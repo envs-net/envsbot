@@ -1,0 +1,4 @@
+,help                                         - Show help (,h)
+,status [online|chat|away|xa|dnd [message]]   - Show/Set status (,s)
+,roster                                       - Show/update bot roster (,r)
+

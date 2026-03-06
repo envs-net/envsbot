@@ -1,0 +1,2 @@
+,help             - Show help (,h)
+,status           - Show status (,s)
