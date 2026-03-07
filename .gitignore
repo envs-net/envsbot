@@ -1,4 +1,4 @@
 venv/
 __pycache__/
 config.py
-
+delete_vcard.py

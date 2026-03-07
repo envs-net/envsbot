@@ -1,11 +1,15 @@
-# ========== EDNA Bot ==========
+# ========== ENVS Bot ==========
 import asyncio
 import logging
+import hashlib
+import base64
 
 from pathlib import Path
 
 from slixmpp import ClientXMPP
+from slixmpp.exceptions import IqError, IqTimeout
 from slixmpp.xmlstream import ET
+from slixmpp.plugins.xep_0084 import stanza as avatar_stanza
 
 import config
 
@@ -14,8 +18,8 @@ logging.basicConfig(level=config.LOG_LEVEL)
 log = logging.getLogger(__name__)
 
 
-# ===== Actual EdnaBot Class =====
-class EdnaBot(ClientXMPP):
+# ===== Actual EnvsBot Class =====
+class EnvsBot(ClientXMPP):
     """ A XMPP bot with various functions """
 
     def __init__(self, jid, password):
@@ -30,6 +34,9 @@ class EdnaBot(ClientXMPP):
         # Register plugins
         self.register_plugin('xep_0030')    # Service Discovery
         self.register_plugin('xep_0045')    # Multi User Chat
+        self.register_plugin('xep_0054')    # VCard
+        self.register_plugin('xep_0163')    # PubSub / PEP (Basis)
+        self.register_plugin('xep_0084')    # User Avatar
 
         self.add_event_handler("session_start", self.session_start)
         self.add_event_handler("message", self.on_message)
@@ -58,6 +65,9 @@ class EdnaBot(ClientXMPP):
         # set automatic mutual subscriptions
         self.roster.auto_subscribe = True
 
+        # VCard Setup
+        # await self.vcard_setup()
+
         # Bot started
         log.info("✅ Bot started, all rooms joined")
 
@@ -74,6 +84,50 @@ class EdnaBot(ClientXMPP):
             await self.admin_cmds(msg)
         else:
             await self.user_cmds(msg)
+
+    # ===== PEP VCard and Avatar Initialization =====
+    async def vcard_setup(self):
+        # === VCARD Setup ===
+        try:
+            # -------------------------
+            # 1️⃣ vCard via XEP-0054
+            # -------------------------
+            vcard = self['xep_0054'].make_vcard()
+            vcard['FN'] = config.VCARD_FN
+            vcard['EMAIL']['USERID'] = config.VCARD_EMAIL_USERID
+            vcard['JABBERID'] = config.VCARD_JABBERID
+            vcard['ORG']['ORGNAME'] = config.VCARD_ORG_ORGNAME
+            vcard['ORG']['ORGUNIT'] = config.VCARD_ORG_ORGUNIT
+            vcard['TITLE'] = config.VCARD_TITLE
+            # URLs als kommagetrennte Liste
+            vcard['URL'] = config.VCARD_URL
+
+            # IQ-Set senden
+            await self['xep_0054'].publish_vcard(vcard)
+            print("✅ vCard veröffentlicht via XEP-0054")
+
+            # -------------------------
+            # 2️⃣ Avatar via PEP/XEP-0084
+            # -------------------------
+            avatar_b64 = base64.b64encode(avatar).decode('ascii')
+            sha1_hash = hashlib.sha1(avatar).hexdigest()
+
+            # Avatar Data
+            avatar_data = avatar_stanza.Data()
+            avatar_data['binval'] = avatar_b64
+            await self['xep_0163'].publish('urn:xmpp:avatar:data', avatar_data)
+
+            # Avatar Metadata
+            avatar_meta = avatar_stanza.Metadata()
+            info = avatar_meta['info']
+            info['id'] = sha1_hash
+            info['bytes'] = str(len(avatar))
+            info['type'] = 'image/png'
+            await self['xep_0163'].publish('urn:xmpp:avatar:metadata', avatar_meta)
+            print("✅ Avatar veröffentlicht via PEP")
+        except (IqError, IqTimeout) as e:
+            log.error(f"❌Couldn' publish Avatar and VCard via PEP: {e}")
+        return
 
     # ===== helper functions =====
     # ===== Checks if a JID is bot admin =====
@@ -221,15 +275,38 @@ class EdnaBot(ClientXMPP):
 
     # ===== Roster Command (,roster) =====
     def cmd_roster(self, msg, mtype, nick, cmd, parts, body):
+        # Check, if user is admin
+        if not self.is_admin(msg['from'].bare):
+            if msg['type'] == "chat":
+                self.send_ephemeral(msg['from'], msg['type'],
+                                    "❌Restricted command")
+            else:
+                self.send_ephemeral(msg['from'].bare, msg['type'],
+                                    "❌Restricted command")
+            return
+        output = f"=={config.NICK}== Roster:\n"
+        for x in self.roster.keys():
+            for key in self.roster[x]:
+                output += f"{key}: Subscription: "
+                output += f"{self.roster[x][key]['subscription']}\n"
+            break
+        self.send_ephemeral(msg['from'].bare, mtype, output)
         return
 
 
 # ===== MAIN ROUTINE =====
 if __name__ == '__main__':
-    # Get help from files
+    # === Get Help Files to display ===
     ADMIN_HELP = Path('admin_help.txt').read_text()
     USER_HELP = Path('user_help.txt').read_text()
-    xmpp = EdnaBot(config.JID, config.PASSWORD)
+
+    # === Load bot avatar ===
+    with open(config.AVATAR, mode="rb") as image:
+        avatar = image.read()
+    # avatar_b64 = base64.b64encode(avatar).decode('utf-8')
+
+    # === Start Bot ===
+    xmpp = EnvsBot(config.JID, config.PASSWORD)
     if xmpp.connect():
         log.info("Connected successfully. Starting event loop...")
         try:
