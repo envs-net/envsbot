@@ -1,5 +1,6 @@
 venv/
 __pycache__/
+tmp/
 config.json
 delete_vcard.py
 avatar_hash.asc
