@@ -1,28 +1,28 @@
 from command import command
 
 
-@command("setstatus", "ss", owner_only=True)
-async def set_status(bot, sender_jid, nick, args, msg, is_room):
+@command("status set", owner_only=True)
+async def status_set(bot, sender_jid, nick, args, msg, is_room):
     """
     Set the bot presence status.
 
     Usage
     -----
-    {prefix}setstatus <show> [message]
+    {prefix}status set <show> [message]
 
     Parameters
     ----------
     show
         Presence type. Supported values:
-        online, chat, away, xa, dnd
+        online, chat, away, xa, dnd - (xa: extended away; dnd: Do not disturb)
 
     message (optional)
         Status text displayed by the bot.
 
     Examples
     --------
-    {prefix}setstatus away
-    {prefix}setstatus away Out for lunch
+    {prefix}status set away
+    {prefix}status set away Out for lunch
     """
 
     target = msg["from"].bare if is_room else msg["from"]
@@ -63,5 +63,33 @@ async def set_status(bot, sender_jid, nick, args, msg, is_room):
     bot.send_message(
         mto=target,
         mbody=response,
+        mtype=mtype
+    )
+
+
+@command("status", "s")
+async def show_status(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Show the current bot status.
+
+    Usage
+    -----
+    {prefix}status
+
+    Displays the presence state and status message
+    currently broadcast by the bot.
+    """
+
+    target = msg["from"].bare if is_room else msg["from"]
+    mtype = "groupchat" if is_room else "chat"
+
+    show = bot.presence.status["show"]
+    message = bot.presence.status["status"]
+
+    emoji = bot.presence.emoji(show)
+
+    bot.send_message(
+        mto=target,
+        mbody=f"Current status {emoji} ({show}) {message}",
         mtype=mtype
     )
