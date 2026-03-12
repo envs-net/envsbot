@@ -71,8 +71,13 @@ async def help_command(bot, sender_jid, nick, args, msg, is_room):
     # -------------------------------------------------
 
     if args:
-
-        name = args[0]
+        # try longest command match
+        for i in range(len(args), 0, -1):
+            candidate = " ".join(args[:i])
+            if candidate in bot.commands:
+                name = candidate
+                args = args[i:]
+                break
 
         if name not in bot.commands:
             bot.send_message(
