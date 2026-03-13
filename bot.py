@@ -174,35 +174,60 @@ class Bot(slixmpp.ClientXMPP):
         if rate_limit:
             now = time.time()
             last = self._reply_rate.get(sender, 0)
+
             if now - last < 0.5:
                 return
+
+            self._reply_rate[sender] = now
+
+            # cleanup old entries occasionally
             if len(self._reply_rate) > 1000:
                 cutoff = now - 60
                 self._reply_rate = {
-                        k: v for k, v in self._reply_rate.items()
-                        if v > cutoff
+                    k: v for k, v in self._reply_rate.items()
+                    if v > cutoff
                 }
 
         if msg["type"] == "groupchat":
             body = text
+
             if mention:
                 nick = msg.get("mucnick") or msg["from"].resource
                 body = f"{nick}: {text}"
-            reply_kwargs = {}
-            if thread and msg.get("id"):
-                reply_kwargs["replyto"] = msg["id"]
-            self.send_message(
+
+            # Build message safely (supports thread when possible)
+            message = self.make_message(
                 mto=msg["from"].bare,
                 mbody=body,
-                mtype="groupchat",
-                **reply_kwargs
+                mtype="groupchat"
             )
+
+            if thread:
+                thread_id = msg.get("thread") or msg.get("id")
+                if thread_id:
+                    try:
+                        message["thread"] = thread_id
+                    except Exception:
+                        pass
+
+            message.send()
+
         else:
-            self.send_message(
+            message = self.make_message(
                 mto=msg["from"],
                 mbody=text,
                 mtype="chat"
             )
+
+            if thread:
+                thread_id = msg.get("thread") or msg.get("id")
+                if thread_id:
+                    try:
+                        message["thread"] = thread_id
+                    except Exception:
+                        pass
+
+            message.send()
 
     async def on_start(self, event):
         # send startup presence
