@@ -23,15 +23,6 @@ PLUGIN_META = {
 }
 
 
-CATEGORY_EMOJIS = {
-    "core": "⚙️",
-    "admin": "🛠️",
-    "chat": "💬",
-    "fun": "🎮",
-    "utility": "🧰",
-}
-
-
 # --------------------------------------------------
 # LIST
 # --------------------------------------------------
@@ -79,22 +70,23 @@ async def plugin_list(bot, sender, nick, args, msg, is_room):
         categories.setdefault(category, {"loaded": [], "available": []})
         categories[category]["available"].append(name)
 
-    lines = ["📜 Plugin status"]
+    lines = ["Plugin status"]
 
     for category in sorted(categories):
 
         block = categories[category]
 
-        emoji = CATEGORY_EMOJIS.get(category, "📂")
-
         lines.append("")
-        lines.append(f"{emoji} {category}")
+        lines.append(f"[{category.upper()}]")
 
-        if block["loaded"]:
-            lines.append("📦 " + ", ".join(sorted(block["loaded"])))
+        loaded_plugins = sorted(block["loaded"])
+        available_plugins = sorted(block["available"])
 
-        if block["available"]:
-            lines.append("🧩 " + ", ".join(sorted(block["available"])))
+        for name in loaded_plugins:
+            lines.append(f"  [loaded] {name}")
+
+        for name in available_plugins:
+            lines.append(f"  [not loaded] {name}")
 
     log.info("[PLUGIN] 📜 Plugin list requested by %s", sender)
 
@@ -154,17 +146,15 @@ async def plugin_info(bot, sender, nick, args, msg, is_room):
     category = meta.get("category", "other")
     requires = meta.get("requires", [])
 
-    emoji = CATEGORY_EMOJIS.get(category, "📂")
-
     lines = [
-        f"📦 {name}",
-        f"🔖 Version: {version}",
-        f"{emoji} Category: {category}",
-        f"📜 Description: {desc}",
+        f"Plugin: {name}",
+        f"Version: {version}",
+        f"Category: {category}",
+        f"Description: {desc}",
     ]
 
     if requires:
-        lines.append("🔗 Requires: " + ", ".join(requires))
+        lines.append("Requires: " + ", ".join(requires))
 
     log.info("[PLUGIN] 📜 Plugin info requested by %s: %s",
              sender, plugin)
@@ -232,10 +222,10 @@ async def plugin_load(bot, sender, nick, args, msg, is_room):
         lines = []
 
         if success:
-            lines.append("✅ Loaded: " + ", ".join(success))
+            lines.append("Loaded: " + ", ".join(success))
 
         if failed:
-            lines.append("❌ Failed: " + ", ".join(failed))
+            lines.append("Failed: " + ", ".join(failed))
 
         bot.reply(msg, "\n".join(lines))
 
@@ -257,13 +247,13 @@ async def plugin_load(bot, sender, nick, args, msg, is_room):
 
         log.info("[PLUGIN] 📦 Plugin loaded: %s", plugin)
 
-        bot.reply(msg, f"✅ Plugin '{plugin}' loaded.")
+        bot.reply(msg, f"Plugin '{plugin}' loaded.")
 
     except Exception as exc:
 
         log.exception("[PLUGIN] ❌ Load failed for plugin: %s", plugin)
 
-        bot.reply(msg, f"❌ Load failed: {exc}")
+        bot.reply(msg, f"Load failed: {exc}")
 
 
 # --------------------------------------------------
@@ -335,10 +325,10 @@ async def plugin_reload(bot, sender, nick, args, msg, is_room):
         lines = []
 
         if success:
-            lines.append("🔁 Reloaded: " + ", ".join(success))
+            lines.append("Reloaded: " + ", ".join(success))
 
         if failed:
-            lines.append("❌ Failed: " + ", ".join(failed))
+            lines.append("Failed: " + ", ".join(failed))
 
         bot.reply(msg, "\n".join(lines))
 
@@ -368,13 +358,13 @@ async def plugin_reload(bot, sender, nick, args, msg, is_room):
 
         log.info("[PLUGIN] 🔁 Plugin reloaded: %s", plugin)
 
-        bot.reply(msg, f"🔁 Plugin '{plugin}' reloaded.")
+        bot.reply(msg, f"Plugin '{plugin}' reloaded.")
 
     except Exception as exc:
 
         log.exception("[PLUGIN] ❌ Reload failed for plugin: %s", plugin)
 
-        bot.reply(msg, f"❌ Reload failed: {exc}")
+        bot.reply(msg, f"Reload failed: {exc}")
 
 
 # --------------------------------------------------
@@ -430,10 +420,10 @@ async def plugin_unload(bot, sender, nick, args, msg, is_room):
 
         log.info("[PLUGIN] 📦 Plugin unloaded: %s", plugin)
 
-        bot.reply(msg, f"📦 Plugin '{plugin}' unloaded.")
+        bot.reply(msg, f"Plugin '{plugin}' unloaded.")
 
     except Exception as exc:
 
         log.exception("[PLUGIN] ❌ Unload failed for plugin: %s", plugin)
 
-        bot.reply(msg, f"❌ Unload failed: {exc}")
+        bot.reply(msg, f"Unload failed: {exc}")

@@ -12,7 +12,7 @@ Design goals
 ------------
 - Simple decorator API for plugin authors
 - Support hierarchical commands (e.g. "plugins reload")
-- Support aliases for commands and tokens
+- Support aliases for commands
 - Resolve the longest matching command
 - Provide role-based access control
 - Keep implementation self-contained
@@ -30,58 +30,11 @@ privileges:
 
 Permission rule:
     user_role <= required_role
-
-Examples
---------
-Registering commands:
-    from bot.command import command, Role
-
-    @command("help")
-    async def help_cmd(bot, sender_jid, nick, args, msg, is_room):
-        ...
-
-    @command("kick", role=Role.MODERATOR, aliases=["k"])
-    async def kick(bot, sender_jid, nick, args, msg, is_room):
-        ...
-
-    @command("plugins reload", role=Role.ADMIN,
-             aliases=["reload", "pl reload"])
-    async def reload_plugins(bot, sender_jid, nick, args, msg, is_room):
-        ...
-
-Resolving commands:
-    cmd, args = resolve_command("plugins reload test")
-
-    if cmd:
-        await cmd.handler(bot, msg, args)
-
-Command resolution
-------------------
-The resolver performs the following steps:
-
-1. Split the input into tokens
-2. Normalize tokens using alias mappings
-3. Search for the longest matching command
-4. Return the command and remaining tokens as arguments
-
-Example:
-
-    input:  "pl reload pluginA"
-    tokens: ["pl", "reload", "pluginA"]
-
-    normalized tokens:
-            ["plugins", "reload", "pluginA"]
-
-    matched command:
-            "plugins reload"
-
-    args:
-            ["pluginA"]
 """
 
 from enum import IntEnum
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 
 class Role(IntEnum):
@@ -114,7 +67,7 @@ class Command:
     role:
         Minimum required role to execute the command
     aliases:
-        Alternative command names or token aliases
+        Alternative command names
     """
 
     name: str
@@ -123,14 +76,33 @@ class Command:
     aliases: List[str] = field(default_factory=list)
 
 
-# Canonical command name -> Command
-COMMANDS: Dict[str, Command] = {}
-
-# Token alias -> canonical token
-TOKEN_ALIASES: Dict[str, str] = {}
+# token tuple -> Command
+COMMAND_INDEX: Dict[Tuple[str, ...], Command] = {}
 
 
-def command(name: str, role: Role = Role.NONE, aliases: Optional[List[str]] = None):
+def _register(name: str, cmd: Command):
+    """
+    Register a command name or alias in the command index.
+
+    Parameters
+    ----------
+    name:
+        Command string (canonical name or alias).
+    cmd:
+        Command object.
+    """
+
+    tokens = tuple(name.lower().split())
+
+    if not tokens:
+        return
+
+    COMMAND_INDEX[tokens] = cmd
+
+
+def command(name: str,
+            role: Role = Role.NONE,
+            aliases: Optional[List[str]] = None):
     """
     Decorator used to register a command.
 
@@ -138,45 +110,57 @@ def command(name: str, role: Role = Role.NONE, aliases: Optional[List[str]] = No
     ----------
     name:
         Canonical command name. May contain multiple words.
+
     role:
         Minimum role required to execute the command.
+
     aliases:
         Optional list of alternative command names.
 
     Examples
     --------
+
     Basic command:
+
         @command("help")
 
     Command with role:
+
         @command("kick", role=Role.MODERATOR)
 
     Command with aliases:
-        @command("plugins reload",
-                 role=Role.ADMIN,
-                 aliases=["reload", "pl reload"])
+
+        @command(
+            "plugins reload",
+            role=Role.ADMIN,
+            aliases=["reload", "pl reload"]
+        )
+
+    Notes
+    -----
+    Aliases are registered as full command entries rather than token
+    rewrites. This avoids side effects where unrelated commands could
+    modify each other's tokens.
     """
 
     if aliases is None:
         aliases = []
 
     def decorator(func: Callable):
+
         cmd = Command(
             name=name,
             handler=func,
             role=role,
             aliases=aliases
         )
-        COMMANDS[name] = cmd
 
-        # register token aliases
-        base_tokens = name.split()
+        # register canonical command
+        _register(name, cmd)
 
+        # register aliases
         for alias in aliases:
-            alias_tokens = alias.split()
-            if len(alias_tokens) == len(base_tokens):
-                for a, b in zip(alias_tokens, base_tokens):
-                    TOKEN_ALIASES[a] = b
+            _register(alias, cmd)
 
         func._command = name
         func._command_names = [name] + aliases
@@ -186,27 +170,6 @@ def command(name: str, role: Role = Role.NONE, aliases: Optional[List[str]] = No
         return func
 
     return decorator
-
-
-def normalize_tokens(tokens: List[str]) -> List[str]:
-    """
-    Replace alias tokens with their canonical equivalents.
-
-    Parameters
-    ----------
-    tokens:
-        List of command tokens.
-
-    Returns
-    -------
-    List[str]
-        Normalized tokens.
-    """
-
-    normalized = []
-    for t in tokens:
-        normalized.append(TOKEN_ALIASES.get(t, t))
-    return normalized
 
 
 def resolve_command(text: str):
@@ -228,43 +191,38 @@ def resolve_command(text: str):
     """
 
     tokens = text.split()
-    tokens = normalize_tokens(tokens)
-    best_match = None
-    best_length = 0
 
-    for name, cmd in COMMANDS.items():
-        cmd_tokens = name.split()
+    if not tokens:
+        return None, []
 
-        if len(tokens) < len(cmd_tokens):
+    tokens = [t.lower() for t in tokens]
+
+    best_cmd = None
+    best_len = 0
+
+    for cmd_tokens, cmd in COMMAND_INDEX.items():
+
+        n = len(cmd_tokens)
+
+        if len(tokens) < n:
             continue
 
-        if tokens[:len(cmd_tokens)] == cmd_tokens:
-            if len(cmd_tokens) > best_length:
-                best_match = cmd
-                best_length = len(cmd_tokens)
+        if tuple(tokens[:n]) == cmd_tokens:
+            if n > best_len:
+                best_cmd = cmd
+                best_len = n
 
-    if best_match is None:
+    if best_cmd is None:
         return None, tokens
 
-    args = tokens[best_length:]
-    return best_match, args
+    args = tokens[best_len:]
+
+    return best_cmd, args
 
 
 def has_permission(user_role: Role, required_role: Role) -> bool:
     """
     Check whether a user role satisfies a command's role requirement.
-
-    Parameters
-    ----------
-    user_role:
-        Role of the user executing the command.
-    required_role:
-        Minimum role required by the command.
-
-    Returns
-    -------
-    bool
-        True if the user may execute the command.
     """
 
     return user_role <= required_role
@@ -273,18 +231,6 @@ def has_permission(user_role: Role, required_role: Role) -> bool:
 def check_permission(user_role: Role, cmd: Command) -> bool:
     """
     Convenience wrapper for permission checking.
-
-    Parameters
-    ----------
-    user_role:
-        Role of the user executing the command.
-    cmd:
-        Command being executed.
-
-    Returns
-    -------
-    bool
-        True if the user may execute the command.
     """
 
     return has_permission(user_role, cmd.role)

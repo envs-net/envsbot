@@ -1,10 +1,62 @@
 """
 plugin_manager.py
 
-Runtime plugin manager for the bot.
+Runtime plugin management for the bot.
 
-Handles plugin discovery, loading, unloading, reloading and
-command registration.
+This module implements the PluginManager class, responsible for
+discovering, loading, unloading, and reloading bot plugins during
+runtime. Plugins are Python modules located inside the configured
+plugin package (by default "plugins").
+
+Responsibilities
+----------------
+• Discover available plugin modules in the plugin package.
+• Load plugins and resolve their dependencies.
+• Register commands exposed by plugins.
+• Unload plugins and remove their commands.
+• Reload plugins without restarting the bot.
+• Provide metadata about loaded plugins.
+
+Plugin Structure
+----------------
+Each plugin is expected to be a Python module that may define:
+
+PLUGIN_META
+    Optional dictionary containing metadata such as:
+    - name
+    - version
+    - description
+    - category
+    - requires (list of plugin dependencies)
+
+setup(bot)
+    Optional function called after a plugin is loaded.
+
+teardown(bot)
+    Optional function called before a plugin is unloaded.
+
+Command functions
+    Functions decorated with the bot's command decorator.
+    The plugin manager registers these automatically.
+
+Notes
+-----
+• Dependencies declared in PLUGIN_META["requires"] are loaded
+  automatically before the plugin itself.
+
+• Commands registered by a plugin are tracked so they can be
+  removed when the plugin is unloaded.
+
+• Reloading a plugin performs an unload followed by a load.
+
+• This manager only tracks plugins loaded during runtime and does
+  not enforce isolation between plugin modules.
+
+See Also
+--------
+plugins.py
+    Administrative plugin providing commands such as
+    ",plugin list", ",plugin load", and ",plugin reload".
 """
 
 import importlib
@@ -44,8 +96,7 @@ class PluginManager:
         plugins = []
 
         for module in pkgutil.iter_modules(package.__path__):
-            if not module.name.startswith("_"):
-                plugins.append(module.name)
+            plugins.append(module.name)
 
         return sorted(plugins)
 
