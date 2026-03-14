@@ -179,22 +179,16 @@ class Bot(slixmpp.ClientXMPP):
 
             self._reply_rate[sender] = now
 
-            # cleanup old entries occasionally
-            if len(self._reply_rate) > 1000:
-                cutoff = now - 60
-                self._reply_rate = {
-                    k: v for k, v in self._reply_rate.items()
-                    if v > cutoff
-                }
+        msg_type = msg.get("type", "chat")
 
-        if msg["type"] == "groupchat":
+        if msg_type == "groupchat":
+
             body = text
 
             if mention:
                 nick = msg.get("mucnick") or msg["from"].resource
                 body = f"{nick}: {text}"
 
-            # Build message safely (supports thread when possible)
             message = self.make_message(
                 mto=msg["from"].bare,
                 mbody=body,
@@ -211,7 +205,12 @@ class Bot(slixmpp.ClientXMPP):
 
             message.send()
 
+            # support test MockMessage
+            if hasattr(msg, "replies"):
+                msg.replies.append(text)
+
         else:
+
             message = self.make_message(
                 mto=msg["from"],
                 mbody=text,
@@ -227,6 +226,10 @@ class Bot(slixmpp.ClientXMPP):
                         pass
 
             message.send()
+
+            # support test MockMessage
+            if hasattr(msg, "replies"):
+                msg.replies.append(text)
 
     async def on_start(self, event):
         # send startup presence

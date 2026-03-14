@@ -198,7 +198,7 @@ async def update_vcard(bot):
     stored_hash = read_hash(VCARD_HASH_FILE)
 
     if stored_hash == new_hash:
-        log.info("vCard unchanged — skipping update")
+        log.info("[PROFILE] vCard unchanged — skipping update")
         return
 
     iq = bot.make_iq_set()
@@ -214,10 +214,10 @@ async def update_vcard(bot):
 
         write_hash(VCARD_HASH_FILE, new_hash)
 
-        log.info("✅ vCard updated")
+        log.info("[PROFILE]✅ vCard updated")
 
     except Exception as e:
-        log.error(f"vCard update failed: {e}")
+        log.error(f"[PROFILE]❌vCard update failed: {e}")
 
 
 # -------------------------------------------------
@@ -260,7 +260,7 @@ async def update_avatar(bot):
         return
 
     if not os.path.exists(avatar_path):
-        log.warning("Avatar file not found")
+        log.warning("[PROFILE]⚠️ Avatar file not found")
         return
 
     try:
@@ -272,11 +272,11 @@ async def update_avatar(bot):
         stored_hash = read_hash(AVATAR_HASH_FILE)
 
         if stored_hash == new_hash:
-            log.info("Avatar unchanged — skipping upload")
+            log.info("[PROFILE] Avatar unchanged — skipping upload")
             return
 
         if avatar_type not in ("image/png", "image/jpeg"):
-            log.error("❌Avatar must be PNG or JPEG")
+            log.error("[PROFILE]❌Avatar must be PNG or JPEG")
             return
 
         pubsub = bot["xep_0084"]
@@ -293,10 +293,10 @@ async def update_avatar(bot):
 
         write_hash(AVATAR_HASH_FILE, new_hash)
 
-        log.info("✅ Avatar updated")
+        log.info("[PROFILE]✅ Avatar updated")
 
     except Exception as e:
-        log.error(f"❌Avatar update failed: {e}")
+        log.error(f"[PROFILE]❌Avatar update failed: {e}")
 
 
 # -------------------------------------------------
@@ -334,7 +334,7 @@ async def setup_profile(bot):
 # -------------------------------------------------
 # REGISTER
 # -------------------------------------------------
-def register(bot):
+def setup(bot):
     """
     Register the profile plugin with the bot. That means it sets the the avatar
     and the vCard, if they've changed.

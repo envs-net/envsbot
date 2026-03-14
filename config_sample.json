@@ -1,12 +1,14 @@
 {
   "jid": "bluebot@domain.tld",
   "password": "<password>",
-  "rooms": ["<room>@muc.domain.tld"],
   "nick": "bluebot",
   "owner": "<owner>@domain.tld",
-  "prefix": ",",
+  "prefix": "!",
+  "db": "bot.db",
+
   "avatar": "avatar.jpg",
   "avatar_type": "image/jpeg",
+
   "vcard": {
     "FN": "Blue Bot",
     "NICKNAME": "bluebot",
