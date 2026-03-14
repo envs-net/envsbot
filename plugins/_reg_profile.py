@@ -32,7 +32,8 @@ import os
 PLUGIN_META = {
     "name": "profile",
     "version": "1.0",
-    "description": "Bot avatar and vCard profile management"
+    "description": "Bot avatar and vCard profile management",
+    "category": "core"
 }
 
 # Setup logging
