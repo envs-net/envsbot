@@ -118,7 +118,7 @@ class PluginManager:
     # LOAD
     # --------------------------------------------------
 
-    def load(self, name):
+    def load(self, name, _stack=None):
         """
         Load a plugin module.
 
@@ -134,47 +134,65 @@ class PluginManager:
             log.warning("[PLUGIN] ⚠️ Plugin already loaded: %s", name)
             return
 
-        log.info("[PLUGIN] 📦 Loading plugin: %s", name)
+        if _stack is None:
+            _stack = []
 
-        module_path = f"{self.package}.{name}"
+        if name in _stack:
+            log.error(
+                "[PLUGIN] 🔁 Circular dependency detected: %s -> %s",
+                " -> ".join(_stack),
+                name,
+            )
+            return
 
-        module = importlib.import_module(module_path)
+        _stack.append(name)
 
-        meta = getattr(module, "PLUGIN_META", {})
+        try:
 
-        # --------------------------------------------------
-        # DEPENDENCIES
-        # --------------------------------------------------
+            log.info("[PLUGIN] 📦 Loading plugin: %s", name)
 
-        for dep in meta.get("requires", []):
+            module_path = f"{self.package}.{name}"
 
-            if dep not in self.plugins:
+            module = importlib.import_module(module_path)
 
-                log.info(
-                    "[PLUGIN] 🔗 Loading dependency '%s' for '%s'",
-                    dep,
-                    name,
-                )
+            meta = getattr(module, "PLUGIN_META", {})
 
-                self.load(dep)
+            # --------------------------------------------------
+            # DEPENDENCIES
+            # --------------------------------------------------
 
-        # --------------------------------------------------
-        # COMMAND REGISTRATION
-        # --------------------------------------------------
+            for dep in meta.get("requires", []):
 
-        self._register_commands(name, module)
+                if dep not in self.plugins:
 
-        # --------------------------------------------------
-        # SETUP HOOK
-        # --------------------------------------------------
+                    log.info(
+                        "[PLUGIN] 🔗 Loading dependency '%s' for '%s'",
+                        dep,
+                        name,
+                    )
 
-        if hasattr(module, "setup"):
-            module.setup(self.bot)
+                    self.load(dep, _stack)
 
-        self.plugins[name] = module
-        self.meta[name] = meta
+            # --------------------------------------------------
+            # SETUP HOOK
+            # --------------------------------------------------
 
-        log.info("[PLUGIN] ✅ Plugin loaded: %s", name)
+            if hasattr(module, "setup"):
+                module.setup(self.bot)
+
+            # --------------------------------------------------
+            # COMMAND REGISTRATION
+            # --------------------------------------------------
+
+            self._register_commands(name, module)
+
+            self.plugins[name] = module
+            self.meta[name] = meta
+
+            log.info("[PLUGIN] ✅ Plugin loaded: %s", name)
+
+        finally:
+            _stack.pop()
 
     # --------------------------------------------------
     # COMMAND REGISTRATION
