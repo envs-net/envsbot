@@ -1,8 +1,6 @@
 import slixmpp
 import asyncio
 import inspect
-import os
-import sys
 import logging
 import time
 
@@ -10,9 +8,6 @@ from utils.plugin_manager import PluginManager
 from utils.config import config, setup_logging
 from utils.command import resolve_command, check_permission, Role
 from database import DatabaseManager
-
-# === Add project main directory to path ===
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 # === set up logging ===
