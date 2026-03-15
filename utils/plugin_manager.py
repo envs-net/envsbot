@@ -188,19 +188,14 @@ class PluginManager:
         is_internal = plugin_name.startswith("_")
 
         for _, obj in inspect.getmembers(module):
-
-            if hasattr(obj, "_command_names"):
-
+            if callable(obj) and hasattr(obj, "_command_names"):
                 for name in obj._command_names:
-
                     if name in self.bot.commands:
-
                         log.warning(
                             "[PLUGIN] ⚠️ Command conflict: %s (plugin: %s)",
                             name,
                             plugin_name,
                         )
-
                     # register handler
                     self.bot.commands[name] = obj
                     self.command_owner[name] = plugin_name
@@ -247,20 +242,31 @@ class PluginManager:
         # remove commands belonging to plugin
         remove = []
 
-        for cmd, owner in self.command_owner.items():
+        for cmd, owner in list(self.command_owner.items()):
             if owner == name:
                 remove.append(cmd)
 
-        for cmd in remove:
+        for cmd_name in remove:
 
-            self.bot.commands.pop(cmd, None)
-            self.command_owner.pop(cmd, None)
+            handler = self.bot.commands.get(cmd_name)
+
+            self.bot.commands.pop(cmd_name, None)
+            self.command_owner.pop(cmd_name, None)
+
+            # --------------------------------------------------
+            # REMOVE FROM COMMAND_INDEX (alias-safe)
+            # --------------------------------------------------
+
+            for tokens, cmd_obj in list(COMMAND_INDEX.items()):
+
+                if getattr(cmd_obj, "handler", None) is handler:
+                    COMMAND_INDEX.pop(tokens, None)
 
         # remove module
         module_path = f"{self.package}.{name}"
-
-        if module_path in sys.modules:
-            del sys.modules[module_path]
+        for mod in list(sys.modules):
+            if mod == module_path or mod.startswith(module_path + "."):
+                del sys.modules[mod]
 
         del self.plugins[name]
         self.meta.pop(name, None)
