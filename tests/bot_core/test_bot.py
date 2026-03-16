@@ -8,7 +8,7 @@ plugin command handlers using the test plugin.
 
 import pytest
 from unittest.mock import AsyncMock
-from utils.command import Role, COMMAND_INDEX
+from utils.command import Role
 
 
 @pytest.mark.asyncio
