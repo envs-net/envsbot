@@ -1,48 +1,98 @@
 """
 plugin_manager.py
 
-Runtime plugin management for the bot.
+Plugin loading, unloading, and lifecycle management for the bot.
 
-This module implements the PluginManager class which is responsible
-for discovering, loading, unloading, and reloading bot plugins
-during runtime.
+This module is responsible for discovering plugin modules, importing them,
+registering their commands, and unloading them safely when requested.
+It acts as the central coordinator between plugin code and the command
+system.
 
-Design
-------
+## Design goals
+
+* Allow plugins to be loaded and unloaded dynamically
+* Support safe hot-reloading of plugin modules
+* Ensure commands are registered only when a plugin is active
+* Ensure commands are removed when a plugin is unloaded
+* Keep plugin authorship simple (decorator-based commands)
+
+## Plugin model
+
 Plugins are normal Python modules located in the configured plugin
-package (default: "plugins").
+directory. A plugin typically exposes one or more command handlers
+using the @command decorator from utils.command.
 
-A plugin may define:
+Example:
 
-PLUGIN_META
-    Optional metadata dictionary.
+```
+@command("ping")
+async def ping_handler(...):
+    ...
+```
 
-setup(bot)
-    Optional setup hook executed after the plugin is loaded.
+During import, the decorator attaches command metadata to the handler
+function but does not register the command globally. The PluginManager
+performs the actual registration during plugin load.
 
-teardown(bot)
-    Optional cleanup hook executed before the plugin is unloaded.
+## Command registration
 
-Commands
---------
-Commands are discovered by scanning the module for functions
-decorated with the command decorator. These functions contain
-a `_command_names` attribute.
+When a plugin is loaded, PluginManager scans the module for callables
+that contain command metadata (stored by the decorator). For each
+declared command it registers the command with the global
+CommandRegistry.
 
-Handlers are registered into:
+This ensures that command registration happens in a controlled place
+and that plugin reloads cannot accidentally accumulate duplicate
+commands.
 
-    bot.commands[name] = handler
+## Command removal
 
-Ownership information is stored in:
+When a plugin is unloaded, the PluginManager removes all commands
+belonging to that plugin using the registry’s ownership tracking:
 
-    self.command_owner[name] = plugin_name
+```
+CommandRegistry.remove_by_plugin(plugin_name)
+```
 
-Internal Plugins
-----------------
-Plugins whose filename begins with "_" are treated as internal.
-Commands belonging to such plugins automatically require at
-least ADMIN privileges.
+This guarantees that unloading a plugin leaves no orphaned commands
+behind.
+
+## Security rules
+
+Plugins whose names begin with "_" are considered internal plugins.
+Commands from such plugins automatically require at least ADMIN role
+even if a lower role was declared in the decorator.
+
+This prevents accidental exposure of privileged internal commands.
+
+## Architecture overview
+
+```
+plugin module
+      │
+      ▼
+@command decorator
+      │
+      ▼
+handler.__commands__ metadata
+      │
+      ▼
+PluginManager._register_commands()
+      │
+      ▼
+CommandRegistry.register(...)
+      │
+      ▼
+resolve_command()
+      │
+      ▼
+Command.handler(...)
+```
+
+The PluginManager therefore owns the command lifecycle while the
+CommandRegistry owns command lookup and execution routing.
 """
+
 
 import importlib
 import pkgutil
@@ -50,7 +100,7 @@ import sys
 import inspect
 import logging
 
-from utils.command import COMMAND_INDEX, Role
+from utils.command import COMMANDS, Role
 
 log = logging.getLogger(__name__)
 
@@ -66,9 +116,6 @@ class PluginManager:
 
         # plugin_name -> module
         self.plugins = {}
-
-        # command_name -> plugin_name
-        self.command_owner = {}
 
         # plugin_name -> metadata
         self.meta = {}
@@ -207,17 +254,12 @@ class PluginManager:
 
         for _, obj in inspect.getmembers(module):
             if callable(obj) and hasattr(obj, "_command_names"):
-                for name in obj._command_names:
-                    if name in self.bot.commands:
-                        log.warning(
-                            "[PLUGIN] ⚠️ Command conflict: %s (plugin: %s)",
-                            name,
-                            plugin_name,
-                        )
-                    # register handler
-                    self.bot.commands[name] = obj
-                    self.command_owner[name] = plugin_name
 
+                # --- REGISTER COMMAND ---
+                for name, cmd in getattr(obj, "__commands__", []):
+                    COMMANDS.register(name, cmd, plugin_name)
+
+                for name in obj._command_names:
                     # --------------------------------------------------
                     # INTERNAL PLUGIN PERMISSION POLICY
                     # --------------------------------------------------
@@ -225,7 +267,7 @@ class PluginManager:
                     if is_internal:
 
                         tokens = tuple(name.lower().split())
-                        cmd = COMMAND_INDEX.get(tokens)
+                        cmd = COMMANDS.get(tokens)
 
                         if cmd and cmd.role > Role.ADMIN:
 
@@ -240,56 +282,29 @@ class PluginManager:
     # UNLOAD
     # --------------------------------------------------
 
-    def unload(self, name):
+    def unload(self, plugin_name: str):
         """
-        Unload a plugin and remove its commands.
+        Unload a plugin and remove all of its commands.
         """
 
-        if name not in self.plugins:
+        module = self.plugins.get(plugin_name)
 
-            log.warning("[PLUGIN] ⚠️ Plugin not loaded: %s", name)
-            return
+        if not module:
+            return False
 
-        log.info("[PLUGIN] 📤 Unloading plugin: %s", name)
+        # remove commands belonging to this plugin
+        COMMANDS.remove_by_plugin(plugin_name)
 
-        module = self.plugins[name]
+        # remove plugin module
+        self.plugins.pop(plugin_name, None)
 
-        if hasattr(module, "teardown"):
-            module.teardown(self.bot)
+        # remove from sys.modules so reload works correctly
+        modname = module.__name__
 
-        # remove commands belonging to plugin
-        remove = []
+        if modname in sys.modules:
+            del sys.modules[modname]
 
-        for cmd, owner in list(self.command_owner.items()):
-            if owner == name:
-                remove.append(cmd)
-
-        for cmd_name in remove:
-
-            handler = self.bot.commands.get(cmd_name)
-
-            self.bot.commands.pop(cmd_name, None)
-            self.command_owner.pop(cmd_name, None)
-
-            # --------------------------------------------------
-            # REMOVE FROM COMMAND_INDEX (alias-safe)
-            # --------------------------------------------------
-
-            for tokens, cmd_obj in list(COMMAND_INDEX.items()):
-
-                if getattr(cmd_obj, "handler", None) is handler:
-                    COMMAND_INDEX.pop(tokens, None)
-
-        # remove module
-        module_path = f"{self.package}.{name}"
-        for mod in list(sys.modules):
-            if mod == module_path or mod.startswith(module_path + "."):
-                del sys.modules[mod]
-
-        del self.plugins[name]
-        self.meta.pop(name, None)
-
-        log.info("[PLUGIN] 📤 Plugin unloaded: %s", name)
+        return True
 
     # --------------------------------------------------
     # RELOAD

@@ -84,7 +84,6 @@ class Bot(slixmpp.ClientXMPP):
         self.db = DatabaseManager(config.get("db", "bot.db"))
 
         # Plugin Manager
-        self.commands = {}
         self.plugins = PluginManager(self)
         self.plugins.load_all()
 
@@ -355,7 +354,7 @@ class Bot(slixmpp.ClientXMPP):
         if not text:
             return
 
-        # resolve command using command resolver
+        # --- resolve command using command resolver ---
         cmd_obj, args = resolve_command(text)
 
         if not cmd_obj:
@@ -386,8 +385,8 @@ class Bot(slixmpp.ClientXMPP):
             if user_role in (Role.OWNER, Role.ADMIN):
                 err_msg = f"❌Command error: {e}"
             else:
-                err_msg = f"❌Command '{cmd_name}'"
-                + " failed due to internal error."
+                err_msg = (f"❌Command '{cmd_name}' "
+                           f"failed due to internal error.")
 
             self.reply(msg, err_msg)
 

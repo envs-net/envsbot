@@ -30,7 +30,13 @@ Notes
 
 import logging
 
-from utils.command import command, resolve_command, check_permission, Role
+from utils.command import (
+    command,
+    resolve_command,
+    check_permission,
+    Role,
+    COMMANDS
+)
 from utils.config import config
 
 log = logging.getLogger(__name__)
@@ -98,33 +104,30 @@ def _commands_for_plugin(bot, plugin_name, user_role):
     """
     Dynamically collect commands belonging to a plugin.
 
-    This is hot-reload safe because it reads the live
-    command registry every time.
+    This reads the live command registry and removes duplicates
+    caused by command aliases.
     """
 
-    seen = set()
     commands = []
+    seen = set()
 
-    for name, owner in bot.plugins.command_owner.items():
+    tokens_list = COMMANDS.by_plugin.get(plugin_name, ())
 
-        if owner != plugin_name:
+    for tokens in tokens_list:
+        cmd = COMMANDS.get(tokens)
+
+        if not cmd:
             continue
 
-        cmd_obj, _ = resolve_command(name)
-
-        if not cmd_obj:
+        # skip aliases (same Command object)
+        if cmd in seen:
             continue
 
-        # avoid duplicates caused by aliases
-        if cmd_obj.name in seen:
+        if not check_permission(user_role, cmd):
             continue
 
-        seen.add(cmd_obj.name)
-
-        if not check_permission(user_role, cmd_obj):
-            continue
-
-        commands.append(cmd_obj)
+        seen.add(id(cmd))
+        commands.append(cmd)
 
     commands.sort(key=lambda c: c.name)
 
@@ -142,12 +145,21 @@ def _format_command(cmd_obj, prefix):
 
     name = cmd_obj.name
     role = str(cmd_obj.role)
+
+    desc = _first_line(cmd_obj.handler.__doc__) or ""
+
     aliases = cmd_obj.aliases or []
 
-    desc = _first_line(cmd_obj.handler.__doc__)
+    # remove canonical name if it appears as alias
+    aliases = [a for a in aliases if a != name]
 
-    alias_text = f" ({', '.join(prefix + a
-                                for a in aliases)})" if aliases else ""
+    # ensure deterministic order
+    aliases = sorted(set(aliases))
+
+    if aliases:
+        alias_text = " (" + ", ".join(prefix + a for a in aliases) + ")"
+    else:
+        alias_text = ""
 
     return f"{prefix}{name}{alias_text} [{role}] - {desc}"
 
@@ -193,7 +205,7 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
             if name.startswith("_") and user_role > Role.ADMIN:
                 continue
 
-            doc = _first_line(module.__doc__)
+            doc = _first_line(module.__doc__) or ""
             lines.append(f"• {name} — {doc}")
 
         lines.append("")

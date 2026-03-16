@@ -32,6 +32,7 @@ Permission rule:
     user_role <= required_role
 """
 
+from __future__ import annotations
 from enum import IntEnum
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -51,6 +52,132 @@ class Role(IntEnum):
 
     def __str__(self):
         return self.name.lower()
+
+
+class CommandRegistry:
+    """
+    Central registry for all commands exposed by plugins.
+
+    The registry maps a command trigger (represented as a tuple of
+    lowercase tokens) to a `Command` instance. It acts as the single
+    source of truth for command discovery and resolution within the bot.
+
+    Example
+    -------
+    A command declared as:
+
+        @command("weather now")
+        async def weather_cmd(...):
+
+    will be stored internally as:
+
+        ("weather", "now") -> Command(...)
+
+    Responsibilities
+    ----------------
+    The registry is responsible for:
+
+    - Storing all commands registered by plugins.
+    - Providing iteration over registered commands for command
+      resolution.
+    - Allowing commands to be removed when a plugin is unloaded
+      or reloaded.
+    - Normalizing command names into a consistent token format.
+
+    Token Format
+    ------------
+    Commands are indexed by tuples of lowercase tokens:
+
+        "ping"        -> ("ping",)
+        "weather now" -> ("weather", "now")
+
+    This structure allows efficient prefix matching when resolving
+    user messages.
+
+    Lifecycle
+    ---------
+    Commands are typically added through the `@command` decorator
+    during plugin import. When plugins are unloaded or reloaded,
+    the plugin manager removes the associated entries from this
+    registry.
+
+    Notes
+    -----
+    The registry intentionally provides only minimal operations
+    (register, remove, iterate, lookup) so that higher-level logic
+    such as command parsing, permission checks, or argument
+    handling remains outside of this class.
+
+    This class replaces the older global `COMMAND_INDEX` dictionary
+    and provides a structured abstraction that can later support
+    dependency injection or multiple registries if needed.
+    """
+
+    def __init__(self):
+        self.index: Dict[Tuple[str, ...], Command] = {}
+        self.by_handler: Dict[object, set[tuple[str, ...]]] = {}
+        self.by_plugin: Dict[str, set[tuple[str, ...]]] = {}
+        self.by_prefix: Dict[str, set[tuple[str, ...]]] = {}
+
+    def register(self, name: str, cmd: Command, plugin: str | None = None):
+        tokens = tuple(name.lower().split())
+        if not tokens:
+            return
+
+        if tokens in self.index:
+            existing = self.index[tokens]
+            raise ValueError(
+                f"Command already registered: '{' '.join(tokens)}' "
+                f"(handler={existing.handler.__name__})"
+            )
+
+        self.index[tokens] = cmd
+
+        prefix = tokens[0]
+        self.by_prefix.setdefault(prefix, set()).add(tokens)
+
+        if plugin:
+            self.by_plugin.setdefault(plugin, set()).add(tokens)
+
+        handler = getattr(cmd, "handler", None)
+        if handler is not None:
+            self.by_handler.setdefault(handler, set()).add(tokens)
+
+    def remove(self, tokens: Tuple[str, ...]):
+        cmd = self.index.pop(tokens, None)
+
+        if not cmd:
+            return
+
+        prefix = tokens[0]
+        if prefix in self.by_prefix:
+            self.by_prefix[prefix].discard(tokens)
+            if not self.by_prefix[prefix]:
+                del self.by_prefix[prefix]
+
+        handler = getattr(cmd, "handler", None)
+        if handler in self.by_handler:
+            self.by_handler[handler].discard(tokens)
+            if not self.by_handler[handler]:
+                del self.by_handler[handler]
+
+    def remove_by_handler(self, handler):
+        tokens = list(self.by_handler.get(handler, ()))
+        for t in tokens:
+            self.remove(t)
+
+    def remove_by_plugin(self, plugin: str):
+        tokens = list(self.by_plugin.get(plugin, ()))
+
+        for t in tokens:
+            self.remove(t)
+        self.by_plugin.pop(plugin, None)
+
+    def items(self):
+        return self.index.items()
+
+    def get(self, tokens):
+        return self.index.get(tokens)
 
 
 @dataclass
@@ -77,19 +204,13 @@ class Command:
 
 
 # token tuple -> Command
-COMMAND_INDEX: Dict[Tuple[str, ...], Command] = {}
+COMMANDS = CommandRegistry()
 
 
 def _register(name: str, cmd: Command):
     """
-    Register a command name or alias in the command index.
-
-    Parameters
-    ----------
-    name:
-        Command string (canonical name or alias).
-    cmd:
-        Command object.
+    Attach command metadata to the handler so PluginManager
+    can register it when the plugin loads.
     """
 
     tokens = tuple(name.lower().split())
@@ -97,7 +218,17 @@ def _register(name: str, cmd: Command):
     if not tokens:
         return
 
-    COMMAND_INDEX[tokens] = cmd
+    if not hasattr(cmd.handler, "__commands__"):
+        cmd.handler.__commands__ = []
+    else:
+        # plugin reload safety: avoid accumulating duplicates
+        if not isinstance(cmd.handler.__commands__, list):
+            cmd.handler.__commands__ = []
+
+    entry = (name, cmd)
+    # --- Prevent duplicate registrations ---
+    if entry not in cmd.handler.__commands__:
+        cmd.handler.__commands__.append((name, cmd))
 
 
 def command(name: str,
@@ -196,7 +327,10 @@ def resolve_command(text: str):
     best_cmd = None
     best_len = 0
 
-    for cmd_tokens, cmd in COMMAND_INDEX.items():
+    candidates = COMMANDS.by_prefix.get(lower_tokens[0], ())
+
+    for cmd_tokens in candidates:
+        cmd = COMMANDS.get(cmd_tokens)
 
         n = len(cmd_tokens)
 
