@@ -553,7 +553,8 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
         lines.append(f"{room:40} {nick:15} {affiliation:10} {role:10}"
                      f" {autojoin_flag:8}")
 
-    bot.reply(msg, f"{'\n'.join(lines)}")
+    output = "\n".join(lines)
+    bot.reply(msg, f"{output}")
 
 
 # -------------------------------------------------
@@ -720,58 +721,53 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
       flag.
     • Joins rooms that are configured with autojoin=true
     """
-
     try:
         rows = await bot.db.rooms.list()
-        db_rooms = {r[0]: r for r in rows}
     except Exception:
         log.exception("[ROOMS] 🔄 Failed to get rooms from DB")
-
         bot.reply(
             msg,
             "🔄 Failed to get rooms from DB",
         )
         return
 
+    muc = bot.plugin["xep_0045"]
     left = []
     joined = []
 
-    rooms_to_delete = []
-    muc = bot.plugin["xep_0045"]
-    for room in JOINED_ROOMS:
-        if room not in db_rooms:
+    # Leave all currently joined rooms
+    for room in list(JOINED_ROOMS.keys()):
+        try:
+            muc.leave_muc(room, JOINED_ROOMS[room]["nick"])
+        except KeyError:
+            log.debug(f"[ROOMS] rooms sync - Room already left: '{room}'")
+        if room in bot.presence.joined_rooms:
+            del bot.presence.joined_rooms[room]
+        left.append(room)
+    JOINED_ROOMS.clear()
 
-            muc.leave_muc(room, bot.boundjid.user)
-
-            rooms_to_delete.append(JOINED_ROOMS[room])
-
-            if room in bot.presence.joined_rooms:
-                del bot.presence.joined_rooms[room]
-
-            left.append(room)
-    for room in list(rooms_to_delete):
-        del room
-
+    # Join only rooms from DB with autojoin=True
     for room_jid, nick_name, autojoin, status in rows:
-
-        if autojoin and room_jid not in JOINED_ROOMS:
-
-            muc = bot.plugin["xep_0045"]
-            await muc.join_muc(room_jid, nick_name,
-                               pshow=bot.presence.status['show'],
-                               pstatus=bot.presence.status['status'])
-
-            JOINED_ROOMS[room_jid] = {
-                "nick": nick_name,
-                "autojoin": autojoin,
-                "status": status,
-                "affiliation": "unknown",
-                "role": "unknown",
-                "nicks": {}
-            }
-            bot.presence.joined_rooms[room_jid] = nick_name
-
-            joined.append(room_jid)
+        if autojoin:
+            try:
+                await muc.join_muc(
+                    room_jid,
+                    nick_name,
+                    pshow=bot.presence.status['show'],
+                    pstatus=bot.presence.status['status']
+                )
+                JOINED_ROOMS[room_jid] = {
+                    "nick": nick_name,
+                    "autojoin": autojoin,
+                    "status": status,
+                    "affiliation": "unknown",
+                    "role": "unknown",
+                    "nicks": {}
+                }
+                bot.presence.joined_rooms[room_jid] = nick_name
+                joined.append(room_jid)
+            except Exception:
+                log.exception(f"[ROOMS] 🚪 Failed to join room {room_jid}")
 
     bot.presence.broadcast()
 
@@ -779,15 +775,10 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
              len(joined), len(left))
 
     lines = ["🔄 Room synchronization complete"]
-
-    if joined:
-        lines.append("🚪 Joined:")
-        lines.extend(joined)
-
     if left:
-        lines.append("🚶 Left:")
-        lines.extend(left)
-
+        lines.append(f"🚶 Left: {', '.join(left)}")
+    if joined:
+        lines.append(f"🚪 Joined: {', '.join(joined)}")
     if not joined and not left:
         lines.append("ℹ️ No changes required.")
 
