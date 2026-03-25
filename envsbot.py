@@ -63,11 +63,12 @@ class PresenceManager:
             rooms = dict(rooms_plugin.JOINED_ROOMS)
             for room in rooms.keys():
                 self.bot.send_presence(
-                    pto=f"{room}/{rooms[room]["nick"]}",
+                    pto=f"{room}/{rooms[room]['nick']}",
                     pshow=show,
                     pstatus=status)
         # log message
-        log.info(f"[PRESENCE] {self.emoji(show)} Status set: '{show}': [{status}]")
+        log.info(f"[PRESENCE] {self.emoji(show)} Status set: "
+                 f"'{show}': [{status}]")
 
     def emoji(self, show=None):
 
