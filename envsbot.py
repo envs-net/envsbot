@@ -207,7 +207,7 @@ class Bot(slixmpp.ClientXMPP):
                     try:
                         message["thread"] = thread_id
                     except Exception:
-                        log.debug("[BOT] ❌Setting Thread failed: {e}")
+                        log.exception("[BOT] ❌Setting Thread failed!")
 
             # Make reply ephemeral
             message.append(ET.Element("{urn:xmpp:hints}no-store"))
