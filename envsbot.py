@@ -7,6 +7,7 @@ import time
 from slixmpp.xmlstream import ET
 
 from utils.plugin_manager import PluginManager
+from utils.rate_limiter import TokenBucketRateLimiter
 from utils.config import config, setup_logging
 from utils.command import (
     resolve_command,
@@ -87,6 +88,20 @@ class Bot(slixmpp.ClientXMPP):
         self.admins = []
         self.prefix = config.get("prefix", ",")
 
+        # Rate limiter (in-memory, per process)
+        # capacity=4, refill 1 token every 0.5s
+        self.rate_limiter = TokenBucketRateLimiter(
+            capacity=4,
+            refill_amount=1,
+            refill_interval=0.5,
+            deny_window=10.0,
+            deny_threshold=6,
+            base_block_seconds=30.0,
+            backoff_multiplier=2.0,
+            max_block_seconds=3600.0,
+            notify_cooldown=10.0,
+        )
+
         # Presence Manager
         self.presence = PresenceManager(self)
 
@@ -106,6 +121,10 @@ class Bot(slixmpp.ClientXMPP):
         self.add_event_handler("groupchat_message", self.on_muc_message)
         self.add_event_handler("message", self.on_private_message)
         self.add_event_handler("muc::%s::got_offline" % "*", self.on_muc_leave)
+
+    # -------------------------------------------------
+    # HELPER FUNCTIONS
+    # -------------------------------------------------
 
     async def get_user_role(self, jid) -> Role:
         """
@@ -168,22 +187,6 @@ class Bot(slixmpp.ClientXMPP):
         # Convert list responses into multi-line text
         if isinstance(text, list):
             text = "\n".join(text)
-
-        sender = str(msg["from"].bare)
-
-        # basic rate limit storage
-        if not hasattr(self, "_reply_rate"):
-            self._reply_rate = {}
-
-        # Rate limiting (2 replies per second per user)
-        if rate_limit:
-            now = time.time()
-            last = self._reply_rate.get(sender, 0)
-
-            if now - last < 0.5:
-                return
-
-            self._reply_rate[sender] = now
 
         msg_type = msg.get("type", "chat")
 
@@ -280,12 +283,13 @@ class Bot(slixmpp.ClientXMPP):
             log.info("[MUC] 🚪 Left room %s (%s)", room, nick)
 
     async def on_muc_message(self, msg):
-
         room = msg['from'].bare
         nick = msg['mucnick']
+        # ignore messages from ourselves (our nick)
         if self.presence.joined_rooms.get(room) == nick:
             return
 
+        # proceed to command handling
         if msg["type"] == "groupchat":
             await self.handle_command(
                 msg["body"],
@@ -368,14 +372,7 @@ class Bot(slixmpp.ClientXMPP):
         if not text:
             return
 
-        # --- resolve command using command resolver ---
-        cmd_obj, args = resolve_command(text)
-
-        if not cmd_obj:
-            return
-
-        cmd_name = cmd_obj.name
-
+        # Checking for real JID
         jid = None
         muc = self.plugin.get("xep_0045", None)
         if muc:
@@ -384,7 +381,25 @@ class Bot(slixmpp.ClientXMPP):
             jid = muc.get_jid_property(room, nick, "jid")
         if jid is None:
             jid = sender_jid
-        jid = str(slixmpp.JID(jid))
+        else:
+            jid = str(slixmpp.JID(jid).bare)
+
+        # Apply rate limiting on ingress
+        allowed, retry_after = await self.rate_limiter.allow(jid)
+        if not allowed:
+            # Avoid notifying the whole room; log and occasional
+            # admin notification only
+            if self.rate_limiter.notify_allowed(jid):
+                log.info("[BOT] Rate-limited %s in room %s (retry_after=%.1fs)", client_id, room, retry_after)
+            return
+
+        # --- resolve command using command resolver ---
+        cmd_obj, args = resolve_command(text)
+
+        if not cmd_obj:
+            return
+
+        cmd_name = cmd_obj.name
 
         # determine sender role
         user_role = await self.get_user_role(jid)
