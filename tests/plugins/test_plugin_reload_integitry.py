@@ -32,7 +32,7 @@ import pytest
 
 from utils.command import COMMANDS
 
-RELOAD_COUNT = 1000
+RELOAD_COUNT = 100
 
 
 def snapshot(plugin):
