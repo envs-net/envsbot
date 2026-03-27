@@ -2,10 +2,10 @@ import slixmpp
 import asyncio
 import inspect
 import logging
-import time
 
 from slixmpp.xmlstream import ET
 
+from utils.presence_manager import PresenceManager
 from utils.plugin_manager import PluginManager
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.config import config, setup_logging
@@ -23,59 +23,9 @@ setup_logging()
 log = logging.getLogger(__name__)
 
 
-class PresenceManager:
-
-    def __init__(self, bot):
-
-        self.bot = bot
-
-        self.status = {
-            "show": "online",
-            "status": "I'm ready to serve you!"
-        }
-
-        self.joined_rooms = {}
-
-        self.emojis = {
-            "online": "✅",
-            "chat": "💬",
-            "away": "👋 ",
-            "xa": "💤",
-            "dnd": "⛔"
-        }
-
-    def update(self, show, status):
-
-        self.status["show"] = show
-        self.status["status"] = status
-
-        self.broadcast()
-
-    def broadcast(self):
-
-        show = self.status["show"]
-        status = self.status["status"]
-
-        self.bot.send_presence(pshow=show, pstatus=status)
-
-        # --- Get JOINED_ROOMS from "rooms" plugin ---
-        rooms_plugin = self.bot.plugins.plugins.get("rooms", None)
-        if rooms_plugin is not None:
-            rooms = dict(rooms_plugin.JOINED_ROOMS)
-            for room in rooms.keys():
-                self.bot.send_presence(
-                    pto=f"{room}/{rooms[room]['nick']}",
-                    pshow=show,
-                    pstatus=status)
-        # log message
-        log.info(f"[PRESENCE] {self.emoji(show)} Status set: "
-                 f"'{show}': [{status}]")
-
-    def emoji(self, show=None):
-
-        show = show or self.status["show"]
-        return self.emojis.get(show, "")
-
+# -------------------------------------------------
+# BOT CLASS
+# -------------------------------------------------
 
 class Bot(slixmpp.ClientXMPP):
 
@@ -120,7 +70,57 @@ class Bot(slixmpp.ClientXMPP):
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("groupchat_message", self.on_muc_message)
         self.add_event_handler("message", self.on_private_message)
-        self.add_event_handler("muc::%s::got_offline" % "*", self.on_muc_leave)
+
+    # -------------------------------------------------
+    # EVENT HANDLERS
+    # -------------------------------------------------
+
+    # fired on "session_start"
+    async def on_start(self, event):
+        # send startup presence
+        self.presence.broadcast()
+        # Get roster
+        await self.get_roster()
+        # Connect to DB
+        await self.db.connect()
+        # load plugins
+        await self.plugins.load_all()
+        # send presence again
+        self.presence.broadcast()
+        # set automatic mutual subscriptions
+        self.roster.auto_subscribe = True
+
+        log.info("[BOT] ✅ Bot started, all rooms joined")
+
+    # fired when a MUC room message arrives
+    async def on_muc_message(self, msg):
+        room = msg['from'].bare
+        nick = msg['mucnick']
+        # ignore messages from ourselves (our nick)
+        if self.presence.joined_rooms.get(room) == nick:
+            return
+
+        # proceed to command handling
+        if msg["type"] == "groupchat":
+            await self.handle_command(
+                msg["body"],
+                msg["from"],
+                msg["mucnick"],
+                msg,
+                True
+            )
+
+    # fired when a direct message to the bot or a MUC DM arrives
+    async def on_private_message(self, msg):
+
+        if msg["type"] in ("chat", "normal"):
+            await self.handle_command(
+                msg["body"],
+                msg["from"],
+                None,
+                msg,
+                False
+            )
 
     # -------------------------------------------------
     # HELPER FUNCTIONS
@@ -148,23 +148,6 @@ class Bot(slixmpp.ClientXMPP):
             return role_from_int(row['role'])
         except KeyError:
             return Role.NONE
-
-    async def autojoin_rooms(self):
-        """
-        Join all rooms marked with autojoin in the database.
-        """
-
-        rows = await self.db.rooms.list()
-        for room_jid, nick, autojoin, status in rows:
-            if not autojoin:
-                continue
-            log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
-            self.plugin["xep_0045"].join_muc(
-                room_jid,
-                nick,
-                pshow=self.presence.status["show"],
-                pstatus=self.presence.status["status"])
-            self.presence.joined_rooms[room_jid] = nick
 
     def reply(self, msg, text, mention=True, thread=True, rate_limit=True):
         """
@@ -246,69 +229,9 @@ class Bot(slixmpp.ClientXMPP):
             if hasattr(msg, "replies"):
                 msg.replies.append(text)
 
-    async def on_start(self, event):
-        # send startup presence
-        self.presence.broadcast()
-        # Get roster
-        await self.get_roster()
-        # Connect to DB
-        await self.db.connect()
-        # load plugins
-        await self.plugins.load_all()
-        # send presence again
-        self.presence.broadcast()
-        # set automatic mutual subscriptions
-        self.roster.auto_subscribe = True
-
-        log.info("[BOT] ✅ Bot started, all rooms joined")
-
-    def on_muc_leave(self, presence):
-        """
-        Handle occupants leaving a MUC.
-
-        If the bot itself leaves a room, remove the room from the
-        presence manager's joined_rooms mapping.
-        """
-
-        room = presence["from"].bare
-        nick = presence["muc"]["nick"]
-
-        # ignore if we never registered this room
-        if room not in self.presence.joined_rooms:
-            return
-
-        # if the leaving nick is our own nick, we left the room
-        if self.presence.joined_rooms.get(room) == nick:
-            self.presence.joined_rooms.pop(room, None)
-            log.info("[MUC] 🚪 Left room %s (%s)", room, nick)
-
-    async def on_muc_message(self, msg):
-        room = msg['from'].bare
-        nick = msg['mucnick']
-        # ignore messages from ourselves (our nick)
-        if self.presence.joined_rooms.get(room) == nick:
-            return
-
-        # proceed to command handling
-        if msg["type"] == "groupchat":
-            await self.handle_command(
-                msg["body"],
-                msg["from"],
-                msg["mucnick"],
-                msg,
-                True
-            )
-
-    async def on_private_message(self, msg):
-
-        if msg["type"] in ("chat", "normal"):
-            await self.handle_command(
-                msg["body"],
-                msg["from"],
-                None,
-                msg,
-                False
-            )
+    # -------------------------------------------------
+    # UNIFIED COMMAND HANDLER
+    # -------------------------------------------------
 
     async def handle_command(self, body, sender_jid, nick, msg, is_room):
         """
@@ -324,18 +247,19 @@ class Bot(slixmpp.ClientXMPP):
         --------
         1. Validate that the message body exists and begins with the command
            prefix.
-        2. Strip the prefix and resolve the command using `resolve_command()`.
-        3. Determine the sender's role (owner, admin, moderator, user, none).
-        4. Verify that the user has permission to execute the command.
-        5. Execute the command handler (async or sync).
-        6. Catch and report execution errors.
+        2. Strip the prefix and process rate limiting
+        3. Resolve the command using `resolve_command()`.
+        4. Determine the sender's role (owner, admin, moderator, user, none).
+        5. Verify that the user has permission to execute the command.
+        6. Execute the command handler (async or sync).
+        7. Catch and report execution errors.
 
         Parameters
         ----------
         body : str
             Raw message body received from the XMPP message.
         sender_jid : str
-            Bare JID of the message sender.
+            JID of the message sender.
         nick : str
             Nickname of the sender in a groupchat. May be None for private
             messages.
@@ -353,11 +277,16 @@ class Bot(slixmpp.ClientXMPP):
             * command aliases
             * longest-match detection
         - Permission checks are based on the role hierarchy:
-                OWNER (1)
-                ADMIN (2)
-                MODERATOR (3)
-                USER (4)
-                NONE (5)
+                    OWNER = 1
+                    SUPERADMIN = 10
+                    ADMIN = 20
+                    MODERATOR = 40
+                    TRUSTED = 60
+                    USER = 80
+                    NEW = 90
+                    NONE = 95
+                    BANNED = 100
+
           Lower numbers have higher privileges.
 
         - Errors are logged and a user-friendly message is returned to the
@@ -390,7 +319,9 @@ class Bot(slixmpp.ClientXMPP):
             # Avoid notifying the whole room; log and occasional
             # admin notification only
             if self.rate_limiter.notify_allowed(jid):
-                log.info("[BOT] Rate-limited %s in room %s (retry_after=%.1fs)", client_id, room, retry_after)
+                log.info(("[BOT] ⚠️Rate-limited %s "
+                          "in room %s (retry_after=%.1fs)"),
+                         jid, room, retry_after)
             return
 
         # --- resolve command using command resolver ---
@@ -434,6 +365,10 @@ class Bot(slixmpp.ClientXMPP):
 
             self.reply(msg, err_msg)
 
+
+# -------------------------------------------------
+# MAIN FUNCTION
+# -------------------------------------------------
 
 async def main():
     xmpp = Bot()
