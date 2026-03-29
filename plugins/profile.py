@@ -1,16 +1,17 @@
 """
 Profile management plugin.
 
-This plugin allows users to set their FULLNAME, LOCATION, TIMEZONE,
-PRONOUNS, SPECIES, EMAIL, and manage up to 6 URLs with descriptions in
-their profile. It also allows querying some of these fields for yourself
-or another user in a room by nickname.
+This plugin allows users to set their FULLNAME, LOCATION, TIMEZONE, BIRTHDAY,
+PRONOUNS, SPECIES, EMAIL, and manage up to 6 URLs with descriptions in their
+profile. It also allows querying some of these fields for yourself or another
+user in a room by nickname.
 """
 
 import slixmpp
 from utils.command import command, Role
 from utils.config import config
 import pytz
+import datetime
 import re
 import urllib.parse
 import logging
@@ -411,6 +412,39 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
         return
 
 
+@command("config birthday", role=Role.USER, aliases=["c birthday"])
+async def set_birthday(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Set your BIRTHDAY in your profile. Format: YYYY-MM-DD or MM-DD.
+    Usage:
+        {prefix}config birthday <YYYY-MM-DD|MM-DD>
+        {prefix}c birthday <YYYY-MM-DD|MM-DD>
+    Example:
+        {prefix}config birthday 1990-05-23
+        {prefix}config birthday 05-23
+    """
+    import re
+    jid = resolve_real_jid(bot, msg, is_room)
+    if not await _check_user_exists(bot, jid, msg):
+        return
+    if not args or len(args) != 1:
+        bot.reply(
+            msg,
+            f"⚠️ Usage: {config.get('prefix', ',')}config birthday" +
+            "<YYYY-MM-DD|MM-DD>",
+        )
+        return
+    birthday = args[0].strip()
+    if not (re.match(r"^\d{4}-\d{2}-\d{2}$", birthday)
+            or re.match(r"^\d{2}-\d{2}$", birthday)):
+        bot.reply(msg, "⚠️ Please provide birthday as YYYY-MM-DD or MM-DD.")
+        return
+    profile_store = bot.db.users.profile()
+    await profile_store.set(str(jid), "BIRTHDAY", birthday)
+    log.info("[PROFILE] ✅ BIRTHDAY set for %s: %s", jid, birthday)
+    bot.reply(msg, f"✅ BIRTHDAY set to: {birthday}")
+
+
 @command("fullname", role=Role.USER, aliases=["f"])
 async def get_fullname(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -673,6 +707,77 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
             bot.reply(msg, f"{label} for {display_name}: {value}")
 
 
+@command("birthday", role=Role.USER, aliases=["b"])
+async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Show the BIRTHDAY of a user and days until next birthday.
+    Usage:
+        {prefix}birthday [nick]
+        {prefix}b [nick]
+    Example:
+        {prefix}birthday Envsi
+    """
+    # 1. Room context (groupchat) or MUC PM: lookup nick in room
+    if (is_room or _is_muc_pm(msg)) and args:
+        target_nick = args[0]
+        room = msg["from"].bare
+        joined = JOINED_ROOMS.get(room, {})
+        nicks = joined.get("nicks", {})
+        nick_info = nicks.get(target_nick)
+        if not nick_info:
+            bot.reply(msg, f"❌ Nick '{target_nick}' not found in this room.")
+            return
+        target_jid = nick_info.get("jid")
+        if not target_jid:
+            bot.reply(msg, f"❌ No JID found for nick '{target_nick}'.")
+            return
+        target_jid = str(target_jid)
+        display_name = target_nick
+    elif not is_room and not _is_muc_pm(msg) and args:
+        target_nick = args[0]
+        index = bot.db.users._nick_index
+        jids = index.get(target_nick, [])
+        if not jids:
+            bot.reply(msg, f"❌ Nick '{target_nick}' not found.")
+            return
+        if len(jids) > 1:
+            bot.reply(msg, "🔎 Multiple users found for nick " +
+                      f"'{target_nick}':\n" +
+                      "\n".join(f"- {jid}" for jid in jids))
+            return
+        target_jid = str(jids[0])
+        display_name = target_nick
+    else:
+        target_jid = resolve_real_jid(bot, msg, is_room)
+        display_name = nick
+    profile_store = bot.db.users.profile()
+    value = await profile_store.get(target_jid, "BIRTHDAY")
+    if not value:
+        bot.reply(msg, f"ℹ️ No Birthday set for {display_name}.")
+        return
+    # Calculate days until next birthday
+    today = datetime.date.today()
+    try:
+        if len(value) == 10:  # YYYY-MM-DD
+            month = int(value[5:7])
+            day = int(value[8:10])
+        elif len(value) == 5:  # MM-DD
+            month = int(value[0:2])
+            day = int(value[3:5])
+        else:
+            raise ValueError
+        this_year = today.year
+        next_birthday = datetime.date(this_year, month, day)
+        if next_birthday < today:
+            next_birthday = datetime.date(this_year + 1, month, day)
+        days_left = (next_birthday - today).days
+        days_str = f"{days_left} day{'s' if days_left != 1 else ''}"
+        bot.reply(msg, f"🎂 Birthday for {display_name}: {value}"
+                       + f" ({days_str} until next birthday)")
+    except Exception:
+        bot.reply(msg, f"🎂 Birthday for {display_name}: {value}")
+
+
 @command("profile", role=Role.USER, aliases=["whois"])
 async def show_profile(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -763,6 +868,7 @@ async def show_profile(bot, sender_jid, nick, args, msg, is_room):
         ("FULLNAME", "Full Name"),
         ("LOCATION", "Location"),
         ("TIMEZONE", "Timezone"),
+        ("BIRTHDAY", "Birthday"),
         ("PRONOUNS", "Pronouns"),
         ("SPECIES", "Species"),
         ("EMAIL", "Email"),
