@@ -389,7 +389,7 @@ async def main():
     finally:
         log.info("[XMPP] disconnected. Closing Database...")
         await asyncio.shield(xmpp.db.close())
-        log.info("[XMPP] Database closed! End!")
+        log.info("[XMPP] ✅ Database closed! End!")
 
 if __name__ == "__main__":
     try:
