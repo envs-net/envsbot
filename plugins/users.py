@@ -33,7 +33,6 @@ PLUGIN_META = {
     "version": "0.1.0",
     "description": "User management with caching, nick lookup and logging",
     "category": "core",
-    "requires": ["rooms"],
 }
 
 
@@ -207,6 +206,7 @@ async def track_room_nick(bot, real_jid: str, room: str, nick: str):
     """
     um = bot.db.users
     if await um.get(real_jid) is None:
+        log.info(f"[USERS] ✅ Creating user: '{real_jid}'")
         await um.create(real_jid, nick)
 
     store = um.plugin("users")
