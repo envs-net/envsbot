@@ -213,7 +213,7 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 
         lines = ["📦 Available plugins", ""]
 
-        for name, module in sorted(pm.bot_plugins.items()):
+        for name, module in sorted(pm.plugins.items()):
 
             # hide internal plugins for non-admin users
             if name.startswith("_") and user_role > Role.ADMIN:
@@ -278,11 +278,11 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "⚠️ Unknown plugin.")
         return
 
-    if plugin not in pm.bot_plugins:
+    if plugin not in pm.plugins:
         bot.reply(msg, "⚠️ Unknown plugin.")
         return
 
-    module = pm.bot_plugins[plugin]
+    module = pm.plugins[plugin]
 
     lines = [
         f"📦 Plugin: {plugin}",
