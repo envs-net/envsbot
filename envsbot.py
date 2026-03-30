@@ -17,7 +17,6 @@ from utils.command import (
 )
 from database.manager import DatabaseManager
 
-
 # === set up logging ===
 setup_logging()
 log = logging.getLogger(__name__)
@@ -127,7 +126,7 @@ class Bot(slixmpp.ClientXMPP):
     # HELPER FUNCTIONS
     # -------------------------------------------------
 
-    async def get_user_role(self, jid) -> Role:
+    async def get_user_role(self, jid, room=None) -> Role:
         """
         Resolve a user's role using config and database.
         """
@@ -152,12 +151,13 @@ class Bot(slixmpp.ClientXMPP):
             return Role.NONE
 
         # Elevate to MODERATOR if user is admin/owner in any joined room
-        for room, data in JOINED_ROOMS.items():
-            nicks = data.get("nicks", {})
+        if room and room in JOINED_ROOMS:
+            nicks = JOINED_ROOMS[room].get("nicks", {})
             for nick_info in nicks.values():
                 if str(nick_info.get("jid")) == str(jid):
                     affiliation = nick_info.get("affiliation", "")
-                    if affiliation in ("admin", "owner") and db_role > Role.MODERATOR:
+                    if (affiliation in ("admin", "owner")
+                            and db_role > Role.MODERATOR):
                         return Role.MODERATOR
         return db_role
 
@@ -315,6 +315,7 @@ class Bot(slixmpp.ClientXMPP):
 
         # Checking for real JID
         jid = None
+        room = None
         muc = self.plugin.get("xep_0045", None)
         if muc:
             room = msg['from'].bare
@@ -345,7 +346,7 @@ class Bot(slixmpp.ClientXMPP):
         cmd_name = cmd_obj.name
 
         # determine sender role
-        user_role = await self.get_user_role(jid)
+        user_role = await self.get_user_role(jid, room)
 
         # permission check
         if not check_permission(user_role, cmd_obj):
