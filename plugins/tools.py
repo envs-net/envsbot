@@ -10,6 +10,7 @@ Commands:
 """
 
 import time
+import slixmpp
 from utils.command import command, Role
 
 PLUGIN_META = {
@@ -36,10 +37,22 @@ async def ping_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     target = args[0]
+
     try:
         start = time.monotonic()
         await bot.plugin["xep_0199"].ping(jid=target, timeout=8)
         rtt = (time.monotonic() - start) * 1000
         bot.reply(msg, f"🏓 Pong from {target} in {rtt:.1f} ms")
+    except slixmpp.exceptions.IqTimeout:
+        bot.reply(msg, f"❌ Ping to {target} timed out.")
+    except slixmpp.exceptions.IqError as e:
+        err = e.iq['error']
+        err_type = err.get('type', 'unknown')
+        err_condition = err.get('condition', 'unknown')
+        err_text = err.get('text', '')
+        bot.reply(
+            msg,
+            f"❌ Ping to {target} failed: {err_type}/{err_condition} {err_text}".strip()
+        )
     except Exception as e:
         bot.reply(msg, f"❌ Ping to {target} failed: {e}")
