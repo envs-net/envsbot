@@ -201,7 +201,7 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
     jid = str(slixmpp.JID(jid))
 
     # determine sender role
-    user_role = await bot.get_user_role(jid)
+    user_role = await bot.get_user_role(jid, room)
 
     pm = bot.bot_plugins
 
