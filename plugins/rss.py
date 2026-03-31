@@ -1,11 +1,11 @@
 """
 RSS Feed watcher plugin.
 
-Periodically checks configured RSS/Atom feeds and posts new updates to
-specified rooms.
+Periodically checks configured RSS/Atom feeds every 20 minutes. You can
+add/delete specified feeds to your room.
 
 Commands:
-    {prefix}rss add <url> <period_seconds> <room1> [room2 ...]
+    {prefix}rss add <url>
     {prefix}rss delete <url>
     {prefix}rss list
 
@@ -134,7 +134,8 @@ async def restart_all_tasks(bot):
 @command("rss", role=Role.MODERATOR)
 async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     """
-    Manage RSS feeds.
+    Manage RSS feeds. Add/delete/list Feed URLs to your room. The feeds are
+    checked every 20 minutes globally.
 
     Usage:
         {prefix}rss add <url>
