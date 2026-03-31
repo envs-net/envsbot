@@ -161,7 +161,8 @@ class Bot(slixmpp.ClientXMPP):
                         return Role.MODERATOR
         return db_role
 
-    def reply(self, msg, text, mention=True, thread=True, rate_limit=True):
+    def reply(self, msg, text, mention=True, thread=True, rate_limit=True,
+              ephemeral=True):
         """
         Smart reply helper for plugins.
 
@@ -208,7 +209,8 @@ class Bot(slixmpp.ClientXMPP):
                         log.exception("[BOT] ❌Setting Thread failed!")
 
             # Make reply ephemeral
-            message.append(ET.Element("{urn:xmpp:hints}no-store"))
+            if ephemeral:
+                message.append(ET.Element("{urn:xmpp:hints}no-store"))
             # send reply
             message.send()
 

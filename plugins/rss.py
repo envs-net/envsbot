@@ -94,6 +94,7 @@ async def rss_check_loop(bot, url, period, rooms):
                                     mention=False,
                                     thread=False,
                                     rate_limit=False,
+                                    ephemeral=False,
                                 )
                     feeds = await get_feeds(store)
                     feeds[url]["last_id"] = (
