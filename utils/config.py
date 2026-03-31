@@ -45,7 +45,7 @@ def setup_logging():
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
 
-    log_file = log_dir / "bluebot.log"
+    log_file = log_dir / "envsbot.log"
 
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
