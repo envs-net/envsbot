@@ -1,0 +1,33 @@
+kind: pipeline
+type: docker
+name: sync-fork
+
+trigger:
+  event:
+    - cron
+    - manual
+    - push
+
+steps:
+  - name: sync
+    image: alpine/git
+    environment:
+      GITEA_TOKEN:
+        from_secret: GITEA_TOKEN
+    commands:
+      - git config --global --add safe.directory /drone/src
+      - git config --global user.name "drone-sync"
+      - git config --global user.email "drone@local"
+
+      - git checkout main
+      - git remote remove upstream || true
+      - git remote add upstream https://git.envs.net/dan/envsbot.git
+      - git fetch upstream
+
+      - |
+        if ! git diff --quiet HEAD upstream/main; then
+          git merge upstream/main --no-edit
+          git push https://creme:$GITEA_TOKEN@git.envs.net/envs/envsbot.git main
+        else
+          echo "Already up to date"
+        fi
