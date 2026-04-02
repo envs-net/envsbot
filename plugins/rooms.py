@@ -487,7 +487,8 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         return
 
     try:
-        if room_jid in await bot.db.rooms.list():
+        db_room = await bot.db.rooms.get(room_jid)
+        if db_room:
             await bot.db.rooms.delete(room_jid)
 
         joined = room_jid in JOINED_ROOMS
