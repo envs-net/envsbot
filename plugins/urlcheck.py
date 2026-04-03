@@ -128,7 +128,7 @@ async def on_groupchat_message(bot, msg):
                 yt_info = await fetch_youtube_info(final_url)
                 if yt_info:
                     bot.reply(
-                        msg, yt_info, mention=False, thread=False,
+                        msg, yt_info, mention=True, thread=False,
                         ephemeral=True
                     )
                     continue
@@ -136,14 +136,14 @@ async def on_groupchat_message(bot, msg):
                 bot.reply(
                     msg,
                     f'[URL] "{title}" ({ctype} {status}) ({final_url})',
-                    mention=False, thread=False, ephemeral=True
+                    mention=True, thread=False, ephemeral=True
                 )
             elif ctype:
                 size_str = f", {content_size} bytes" if content_size is not None else ""
                 bot.reply(
                     msg,
                     f'[URL] ({ctype} {status}{size_str}) ({final_url})',
-                    mention=False, thread=False, ephemeral=True
+                    mention=True, thread=False, ephemeral=True
                 )
         except Exception as e:
             log.warning(f"[URLCHECK] Failed to fetch URL {url}: {e}")
