@@ -67,7 +67,12 @@ async def on_muc_presence(bot, pres):
         if nick == JOINED_ROOMS[room]["nick"]:
             del JOINED_ROOMS[room]
         else:
-            del JOINED_ROOMS[room]["nicks"][nick]
+            try:
+                if nick in JOINED_ROOMS[room]["nicks"]:
+                    del JOINED_ROOMS[room]["nicks"][nick]
+            except KeyError:
+                log.debug(f"[ROOMS] KeyError while trying to del '{nick}'"
+                          f" from '{room}'")
 
     new_nick = room_info["nicks"].get(nick)
     if new_nick is None:
@@ -169,6 +174,7 @@ async def on_load(bot):
     else:
         # Case 2: normal startup → use config
         await autojoin_rooms(bot)
+
 
 # -------------------------------------------------
 # ON_UNLOAD teardown function.

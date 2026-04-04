@@ -15,7 +15,10 @@
   "_comment4": "The 'db' key holds the name of the database file. It will be stored in the bots main directory you cloned",
   "db": "bot.db",
 
-  "_comment6": "Avatar image name and type. Types may only be 'image/jpeg' and 'image/png' AFAIK",
+  "_comment6": "Your YouTube API key for getting Information about Videos with the urlcheck plugin",
+  "youtube_api_key": "<your_youtube_api_key>",
+
+  "_comment7": "Avatar image name and type. Types may only be 'image/jpeg' and 'image/png' AFAIK",
   "avatar": "avatar.jpg",
   "avatar_type": "image/jpeg",
 
@@ -33,7 +36,7 @@
             ["https://envs.net/", "Envs Pubnix/Tilde Community Homepage"]]
   },
 
-  "_comment7": "The XMPP temp-vcard in JSON format. Look at https://xmpp.org/extensions/xep-0054.html for which fields you can use and how they're structured. These are the ones I know they work. You don't need to use all of them. If you want to use more than one NOTE/EMAIL/URL/WHATEVER, you have to find out how to put them in json format in the slixmpp documentation.",
+  "_comment8": "The XMPP temp-vcard in JSON format. Look at https://xmpp.org/extensions/xep-0054.html for which fields you can use and how they're structured. These are the ones I know they work. You don't need to use all of them. If you want to use more than one NOTE/EMAIL/URL/WHATEVER, you have to find out how to put them in json format in the slixmpp documentation.",
   "vcard": {
     "FN": "Blue Bot",
     "NICKNAME": "bluebot",
