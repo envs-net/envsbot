@@ -25,7 +25,7 @@ except ImportError:
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms"],
@@ -107,7 +107,7 @@ async def rss_check_loop(bot, store, url, period):
                         },
                         msg,
                         mention=False,
-                        thread=False,
+                        thread=True,
                         rate_limit=False,
                         ephemeral=False,
                     )
