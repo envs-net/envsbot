@@ -15,6 +15,10 @@ Feed configuration is stored in the plugin runtime store under the key "RSS".
 import asyncio
 import logging
 import time
+import html
+
+from bs4 import BeautifulSoup
+
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
 
@@ -35,6 +39,16 @@ log = logging.getLogger(__name__)
 
 RSS_KEY = "RSS"
 CHECK_TASKS = {}
+
+
+def html_to_text_with_links(html_content):
+    soup = BeautifulSoup(html_content, "html.parser")
+    for a in soup.find_all("a"):
+        href = a.get("href")
+        if href:
+            a.replace_with(f"{a.get_text()} ({href})")
+    text = soup.get_text(separator=" ", strip=True)
+    return html.unescape(text)
 
 
 def _now():
@@ -93,9 +107,13 @@ async def rss_check_loop(bot, store, url, period):
         # Post new entries in reverse order (oldest first)
         for entry in reversed(new_entries):
             entry_id = entry.get("id") or entry.get("link")
-            entry_title = entry.get("title", "No title")
+            entry_title = html_to_text_with_links(
+                entry.get("title", "No title")
+            )
+            entry_desc = html_to_text_with_links(entry.get("description", ""))
             entry_link = entry.get("link", "")
-            msg = f"[RSS] ({feed_title}) {entry_title} - {entry_link}"
+            msg = f"[RSS] ({feed_title}) {entry_title} - {entry_desc}\n"
+            msg += f"{entry_link}"
             for room in rooms:
                 if room in JOINED_ROOMS:
                     bot.reply(

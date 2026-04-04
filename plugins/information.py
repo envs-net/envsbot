@@ -16,8 +16,12 @@ Commands:
 """
 
 import aiohttp
+import html
 import logging
 import re
+
+from bs4 import BeautifulSoup
+
 from utils.command import command, Role
 from utils.config import config
 
@@ -103,6 +107,7 @@ THES_API_ENDPOINTS = {
     "en": "https://www.openthesaurus.de/synonyme/search?q={}&format=application/json",
     "de": "https://www.openthesaurus.de/synonyme/search?q={}&format=application/json",
 }
+
 
 @command("thesaurus", role=Role.USER, aliases=["thes"])
 async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
@@ -207,6 +212,16 @@ async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
 FEDIVERSE_USER_RE = re.compile(r"^@?([^@]+)@([^@]+)$")
 
 
+def html_to_text_with_links(html_content):
+    soup = BeautifulSoup(html_content, "html.parser")
+    for a in soup.find_all("a"):
+        href = a.get("href")
+        if href:
+            a.replace_with(f"{a.get_text()} ({href})")
+    text = soup.get_text(separator=" ", strip=True)
+    return html.unescape(text)
+
+
 @command("fediverse", role=Role.USER, aliases=["fedi"])
 async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -271,7 +286,7 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
         return
 
     status = statuses[0]
-    content = re.sub(r"<.*?>", "", status.get("content", "")).strip()
+    content = html_to_text_with_links(status.get("content", ""))
     url = status.get("url", "")
     boosts = status.get("reblogs_count", 0)
     replies = status.get("replies_count", 0)
