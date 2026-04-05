@@ -117,7 +117,11 @@ async def on_groupchat_message(bot, msg):
         return
 
     text = msg.get("body", "")
-    urls = URL_RE.findall(text)
+    # Only match URLs in lines that do not start with ">"
+    lines = [line for line in text.splitlines() if not line.lstrip().startswith(">")]
+    urls = []
+    for line in lines:
+        urls.extend(URL_RE.findall(line))
     if not urls:
         return
 
@@ -127,27 +131,23 @@ async def on_groupchat_message(bot, msg):
             final_url, status, ctype, title, content_size = await fetch_url_title(
                 url, max_redirects=3
             )
+            st = f"(Status: {status})" if status != 200 else ""
             if is_youtube_url(final_url):
                 yt_info = await fetch_youtube_info(final_url)
                 if yt_info:
                     bot.reply(
-                        msg, yt_info, mention=True, thread=False,
-                        ephemeral=True
+                        msg, yt_info, mention=False, thread=True,
+                        ephemeral=False
                     )
                     continue
             if ctype and ctype.startswith("text/html") and title:
                 bot.reply(
                     msg,
-                    f'[URL] "{title}" ({ctype} {status}) ({final_url})',
-                    mention=True, thread=False, ephemeral=True
+                    f'[URL] "{title}" {st} ({final_url})',
+                    mention=False, thread=True, ephemeral=False
                 )
             elif ctype:
-                size_str = f", {content_size} bytes" if content_size is not None else ""
-                bot.reply(
-                    msg,
-                    f'[URL] ({ctype} {status}{size_str}) ({final_url})',
-                    mention=True, thread=False, ephemeral=True
-                )
+                return
         except Exception as e:
             log.warning(f"[URLCHECK] Failed to fetch URL {url}: {e}")
 

@@ -126,4 +126,4 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
             result_str += f" {cond_str} [✅ SUCCESS]"
         else:
             result_str += f" {cond_str} [❌ FAILURE]"
-    bot.reply(msg, f"🎲 {result_str}")
+    bot.reply(msg, f"🎲 {result_str}", ephemeral=False)

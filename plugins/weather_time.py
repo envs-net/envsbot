@@ -50,15 +50,13 @@ async def _get_target(bot, msg, is_room, nick, args):
         target_nick = args[0]
         info = nicks.get(target_nick)
         if not info or not info.get("jid"):
-            return None, f"❌ Nick '{target_nick}' not found in this room.",
-            None, None
+            return None, f"❌ Nick '{target_nick}' not found in this room.", None, None
         target_jid = str(info["jid"])
         display_name = target_nick
     else:
         info = nicks.get(nick)
         if not info or not info.get("jid"):
-            return None, "❌ Could not determine your JID in this room.",
-            None, None
+            return None, "❌ Could not determine your JID in this room.", None, None
         target_jid = str(info["jid"])
         display_name = nick
     profile_store = bot.db.users.profile()
@@ -111,7 +109,8 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     log.info(f"[TIME] 🕒 {display_name} ({target_jid}) ->"
              + f" {formatted} ({timezone}){loc_str}")
     bot.reply(msg, f"🕒 Time for {display_name}: {formatted}"
-                   + f" ({timezone}){loc_str}")
+                   + f" ({timezone}){loc_str}",
+              ephemeral=False)
 
 
 @command("weather", role=Role.USER, aliases=["w"])
@@ -164,4 +163,5 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     log.info(f"[WEATHER] 🌤️ {display_name} ({target_jid}) ->"
              f" {weather.strip()}{tz_str} ({location})")
     bot.reply(msg, f"🌤️ Weather for {display_name}:"
-                   + f" {weather.strip()}{tz_str} ({location})")
+                   + f" {weather.strip()}{tz_str} ({location})",
+              ephemeral=False)
