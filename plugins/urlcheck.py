@@ -41,8 +41,21 @@ PLUGIN_META = {
 
 URLCHECK_KEY = "URLCHECK"
 URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
+# Robust YouTube video ID extraction: supports many URL forms
+#  youtu.be/VIDEO_ID
+# /watch?...v=VIDEOID, /embed/VIDEOID, /v/VIDEOID, /shorts/VIDEOID
+
 YOUTUBE_RE = re.compile(
-    r"(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]+)", re.I
+    r"""(?x)
+    (?: # Match any of the following forms:
+        (?:https?://)?(?:www\.)?youtu\.be/([A-Za-z0-9_-]{11})
+      | (?:https?://)?(?:www\.)?youtube\.com/
+        (?:
+            (?:watch\?(?:.*&)?v=|embed/|v/|shorts/))
+        ([A-Za-z0-9_-]{11})
+    )
+    """,
+    re.I,
 )
 
 
@@ -216,7 +229,8 @@ async def fetch_youtube_info(url):
     m = YOUTUBE_RE.search(url)
     if not m:
         return None
-    video_id = m.group(1)
+    # Extract video_id from the first non-None group
+    video_id = m.group(1) or m.group(2)
     api_url = (
         f"https://www.googleapis.com/youtube/v3/videos"
         f"?id={video_id}&part=snippet,statistics,"
