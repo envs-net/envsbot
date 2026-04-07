@@ -226,9 +226,10 @@ async def on_groupchat_message(bot, msg):
                                 f"Status: {status} - Content-Type: {ctype}"
                                 f" - Size: {content_size}"
                             )
-                            message["link_metadata"]["description"] = (
-                                html.unescape(mdesc) or ""
-                            )
+                            if mdesc is not None:
+                                message["link_metadata"]["description"] = (
+                                    html.unescape(mdesc) or ""
+                                )
                         except Exception as e:
                             log.warning(
                                 "[URLCHECK] Failed to set link metadata for "
