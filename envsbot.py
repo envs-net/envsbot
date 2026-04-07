@@ -62,6 +62,7 @@ class Bot(slixmpp.ClientXMPP):
         self.register_plugin("xep_0199")
         self.register_plugin("xep_0461")
         self.register_plugin("xep_0359")
+        self.register_plugin("xep_0511")
 
         # Database Manager
         self.db = DatabaseManager(config.get("db", "bot.db"))
