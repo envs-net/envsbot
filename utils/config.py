@@ -22,7 +22,7 @@ def load_config():
             with open(config_path) as f:
                 cfg.update(json.load(f))
         except Exception as e:
-            print(f"⚠️ Failed to load config.json: {e}")
+            print(f"🟡️ Failed to load config.json: {e}")
 
     return cfg
 

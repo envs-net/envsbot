@@ -222,7 +222,7 @@ async def update_vcard(bot):
         log.info("[PROFILE]✅ vCard updated")
 
     except Exception as e:
-        log.error(f"[PROFILE]❌vCard update failed: {e}")
+        log.error(f"[PROFILE]🔴 vCard update failed: {e}")
 
 
 # -------------------------------------------------
@@ -293,7 +293,7 @@ async def update_profile(bot):
         log.info("[PROFILE]✅ DB profile updated")
 
     except Exception as e:
-        log.error(f"[PROFILE]❌vCard update failed: {e}")
+        log.error(f"[PROFILE]🔴 vCard update failed: {e}")
 
 
 # -------------------------------------------------
@@ -336,7 +336,7 @@ async def update_avatar(bot):
         return
 
     if not os.path.exists(avatar_path):
-        log.warning("[PROFILE]⚠️ Avatar file not found")
+        log.warning("[PROFILE]🟡️ Avatar file not found")
         return
 
     try:
@@ -352,7 +352,7 @@ async def update_avatar(bot):
             return
 
         if avatar_type not in ("image/png", "image/jpeg"):
-            log.error("[PROFILE]❌Avatar must be PNG or JPEG")
+            log.error("[PROFILE]🔴 Avatar must be PNG or JPEG")
             return
 
         pubsub = bot["xep_0084"]
@@ -372,7 +372,7 @@ async def update_avatar(bot):
         log.info("[PROFILE]✅ Avatar updated")
 
     except Exception as e:
-        log.error(f"[PROFILE]❌Avatar update failed: {e}")
+        log.error(f"[PROFILE]🔴 Avatar update failed: {e}")
 
 
 # -------------------------------------------------

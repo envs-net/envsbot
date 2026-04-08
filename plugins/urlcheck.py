@@ -6,14 +6,19 @@ checking in a groupchat room. When enabled, the bot will watch for URLs
 in messages and output the title and filetype for HTML pages, or YouTube
 video info for YouTube links.
 
+It will also add an XEP-0511 metadata attachment, if the message sending
+the URL does not already provide Link metadata. If the sending message
+does provide additional Link information, the XEP-0511 attachment will be
+omitted to avoid redundancy, but the bot will still reply with the URL or
+YouTube info in the message text.
+
+Output of the same URL is temporary disabled for 2 minutes, after first
+fetch, to avoid spam if the same URL is posted multiple times in a short
+period.
+
 Command:
     {prefix}urlcheck on
     {prefix}urlcheck off
-
-Requires:
-    - aiohttp
-    - Users plugin (for runtime store)
-    - YouTube Data API key in config as "youtube_api_key"
 """
 import re
 import aiohttp
@@ -33,7 +38,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "urlcheck",
-    "version": "0.1.0",
+    "version": "0.2.1",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
     "requires": ["users"],
@@ -44,7 +49,6 @@ URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
 # Robust YouTube video ID extraction: supports many URL forms
 #  youtu.be/VIDEO_ID
 # /watch?...v=VIDEOID, /embed/VIDEOID, /v/VIDEOID, /shorts/VIDEOID
-
 YOUTUBE_RE = re.compile(
     r"""(?x)
     (?: # Match any of the following forms:
@@ -57,6 +61,13 @@ YOUTUBE_RE = re.compile(
     """,
     re.I,
 )
+
+# Dict of URLs which have been requested with timestamp to avoid fetching
+# the same URL multiple times in a short period
+# formant _url_timestamp[room][url] = timestamp
+_url_timestamps = {}
+# seconds to wait until next URL output
+_wait_secs_url = 120
 
 
 async def get_urlcheck_store(bot):
@@ -129,25 +140,46 @@ async def on_groupchat_message(bot, msg):
     if room not in enabled_rooms:
         return
 
+
     text = msg.get("body", "")
     thread_id = msg.get("thread") or msg.get("id")
     # Only match URLs in lines that do not start with ">"
-    lines = [line for line in text.splitlines() if not line.lstrip().startswith(">")]
+    lines = [line for line in text.splitlines()
+             if not line.lstrip().startswith(">")]
     urls = []
     for line in lines:
         urls.extend(URL_RE.findall(line))
     if not urls:
         return
 
+    has_xep_0511 = msg.xml.find("{urn:xmpp:ssn}x") is not None
+
     for url in urls:
+        # Check if room is in _url_timestamps, if not add it
+        now = datetime.now().timestamp()
+        if room not in _url_timestamps:
+            _url_timestamps[room] = {}
+        # delete all expired URLs
+        for u in dict(_url_timestamps[room]):
+            if _url_timestamps[room][u] < now - _wait_secs_url:
+                del _url_timestamps[room][u]
+        # if URL in _url_timestamps[room], skip it
+        # else add it to _url_timestamps[room] with current timestamp
+        if url in _url_timestamps[room]:
+            log.info(f"[URLCHECK] 🟡 Fetching '{url}' temporary disabled")
+            continue
+        _url_timestamps[room][url] = now
+
         try:
             # handle up to 3 redirects manually
-            final_url, status, ctype, title, content_size, mdesc = await fetch_url_title(
-                url, max_redirects=3
+            final_url, status, ctype, title, content_size, mdesc = (
+                await fetch_url_title(url, max_redirects=3)
             )
             st = f"(Status: {status})" if status != 200 else ""
             if is_youtube_url(final_url):
-                yt_info, title, uploader, length_str, views = await fetch_youtube_info(final_url)
+                yt_info, title, uploader, length_str, views = (
+                    await fetch_youtube_info(final_url)
+                )
                 if yt_info:
                     message = bot.make_message(
                         mto=msg["from"].bare,
@@ -159,16 +191,38 @@ async def on_groupchat_message(bot, msg):
                             message["thread"] = thread_id
                         except Exception:
                             pass
-                    try:
-                        message["link_metadata"]["title"] = html.unescape(title)
-                        message["link_metadata"]["about"] = (
-                            f"Uploader: {uploader} - Length: {length_str}"
-                            f" - Views: {views}")
-                        message["link_metadata"]["description"] = html.unescape(yt_info)
-                        message["link_metadata"]["url"] = final_url
-                    except Exception as e:
-                        log.warning("[URLCHECK] Failed to set link metadata"
-                                    f" for YouTube info: {e}")
+                    # Only attach XEP-0511 if not already present
+                    # in the original message
+                    if (not has_xep_0511 and
+                            not has_xep_0392_link_metadata(msg)):
+                        try:
+                            if title is not None:
+                                message["link_metadata"]["title"] = (
+                                    html.unescape(title)
+                                )
+                            message["link_metadata"]["about"] = (
+                                f"Uploader: {uploader} - Length: {length_str}"
+                                f" - Views: {views}"
+                            )
+                            if yt_info is not None:
+                                message["link_metadata"]["description"] = (
+                                    html.unescape(yt_info)
+                                )
+                            message["link_metadata"]["url"] = final_url
+                        except Exception as e:
+                            log.warning(
+                                "[URLCHECK] Failed to set link metadata"
+                                f" for YouTube info: {e}"
+                            )
+                    if (has_xep_0511 or
+                            has_xep_0392_link_metadata(msg)):
+                        # If original message has XEP-0511,
+                        # don't include YouTube info in the reply text
+                        for x in list(
+                            message.xml.findall("{urn:xmpp:ssn}x")
+                        ):
+                            message.xml.remove(x)
+
                     message.send()
                     continue
             # log.info(f"[URLCHECK] ctype is: {ctype}")
@@ -183,24 +237,46 @@ async def on_groupchat_message(bot, msg):
                         message["thread"] = thread_id
                     except Exception:
                         pass
-                try:
-                    message["link_metadata"]["title"] = html.unescape(title)
-                    message["link_metadata"]["url"] = final_url
-                    message["link_metadata"]["about"] = (
-                            f"Status: {status} - Content-Type: {ctype}"
-                            f" - Size: {content_size}")
-                    message["link_metadata"]["description"] = html.unescape(mdesc) or ""
-                except Exception as e:
-                    log.warning("[URLCHECK] Failed to set link metadata for "
-                                f"URL '{final_url}': {e}")
+                    # Only attach XEP-0511 if not already present
+                    # in the original message
+                    if (not has_xep_0511 and
+                            not has_xep_0392_link_metadata(msg)):
+                        try:
+                            if title is not None:
+                                message["link_metadata"]["title"] = (
+                                    html.unescape(title)
+                                )
+                            message["link_metadata"]["url"] = final_url
+                            message["link_metadata"]["about"] = (
+                                f"Status: {status} - Content-Type: {ctype}"
+                                f" - Size: {content_size}"
+                            )
+                            if mdesc is not None:
+                                message["link_metadata"]["description"] = (
+                                    html.unescape(mdesc) or ""
+                                )
+                        except Exception as e:
+                            log.warning(
+                                "[URLCHECK] Failed to set link metadata for "
+                                f"URL '{final_url}': {e}"
+                            )
+                    if (has_xep_0511 or
+                            has_xep_0392_link_metadata(msg)):
+                        # If original message has XEP-0511,
+                        # don't include URL info in the reply text
+                        for x in list(
+                            message.xml.findall("{urn:xmpp:ssn}x")
+                        ):
+                            message.xml.remove(x)
+
                 message.send()
             elif ctype:
-                return
+                continue
         except Exception as e:
             if str(e) == "Too many redirects":
                 bot.reply(
                     msg,
-                    f"⚠️ URL not fetched: too many redirects for {url}",
+                    f"🟡️ URL not fetched: too many redirects for {url}",
                     mention=False, thread=True, ephemeral=False
                 )
                 log.info(f"[URLCHECK] Too many redirects for URL {url}")
@@ -210,6 +286,17 @@ async def on_groupchat_message(bot, msg):
 
 def is_youtube_url(url):
     return "youtube.com/watch" in url or "youtu.be/" in url
+
+
+def has_xep_0392_link_metadata(msg):
+    # Checks for <Descriptionx#
+    # mlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    # or <rdf:Description ...>
+    return (
+        msg.xml.find(
+            './/{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description'
+        ) is not None
+    )
 
 
 async def fetch_url_title(url, max_redirects=3):
@@ -236,15 +323,17 @@ async def fetch_url_title(url, max_redirects=3):
                     log.info(f"[URLCHECK] Fetching: {url}")
                     # Only read the full HTML if it's a github.com URL
                     # (with strict prefix check)
-                    if (url.startswith("https://github.com/")
-                            or url.startswith("http://github.com/")):
-                        #log.info(f"[URLCHECK] Github: {content_size} bytes")
+                    if (url.startswith("https://github.com/") or
+                            url.startswith("http://github.com/")):
+                        # log.info(f"[URLCHECK] Github: {content_size} bytes")
                         raw = await resp.content.read()
                     else:
                         raw = await resp.content.read(128 * 1024)
                     try:
-                        text = raw.decode(resp.charset or "utf-8",
-                                          errors="replace")
+                        text = raw.decode(
+                            resp.charset or "utf-8",
+                            errors="replace"
+                        )
                     except Exception:
                         text = raw.decode("utf-8", errors="replace")
                     title, mdesc = extract_html_title_desc(text)
@@ -255,7 +344,7 @@ async def fetch_url_title(url, max_redirects=3):
                 else:
                     return (
                         resp.url.human_repr(), status, ctype,
-                        None, content_size, mdesc
+                        None, content_size, None
                     )
         raise Exception("Too many redirects")
 
@@ -328,7 +417,9 @@ async def fetch_youtube_info(url):
             # Format upload date as "DD Mon YYYY" if possible
             if upload_date:
                 try:
-                    upload_date = datetime.strptime(upload_date[:10], "%Y-%m-%d").strftime("%d %b %Y")
+                    upload_date = datetime.strptime(
+                        upload_date[:10], "%Y-%m-%d"
+                    ).strftime("%d %b %Y")
                 except Exception:
                     upload_date = ""
             return (

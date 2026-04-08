@@ -73,14 +73,14 @@ class DatabaseManager:
                         try:
                             await self.users.flush_all()
                         except Exception:
-                            log.exception("[DatabaseManager] ❌Flush failed!")
+                            log.exception("[DatabaseManager] 🔴 Flush failed!")
         finally:
             # final guaranteed flush
             if self.users:
                 try:
                     await self.users.flush_all()
                 except Exception:
-                    log.exception("[DatabaseManager] ❌FINAL Flush failed!")
+                    log.exception("[DatabaseManager] 🔴 FINAL Flush failed!")
 
     async def flush(self):
         """Manually flush cached data."""
@@ -89,7 +89,7 @@ class DatabaseManager:
             try:
                 await self.users.flush_all()
             except Exception:
-                log.exception("[DatabaseManager] ❌Flush failed!")
+                log.exception("[DatabaseManager] 🔴 Flush failed!")
 
     async def close(self):
         """

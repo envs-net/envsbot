@@ -220,7 +220,7 @@ class PluginManager:
                     log.info("[PLUGIN] loaded: %s", name)
                 except Exception:
                     log.exception(
-                        "[PLUGIN] ❌Failed to load plugin (on_load): '%s'",
+                        "[PLUGIN] 🔴 Failed to load plugin (on_load): '%s'",
                         name,
                     )
                     # Remove any commands that might have been registered

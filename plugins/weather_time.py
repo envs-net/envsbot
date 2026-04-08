@@ -50,13 +50,13 @@ async def _get_target(bot, msg, is_room, nick, args):
         target_nick = args[0]
         info = nicks.get(target_nick)
         if not info or not info.get("jid"):
-            return None, f"❌ Nick '{target_nick}' not found in this room.", None, None
+            return None, f"🔴  Nick '{target_nick}' not found in this room.", None, None
         target_jid = str(info["jid"])
         display_name = target_nick
     else:
         info = nicks.get(nick)
         if not info or not info.get("jid"):
-            return None, "❌ Could not determine your JID in this room.", None, None
+            return None, "🔴  Could not determine your JID in this room.", None, None
         target_jid = str(info["jid"])
         display_name = nick
     profile_store = bot.db.users.profile()
@@ -64,7 +64,7 @@ async def _get_target(bot, msg, is_room, nick, args):
 
 
 def _not_available(msg, bot):
-    bot.reply(msg, ("❌ This command is only available in a room or"
+    bot.reply(msg, ("🔴  This command is only available in a room or"
                     " MUC direct message."))
 
 
@@ -93,14 +93,14 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     timezone = await profile_store.get(target_jid, "TIMEZONE")
     location = await profile_store.get(target_jid, "LOCATION")
     if not timezone:
-        bot.reply(msg, (f"⚠️ No TIMEZONE set for {display_name}."
+        bot.reply(msg, (f"🟡️ No TIMEZONE set for {display_name}."
                         f" Use {config.get('prefix', ',')}config timezone"
                         f" <zone>"))
         return
     try:
         now = datetime.now(pytz.timezone(timezone))
     except Exception:
-        bot.reply(msg, f"⚠️ Invalid timezone '{timezone}' for {display_name}.")
+        bot.reply(msg, f"🟡️ Invalid timezone '{timezone}' for {display_name}.")
         log.warning(f"[TIME] 🕒 Invalid timezone '{timezone}' for"
                     + f"{display_name} ({target_jid})")
         return
@@ -138,7 +138,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     location = await profile_store.get(target_jid, "LOCATION")
     timezone = await profile_store.get(target_jid, "TIMEZONE")
     if not location:
-        bot.reply(msg, f"⚠️ No LOCATION set for {display_name}."
+        bot.reply(msg, f"🟡️ No LOCATION set for {display_name}."
                        + f" Use {config.get('prefix', ',')}config"
                        + " location <your location>")
         return

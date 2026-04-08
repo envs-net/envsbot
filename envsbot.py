@@ -209,7 +209,7 @@ class Bot(slixmpp.ClientXMPP):
                     try:
                         message["thread"] = thread_id
                     except Exception:
-                        log.exception("[BOT] ❌Setting Thread failed!")
+                        log.exception("[BOT] 🔴 Setting Thread failed!")
 
             # Make reply ephemeral
             if ephemeral:
@@ -337,7 +337,7 @@ class Bot(slixmpp.ClientXMPP):
             # Avoid notifying the whole room; log and occasional
             # admin notification only
             if self.rate_limiter.notify_allowed(jid):
-                log.info(("[BOT] ⚠️Rate-limited %s "
+                log.info(("[BOT] 🟡️Rate-limited %s "
                           "in room %s (retry_after=%.1fs)"),
                          jid, room, retry_after)
             return
@@ -355,30 +355,30 @@ class Bot(slixmpp.ClientXMPP):
 
         # permission check
         if not check_permission(user_role, cmd_obj):
-            self.reply(msg, "❌You are not allowed to use this command.")
+            self.reply(msg, "🔴 You are not allowed to use this command.")
             return
 
         # Commands which require permissions of at least "moderator"
         # shouldn't be used in GroupChat
         required_role = getattr(cmd_obj, "role", Role.NONE)
         if required_role <= Role.MODERATOR and is_room:
-            self.reply(msg, "❌Use this command in MUC Direct Message only.")
+            self.reply(msg, "🔴 Use this command in MUC Direct Message only.")
             return
 
         try:
             handler = getattr(cmd_obj, "handler", None)
             if not handler:
-                log.error(f"[BOT]❌Command '{cmd_name}' has no handler")
+                log.error(f"[BOT]🔴 Command '{cmd_name}' has no handler")
                 return
             result = handler(self, sender_jid, nick, args, msg, is_room)
             if inspect.isawaitable(result):
                 await result
         except Exception as e:
-            log.exception(f"[BOT]❌ Error while executing command '{cmd_name}'")
+            log.exception(f"[BOT]🔴  Error while executing command '{cmd_name}'")
             if user_role in (Role.OWNER, Role.ADMIN):
-                err_msg = f"❌Command error: {e}"
+                err_msg = f"🔴 Command error: {e}"
             else:
-                err_msg = (f"❌Command '{cmd_name}' "
+                err_msg = (f"🔴 Command '{cmd_name}' "
                            f"failed due to internal error.")
 
             self.reply(msg, err_msg)

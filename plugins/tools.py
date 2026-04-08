@@ -67,7 +67,7 @@ async def ping_command(bot, sender_jid, nick, args, msg, is_room):
         rtt = (time.monotonic() - start) * 1000
         bot.reply(msg, f"🏓 Pong from {target} in {rtt:.1f} ms")
     except slixmpp.exceptions.IqTimeout:
-        bot.reply(msg, f"❌ Ping to {target} timed out.")
+        bot.reply(msg, f"🔴  Ping to {target} timed out.")
     except slixmpp.exceptions.IqError as e:
         err = e.iq['error']
         err_type = err.get('type', 'unknown')
@@ -75,8 +75,8 @@ async def ping_command(bot, sender_jid, nick, args, msg, is_room):
         err_text = err.get('text', '')
         bot.reply(
             msg,
-            f"❌ Ping to {target} failed: {err_type}/"
+            f"🔴  Ping to {target} failed: {err_type}/"
             f"{err_condition} {err_text}".strip()
         )
     except Exception as e:
-        bot.reply(msg, f"❌ Ping to {target} failed: {e}")
+        bot.reply(msg, f"🔴  Ping to {target} failed: {e}")

@@ -50,7 +50,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}dice <num>d<sides> "
+            f"🟡️ Usage: {config.get('prefix', ',')}dice <num>d<sides> "
             "[modifier] [operator] [target]"
         )
         return
@@ -60,7 +60,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
     if not m:
         bot.reply(
             msg,
-            f"⚠️ Invalid syntax. Example: {config.get('prefix', ',')}dice "
+            f"🟡️ Invalid syntax. Example: {config.get('prefix', ',')}dice "
             "3d20 -5 >= 30"
         )
         return
@@ -71,7 +71,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
     if num < 1 or num > 10 or sides < 2 or sides > 100:
         bot.reply(
             msg,
-            "⚠️ Dice number must be 1-10 and sides 2-100."
+            "🟡️ Dice number must be 1-10 and sides 2-100."
         )
         return
 
@@ -90,7 +90,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
                 (op in ("<=", "<") and min_result > target)):
             bot.reply(
                 msg,
-                "⚠️ Impossible roll: result cannot reach the target."
+                "🟡️ Impossible roll: result cannot reach the target."
             )
             return
         can_succeed = (
@@ -108,7 +108,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
         if not (can_succeed and can_fail):
             bot.reply(
                 msg,
-                "⚠️ This roll cannot fail or cannot succeed. Please adjust "
+                "🟡️ This roll cannot fail or cannot succeed. Please adjust "
                 "your modifier or target."
             )
             return
@@ -125,5 +125,5 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
         if success:
             result_str += f" {cond_str} [✅ SUCCESS]"
         else:
-            result_str += f" {cond_str} [❌ FAILURE]"
+            result_str += f" {cond_str} [🔴  FAILURE]"
     bot.reply(msg, f"🎲 {result_str}", ephemeral=False)

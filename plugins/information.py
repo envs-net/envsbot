@@ -56,7 +56,7 @@ async def acronym_lookup(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}acronym <word>"
+            f"🟡️ Usage: {config.get('prefix', ',')}acronym <word>"
         )
         return
 
@@ -67,10 +67,10 @@ async def acronym_lookup(bot, sender_jid, nick, args, msg, is_room):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=8) as resp:
                 if resp.status != 200:
-                    log.warning("[ACRONYM] ❌ Failed to fetch acronym definition.")
+                    log.warning("[ACRONYM] 🔴  Failed to fetch acronym definition.")
                     bot.reply(
                         msg,
-                        "❌ Failed to fetch acronym definition."
+                        "🔴  Failed to fetch acronym definition."
                     )
                     return
                 data = await resp.json()
@@ -78,7 +78,7 @@ async def acronym_lookup(bot, sender_jid, nick, args, msg, is_room):
         log.exception("[ACRONYM] 🚨 Error fetching acronym definition.")
         bot.reply(
             msg,
-            "❌ Error fetching acronym definition."
+            "🔴  Error fetching acronym definition."
         )
         return
 
@@ -127,7 +127,7 @@ async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}thesaurus <lang>:<word>"
+            f"🟡️ Usage: {config.get('prefix', ',')}thesaurus <lang>:<word>"
         )
         return
 
@@ -151,7 +151,7 @@ async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
     if ":" not in args[0]:
         bot.reply(
             msg,
-            "⚠️ Please specify language and word as <lang>:<word>."
+            "🟡️ Please specify language and word as <lang>:<word>."
         )
         return
 
@@ -160,10 +160,10 @@ async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
     word = word.strip()
 
     if lang not in LANGUAGES:
-        log.warning(f"[THESAURUS] ⚠️ Language '{lang}' not supported.")
+        log.warning(f"[THESAURUS] 🟡️ Language '{lang}' not supported.")
         bot.reply(
             msg,
-            f"⚠️ Language '{lang}' not supported. "
+            f"🟡️ Language '{lang}' not supported. "
             f"Use {config.get('prefix', ',')}thesaurus langs"
         )
         return
@@ -174,10 +174,10 @@ async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=8) as resp:
                 if resp.status != 200:
-                    log.warning("[THESAURUS] ❌ Failed to fetch synonyms.")
+                    log.warning("[THESAURUS] 🔴  Failed to fetch synonyms.")
                     bot.reply(
                         msg,
-                        "❌ Failed to fetch synonyms."
+                        "🔴  Failed to fetch synonyms."
                     )
                     return
                 data = await resp.json()
@@ -185,7 +185,7 @@ async def thesaurus_command(bot, sender_jid, nick, args, msg, is_room):
         log.exception("[THESAURUS] 🚨 Error fetching synonyms.")
         bot.reply(
             msg,
-            "❌ Error fetching synonyms."
+            "🔴  Error fetching synonyms."
         )
         return
 
@@ -237,16 +237,16 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}fediverse <@user@instance>"
+            f"🟡️ Usage: {config.get('prefix', ',')}fediverse <@user@instance>"
         )
         return
 
     match = FEDIVERSE_USER_RE.match(args[0])
     if not match:
-        log.warning("[FEDIVERSE] ⚠️ Invalid user format.")
+        log.warning("[FEDIVERSE] 🟡️ Invalid user format.")
         bot.reply(
             msg,
-            "⚠️ Please specify the user as @user@instance"
+            "🟡️ Please specify the user as @user@instance"
         )
         return
 
@@ -257,14 +257,14 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=8) as resp:
                 if resp.status != 200:
-                    log.warning("[FEDIVERSE] ❌ User not found on instance.")
-                    bot.reply(msg, "❌ User not found on this instance.")
+                    log.warning("[FEDIVERSE] 🔴  User not found on instance.")
+                    bot.reply(msg, "🔴  User not found on this instance.")
                     return
                 user = await resp.json()
             user_id = user.get("id")
             if not user_id:
-                log.warning("[FEDIVERSE] ❌ Could not resolve user ID.")
-                bot.reply(msg, "❌ Could not resolve user.")
+                log.warning("[FEDIVERSE] 🔴  Could not resolve user ID.")
+                bot.reply(msg, "🔴  Could not resolve user.")
                 return
             timeline_url = (
                 f"https://{instance}/api/v1/accounts/{user_id}/statuses"
@@ -272,13 +272,13 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
             )
             async with session.get(timeline_url, timeout=8) as resp:
                 if resp.status != 200:
-                    log.warning("[FEDIVERSE] ❌ Could not fetch user timeline.")
-                    bot.reply(msg, "❌ Could not fetch user timeline.")
+                    log.warning("[FEDIVERSE] 🔴  Could not fetch user timeline.")
+                    bot.reply(msg, "🔴  Could not fetch user timeline.")
                     return
                 statuses = await resp.json()
     except Exception:
         log.exception("[FEDIVERSE] 🚨 Error fetching from Fediverse.")
-        bot.reply(msg, "❌ Error fetching from Fediverse.")
+        bot.reply(msg, "🔴  Error fetching from Fediverse.")
         return
 
     if not statuses:
@@ -320,7 +320,7 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}udict <term>"
+            f"🟡️ Usage: {config.get('prefix', ',')}udict <term>"
         )
         return
 
@@ -331,13 +331,13 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=8) as resp:
                 if resp.status != 200:
-                    log.warning("[UDICT] ❌ Failed to fetch definition.")
-                    bot.reply(msg, "❌ Failed to fetch definition.")
+                    log.warning("[UDICT] 🔴  Failed to fetch definition.")
+                    bot.reply(msg, "🔴  Failed to fetch definition.")
                     return
                 data = await resp.json()
     except Exception:
         log.exception("[UDICT] 🚨 Error fetching from Urban Dictionary.")
-        bot.reply(msg, "❌ Error fetching from Urban Dictionary.")
+        bot.reply(msg, "🔴  Error fetching from Urban Dictionary.")
         return
 
     defs = data.get("list", [])

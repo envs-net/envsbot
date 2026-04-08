@@ -59,9 +59,9 @@ async def _check_user_exists(bot, sender_jid, msg):
     user = await bot.db.users.get(jid)
     if not user:
         log.warning(
-            "[PROFILE] ❌ Unregistered user tried to use config: %s", jid
+            "[PROFILE] 🔴  Unregistered user tried to use config: %s", jid
         )
-        bot.reply(msg, "❌ You are not a registered user.")
+        bot.reply(msg, "🔴  You are not a registered user.")
         return False
     return True
 
@@ -82,17 +82,17 @@ async def set_fullname(bot, sender_jid, nick, args, msg, is_room):
     if not await _check_user_exists(bot, jid, msg):
         return
     if not args:
-        log.warning("[PROFILE] ❌ FULLNAME missing args for %s", jid)
+        log.warning("[PROFILE] 🔴  FULLNAME missing args for %s", jid)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config fullname "
+            f"🟡️ Usage: {config.get('prefix', ',')}config fullname "
             "<your full name>",
         )
         return
     fullname = " ".join(args).strip()
     if not fullname:
-        log.warning("[PROFILE] ❌ FULLNAME empty for %s", jid)
-        bot.reply(msg, "⚠️ Please provide a non-empty full name.")
+        log.warning("[PROFILE] 🔴  FULLNAME empty for %s", jid)
+        bot.reply(msg, "🟡️ Please provide a non-empty full name.")
         return
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "FULLNAME", fullname)
@@ -117,17 +117,17 @@ async def set_location(bot, sender_jid, nick, args, msg, is_room):
     if not await _check_user_exists(bot, jid, msg):
         return
     if not args:
-        log.warning("[PROFILE] ❌ LOCATION missing args for %s", jid)
+        log.warning("[PROFILE] 🔴  LOCATION missing args for %s", jid)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config location "
+            f"🟡️ Usage: {config.get('prefix', ',')}config location "
             "<your location>",
         )
         return
     location = " ".join(args).strip()
     if not location:
-        log.warning("[PROFILE] ❌ LOCATION empty for %s", jid)
-        bot.reply(msg, "⚠️ Please provide a non-empty location.")
+        log.warning("[PROFILE] 🔴  LOCATION empty for %s", jid)
+        bot.reply(msg, "🟡️ Please provide a non-empty location.")
         return
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "LOCATION", location)
@@ -152,11 +152,11 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
     if not await _check_user_exists(bot, jid, msg):
         return
     if not args or len(args) != 1:
-        log.warning("[PROFILE] ❌ TIMEZONE missing/invalid args for %s",
+        log.warning("[PROFILE] 🔴  TIMEZONE missing/invalid args for %s",
                     jid)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config timezone "
+            f"🟡️ Usage: {config.get('prefix', ',')}config timezone "
             "<timezone>",
         )
         return
@@ -165,11 +165,11 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
         if timezone not in pytz.all_timezones:
             raise ValueError
     except Exception:
-        log.warning("[PROFILE] ❌ Invalid timezone for %s: %s", jid,
+        log.warning("[PROFILE] 🔴  Invalid timezone for %s: %s", jid,
                     timezone)
         bot.reply(
             msg,
-            "⚠️ Invalid timezone. Use a valid IANA timezone, "
+            "🟡️ Invalid timezone. Use a valid IANA timezone, "
             "e.g. Europe/Berlin.",
         )
         return
@@ -195,17 +195,17 @@ async def set_pronouns(bot, sender_jid, nick, args, msg, is_room):
     if not await _check_user_exists(bot, jid, msg):
         return
     if not args:
-        log.warning("[PROFILE] ❌ PRONOUNS missing args for %s", jid)
+        log.warning("[PROFILE] 🔴  PRONOUNS missing args for %s", jid)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config pronouns "
+            f"🟡️ Usage: {config.get('prefix', ',')}config pronouns "
             "<your pronouns>",
         )
         return
     pronouns = " ".join(args).strip()
     if not pronouns:
-        log.warning("[PROFILE] ❌ PRONOUNS empty for %s", jid)
-        bot.reply(msg, "⚠️ Please provide non-empty pronouns.")
+        log.warning("[PROFILE] 🔴  PRONOUNS empty for %s", jid)
+        bot.reply(msg, "🟡️ Please provide non-empty pronouns.")
         return
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "PRONOUNS", pronouns)
@@ -229,17 +229,17 @@ async def set_species(bot, sender_jid, nick, args, msg, is_room):
     if not await _check_user_exists(bot, jid, msg):
         return
     if not args:
-        log.warning("[PROFILE] ❌ SPECIES missing args for %s", jid)
+        log.warning("[PROFILE] 🔴  SPECIES missing args for %s", jid)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config species "
+            f"🟡️ Usage: {config.get('prefix', ',')}config species "
             "<your species>",
         )
         return
     species = " ".join(args).strip()
     if not species:
-        log.warning("[PROFILE] ❌ SPECIES empty for %s", jid)
-        bot.reply(msg, "⚠️ Please provide a non-empty species.")
+        log.warning("[PROFILE] 🔴  SPECIES empty for %s", jid)
+        bot.reply(msg, "🟡️ Please provide a non-empty species.")
         return
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "SPECIES", species)
@@ -263,17 +263,17 @@ async def set_email(bot, sender_jid, nick, args, msg, is_room):
     if not await _check_user_exists(bot, jid, msg):
         return
     if not args or len(args) != 1:
-        log.warning("[PROFILE] ❌ EMAIL missing/invalid args for %s",
+        log.warning("[PROFILE] 🔴  EMAIL missing/invalid args for %s",
                     jid)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config email <your@email>",
+            f"🟡️ Usage: {config.get('prefix', ',')}config email <your@email>",
         )
         return
     email = args[0].strip()
     if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
-        log.warning("[PROFILE] ❌ Invalid email for %s: %s", jid, email)
-        bot.reply(msg, "⚠️ Please provide a valid email address.")
+        log.warning("[PROFILE] 🔴  Invalid email for %s: %s", jid, email)
+        bot.reply(msg, "🟡️ Please provide a valid email address.")
         return
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "EMAIL", email)
@@ -304,11 +304,11 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
         return
 
     if not args or args[0] not in ("add", "list", "delete"):
-        log.warning("[PROFILE] ❌ Invalid url subcommand for %s: %s",
+        log.warning("[PROFILE] 🔴  Invalid url subcommand for %s: %s",
                     jid, args)
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config url "
+            f"🟡️ Usage: {config.get('prefix', ',')}config url "
             "<add|list|delete> ...",
         )
         return
@@ -320,19 +320,19 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
 
     if subcmd == "add":
         if len(args) < 2:
-            log.warning("[PROFILE] ❌ URL add missing args for %s",
+            log.warning("[PROFILE] 🔴  URL add missing args for %s",
                         jid)
             bot.reply(
                 msg,
-                f"⚠️ Usage: {config.get('prefix', ',')}config url add "
+                f"🟡️ Usage: {config.get('prefix', ',')}config url add "
                 "<url> [description]",
             )
             return
         url = args[1]
         if any(c.isspace() for c in url):
-            log.warning("[PROFILE] ❌ URL add whitespace in url for %s",
+            log.warning("[PROFILE] 🔴  URL add whitespace in url for %s",
                         jid)
-            bot.reply(msg, "⚠️ URL must not contain whitespace.")
+            bot.reply(msg, "🟡️ URL must not contain whitespace.")
             return
         try:
             url_enc = urllib.parse.quote(
@@ -342,14 +342,14 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
             if not parsed.scheme or not parsed.netloc:
                 raise ValueError
         except Exception:
-            log.warning("[PROFILE] ❌ Invalid URL for %s: %s", jid, url)
-            bot.reply(msg, "⚠️ Invalid URL.")
+            log.warning("[PROFILE] 🔴  Invalid URL for %s: %s", jid, url)
+            bot.reply(msg, "🟡️ Invalid URL.")
             return
         description = " ".join(args[2:]).strip() if len(args) > 2 else ""
         urls = [item for item in urls if item[0] != url_enc]
         if len(urls) >= 6:
-            log.warning("[PROFILE] ❌ URL add limit reached for %s", jid)
-            bot.reply(msg, "⚠️ You can only store up to 6 URLs.")
+            log.warning("[PROFILE] 🔴  URL add limit reached for %s", jid)
+            bot.reply(msg, "🟡️ You can only store up to 6 URLs.")
             return
         urls.append((url_enc, description))
         await profile_store.set(jid_str, "URLS", urls)
@@ -362,10 +362,10 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
 
     if subcmd == "list":
         if len(args) != 1:
-            log.warning("[PROFILE] ❌ URL list invalid args for %s", jid)
+            log.warning("[PROFILE] 🔴  URL list invalid args for %s", jid)
             bot.reply(
                 msg,
-                f"⚠️ Usage: {config.get('prefix', ',')}config url list",
+                f"🟡️ Usage: {config.get('prefix', ',')}config url list",
             )
             return
         if not urls:
@@ -386,11 +386,11 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
 
     if subcmd == "delete":
         if len(args) != 2:
-            log.warning("[PROFILE] ❌ URL delete invalid args for %s",
+            log.warning("[PROFILE] 🔴  URL delete invalid args for %s",
                         jid)
             bot.reply(
                 msg,
-                f"⚠️ Usage: {config.get('prefix', ',')}config url delete "
+                f"🟡️ Usage: {config.get('prefix', ',')}config url delete "
                 "<url>",
             )
             return
@@ -400,9 +400,9 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
         )
         new_urls = [item for item in urls if item[0] != url_enc]
         if len(new_urls) == len(urls):
-            log.warning("[PROFILE] ❌ URL not found for delete for %s: %s",
+            log.warning("[PROFILE] 🔴  URL not found for delete for %s: %s",
                         jid, url)
-            bot.reply(msg, "⚠️ URL not found.")
+            bot.reply(msg, "🟡️ URL not found.")
             return
         await profile_store.set(jid_str, "URLS", new_urls)
         log.info(
@@ -430,14 +430,14 @@ async def set_birthday(bot, sender_jid, nick, args, msg, is_room):
     if not args or len(args) != 1:
         bot.reply(
             msg,
-            f"⚠️ Usage: {config.get('prefix', ',')}config birthday" +
+            f"🟡️ Usage: {config.get('prefix', ',')}config birthday" +
             "<YYYY-MM-DD|MM-DD>",
         )
         return
     birthday = args[0].strip()
     if not (re.match(r"^\d{4}-\d{2}-\d{2}$", birthday)
             or re.match(r"^\d{2}-\d{2}$", birthday)):
-        bot.reply(msg, "⚠️ Please provide birthday as YYYY-MM-DD or MM-DD.")
+        bot.reply(msg, "🟡️ Please provide birthday as YYYY-MM-DD or MM-DD.")
         return
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "BIRTHDAY", birthday)
@@ -618,15 +618,15 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         nicks = joined.get("nicks", {})
         nick_info = nicks.get(target_nick)
         if not nick_info:
-            log.warning("[PROFILE] ❌ Nick '%s' not found in room '%s'",
+            log.warning("[PROFILE] 🔴  Nick '%s' not found in room '%s'",
                         target_nick, room)
-            bot.reply(msg, f"❌ Nick '{target_nick}' not found in this room.")
+            bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
             return
         target_jid = nick_info.get("jid")
         if not target_jid:
-            log.warning("[PROFILE] ❌ No JID for nick '%s' in room '%s'",
+            log.warning("[PROFILE] 🔴  No JID for nick '%s' in room '%s'",
                         target_nick, room)
-            bot.reply(msg, f"❌ No JID found for nick '{target_nick}'.")
+            bot.reply(msg, f"🔴  No JID found for nick '{target_nick}'.")
             return
         target_jid = str(target_jid)
         display_name = target_nick
@@ -635,7 +635,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         log.info(f"[PROFILE] {user_jid} looking up {field} for"
                  f"'{target_jid}'")
         if value is None or value == "" or value == []:
-            log.warning("[PROFILE] ❌ No %s for requested user '%s'",
+            log.warning("[PROFILE] 🔴  No %s for requested user '%s'",
                         field, target_jid)
             bot.reply(msg, f"ℹ️ No {label} set for nick '{args[0]}'.")
             return
@@ -655,9 +655,9 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         index = bot.db.users._nick_index
         jids = index.get(target_nick, [])
         if not jids:
-            log.warning("[PROFILE] ❌ Nick '%s' not found globally",
+            log.warning("[PROFILE] 🔴  Nick '%s' not found globally",
                         target_nick)
-            bot.reply(msg, f"❌ Nick '{target_nick}' not found.")
+            bot.reply(msg, f"🔴  Nick '{target_nick}' not found.")
             return
         if len(jids) > 1:
             lines = await _handle_multiple_nick_matches(bot, target_nick,
@@ -672,7 +672,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         log.info(f"[PROFILE] {user_jid} looking up {field} for"
                  f" '{target_jid}'")
         if value is None or value == "" or value == []:
-            log.warning("[PROFILE] ❌ No %s for requested user '%s'",
+            log.warning("[PROFILE] 🔴  No %s for requested user '%s'",
                         field, target_jid)
             bot.reply(msg, f"ℹ️ No {label} set for nick '{args[0]}'.")
             return
@@ -694,7 +694,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         log.info(f"[PROFILE] {user_jid} looking up {field} for"
                  f" '{target_jid}'")
         if value is None or value == "" or value == []:
-            log.warning("[PROFILE] ❌ No %s for requested user '%s'",
+            log.warning("[PROFILE] 🔴  No %s for requested user '%s'",
                         field, target_jid)
             bot.reply(msg, f"ℹ️ No {label} set for this user.")
             return
@@ -725,11 +725,11 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
         nicks = joined.get("nicks", {})
         nick_info = nicks.get(target_nick)
         if not nick_info:
-            bot.reply(msg, f"❌ Nick '{target_nick}' not found in this room.")
+            bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
             return
         target_jid = nick_info.get("jid")
         if not target_jid:
-            bot.reply(msg, f"❌ No JID found for nick '{target_nick}'.")
+            bot.reply(msg, f"🔴  No JID found for nick '{target_nick}'.")
             return
         target_jid = str(target_jid)
         display_name = target_nick
@@ -738,7 +738,7 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
         index = bot.db.users._nick_index
         jids = index.get(target_nick, [])
         if not jids:
-            bot.reply(msg, f"❌ Nick '{target_nick}' not found.")
+            bot.reply(msg, f"🔴  Nick '{target_nick}' not found.")
             return
         if len(jids) > 1:
             bot.reply(msg, "🔎 Multiple users found for nick " +
@@ -809,12 +809,12 @@ async def show_profile(bot, sender_jid, nick, args, msg, is_room):
             info = nicks.get(target_nick)
             if not info or not info.get("jid"):
                 log.warning(
-                    "[PROFILE] ❌ Nick '%s' not found in room '%s'",
+                    "[PROFILE] 🔴  Nick '%s' not found in room '%s'",
                     target_nick, room
                 )
                 bot.reply(
                     msg,
-                    f"❌ Nick '{target_nick}' not found in this room."
+                    f"🔴  Nick '{target_nick}' not found in this room."
                 )
                 return
             target_jid = str(info["jid"])
@@ -829,12 +829,12 @@ async def show_profile(bot, sender_jid, nick, args, msg, is_room):
             jids = index.get(target_nick, [])
             if not jids:
                 log.warning(
-                    "[PROFILE] ❌ Nick '%s' not found globally",
+                    "[PROFILE] 🔴  Nick '%s' not found globally",
                     target_nick
                 )
                 bot.reply(
                     msg,
-                    f"❌ Nick '{target_nick}' not found."
+                    f"🔴  Nick '{target_nick}' not found."
                 )
                 return
             if len(jids) > 1:

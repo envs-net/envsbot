@@ -190,7 +190,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         if not room:
             bot.reply(
                 msg,
-                "❌ RSS add can only be used in a room or MUC DM.",
+                "🔴  RSS add can only be used in a room or MUC DM.",
             )
             return
         url = args[1]
@@ -240,7 +240,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         if not room:
             bot.reply(
                 msg,
-                "❌ RSS delete can only be used in a room or MUC DM.",
+                "🔴  RSS delete can only be used in a room or MUC DM.",
             )
             return
         url = args[1]

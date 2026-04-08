@@ -247,7 +247,7 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
         cmd_obj, _ = resolve_command(cmd_text)
 
         if not cmd_obj:
-            bot.reply(msg, "⚠️ Unknown command.")
+            bot.reply(msg, "🟡️ Unknown command.")
             return
 
         if not check_permission(user_role, cmd_obj):
@@ -275,11 +275,11 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 
     # hide internal plugins for non-admin users
     if plugin.startswith("_") and user_role > Role.ADMIN:
-        bot.reply(msg, "⚠️ Unknown plugin.")
+        bot.reply(msg, "🟡️ Unknown plugin.")
         return
 
     if plugin not in pm.plugins:
-        bot.reply(msg, "⚠️ Unknown plugin.")
+        bot.reply(msg, "🟡️ Unknown plugin.")
         return
 
     module = pm.plugins[plugin]

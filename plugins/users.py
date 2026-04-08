@@ -191,8 +191,8 @@ async def _send_user_info(bot, msg, user: dict):
         bot.reply(msg, "\n".join(lines))
 
     except Exception:
-        log.exception("[USERS] ❌ Failed to format user info")
-        bot.reply(msg, "⚠️ Failed to format user info.")
+        log.exception("[USERS] 🔴  Failed to format user info")
+        bot.reply(msg, "🟡️ Failed to format user info.")
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +277,7 @@ async def update_last_seen(bot, real_jid: str):
         log.debug(f"[USERS] ⏱️ Updated last_seen: {real_jid}")
 
     except Exception:
-        log.exception(f"[USERS] ❌ Failed to update last_seen for {real_jid}")
+        log.exception(f"[USERS] 🔴  Failed to update last_seen for {real_jid}")
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +295,8 @@ async def users_info(bot, sender, nick, args, msg, is_room):
     """
     try:
         if not args:
-            log.warning("[USERS] ⚠️ users info without args")
-            bot.reply(msg, f"⚠️ Usage: {config.prefix}users info <jid|nick>")
+            log.warning("[USERS] 🟡️ users info without args")
+            bot.reply(msg, f"🟡️ Usage: {config.prefix}users info <jid|nick>")
             return
 
         query = args[0]
@@ -316,8 +316,8 @@ async def users_info(bot, sender, nick, args, msg, is_room):
         jids = await find_users_by_nick_safe(bot, query)
 
         if not jids:
-            log.warning(f"[USERS] ⚠️ No users found for nick: {query}")
-            bot.reply(msg, f"⚠️ No users found for nick: {query}")
+            log.warning(f"[USERS] 🟡️ No users found for nick: {query}")
+            bot.reply(msg, f"🟡️ No users found for nick: {query}")
             return
 
         if len(jids) > 1:
@@ -332,16 +332,16 @@ async def users_info(bot, sender, nick, args, msg, is_room):
         user = await um.get(jid)
 
         if user is None:
-            log.info(f"[USERS][INFO] ❌ Unregistered user (jid={jid})")
-            bot.reply(msg, "❌ User is not registered.")
+            log.info(f"[USERS][INFO] 🔴  Unregistered user (jid={jid})")
+            bot.reply(msg, "🔴  User is not registered.")
             return
 
         log.info(f"[USERS] 🔎 Info lookup by nick: {query} -> {jid}")
         await _send_user_info(bot, msg, user)
 
     except Exception:
-        log.exception("[USERS] ❌ users info failed")
-        bot.reply(msg, "⚠️ Failed to fetch user info.")
+        log.exception("[USERS] 🔴  users info failed")
+        bot.reply(msg, "🟡️ Failed to fetch user info.")
 
 
 @command("users list", role=Role.ADMIN, aliases=["user list"])
@@ -358,11 +358,11 @@ async def users_list(bot, sender, nick, args, msg, is_room):
         rooms_plugin = bot.bot_plugins.plugins.get("rooms")
         if not rooms_plugin or not hasattr(rooms_plugin, "JOINED_ROOMS"):
             log.error(
-                "[USERS] ⚠️ Rooms plugin not loaded or JOINED_ROOMS missing."
+                "[USERS] 🟡️ Rooms plugin not loaded or JOINED_ROOMS missing."
             )
             bot.reply(
                 msg,
-                "⚠️ Rooms plugin not loaded or JOINED_ROOMS missing."
+                "🟡️ Rooms plugin not loaded or JOINED_ROOMS missing."
             )
             return
         JOINED_ROOMS = rooms_plugin.JOINED_ROOMS
@@ -374,7 +374,7 @@ async def users_list(bot, sender, nick, args, msg, is_room):
             )
             bot.reply(
                 msg,
-                "⚠️ This command can only be used in a private chat"
+                "🟡️ This command can only be used in a private chat"
                 " with the bot.",
             )
             return
@@ -389,7 +389,7 @@ async def users_list(bot, sender, nick, args, msg, is_room):
                 )
                 bot.reply(
                     msg,
-                    f"⚠️ Not joined to room: {room_jid}"
+                    f"🟡️ Not joined to room: {room_jid}"
                 )
                 return
         else:
@@ -401,7 +401,7 @@ async def users_list(bot, sender, nick, args, msg, is_room):
                 )
                 bot.reply(
                     msg,
-                    f"⚠️ Not joined to room: {room_jid}"
+                    f"🟡️ Not joined to room: {room_jid}"
                 )
                 return
 
@@ -437,8 +437,8 @@ async def users_list(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, "\n".join(output))
 
     except Exception:
-        log.exception("[USERS] ❌ users list failed")
-        bot.reply(msg, "⚠️ Failed to list users.")
+        log.exception("[USERS] 🔴  users list failed")
+        bot.reply(msg, "🟡️ Failed to list users.")
 
 
 @command("users role", role=Role.ADMIN, aliases=["user role"])
@@ -458,8 +458,8 @@ async def users_update(bot, sender, nick, args, msg, is_room):
     try:
         # --- Check argument list ---
         if len(args) != 2:
-            log.warning("[USERS] ⚠️ users update wrong number of args")
-            bot.reply(msg, (f"⚠️ Usage: {config.prefix}users update"
+            log.warning("[USERS] 🟡️ users update wrong number of args")
+            bot.reply(msg, (f"🟡️ Usage: {config.prefix}users update"
                             " <jid> <role>"))
             return
 
@@ -478,31 +478,31 @@ async def users_update(bot, sender, nick, args, msg, is_room):
         jid = str(JID(jid).bare)
         sender_user = await um.get(jid)
         if not sender_user:
-            bot.reply(msg, "⚠️ Your user record was not found.")
+            bot.reply(msg, "🟡️ Your user record was not found.")
             return
 
         # --- Setting variables ---
         sender_role = await bot.get_user_role(jid)
         receiver = str(JID(args[0]).bare)
         if not receiver:
-            bot.reply(msg, f"⚠️Invalid JID: {args[0]}")
+            bot.reply(msg, f"🟡️Invalid JID: {args[0]}")
             return
 
         # --- Get receiver from DB ---
         receiver_role = await bot.get_user_role(receiver)
         if not receiver_role:
-            log.warning(f"[USERS] ⚠️ Update failed,"
+            log.warning(f"[USERS] 🟡️ Update failed,"
                         f" user not found: {receiver}")
-            bot.reply(msg, f"⚠️ User not found: {receiver}")
+            bot.reply(msg, f"🟡️ User not found: {receiver}")
             return
 
         # --- Check for invalid Role ---
         role_map = {r.name.lower(): r for r in Role}
         if args[1].lower() not in role_map:
-            log.warning(f"[USERS] ⚠️ Invalid role: {args[1].lower()}")
+            log.warning(f"[USERS] 🟡️ Invalid role: {args[1].lower()}")
             bot.reply(
                 msg,
-                f"⚠️ Invalid role. Available: {', '.join(role_map.keys())}",
+                f"🟡️ Invalid role. Available: {', '.join(role_map.keys())}",
             )
             return
 
@@ -537,8 +537,8 @@ async def users_update(bot, sender, nick, args, msg, is_room):
                   f" {new_role.name.lower()}")
 
     except Exception:
-        log.exception("[USERS] ❌ users update failed")
-        bot.reply(msg, "⚠️ Failed to update user.")
+        log.exception("[USERS] 🔴  users update failed")
+        bot.reply(msg, "🟡️ Failed to update user.")
 
 
 @command("users delete", role=Role.ADMIN, aliases=["user delete"])
@@ -553,22 +553,22 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
     """
     try:
         if not args:
-            bot.reply(msg, f"⚠️ Usage: {config.prefix}users delete <jid>")
+            bot.reply(msg, f"🟡️ Usage: {config.prefix}users delete <jid>")
             return
 
         try:
             jid = str(JID(args[0]).bare)
         except Exception:
-            log.warning(f"[USERS] ⚠️ Invalid JID for delete: {args[0]}")
-            bot.reply(msg, "⚠️ Invalid JID.")
+            log.warning(f"[USERS] 🟡️ Invalid JID for delete: {args[0]}")
+            bot.reply(msg, "🟡️ Invalid JID.")
             return
 
         um = bot.db.users
         user = await um.get(jid)
 
         if not user:
-            log.warning(f"[USERS] ⚠️ Delete failed, user not found: {jid}")
-            bot.reply(msg, f"⚠️ User not found: {jid}")
+            log.warning(f"[USERS] 🟡️ Delete failed, user not found: {jid}")
+            bot.reply(msg, f"🟡️ User not found: {jid}")
             return
 
         await um.delete(jid)
@@ -577,5 +577,5 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, f"🗑️ Deleted: {jid}")
 
     except Exception:
-        log.exception("[USERS] ❌ users delete failed")
-        bot.reply(msg, "⚠️ Failed to delete user.")
+        log.exception("[USERS] 🔴  users delete failed")
+        bot.reply(msg, "🟡️ Failed to delete user.")

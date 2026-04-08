@@ -117,7 +117,7 @@ async def on_load(bot):
     muc = bot.plugin["xep_0045"]
     rooms_db = bot.db.rooms
     if muc is None or rooms_db is None:
-        log.warning("[ROOMS] ⚠️missing dependencies: "
+        log.warning("[ROOMS] 🟡️missing dependencies: "
                     f"rooms_db={'OK' if rooms_db is not None else 'missing'} "
                     f"xep_0045={'OK' if muc is not None else 'missing'}")
         return
@@ -218,7 +218,7 @@ async def is_valid_muc_domain(bot, domain: str) -> bool:
                 return True
 
     except Exception as e:
-        log.warning("[ROOMS] ⚠️ MUC discovery failed for %s: %s", domain, e)
+        log.warning("[ROOMS] 🟡️ MUC discovery failed for %s: %s", domain, e)
 
     return False
 
@@ -252,7 +252,7 @@ async def is_valid_room_jid(bot, jid: str, msg) -> bool:
     if not is_valid:
         bot.reply(
             msg,
-            f"⚠️ Domain '{domain}' does not provide muc service.")
+            f"🟡️ Domain '{domain}' does not provide muc service.")
         return False
     return True
 
@@ -284,7 +284,7 @@ async def autojoin_rooms(bot):
     muc = bot.plugin["xep_0045"]
     rooms_db = bot.db.rooms
     if muc is None or rooms_db is None:
-        log.warning("[ROOMS] ⚠️missing dependencies: "
+        log.warning("[ROOMS] 🟡️missing dependencies: "
                     f"rooms_db={'OK' if rooms_db is not None else 'missing'} "
                     f"xep_0045={'OK' if muc is not None else 'missing'}")
         return
@@ -323,7 +323,7 @@ async def autojoin_rooms(bot):
                 }
                 bot.presence.joined_rooms[room_jid] = nick
         except Exception:
-            log.exception(f"[ROOMS] ❌Couldn't join room '{room_jid}'")
+            log.exception(f"[ROOMS] 🔴 Couldn't join room '{room_jid}'")
 
 
 # -------------------------------------------------
@@ -356,7 +356,7 @@ async def rooms_add(bot, sender_jid, nick, args, msg, is_room):
     if len(args) < 2 or len(args) > 3:
         bot.reply(
             msg,
-            (f"⚠️ Usage: {bot.prefix}rooms add <room_jid>"
+            (f"🟡️ Usage: {bot.prefix}rooms add <room_jid>"
              " <nick> [autojoin]"),
             )
         return
@@ -367,9 +367,9 @@ async def rooms_add(bot, sender_jid, nick, args, msg, is_room):
     if not await is_valid_room_jid(bot, room_jid, msg):
         bot.reply(
             msg,
-            f"⚠️ Invalid room JID: {room_jid}"
+            f"🟡️ Invalid room JID: {room_jid}"
         )
-        log.warning(f"[ROOMS]⚠️ Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS]🟡️ Room '{room_jid}' not valid!")
         return
 
     autojoin = len(args) >= 3 and args[2].lower() in ("true", "1", "yes")
@@ -415,7 +415,7 @@ async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
     if len(args) != 3:
         bot.reply(
             msg,
-            (f"⚠️ Usage: {bot.prefix}rooms update <room_jid>"
+            (f"🟡️ Usage: {bot.prefix}rooms update <room_jid>"
              f" <field> <value>"),
         )
         return
@@ -425,9 +425,9 @@ async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
     if not await is_valid_room_jid(bot, room_jid, msg):
         bot.reply(
             msg,
-            f"⚠️ Invalid room JID: {room_jid}",
+            f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]⚠️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
         return
 
     field = args[1].lower()
@@ -478,7 +478,7 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
     if len(args) < 1:
         bot.reply(
             msg,
-            f"⚠️ Usage: {bot.prefix}rooms delete <room_jid>",
+            f"🟡️ Usage: {bot.prefix}rooms delete <room_jid>",
         )
         return
 
@@ -487,9 +487,9 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
     if not await is_valid_room_jid(bot, room_jid, msg):
         bot.reply(
             msg,
-            f"⚠️ Invalid room JID: {room_jid}",
+            f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]⚠️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
         return
 
     try:
@@ -596,7 +596,7 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
     if len(args) < 1 or len(args) > 2:
         bot.reply(
             msg,
-            f"⚠️ Usage: {bot.prefix}rooms join <room_jid> [nick]",
+            f"🟡️ Usage: {bot.prefix}rooms join <room_jid> [nick]",
         )
         return
 
@@ -605,9 +605,9 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
     if not await is_valid_room_jid(bot, room_jid, msg):
         bot.reply(
             msg,
-            f"⚠️ Invalid room JID: {room_jid}",
+            f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]⚠️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
         return
 
     if len(args) == 2:
@@ -673,7 +673,7 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
     if len(args) != 1:
         bot.reply(
             msg,
-            f"⚠️ Usage: {bot.prefix}rooms leave <room_jid>",
+            f"🟡️ Usage: {bot.prefix}rooms leave <room_jid>",
         )
         return
 
@@ -682,9 +682,9 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
     if not await is_valid_room_jid(bot, room_jid, msg):
         bot.reply(
             msg,
-            f"⚠️ Invalid room JID: {room_jid}",
+            f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]⚠️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
         return
 
     try:
