@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "urlcheck",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
     "requires": ["users"],
@@ -300,6 +300,12 @@ def has_xep_0392_link_metadata(msg):
 
 
 async def fetch_url_title(url, max_redirects=3):
+    from urllib.parse import urlparse, urlunparse
+
+    # Save the original fragment
+    parsed_orig = urlparse(url)
+    orig_fragment = parsed_orig.fragment
+
     async with aiohttp.ClientSession() as session:
         for _ in range(max_redirects):
             async with session.get(
@@ -325,7 +331,6 @@ async def fetch_url_title(url, max_redirects=3):
                     # (with strict prefix check)
                     if (url.startswith("https://github.com/") or
                             url.startswith("http://github.com/")):
-                        # log.info(f"[URLCHECK] Github: {content_size} bytes")
                         raw = await resp.content.read()
                     else:
                         raw = await resp.content.read(128 * 1024)
@@ -337,13 +342,22 @@ async def fetch_url_title(url, max_redirects=3):
                     except Exception:
                         text = raw.decode("utf-8", errors="replace")
                     title, mdesc = extract_html_title_desc(text)
+                    # Re-attach the original fragment if present
+                    final_url = resp.url.human_repr()
+                    if orig_fragment:
+                        parsed_final = urlparse(final_url)
+                        final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
                     return (
-                        resp.url.human_repr(), status,
+                        final_url, status,
                         ctype, title, None, mdesc
                     )
                 else:
+                    final_url = resp.url.human_repr()
+                    if orig_fragment:
+                        parsed_final = urlparse(final_url)
+                        final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
                     return (
-                        resp.url.human_repr(), status, ctype,
+                        final_url, status, ctype,
                         None, content_size, None
                     )
         raise Exception("Too many redirects")
