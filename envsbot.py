@@ -54,14 +54,16 @@ class Bot(slixmpp.ClientXMPP):
         # Presence Manager
         self.presence = PresenceManager(self)
 
+        self.register_plugin("xep_0012")
         self.register_plugin("xep_0030")
         self.register_plugin("xep_0045")
-        self.register_plugin("xep_0084")
-        self.register_plugin("xep_0163")
         self.register_plugin("xep_0054")
+        self.register_plugin("xep_0084")
+        self.register_plugin("xep_0092")
+        self.register_plugin("xep_0163")
         self.register_plugin("xep_0199")
-        self.register_plugin("xep_0461")
         self.register_plugin("xep_0359")
+        self.register_plugin("xep_0461")
         self.register_plugin("xep_0511")
 
         # Database Manager
