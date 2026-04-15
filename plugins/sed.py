@@ -12,11 +12,9 @@ Commands:
 """
 import re
 import logging
-import signal
+import threading
 from functools import partial
 from collections import deque, defaultdict
-from contextlib import contextmanager
-from types import FrameType
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
 
@@ -24,7 +22,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "sed",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
     "Requires": ["rooms"],
@@ -36,24 +34,8 @@ REGEX_TIMEOUT = 0.5  # Max 0.5 seconds for regex substitution
 # Store only last 10 messages per room
 MESSAGE_CACHE = defaultdict(lambda: deque(maxlen=10))
 
-# Track processed messages to avoid duplicates
+# Track processed messages to avoid duplicates (use stanza_id instead of object id)
 PROCESSED_STANZAS = set()
-
-
-def raise_timeout(sig: signal.Signals, frame_type: FrameType) -> None:
-    """Signal handler for timeout."""
-    raise TimeoutError()
-
-
-@contextmanager
-def timeout(max_time: float = REGEX_TIMEOUT):
-    """Context manager for timeout protection."""
-    signal.signal(signal.SIGALRM, raise_timeout)
-    signal.setitimer(signal.ITIMER_REAL, max_time)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
 
 
 def get_stanza_id(msg):
@@ -171,7 +153,8 @@ def parse_sed_command(text):
 
 def apply_sed(original_text, pattern, replacement, flags_str):
     """
-    Apply sed substitution to text with timeout protection.
+    Apply sed substitution to text with timeout protection using threading.
+    Thread-safe alternative to signal-based timeout.
 
     Flags:
         i - case insensitive
@@ -200,18 +183,35 @@ def apply_sed(original_text, pattern, replacement, flags_str):
         if literal_mode:
             pattern = re.escape(pattern)
 
-        # Apply regex with timeout protection
-        with timeout():
-            if global_replace:
-                new_text, num = re.subn(pattern, replacement, original_text, flags=re_flags)
-            else:
-                new_text, num = re.subn(pattern, replacement, original_text, count=1, flags=re_flags)
+        # Thread-safe timeout using threading.Timer
+        result = [None, None]
+        exception = [None]
 
-        return new_text, num
-    except TimeoutError:
-        log.warning("[SED] Regex timeout - possible ReDoS attack: pattern=%s", pattern)
-        return None, -1  # -1 indicates timeout
-    except re.error:
+        def do_regex():
+            try:
+                if global_replace:
+                    result[0], result[1] = re.subn(pattern, replacement, original_text, flags=re_flags)
+                else:
+                    result[0], result[1] = re.subn(pattern, replacement, original_text, count=1, flags=re_flags)
+            except Exception as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=do_regex, daemon=True)
+        thread.start()
+        thread.join(timeout=REGEX_TIMEOUT)
+
+        if thread.is_alive():
+            log.warning("[SED] Regex timeout - possible ReDoS attack: pattern=%s", pattern)
+            return None, -1
+
+        if exception[0]:
+            if isinstance(exception[0], re.error):
+                return None, 0
+            raise exception[0]
+
+        return result[0], result[1]
+    except Exception as e:
+        log.exception("[SED] Unexpected error in apply_sed: %s", e)
         return None, 0
 
 
@@ -356,18 +356,19 @@ async def on_message(bot, msg):
         if msg.get("from") == bot.boundjid:
             return
 
-        stanza_obj_id = id(msg)
-        if stanza_obj_id in PROCESSED_STANZAS:
+        # Use stanza_id for tracking instead of object id (more reliable)
+        stanza_id = get_stanza_id(msg)
+        if stanza_id and stanza_id in PROCESSED_STANZAS:
             return
 
-        PROCESSED_STANZAS.add(stanza_obj_id)
-        if len(PROCESSED_STANZAS) > 10000:
-            PROCESSED_STANZAS.clear()
+        if stanza_id:
+            PROCESSED_STANZAS.add(stanza_id)
+            if len(PROCESSED_STANZAS) > 10000:
+                PROCESSED_STANZAS.clear()
 
         is_room = msg.get("type") == "groupchat"
         nick = msg.get("mucnick") if is_room else None
         room = msg['from'].bare if is_room else None
-        stanza_id = get_stanza_id(msg)
 
         if is_room:
             store = await get_sed_store(bot)
@@ -375,7 +376,9 @@ async def on_message(bot, msg):
             if room not in enabled_rooms:
                 return
 
-            if bot.presence.joined_rooms.get(room) == nick:
+            # Check if message is from the bot itself
+            bot_nick = bot.presence.joined_rooms.get(room)
+            if bot_nick and bot_nick == nick:
                 return
 
         # Handle sed command BEFORE caching
