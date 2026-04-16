@@ -7,11 +7,13 @@ including creating, retrieving, updating, and deleting reminders.
 
 import logging
 import datetime
+from utils.config import config
 
 log = logging.getLogger(__name__)
 
-# Maximum reminder duration (365 days)
-MAX_REMINDER_SECONDS = 365 * 24 * 3600
+# Maximum reminder duration (from config, default 365 days)
+MAX_REMINDER_DAYS = config.get("reminder_max_age_days", 365)
+MAX_REMINDER_SECONDS = MAX_REMINDER_DAYS * 24 * 3600
 
 class RemindersManager:
     """
@@ -22,6 +24,10 @@ class RemindersManager:
     def __init__(self, db_manager):
         """Initialize with database manager (not connection)."""
         self.db = db_manager
+        # Update max seconds from config on init
+        global MAX_REMINDER_SECONDS
+        MAX_REMINDER_DAYS = config.get("reminder_max_age_days", 365)
+        MAX_REMINDER_SECONDS = MAX_REMINDER_DAYS * 24 * 3600
 
     async def init(self):
         """Create the reminders table if it doesn't exist."""

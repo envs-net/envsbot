@@ -178,9 +178,12 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🟡️ Invalid duration. Use format: 10s, 5m, 1h, 2d")
         return
 
-    # Enforce maximum (365 days)
-    if seconds > MAX_REMINDER_SECONDS:
-        bot.reply(msg, f"🟡️ Duration too long (max 365 days)")
+    # Get max seconds from config
+    max_seconds = config.get("reminder_max_age_days", 365) * 24 * 3600
+    # Enforce maximum
+    if seconds > max_seconds:
+        max_days = config.get("reminder_max_age_days", 365)
+        bot.reply(msg, f"🟡️ Duration too long (max {max_days} days)")
         return
 
     # Trim message length
