@@ -299,6 +299,21 @@ class PluginManager:
                 except Exception:
                     log.exception("[PLUGIN] failed to load: %s", plugin)
 
+    async def call_on_ready(self):
+        """
+        Call on_ready() hook for all loaded plugins.
+
+        This should be called AFTER the bot is fully initialized and DB is connected.
+        Use this for expensive initialization like loading data from the database.
+        """
+        for name, module in self.plugins.items():
+            if hasattr(module, "on_ready"):
+                try:
+                    log.debug("[PLUGIN] calling on_ready: %s", name)
+                    await self._run_hook(module.on_ready)
+                except Exception:
+                    log.exception("[PLUGIN] 🔴 on_ready failed: %s", name)
+
     # --------------------------------------------------
     # COMMAND REGISTRATION
     # --------------------------------------------------

@@ -4,6 +4,9 @@ import aiosqlite
 
 from .users import UserManager
 from .rooms import Rooms
+from .reminders import RemindersManager
+
+from utils.config import config
 
 # logger for this module
 log = logging.getLogger(__name__)
@@ -14,10 +17,10 @@ class DatabaseManager:
     Central database manager.
 
     Handles the SQLite connection and exposes
-    table managers for users and rooms.
+    table managers for users, rooms, and reminders.
 
-    Also runs a background task that periodically
-    flushes cached user data to the database.
+    Also runs background tasks that periodically
+    flush cached user data to the database.
     """
 
     def __init__(self, path: str, flush_interval: int = 60):
@@ -27,8 +30,10 @@ class DatabaseManager:
 
         self.users = None
         self.rooms = None
+        self.reminders = None
 
         self.flush_interval = flush_interval
+
         self._flush_task = None
         self._running = False
 
@@ -49,9 +54,11 @@ class DatabaseManager:
 
         self.users = UserManager(self.conn)
         self.rooms = Rooms(self.conn)
+        self.reminders = RemindersManager(self)
 
         await self.users.init()
         await self.rooms.init()
+        await self.reminders.init()
 
         # add asyncio sqlite3 stop event
         self._stop_event = asyncio.Event()

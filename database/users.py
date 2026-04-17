@@ -606,9 +606,10 @@ class UserManager:
                 data = self._profile_cache.get(jid, {})
                 await self._write_profile(jid, data)
 
-        # End Transaction
+            # End Transaction
             await self.db.commit()
             log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
+
         except Exception:
             await self.db.rollback()
             log.exception("[DB] FLUSH ALL FAILED!")

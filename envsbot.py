@@ -90,6 +90,10 @@ class Bot(slixmpp.ClientXMPP):
         await self.db.connect()
         # load plugins
         await self.bot_plugins.load_all()
+
+        # === CALL on_ready() HOOKS (after DB is ready) ===
+        await self.bot_plugins.call_on_ready()
+
         # send presence again
         self.presence.broadcast()
         # set automatic mutual subscriptions

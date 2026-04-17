@@ -9,6 +9,7 @@ Commands:
     s#<pattern>#<replacement>#<flags> - Alternative delimiter
     {prefix}sed <pattern> <replacement> [flags] - Alternative syntax
     {prefix}sed on/off - Enable/disable sed plugin in this room (moderator only)
+    {prefix}sed status - Show if sed is enabled in this room
 """
 import re
 import logging
@@ -22,14 +23,14 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "sed",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
     "Requires": ["rooms"],
 }
 
 SED_KEY = "SED"
-REGEX_TIMEOUT = 0.5  # Max 0.5 seconds for regex substitution
+REGEX_TIMEOUT = 1.0  # second for regex substitution (0.2 - 2.0 good values)
 
 # Store only last 10 messages per room
 MESSAGE_CACHE = defaultdict(lambda: deque(maxlen=10))
@@ -225,8 +226,15 @@ def is_sed_command(body):
     lines = body.strip().split('\n')
     for line in lines:
         if not line.startswith('>'):
+            # Check for s/pattern/replacement/ format
             if line.startswith('s') and len(line) > 2 and line[1] in ('/', '#'):
                 return True
+            # Check for ;sed CORRECTION format (not ;sed on/off/status)
+            if line.startswith(';sed '):
+                parts = line[5:].strip().split(None, 2)
+                # Only treat as sed command if there are at least 2 parts (pattern + replacement)
+                if len(parts) >= 2:
+                    return True
     return False
 
 
@@ -235,19 +243,34 @@ def extract_sed_command(body):
     lines = body.strip().split('\n')
     for line in lines:
         if not line.startswith('>'):
+            # If it's a ;sed command, convert it to s/pattern/replacement/ format
+            if line.startswith(';sed '):
+                # Extract the pattern and replacement from ";sed pattern replacement [flags]"
+                parts = line[5:].strip().split(None, 2)
+                if len(parts) >= 2:
+                    pattern = parts[0]
+                    replacement = parts[1]
+                    flags = parts[2] if len(parts) > 2 else ""
+                    return f"s/{pattern}/{replacement}/{flags}"
             return line.strip()
     return body.strip()
 
 
 async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, flags_str):
     """Process a sed correction."""
-    room = msg['from'].bare if is_room else None
+    if is_room:
+        room = msg['from'].bare
+    else:
+        # For DMs: remove the resource-ID
+        room_full = str(msg['from'])
+        room = room_full.split('/')[0] if '/' in room_full else room_full
+
     body = msg.get("body", "").strip()
 
     last_msg = None
 
-    # 1. Try to extract from reply quote first
-    if is_room and body.startswith('>'):
+    # 1. Try to extract from reply quote first (works for both rooms and DMs)
+    if body.startswith('>'):
         quoted_msg = extract_reply_quote(body)
         if quoted_msg:
             last_msg = quoted_msg
@@ -258,8 +281,8 @@ async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, 
         if reply_target_id:
             last_msg = get_message_by_id(room, reply_target_id)
 
-    # 3. Fall back to last message in cache
-    if not last_msg and is_room:
+    # 3. Fall back to last message in cache (works for both rooms and DMs)
+    if not last_msg:
         last_msg = get_last_message(room)
 
     if not last_msg:
@@ -299,7 +322,8 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
     Handle sed corrections or enable/disable sed in a room.
 
     Usage:
-        {prefix}sed on|off              - Enable/disable sed (MUC PM, moderator only)
+        {prefix}sed on|off              - Enable/disable sed (room only, moderator only)
+        {prefix}sed status              - Show if sed is enabled in this room
         {prefix}sed <pattern> <replacement> [flags] - Apply correction
 
     Examples:
@@ -308,15 +332,31 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
         {prefix}sed -- xxx l
         {prefix}sed ERROR Error i
     """
+    from_jid = msg["from"].bare
+    is_muc_pm = from_jid in JOINED_ROOMS
+
+    # Handle status command
+    if args and args[0] == "status":
+        if is_room or is_muc_pm:
+            # This is a room or MUC-PM
+            store = await get_sed_store(bot)
+            enabled_rooms = await store.get_global(SED_KEY, default={})
+
+            if from_jid in enabled_rooms and enabled_rooms[from_jid]:
+                bot.reply(msg, "✅ SED corrections are **enabled** in this room.")
+            else:
+                bot.reply(msg, "🛑 SED corrections are **disabled** in this room.")
+        else:
+            # This is a true DM
+            bot.reply(msg, "ℹ️ SED corrections are **always available** in DMs.")
+        return
+
+    # Handle on/off commands (room and MUC-PM only)
     if (
-        msg.get("type") in ("chat", "normal")
-        and hasattr(msg["from"], "bare")
-        and "@" in str(msg["from"].bare)
+        (is_room or is_muc_pm)
         and args and args[0] in ("on", "off")
     ):
-        room = msg["from"].bare
-
-        if room not in JOINED_ROOMS:
+        if from_jid not in JOINED_ROOMS:
             bot.reply(msg, "This room is not a joined room.")
             return
 
@@ -324,12 +364,12 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
         enabled_rooms = await store.get_global(SED_KEY, default={})
 
         if args[0] == "on":
-            enabled_rooms[room] = True
+            enabled_rooms[from_jid] = True
             await store.set_global(SED_KEY, enabled_rooms)
             bot.reply(msg, "✅ SED corrections enabled in this room.")
         else:
-            if room in enabled_rooms:
-                del enabled_rooms[room]
+            if from_jid in enabled_rooms:
+                del enabled_rooms[from_jid]
                 await store.set_global(SED_KEY, enabled_rooms)
             bot.reply(msg, "🛑 SED corrections disabled in this room.")
         return
@@ -342,7 +382,7 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
     replacement = args[1]
     flags_str = args[2] if len(args) > 2 else ""
 
-    await process_sed_correction(bot, msg.get("mucnick"), msg, True, pattern, replacement, flags_str)
+    await process_sed_correction(bot, msg.get("mucnick"), msg, is_room, pattern, replacement, flags_str)
 
 
 async def on_message(bot, msg):
@@ -368,8 +408,15 @@ async def on_message(bot, msg):
 
         is_room = msg.get("type") == "groupchat"
         nick = msg.get("mucnick") if is_room else None
-        room = msg['from'].bare if is_room else None
 
+        if is_room:
+            room = msg['from'].bare
+        else:
+            # For DMs: remove the resource-ID
+            room_full = str(msg['from'])
+            room = room_full.split('/')[0] if '/' in room_full else room_full
+
+        # Check if sed is enabled in rooms (always enabled for DMs)
         if is_room:
             store = await get_sed_store(bot)
             enabled_rooms = await store.get_global(SED_KEY, default={})
@@ -392,9 +439,8 @@ async def on_message(bot, msg):
             # Don't cache sed commands!
             return
 
-        # Cache non-sed messages (only keeps last 10 per room)
-        if is_room:
-            cache_message(room, nick, body, stanza_id)
+        # Cache non-sed messages (keeps last 10 per room/user for both rooms and DMs)
+        cache_message(room, nick, body, stanza_id)
 
     except Exception as e:
         log.exception("[SED] Error in on_message: %s", e)
@@ -405,5 +451,11 @@ async def on_load(bot):
     bot.bot_plugins.register_event(
         "sed",
         "groupchat_message",
+        partial(on_message, bot)
+    )
+
+    bot.bot_plugins.register_event(
+        "sed",
+        "message",
         partial(on_message, bot)
     )

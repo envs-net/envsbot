@@ -8,10 +8,10 @@ checking compliance scores, and performing DNS SRV lookups.
 Commands:
     {prefix}x help                  - Displays all available commands.
     {prefix}x version <domain>      - Shows the software version of an XMPP server (XEP-0092).
-    {prefix}x items <domain>        - Lists service items of an XMPP server (XEP-0030).
+    {prefix}x items <domain|jid>    - Lists service items of an XMPP server (XEP-0030).
     {prefix}x contact <domain>      - Displays admin/contact information for a server (XEP-0030).
-    {prefix}x info <domain>         - Shows identities & features (XEP-0030).
-    {prefix}x ping <jid|domain>     - Pings an XMPP entity (XEP-0199).
+    {prefix}x info <domain|jid>     - Shows identities & features (XEP-0030).
+    {prefix}x ping <domain|jid>     - Pings an XMPP entity (XEP-0199).
     {prefix}x uptime <domain>       - Shows the uptime of an XMPP server (XEP-0012).
     {prefix}x srv <domain>          - DNS SRV lookup.
     {prefix}x compliance <domain>   - Compliance score from compliance.conversations.im.
@@ -27,7 +27,7 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
     "Requires": ["rooms"],
@@ -133,9 +133,9 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
             version_info = f"**{name}** v{version}"
             if os_info:
                 version_info += f" on {os_info}"
-            bot.reply(msg, f"ℹ️  Version: {version_info}")
+            bot.reply(msg, f"ℹ️ Version for {target}: {version_info}")
         else:
-            bot.reply(msg, f"ℹ️  {target} does not provide version information via XEP-0092")
+            bot.reply(msg, f"ℹ️ {target} does not provide version information via XEP-0092")
     except slixmpp.exceptions.IqTimeout:
         bot.reply(msg, f"🔴 Version request to {target} timed out.")
     except slixmpp.exceptions.IqError as e:
@@ -199,14 +199,14 @@ async def cmd_xmpp_items(bot, sender_jid, nick, args, msg, is_room):
     List the service items of an XMPP server (XEP-0030).
 
     Usage:
-        {prefix}xmpp items <domain>
-        {prefix}x items <domain>
+        {prefix}xmpp items <domain|jid>
+        {prefix}x items <domain|jid>
     """
     target, error = _resolve_target(bot, args, msg, is_room, nick)
     if error:
         bot.reply(msg, f"❌ {error}")
         return
-    target = inform_if_jid(msg, target, bot, "items", domain_only=True)
+    target = inform_if_jid(msg, target, bot, "items")
     try:
         items = await bot.plugin["xep_0030"].get_items(jid=target, timeout=8)
         disco_items = items.get('disco_items', {})
@@ -300,15 +300,15 @@ async def cmd_xmpp_info(bot, sender_jid, nick, args, msg, is_room):
     List the identities and features of an XMPP server/domain (XEP-0030).
 
     Usage:
-        {prefix}xmpp info <domain>
-        {prefix}x info <domain>
+        {prefix}xmpp info <domain|jid>
+        {prefix}x info <domain|jid>
     """
     target, error = _resolve_target(bot, args, msg, is_room, nick)
     if error:
         bot.reply(msg, f"❌ {error}")
         return
-    # New: Always extract domain and notify if JID supplied
-    target = inform_if_jid(msg, target, bot, "info", domain_only=True)
+    # Always extract domain and notify if JID supplied
+    target = inform_if_jid(msg, target, bot, "info")
     try:
         info = await bot.plugin["xep_0030"].get_info(jid=target, timeout=8)
         disco_info = info.get('disco_info', {})
