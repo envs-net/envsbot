@@ -131,7 +131,9 @@ def format_seconds(total_seconds: float) -> str:
 async def schedule_reminder_task(bot, reminder_id: int, jid: str, nick: str,
                                  message: str, seconds: int, original_msg,
                                  overdue_str: str = None,
-                                 room_jid: str = None):
+                                 room_jid: str = None,
+                                 msg_mto: str = None,
+                                 msg_type: str = None):
     """
     Background task that waits and sends the reminder.
 
@@ -151,10 +153,19 @@ async def schedule_reminder_task(bot, reminder_id: int, jid: str, nick: str,
         await asyncio.sleep(seconds)
 
         # Build reminder text
-        if overdue_str:
-            reminder_text = f"🔔 Reminder (was due {overdue_str}): {message}"
+        # Only include nick in group chats, not in DMs
+        if room_jid:
+            # Group chat: include nick
+            if overdue_str:
+                reminder_text = f"{nick}: 🔔 Reminder (was due {overdue_str}): {message}"
+            else:
+                reminder_text = f"{nick}: 🔔 Reminder: {message}"
         else:
-            reminder_text = f"🔔 Reminder: {message}"
+            # Direct message: no nick needed (already shows sender)
+            if overdue_str:
+                reminder_text = f"🔔 Reminder (was due {overdue_str}): {message}"
+            else:
+                reminder_text = f"🔔 Reminder: {message}"
 
         # Send the actual reminder
         if original_msg is not None:
@@ -164,24 +175,13 @@ async def schedule_reminder_task(bot, reminder_id: int, jid: str, nick: str,
         else:
             # After bot restart: Send via direct message or to room
             try:
-                if room_jid:
-                    # Send to room
-                    msg = bot.make_message(
-                        mto=room_jid,
-                        mbody=reminder_text,
-                        mtype="groupchat"
-                    )
-                    log.info(f"[REMINDER] ✅ Reminder {reminder_id} sent to room {room_jid}")
-                else:
-                    # Send as direct message
-                    msg = bot.make_message(
-                        mto=jid,
-                        mbody=reminder_text,
-                        mtype="chat"
-                    )
-                    log.info(f"[REMINDER] ✅ Reminder {reminder_id} sent to {jid}")
-
+                msg = bot.make_message(
+                    mto=msg_mto or (room_jid if room_jid else jid),
+                    mbody=reminder_text,
+                    mtype=msg_type or ("groupchat" if room_jid else "chat")
+                )
                 msg.send()
+                log.info(f"[REMINDER] ✅ Reminder {reminder_id} sent")
 
             except Exception as e:
                 log.exception(f"[REMINDER] 🔴 Failed to send reminder {reminder_id}: {e}")
@@ -252,10 +252,13 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     try:
+        # Extract nick from sender_jid for fallback
+        display_nick = nick if nick else (sender_jid.split('/')[-1] if '/' in sender_jid else sender_jid.split('@')[0])
+
         # Save room_jid if reminder was created in a chat
         room_jid = msg['from'].bare if is_room else None
 
-        # Store in database
+        # Store in database (NUR EINMAL!)
         reminder_id = await bot.db.reminders.create(
             user_jid=str(sender_jid),
             message=message,
@@ -271,10 +274,13 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
                 bot,
                 reminder_id,
                 sender_jid,
-                nick,
+                display_nick,
                 message,
                 seconds,
-                msg
+                msg,
+                room_jid=room_jid,
+                msg_mto=room_jid if is_room else sender_jid,
+                msg_type="groupchat" if is_room else "chat"
             )
         )
 
@@ -446,17 +452,22 @@ async def on_ready(bot):
 
             # Schedule the reminder
             try:
+                # Extract nick from user_jid (format: user@domain/nick or user@domain)
+                nick = user_jid.split('/')[-1] if '/' in user_jid else user_jid.split('@')[0]
+
                 task = asyncio.create_task(
                     schedule_reminder_task(
                         bot,
                         reminder_id,
                         user_jid,
-                        None,
+                        nick,
                         message,
                         seconds_left,
                         None,
                         overdue_str,
-                        room_jid
+                        room_jid,
+                        msg_mto=room_jid if room_jid else user_jid,
+                        msg_type="groupchat" if room_jid else "chat"
                     )
                 )
 
