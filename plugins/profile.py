@@ -416,9 +416,12 @@ async def config_url(bot, sender_jid, nick, args, msg, is_room):
 async def set_birthday(bot, sender_jid, nick, args, msg, is_room):
     """
     Set your BIRTHDAY in your profile. Format: YYYY-MM-DD or MM-DD.
+    Birthday must not be in the future.
+
     Usage:
         {prefix}config birthday <YYYY-MM-DD|MM-DD>
         {prefix}c birthday <YYYY-MM-DD|MM-DD>
+
     Example:
         {prefix}config birthday 1990-05-23
         {prefix}config birthday 05-23
@@ -430,7 +433,7 @@ async def set_birthday(bot, sender_jid, nick, args, msg, is_room):
     if not args or len(args) != 1:
         bot.reply(
             msg,
-            f"🟡️ Usage: {config.get('prefix', ',')}config birthday" +
+            f"🟡️ Usage: {config.get('prefix', ',')}config birthday " +
             "<YYYY-MM-DD|MM-DD>",
         )
         return
@@ -439,6 +442,32 @@ async def set_birthday(bot, sender_jid, nick, args, msg, is_room):
             or re.match(r"^\d{2}-\d{2}$", birthday)):
         bot.reply(msg, "🟡️ Please provide birthday as YYYY-MM-DD or MM-DD.")
         return
+
+    # Validate that birthday is not in the future
+    today = datetime.date.today()
+    try:
+        if len(birthday) == 10:  # YYYY-MM-DD
+            year = int(birthday[0:4])
+            month = int(birthday[5:7])
+            day = int(birthday[8:10])
+            birthday_date = datetime.date(year, month, day)
+            if birthday_date > today:
+                bot.reply(msg, "🟡️ Birthday cannot be in the future.")
+                return
+        elif len(birthday) == 5:  # MM-DD
+            month = int(birthday[0:2])
+            day = int(birthday[3:5])
+            # For MM-DD format, check if the date is valid but don't check future
+            # (since we don't have year, we can't determine if it's in the future)
+            try:
+                datetime.date(today.year, month, day)
+            except ValueError:
+                bot.reply(msg, "🟡️ Invalid date.")
+                return
+    except ValueError:
+        bot.reply(msg, "🟡️ Invalid date.")
+        return
+
     profile_store = bot.db.users.profile()
     await profile_store.set(str(jid), "BIRTHDAY", birthday)
     log.info("[PROFILE] ✅ BIRTHDAY set for %s: %s", jid, birthday)
