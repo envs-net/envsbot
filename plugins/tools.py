@@ -1,11 +1,15 @@
-# plugins/tools.py
-
 """
-Tools plugin: Show the current time and date for a user's configured profile.
+Tools plugin: Utility commands for bot interaction and timezone-aware time/date lookups.
+
+Provides basic bot health checks and allows users to query the current time and date
+in their configured timezone or another user's timezone.
 
 Commands:
+    {prefix}ping
     {prefix}time [nick]
     {prefix}date [nick]
+    {prefix}utc
+    {prefix}ts <unix_timestamp>
 """
 
 import pytz
@@ -24,6 +28,17 @@ def get_pm_target(sender_jid, nick):
     else:
         bare_jid = str(sender_jid).split('/')[0]
     return bare_jid, nick
+
+
+@command("ping", role=Role.USER, aliases=["pong"])
+async def ping_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Respond with a pong message to confirm the bot is alive.
+
+    Usage:
+        {prefix}ping
+    """
+    bot.reply(msg, "🏓 Pong!", ephemeral=False)
 
 
 @command("time", role=Role.USER, aliases=["t"])
@@ -133,3 +148,64 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
     formatted = now.strftime("%Y-%m-%d")
     loc_str = f" ({location})" if location else ""
     bot.reply(msg, f"📅 Date for {display_name}: {formatted} ({tzone}){loc_str}", ephemeral=False)
+
+
+@command("utc", role=Role.USER)
+async def utc_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Show the current UTC time as a quick reference.
+
+    Usage:
+        {prefix}utc
+    """
+    now = datetime.now(pytz.UTC)
+    formatted = now.strftime("%Y-%m-%d %H:%M:%S")
+    bot.reply(msg, f"🌍 Current UTC time: {formatted}", ephemeral=False)
+
+
+@command("ts", role=Role.USER)
+async def timestamp_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Convert a Unix timestamp to human-readable date and time in your timezone.
+
+    Usage:
+        {prefix}ts <unix_timestamp>
+
+    Examples:
+        {prefix}ts 1704067200
+    """
+    if not args:
+        bot.reply(msg, f"🔴 Usage: {config.get('prefix', ',')}ts <unix_timestamp>")
+        return
+
+    try:
+        timestamp = int(args[0])
+    except ValueError:
+        bot.reply(msg, f"🔴 Invalid timestamp. Please provide a valid Unix timestamp (integer).")
+        return
+
+    try:
+        # Get user's timezone
+        profile_store = bot.db.users.profile()
+        target_jid, _ = get_pm_target(sender_jid, nick)
+        timezone = await profile_store.get(target_jid, "TIMEZONE")
+
+        if timezone:
+            try:
+                tzinfo = pytz.timezone(timezone)
+            except Exception:
+                tzinfo = pytz.UTC
+        else:
+            tzinfo = pytz.UTC
+
+        # Convert timestamp to datetime in user's timezone
+        dt = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+        dt_local = dt.astimezone(tzinfo)
+        formatted = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+        tzone = str(tzinfo) if timezone else "UTC"
+
+        bot.reply(msg, f"⏰ Timestamp {timestamp} = {formatted} ({tzone})", ephemeral=False)
+    except (ValueError, OSError):
+        bot.reply(msg, f"🔴 Invalid timestamp or out of range.")
+    except Exception as e:
+        bot.reply(msg, f"🔴 Error converting timestamp: {str(e)}")
