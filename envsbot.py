@@ -2,6 +2,7 @@ import slixmpp
 import asyncio
 import inspect
 import logging
+import json
 
 from slixmpp.xmlstream import ET
 
@@ -80,6 +81,46 @@ class Bot(slixmpp.ClientXMPP):
     # EVENT HANDLERS
     # -------------------------------------------------
 
+    async def _send_restart_notification(self):
+        """Send restart completion notification if one was queued."""
+        import json
+        import os
+
+        restart_file = "/tmp/bot_restart_notification.json"
+
+        if not os.path.exists(restart_file):
+            return
+
+        try:
+            with open(restart_file, 'r') as f:
+                notif = json.load(f)
+            os.remove(restart_file)
+
+            log.info("[ADMIN] Processing restart notification: %s", notif)
+
+            if notif.get("is_room") and notif.get("room"):
+                # Send to the room
+                message = self.make_message(
+                    mto=notif["room"],
+                    mbody=f"{notif['nick']}: ✅ Bot restart complete!",
+                    mtype="groupchat"
+                )
+                message.send()
+                log.info("[ADMIN] Bot restart notification sent to room %s", notif["room"])
+            else:
+                # Send private message
+                message = self.make_message(
+                    mto=notif["sender"],
+                    mbody="✅ Bot restart complete!",
+                    mtype="chat"
+                )
+                message.send()
+                log.info("[ADMIN] Bot restart notification sent to %s", notif["sender"])
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            log.error("[ADMIN] Failed to send restart notification: %s", e)
+
     # fired on "session_start"
     async def on_start(self, event):
         # send startup presence
@@ -93,6 +134,9 @@ class Bot(slixmpp.ClientXMPP):
 
         # === CALL on_ready() HOOKS (after DB is ready) ===
         await self.bot_plugins.call_on_ready()
+
+        # Check for restart notification (after everything is initialized)
+        await self._send_restart_notification()
 
         # send presence again
         self.presence.broadcast()
