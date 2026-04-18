@@ -145,13 +145,12 @@ async def on_load(bot):
                         or "envsbot")
             nick = str(raw_nick)
 
-            autojoin = (data["autojoin"]
-                        or db_autojoin
-                        or None)
+            # Use runtime state if available, fallback to DB
+            autojoin = data.get("autojoin")
+            if autojoin is None:
+                autojoin = db_autojoin
 
-            status = (data["status"]
-                      or db_status
-                      or None)
+            status = data.get("status") or db_status or None
 
             # --- rebuild runtime state ---
             JOINED_ROOMS[room] = {
@@ -181,7 +180,6 @@ async def on_load(bot):
 # -------------------------------------------------
 
 async def on_unload(bot):
-    # store current runtime state for reload
     bot._reload_rooms = dict(JOINED_ROOMS)
 
     for room_jid, data in JOINED_ROOMS.items():
@@ -427,7 +425,7 @@ async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
             msg,
             f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS] 🟡️Room '{room_jid}' not valid!")
         return
 
     field = args[1].lower()
@@ -489,7 +487,7 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
             msg,
             f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS] 🟡️Room '{room_jid}' not valid!")
         return
 
     try:
@@ -500,8 +498,8 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         joined = room_jid in JOINED_ROOMS
 
         if joined:
-
-            bot.plugin["xep_0045"].leave_muc(room_jid, bot.boundjid.user)
+            nick = JOINED_ROOMS[room_jid]["nick"]
+            bot.plugin["xep_0045"].leave_muc(room_jid, nick)
 
             del JOINED_ROOMS[room_jid]
 
@@ -562,7 +560,7 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
         )
 
     header = (f"{'ROOM':40} {'NICK':15} {'AFFILIATION':10} {'ROLE':10}"
-              f" {'AUTOJOIN'}")
+              f" {'AUTOJOIN':8} {'STATUS'}")
     lines += ["", "📋 JOINED rooms", header, "-" * len(header)]
 
     for room, data in JOINED_ROOMS.items():
@@ -570,10 +568,14 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
         affiliation = data["affiliation"]
         role = data["role"]
         autojoin = data["autojoin"]
+        status = data.get("status") or ""
         autojoin_flag = "yes" if autojoin else "no"
 
+        # Only display status if not empty and not empty JSON
+        status_display = status if status and status != "{}" else ""
+
         lines.append(f"{room:40} {nick:15} {affiliation:10} {role:10}"
-                     f" {autojoin_flag:8}")
+                     f" {autojoin_flag:8} {status_display}")
 
     output = "\n".join(lines)
     bot.reply(msg, f"{output}")
@@ -607,7 +609,7 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
             msg,
             f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS] 🟡️ Room '{room_jid}' not valid!")
         return
 
     if len(args) == 2:
@@ -624,11 +626,16 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
                            pshow=bot.presence.status["show"],
                            pstatus=bot.presence.status["status"])
 
+        # Get current room state from DB
+        db_room = await bot.db.rooms.get(room_jid)
+        current_autojoin = db_room[2] if db_room else False
+        current_status = db_room[3] if db_room else None
+
         if room_jid not in JOINED_ROOMS:
             JOINED_ROOMS[room_jid] = {
                 "nick": room_nick,
-                "autojoin": False,
-                "status": None,
+                "autojoin": current_autojoin,
+                "status": current_status,
                 "affiliation": "unknown",
                 "role": "unknown",
                 "nicks": {}
@@ -637,7 +644,14 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
         bot.presence.joined_rooms[room_jid] = room_nick
         bot.presence.broadcast()
 
-        await bot.db.rooms.add(room_jid, room_nick, False)
+        # Only add if it doesn't exist; update if it does
+        if db_room:
+            # Room exists, only update nick if different
+            if db_room[1] != room_nick:
+                await bot.db.rooms.update(room_jid, nick=room_nick)
+        else:
+            # New room, add with autojoin=False (default for manual join)
+            await bot.db.rooms.add(room_jid, room_nick, False)
 
         log.info("[ROOMS] 🚪 Joined room %s nick=%s", room_jid, room_nick)
 
@@ -684,12 +698,15 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
             msg,
             f"🟡️ Invalid room JID: {room_jid}",
         )
-        log.warning(f"[ROOMS]🟡️Room '{room_jid}' not valid!")
+        log.warning(f"[ROOMS] 🟡️ Room '{room_jid}' not valid!")
         return
 
     try:
         muc = bot.plugin["xep_0045"]
-        muc.leave_muc(room_jid, bot.boundjid.user)
+
+        if room_jid in JOINED_ROOMS:
+            nick = JOINED_ROOMS[room_jid]["nick"]
+            muc.leave_muc(room_jid, nick)
 
         # --- Delete room completely from JOINED_ROOMS --
         if room_jid in JOINED_ROOMS:
@@ -712,7 +729,7 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
 
         bot.reply(
             msg,
-            f"🚶 Failed to leave rooom: {room_jid}",
+            f"🚶 Failed to leave room: {room_jid}",
         )
 
 
