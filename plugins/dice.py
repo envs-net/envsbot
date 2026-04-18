@@ -77,7 +77,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
 
     rolls = [random.randint(1, sides) for _ in range(num)]
     mod_val = int(mod) if mod else 0
-    if modval >= 1000 or mod_val <= -1000:
+    if mod_val >= 1000 or mod_val <= -1000:
         bot.reply(
             msg,
             "🟡️ Modifier must be between -999 and 999."
