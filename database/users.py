@@ -29,11 +29,12 @@ class ProfileStore:
         raw_data, last_updated = row
 
         try:
-            return json.loads(raw_data)
+            data = json.loads(raw_data)
         except Exception:
+            log.exception("[PROFILE] Failed to decode JSON for %s", jid)
             data = {}
 
-        # store timestamp in meta
+        # Store timestamp in meta ALWAYS (even on error)
         self.um._profile_meta[jid] = last_updated
 
         return data
@@ -62,7 +63,7 @@ class ProfileStore:
         Set profile value (cached, no immediate DB write).
         """
 
-        # get update time
+        # Get update time
         now = datetime.now(timezone.utc).isoformat()
 
         # Ensure cache exists
@@ -78,6 +79,8 @@ class ProfileStore:
         """
         Delete a key from profile (cached).
         """
+        now = datetime.now(timezone.utc).isoformat()
+
         if jid not in self.um._profile_cache:
             data = await self._load_from_db(jid)
             self.um._profile_cache[jid] = data
@@ -86,6 +89,7 @@ class ProfileStore:
 
         if key in profile:
             del profile[key]
+            self.um._profile_meta[jid] = now
             self.um._dirty_profiles.add(jid)
 
     async def clear(self, jid: str):
@@ -149,10 +153,10 @@ class PluginRuntimeStore:
         row = await cursor.fetchone()
 
         if not row:
-            self.um._profile_meta[jid] = None
+            self.um._runtime_meta[jid] = None
             return {"plugins": {}}
         if row[0] is None:
-            self.um._profile_meta[jid] = None
+            self.um._runtime_meta[jid] = None
             return {"plugins": {}}
 
         raw_data, last_updated = row
@@ -166,7 +170,7 @@ class PluginRuntimeStore:
         if "plugins" not in data:
             data["plugins"] = {}
 
-        # store timestamp in meta
+        # Store timestamp in meta
         self.um._runtime_meta[jid] = last_updated
 
         return data
@@ -236,7 +240,7 @@ class PluginRuntimeStore:
         Marks the user as dirty so the change will be persisted on flush.
         """
 
-        # get update time
+        # Get update time
         now = datetime.now(timezone.utc).isoformat()
 
         if jid not in self.um._runtime_cache:
@@ -258,6 +262,8 @@ class PluginRuntimeStore:
         """
         Delete a key from this plugin's runtime data (cached).
         """
+        now = datetime.now(timezone.utc).isoformat()
+
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
 
@@ -267,12 +273,15 @@ class PluginRuntimeStore:
 
         if key in plugin_data:
             del plugin_data[key]
+            self.um._runtime_meta[jid] = now
             self.um._dirty_runtime.add(jid)
 
     async def clear(self, jid: str):
         """
         Remove all runtime data for this plugin (cached).
         """
+        now = datetime.now(timezone.utc).isoformat()
+
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
 
@@ -283,6 +292,7 @@ class PluginRuntimeStore:
 
         data["plugins"][self.plugin_name] = {}
 
+        self.um._runtime_meta[jid] = now
         self.um._dirty_runtime.add(jid)
 
 
@@ -313,8 +323,8 @@ class UserManager:
         self._runtime_meta = {}
 
         self._dirty_users = set()
-        self._dirty_profiles = set()   # optional (can be removed later)
-        self._dirty_runtime = set()   # optional (can be removed later)
+        self._dirty_profiles = set()
+        self._dirty_runtime = set()
 
     # ------------------------------------------------------------------
     # Initialization
@@ -360,15 +370,19 @@ class UserManager:
         )
         """)
 
-        # --- Make sure JID "__GLOBAL_" exists ---
+        # Ensure GLOBAL_JID exists
         await self.ensure_global_exists()
 
-        # --- load persisted _nick_index ---
+        # Load persisted _nick_index
         store = self.plugin("users")
         index = await store.get_global("_nick_index")
 
         if isinstance(index, dict):
-            self._nick_index = index
+            # Convert all lists to sets for consistency
+            self._nick_index = {
+                nick: set(jids) if isinstance(jids, list) else jids
+                for nick, jids in index.items()
+            }
 
     # ------------------------------------------------------------------
     # Users (DB + cache)
@@ -417,34 +431,34 @@ class UserManager:
         await self.set(jid, "last_seen", now)
 
     async def get_all_users(self):
-        # --- 1. load all JIDs from DB ---
+        # 1. Load all JIDs from DB
         rows = await self.db.execute_fetchall(
             "SELECT * FROM users"
         )
 
         users = []
 
-        # --- 2. populate cache from DB (without overwriting dirty cache) ---
+        # 2. Populate cache from DB (without overwriting dirty cache)
         for row in rows:
             user = dict(row)
             jid = user["jid"]
 
-            # only populate if not already cached
+            # Only populate if not already cached
             if jid not in self._users_cache:
                 self._users_cache[jid] = user
 
             users.append(self._users_cache[jid])
 
-        # --- 3. include cache-only users (not yet flushed to DB) ---
+        # 3. Include cache-only users (not yet flushed to DB)
         for jid, user in self._users_cache.items():
             if jid not in {u["jid"] for u in users}:
                 users.append(user)
 
-        # --- 4. return sorted result (by jid for determinism) ---
+        # 4. Return sorted result (by jid for determinism)
         return sorted(users, key=lambda u: u["jid"])
 
     async def delete(self, jid):
-        # 1. --- delete from database ---
+        # 1. Delete from database
         await self.db.execute(
             "DELETE FROM users WHERE jid = ?",
             (jid,)
@@ -460,23 +474,29 @@ class UserManager:
             (jid,)
         )
 
-        # 2. --- remove from caches ---
+        # 2. Remove from caches
         self._users_cache.pop(jid, None)
         self._profile_cache.pop(jid, None)
         self._runtime_cache.pop(jid, None)
 
-        # 3. --- clean dirty flags ---
+        # 3. Clean dirty flags
         self._dirty_users.discard(jid)
         self._dirty_profiles.discard(jid)
         self._dirty_runtime.discard(jid)
 
-        # 4. --- remove from _nick_index ---
+        # 4. Remove from _nick_index
         for nick in list(self._nick_index.keys()):
             jids = self._nick_index[nick]
+            # Convert to set if needed (for robustness)
+            if not isinstance(jids, set):
+                jids = set(jids) if isinstance(jids, list) else {jids}
+
             if jid in jids:
                 jids.discard(jid)
                 if not jids:
                     del self._nick_index[nick]
+                else:
+                    self._nick_index[nick] = jids
 
     # ------------------------------------------------------------------
     # Helpers
@@ -511,7 +531,6 @@ class UserManager:
     # FLUSH LOGIC
     # ------------------------------------------------------------------
 
-    # --- Flush users ---
     async def flush_users(self):
         for jid in self._dirty_users:
             user = self._users_cache[jid]
@@ -572,19 +591,24 @@ class UserManager:
         """
         Flush all cached data atomically in a single transaction.
         """
-        # --- persistent nick index ---
+        # Persist nick index
         index = getattr(self, "_nick_index", None)
         if index is not None:
             store = self.plugin("users")
-            await store.set_global("_nick_index", index)
+            # Convert sets to lists for JSON serialization
+            serializable_index = {
+                nick: list(jids) if isinstance(jids, set) else jids
+                for nick, jids in index.items()
+            }
+            await store.set_global("_nick_index", serializable_index)
 
         if not (self._dirty_users or self._dirty_runtime
                 or self._dirty_profiles):
             return
 
-        # Begin Transaction
-        await self.db.execute("BEGIN")
+        # Start transaction using SAVEPOINT (thread-safe alternative)
         try:
+            await self.db.execute("SAVEPOINT flush_checkpoint")
 
             # ----------------------------------------------------------
             # 1. USERS
@@ -606,12 +630,15 @@ class UserManager:
                 data = self._profile_cache.get(jid, {})
                 await self._write_profile(jid, data)
 
-            # End Transaction
-            await self.db.commit()
+            # Commit transaction
+            await self.db.execute("RELEASE flush_checkpoint")
             log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
 
         except Exception:
-            await self.db.rollback()
+            try:
+                await self.db.execute("ROLLBACK TO flush_checkpoint")
+            except Exception:
+                pass  # Rollback might also fail
             log.exception("[DB] FLUSH ALL FAILED!")
             raise
 

@@ -112,7 +112,12 @@ async def rss_check_loop(bot, store, url, period):
             )
             entry_desc = html_to_text_with_links(entry.get("description", ""))
             entry_link = entry.get("link", "")
-            msg = f"[RSS] ({feed_title}) {entry_title} - {entry_desc}\n"
+
+            # Only add description if it differs from title
+            if entry_desc and entry_desc != entry_title:
+                msg = f"[RSS] ({feed_title}) {entry_title} - {entry_desc}\n"
+            else:
+                msg = f"[RSS] ({feed_title}) {entry_title}\n"
             msg += f"{entry_link}"
             for room in rooms:
                 if room in JOINED_ROOMS:

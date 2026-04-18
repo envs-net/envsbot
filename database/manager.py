@@ -112,17 +112,27 @@ class DatabaseManager:
         if self.conn:
             await self.conn.close()
 
-    async def execute(self, query: str, params: tuple | None = None):
+    async def execute(self, query: str, params: tuple | None = None, auto_commit: bool = True):
         """
         Execute a write query (INSERT/UPDATE/DELETE).
 
-        Automatically commits the transaction.
+        Args:
+            query: SQL query string
+            params: Query parameters (optional)
+            auto_commit: If True, automatically commits. If False, caller must commit
+
+        When used within an explicit transaction (BEGIN...COMMIT),
+        set auto_commit=False to prevent premature commits.
         """
         if params is None:
             params = ()
 
         cursor = await self.conn.execute(query, params)
-        await self.conn.commit()
+
+        # Only commit when desired and not within a transaction
+        if auto_commit:
+            await self.conn.commit()
+
         return cursor
 
     async def fetch_one(self, query: str, params: tuple | None = None):
