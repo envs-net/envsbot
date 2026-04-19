@@ -7,6 +7,7 @@ This module provides the PluginManager class, which is responsible for:
 - Registering commands into the global COMMANDS registry
 - Managing plugin lifecycle hooks (on_load / on_unload)
 - Tracking plugin metadata and event handlers
+- Safe plugin reloading with dependency-aware management
 
 All lifecycle operations are fully asynchronous and must be awaited.
 """
@@ -37,6 +38,7 @@ class PluginManager:
         meta (dict): Cached PLUGIN_META per plugin.
         _event_handlers (dict): Registered event handlers per plugin.
         _lock (asyncio.Lock): Ensures safe concurrent lifecycle operations.
+        _dependents (dict): Cache of plugins that depend on each plugin.
     """
 
     def __init__(self, bot, package="plugins"):
@@ -47,8 +49,124 @@ class PluginManager:
         self.plugins = {}
         self.meta = {}
         self._event_handlers = {}
+        self._dependents = {}  # Cache: plugin -> plugins that depend on it
 
         self._lock = asyncio.Lock()
+
+    # --------------------------------------------------
+    # DEPENDENCY ANALYSIS
+    # --------------------------------------------------
+
+    def _get_dependents(self, name):
+        """
+        Find ALL plugins that depend on the given plugin (recursively).
+        """
+        dependents = set()
+        to_process = [name]
+
+        while to_process:
+            current = to_process.pop(0)
+
+            for plugin_name, meta in self.meta.items():
+                if plugin_name in dependents:
+                    continue
+
+                if current in meta.get("requires", []):
+                    dependents.add(plugin_name)
+                    to_process.append(plugin_name)
+
+        return dependents
+
+    def _topological_sort(self, plugin_names):
+        """
+        Sort plugins by their dependencies (topological sort).
+
+        Ensures that if plugin A depends on plugin B, B is loaded BEFORE A.
+
+        Args:
+            plugin_names: Iterable of plugin names to sort
+
+        Returns:
+            list: Sorted plugin names (dependencies first)
+        """
+        plugin_set = set(plugin_names)
+        sorted_plugins = []
+        visited = set()
+        temp_marked = set()
+
+        def visit(node):
+            if node in visited:
+                return
+            if node in temp_marked:
+                log.warning("[PLUGIN] circular dependency: %s", node)
+                return
+
+            temp_marked.add(node)
+
+            # Visit all dependencies of this node FIRST
+            meta = self.meta.get(node, {})
+            for dep in meta.get("requires", []):
+                if dep in plugin_set and dep not in visited:
+                    visit(dep)
+
+            temp_marked.remove(node)
+            visited.add(node)
+            sorted_plugins.append(node)
+
+        # Sort input for deterministic order
+        for plugin_name in sorted(plugin_names):
+            visit(plugin_name)
+
+        return sorted_plugins
+
+    def _check_dependency_conflict(self, name: str) -> tuple[bool, str]:
+        """
+        Check if unloading a plugin would break other plugins.
+
+        Returns:
+            (bool, str): (has_conflict, error_message)
+        """
+        dependents = self._get_dependents(name)
+        if dependents:
+            return True, f"Plugins depend on {name}: {', '.join(sorted(dependents))}"
+        return False, ""
+
+    def _validate_dependencies(self, name: str, _visited=None) -> tuple[bool, str]:
+        """
+        Validate that all dependencies of a plugin are available.
+
+        Returns:
+            (bool, str): (valid, error_message)
+        """
+        if _visited is None:
+            _visited = set()
+
+        if name in _visited:
+            return False, f"Circular dependency detected involving {name}"
+
+        _visited.add(name)
+
+        # Try to load metadata if not already loaded
+        if name not in self.meta:
+            try:
+                module = importlib.import_module(f"{self.package}.{name}")
+                meta = getattr(module, "PLUGIN_META", {})
+            except Exception as e:
+                return False, f"Cannot load {name}: {e}"
+        else:
+            meta = self.meta[name]
+
+        # Check required dependencies
+        for dep in meta.get("requires", []):
+            if dep not in self.discover():
+                return False, f"Plugin {name} requires {dep}, which is not available"
+
+            # Recursively validate transitive dependencies
+            valid, msg = self._validate_dependencies(dep, _visited.copy())
+            if not valid:
+                return False, msg
+
+        return True, ""
 
     # --------------------------------------------------
     # EVENTS
@@ -234,70 +352,219 @@ class PluginManager:
             # no-op: kept for symmetry / future hooks
             pass
 
-    async def unload(self, name):
+    async def unload(self, name, force=False):
         """
         Unload a plugin and clean up all associated resources.
 
         Args:
             name (str): Plugin name.
+            force (bool): If True, unload even if other plugins depend on it.
 
         Returns:
-            bool: True if unloaded, False if not loaded.
+            tuple: (bool, str) - (success, message)
         """
+        # Check for dependent plugins
+        if not force:
+            has_conflict, msg = self._check_dependency_conflict(name)
+            if has_conflict:
+                log.warning("[PLUGIN] cannot unload %s: %s", name, msg)
+                return False, msg
+
         async with self._lock:
             module = self.plugins.pop(name, None)
             if not module:
-                return False
+                return False, f"Plugin {name} is not loaded"
 
-            # Remove event handlers
-            for event, handler in self._event_handlers.pop(name, []):
-                self.bot.del_event_handler(event, handler)
+            try:
+                # Remove event handlers with error handling
+                removed_handlers = 0
+                for event, handler in self._event_handlers.pop(name, []):
+                    try:
+                        self.bot.del_event_handler(event, handler)
+                        removed_handlers += 1
+                    except Exception as e:
+                        log.warning(
+                            "[PLUGIN] failed to remove event handler %s.%s: %s",
+                            name, event, e
+                        )
 
-            # Run unload hook
-            if hasattr(module, "on_unload"):
-                try:
-                    await self._run_hook(module.on_unload)
-                except Exception:
-                    log.exception("[PLUGIN] on_unload failed: %s", name)
+                if removed_handlers > 0:
+                    log.debug("[PLUGIN] removed %d event handlers from %s", removed_handlers, name)
 
-            # Remove commands
-            COMMANDS.remove_by_plugin(name)
+                # Run unload hook with error handling
+                if hasattr(module, "on_unload"):
+                    try:
+                        await self._run_hook(module.on_unload)
+                    except Exception as e:
+                        log.exception("[PLUGIN] on_unload failed for %s: %s", name, e)
+                        # Don't fail the entire unload, continue with cleanup
 
-            # Debug leak detection (if enabled)
-            if log.isEnabledFor(logging.DEBUG):
-                from utils.command import debug_leaks
-                debug_leaks()
+                # Remove commands
+                COMMANDS.remove_by_plugin(name)
 
-            # Cleanup metadata
-            self.meta.pop(name, None)
+                # Debug leak detection (if enabled)
+                if log.isEnabledFor(logging.DEBUG):
+                    from utils.command import debug_leaks
+                    debug_leaks()
 
-            # Deterministically detach from import system (no GC reliance)
-            self._detach_module(module, name)
+                # Cleanup metadata
+                self.meta.pop(name, None)
 
-            log.info("[PLUGIN] unloaded: %s", name)
-            return True
+                # Deterministically detach from import system (no GC reliance)
+                self._detach_module(module, name)
 
-    async def reload(self, name):
+                log.info("[PLUGIN] unloaded: %s", name)
+                return True, f"Plugin {name} unloaded"
+
+            except Exception as e:
+                log.exception("[PLUGIN] error during unload of %s", name)
+                # Attempt to restore plugin reference for recovery
+                self.plugins[name] = module
+                return False, f"Error unloading {name}: {e}"
+
+    async def reload(self, name, auto=False):
         """
-        Reload a plugin.
+        Reload a plugin and optionally its dependents.
 
         Args:
             name (str): Plugin name.
+            auto (bool): If True, automatically reload dependent plugins.
+                        If False, return error if plugins depend on this one.
+
+        Returns:
+            tuple: (bool, str) - (success, message)
         """
-        log.info("[PLUGIN] reloading: %s", name)
-        await self.unload(name)
-        await self.load(name)
+        log.info("[PLUGIN] reloading: %s (auto=%s)", name, auto)
+
+        # Check for dependent plugins
+        dependents = self._get_dependents(name)
+
+        if dependents and not auto:
+            # Dependents exist but auto is False
+            log.warning(
+                "[PLUGIN] cannot reload %s safely: plugins depend on it: %s",
+                name, ", ".join(sorted(dependents))
+            )
+            return False, (
+                f"Cannot reload {name} safely. Plugins depend on it: {', '.join(sorted(dependents))}. "
+                f"Use 'plugin reload {name} auto' to reload with dependents."
+            )
+
+        try:
+            # If auto mode: unload dependents first (in reverse topological order)
+            if auto and dependents:
+                log.info("[PLUGIN] auto-unloading %d dependent(s)", len(dependents))
+                # Unload in reverse topological order (deepest first)
+                unload_order = list(reversed(self._topological_sort(dependents)))
+                unload_errors = []
+
+                for dep_name in unload_order:
+                    try:
+                        log.debug("[PLUGIN] unloading dependent: %s", dep_name)
+                        await self.unload(dep_name)
+                    except Exception as e:
+                        unload_errors.append(f"{dep_name}: {e}")
+                        log.exception("[PLUGIN] failed to unload dependent %s", dep_name)
+
+                if unload_errors:
+                    error_msg = "; ".join(unload_errors)
+                    log.error("[PLUGIN] errors unloading dependents: %s", error_msg)
+                    return False, f"Error unloading dependents: {error_msg}"
+
+            # Unload and reload target
+            log.debug("[PLUGIN] unloading target: %s", name)
+            await self.unload(name)
+
+            log.debug("[PLUGIN] loading target: %s", name)
+            await self.load(name)
+
+            # Reload dependents if auto mode (in topological order - dependencies first)
+            if auto and dependents:
+                reload_errors = []
+                # Load in topological order (dependencies first)
+                load_order = self._topological_sort(dependents)
+
+                for dep_name in load_order:
+                    try:
+                        log.debug("[PLUGIN] reloading dependent: %s", dep_name)
+                        await self.load(dep_name)
+                    except Exception as e:
+                        reload_errors.append(f"{dep_name}: {e}")
+                        log.exception("[PLUGIN] failed to reload dependent %s", dep_name)
+
+                if reload_errors:
+                    error_msg = "; ".join(reload_errors)
+                    log.error("[PLUGIN] errors reloading dependents: %s", error_msg)
+                    return True, (
+                        f"Plugin {name} reloaded, but errors occurred reloading {len(reload_errors)} dependent(s): {error_msg}"
+                    )
+
+                # Use len(load_order) instead of unique_dependents
+                return True, f"✅ Plugin {name} and {len(load_order)} dependent(s) reloaded successfully"
+
+            return True, f"✅ Plugin {name} reloaded"
+
+        except Exception as e:
+            log.exception("[PLUGIN] error during reload of %s", name)
+            return False, f"Error reloading {name}: {e}"
 
     async def load_all(self):
         """
-        Load all available plugins.
+        Load all available plugins in dependency order.
         """
-        for plugin in self.discover():
-            if plugin not in self.plugins:
+        discovered = self.discover()
+        loaded = set()
+        failed = set()
+
+        # Simple topological sort: try to load plugins with their dependencies first
+        max_iterations = len(discovered)
+        iteration = 0
+
+        while len(loaded) < len(discovered) and iteration < max_iterations:
+            iteration += 1
+            made_progress = False
+
+            for plugin in discovered:
+                if plugin in loaded or plugin in failed:
+                    continue
+
+                # Get metadata
                 try:
-                    await self.load(plugin)
+                    if plugin not in self.meta:
+                        module = await self._import(f"{self.package}.{plugin}")
+                        meta = getattr(module, "PLUGIN_META", {})
+                    else:
+                        meta = self.meta[plugin]
                 except Exception:
-                    log.exception("[PLUGIN] failed to load: %s", plugin)
+                    failed.add(plugin)
+                    continue
+
+                # Check if all dependencies are loaded
+                requires = meta.get("requires", [])
+                if all(dep in loaded for dep in requires):
+                    try:
+                        await self.load(plugin)
+                        loaded.add(plugin)
+                        made_progress = True
+                    except Exception:
+                        log.exception("[PLUGIN] failed to load: %s", plugin)
+                        failed.add(plugin)
+                else:
+                    # Dependencies not yet loaded, try again later
+                    pass
+
+            if not made_progress and len(loaded) < len(discovered):
+                # No progress made but plugins still unloaded
+                # Load remaining plugins anyway (may have unsatisfied deps)
+                for plugin in discovered:
+                    if plugin not in loaded and plugin not in failed:
+                        try:
+                            await self.load(plugin)
+                            loaded.add(plugin)
+                        except Exception:
+                            log.exception("[PLUGIN] failed to load: %s", plugin)
+                            failed.add(plugin)
+                break
 
     async def call_on_ready(self):
         """

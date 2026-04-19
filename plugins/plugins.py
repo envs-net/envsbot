@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "plugins",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Runtime plugin management",
     "category": "core",
 }
@@ -31,7 +31,7 @@ async def plugin_list(bot, sender, nick, args, msg, is_room):
     Shows both loaded and available (not loaded) plugins.
 
     Usage:
-        {prefilx}plugins list
+        {prefix}plugins list
     """
     categories = await bot.bot_plugins.list_detailed()
 
@@ -100,13 +100,15 @@ async def plugin_load(bot, sender, nick, args, msg, is_room):
     target = args[0].lower()
 
     if target == "all":
-        for name in bot.bot_plugins.available():
-            await bot.bot_plugins.load(name)
-        bot.reply(msg, "All plugins loaded.")
+        await bot.bot_plugins.load_all()
+        bot.reply(msg, "All plugins loaded (in dependency order).")
         return
 
-    await bot.bot_plugins.load(target)
-    bot.reply(msg, f"Plugin '{target}' loaded.")
+    try:
+        await bot.bot_plugins.load(target)
+        bot.reply(msg, f"Plugin '{target}' loaded.")
+    except Exception as e:
+        bot.reply(msg, f"Error loading '{target}': {e}")
 
 
 @command("plugin unload", role=Role.ADMIN, aliases=["plugins unload"])
@@ -116,48 +118,78 @@ async def plugin_unload(bot, sender, nick, args, msg, is_room):
 
     Usage:
         {prefix}plugin unload <plugin>
+        {prefix}plugin unload <plugin> force
     """
     if not args:
-        bot.reply(msg, f"Usage: {prefix}plugin unload <plugin>")
+        bot.reply(msg, f"Usage: {prefix}plugin unload <plugin> [force]")
         return
 
     name = args[0].lower()
+    force = len(args) > 1 and args[1].lower() == "force"
 
     if name == "plugins":
         bot.reply(msg, "Cannot unload plugin manager.")
         return
 
-    success = await bot.bot_plugins.unload(name)
+    success, message = await bot.bot_plugins.unload(name, force=force)
 
-    if success:
-        bot.reply(msg, f"Plugin '{name}' unloaded.")
-    else:
-        bot.reply(msg, f"Plugin '{name}' is not loaded.")
+    bot.reply(msg, message)
 
 
 @command("plugin reload", role=Role.ADMIN, aliases=["plugins reload"])
-async def plugin_reload(bot, sender, nick, args, msg, is_room):
+async def plugin_reload(bot, sender_jid, nick, args, msg, is_room):
     """
-    Reload a plugin or all plugins, that are currently loaded.
+    Reload a plugin or all plugins that are currently loaded.
+
+    Respects plugin dependencies. If other plugins depend on the target,
+    use 'auto' flag to reload them automatically.
 
     Usage:
         {prefix}plugin reload <plugin>
+        {prefix}plugin reload <plugin> auto
         {prefix}plugin reload all
+        {prefix}plugin reload all auto
     """
     if not args:
-        bot.reply(msg, f"Usage: {prefix}plugin reload <plugin|all>")
+        bot.reply(msg, f"Usage: {prefix}plugin reload <plugin> [auto]")
         return
 
     target = args[0].lower()
+    auto = len(args) > 1 and args[1].lower() == "auto"
 
     if target == "all":
-        for name in bot.bot_plugins.list():
-            if name != "plugins":
-                await bot.bot_plugins.reload(name)
+        # Reload all plugins
+        plugins_to_reload = [p for p in bot.bot_plugins.list() if p != "plugins"]
 
-        await bot.bot_plugins.reload("plugins")
-        bot.reply(msg, "All plugins reloaded.")
+        errors = []
+        successful = []
+
+        for name in plugins_to_reload:
+            # With auto flag: attempt reload with auto
+            success, message = await bot.bot_plugins.reload(name, auto=auto)
+            if success:
+                successful.append(name)
+                log.info("[PLUGIN] reload successful: %s", name)
+            else:
+                errors.append(f"- {name}: {message}")
+                log.warning("[PLUGIN] reload failed: %s", name)
+
+        # Reload plugins manager last
+        success, message = await bot.bot_plugins.reload("plugins", auto=False)
+        if success:
+            successful.append("plugins")
+        else:
+            errors.append(f"- plugins: {message}")
+
+        if errors:
+            error_text = "\n".join(errors)
+            if auto:
+                bot.reply(msg, f"⚠️ All plugins reloaded with some errors:\n{error_text}")
+            else:
+                bot.reply(msg, f"⚠️ All plugins reloaded with errors:\n{error_text}")
+        else:
+            bot.reply(msg, f"✅ All {len(successful)} plugins reloaded successfully.")
         return
 
-    await bot.bot_plugins.reload(target)
-    bot.reply(msg, f"Plugin '{target}' reloaded.")
+    success, message = await bot.bot_plugins.reload(target, auto=auto)
+    bot.reply(msg, message)

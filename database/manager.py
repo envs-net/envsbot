@@ -68,6 +68,7 @@ class DatabaseManager:
         self._flush_task = asyncio.create_task(self._flush_loop())
 
     async def _flush_loop(self):
+        """Background loop that flushes data periodically with retry logic."""
         try:
             while not self._stop_event.is_set():
                 try:
@@ -77,26 +78,45 @@ class DatabaseManager:
                     )
                 except asyncio.TimeoutError:
                     if self.users:
-                        try:
-                            await self.users.flush_all()
-                        except Exception:
-                            log.exception("[DatabaseManager] 🔴 Flush failed!")
+                        await self._flush_with_retry()
         finally:
-            # final guaranteed flush
+            # final guaranteed flush with retry
             if self.users:
-                try:
-                    await self.users.flush_all()
-                except Exception:
-                    log.exception("[DatabaseManager] 🔴 FINAL Flush failed!")
+                await self._flush_with_retry()
 
-    async def flush(self):
-        """Manually flush cached data."""
+    async def _flush_with_retry(self, max_retries: int = 3, backoff: float = 1.0):
+        """
+        Flush with exponential backoff retry logic.
 
-        if self.users:
+        Args:
+            max_retries: Maximum number of retry attempts
+            backoff: Initial backoff in seconds (exponential growth)
+        """
+        last_error = None
+        for attempt in range(max_retries):
             try:
                 await self.users.flush_all()
-            except Exception:
-                log.exception("[DatabaseManager] 🔴 Flush failed!")
+                return  # Success
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait_time = backoff * (2 ** attempt)
+                    log.warning(
+                        "[DatabaseManager] Flush attempt %d/%d failed, "
+                        "retrying in %.1fs: %s",
+                        attempt + 1, max_retries, wait_time, e
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    log.exception(
+                        "[DatabaseManager] 🔴 Flush failed after %d attempts: %s",
+                        max_retries, e
+                    )
+
+    async def flush(self):
+        """Manually flush cached data with retry logic."""
+        if self.users:
+            await self._flush_with_retry()
 
     async def close(self):
         """
