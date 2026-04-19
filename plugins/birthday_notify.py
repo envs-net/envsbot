@@ -180,12 +180,17 @@ async def _check_user_birthday(bot, user_jid_str: str, nick: str, room_jid):
         else:
             msg_text = f"🎂 Happy Birthday {nick}! 🎉"
 
-        msg = bot.make_message(
-            mto=room_jid,
-            mbody=msg_text,
-            mtype="groupchat"
-        )
-        msg.send()
+        try:
+            msg = bot.make_message(
+                mto=room_jid,
+                mbody=msg_text,
+                mtype="groupchat"
+            )
+            # Use safe send method
+            await bot._safe_send_message(msg)
+        except Exception as e:
+            log.exception(f"[BIRTHDAY] 🔴 Failed to send birthday message: {e}")
+            return
 
         # Mark as announced
         ANNOUNCED_TODAY[user_jid_str] = today_str

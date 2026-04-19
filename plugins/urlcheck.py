@@ -41,7 +41,6 @@ PLUGIN_META = {
     "version": "0.2.2",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
-    "requires": ["users"],
 }
 
 URLCHECK_KEY = "URLCHECK"

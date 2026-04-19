@@ -26,7 +26,7 @@ PLUGIN_META = {
     "version": "0.3.0",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
-    "Requires": ["rooms"],
+    "requires": ["rooms"],
 }
 
 SED_KEY = "SED"

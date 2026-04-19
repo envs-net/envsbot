@@ -24,7 +24,6 @@ PLUGIN_META = {
     "version": "0.1.2",
     "description": "User profile management",
     "category": "info",
-    "requires": ["rooms"],
 }
 
 
