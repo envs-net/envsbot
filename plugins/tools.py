@@ -1,11 +1,14 @@
 """
-Tools plugin: Utility commands for bot interaction and timezone-aware time/date lookups.
+Tools plugin: Utility commands for bot interaction including ping/pong, message echo,
+timezone-aware time/date lookups, and Unix timestamp conversion.
 
-Provides basic bot health checks and allows users to query the current time and date
-in their configured timezone or another user's timezone.
+Provides basic bot health checks, message echoing, and allows users to query the current
+time and date in their configured timezone or another user's timezone, as well as convert
+Unix timestamps.
 
 Commands:
     {prefix}ping
+    {prefix}echo <message>
     {prefix}time [nick]
     {prefix}date [nick]
     {prefix}utc
@@ -17,6 +20,13 @@ from datetime import datetime
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
+
+PLUGIN_META = {
+    "name": "tools",
+    "version": "0.1.0",
+    "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
+    "category": "utility",
+}
 
 
 def get_pm_target(sender_jid, nick):
@@ -39,6 +49,28 @@ async def ping_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}ping
     """
     bot.reply(msg, "🏓 Pong!", ephemeral=False)
+
+
+@command("echo", role=Role.USER)
+async def echo_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Repeat a message back to the user.
+
+    Usage:
+        {prefix}echo <message>
+
+    Examples:
+        {prefix}echo Hello World!
+    """
+    if not args:
+        bot.reply(msg, f"🔴 Usage: {config.get('prefix', ',')}echo <message>")
+        return
+
+    # Join all arguments to handle multi-word messages
+    message = " ".join(args)
+
+    # Escape any special characters for safety if needed
+    bot.reply(msg, f"🔊 {message}", ephemeral=False)
 
 
 @command("time", role=Role.USER, aliases=["t"])
