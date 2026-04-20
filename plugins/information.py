@@ -2,15 +2,10 @@
 Info plugin.
 
 This plugin provides various information commands:
-- Acronym lookup from Acromine
-- Thesaurus (synonyms) for English and German (OpenThesaurus)
 - Fetch latest toot from a Fediverse user
 - Urban Dictionary term search
 
 Commands:
-    {prefix}acronym <word>
-    {prefix}thesaurus <lang>:<word>
-    {prefix}thesaurus langs
     {prefix}fediverse <@user@instance>
     {prefix}udict <term>
 """
