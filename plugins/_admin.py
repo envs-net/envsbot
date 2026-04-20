@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "admin",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Bot administration commands",
     "category": "core",
 }
@@ -194,8 +194,16 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
 
         # CPU usage
         try:
-            cpu_percent = psutil.Process(os.getpid()).cpu_percent(interval=0.1)
-            lines.append(f"CPU Usage: {cpu_percent:.1f}%")
+            process = psutil.Process(os.getpid())
+            loop = asyncio.get_event_loop()
+
+            cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 1.0)
+
+            cpu_load = psutil.getloadavg()[0]
+            cpu_count = psutil.cpu_count()
+
+            lines.append(f"CPU Usage: {cpu_percent:.1f}% (Process)")
+            lines.append(f"System Load: {cpu_load:.2f} ({cpu_count} cores)")
         except Exception as e:
             log.debug("[ADMIN] Could not get CPU info: %s", e)
 
