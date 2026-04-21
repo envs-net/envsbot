@@ -678,7 +678,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
     # 1. Room context (groupchat) or MUC PM: lookup nick in room
     user_jid = resolve_real_jid(bot, msg, is_room)
     if (is_room or _is_muc_pm(msg)) and args:
-        target_nick = args[0]
+        target_nick = " ".join(args).strip()
         room = msg["from"].bare
         joined = JOINED_ROOMS.get(room, {})
         nicks = joined.get("nicks", {})
@@ -717,7 +717,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
 
     # 2. Direct message to bot JID: lookup nick globally, group by JID/rooms
     elif not is_room and not _is_muc_pm(msg) and args:
-        target_nick = args[0]
+        target_nick = " ".join(args).strip()
         index = bot.db.users._nick_index
         jids = index.get(target_nick, [])
         if not jids:
@@ -785,7 +785,7 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
     """
     # 1. Room context (groupchat) or MUC PM: lookup nick in room
     if (is_room or _is_muc_pm(msg)) and args:
-        target_nick = args[0]
+        target_nick = " ".join(args).strip()
         room = msg["from"].bare
         joined = JOINED_ROOMS.get(room, {})
         nicks = joined.get("nicks", {})
@@ -800,7 +800,7 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
         target_jid = str(target_jid)
         display_name = target_nick
     elif not is_room and not _is_muc_pm(msg) and args:
-        target_nick = args[0]
+        target_nick = " ".join(args).strip()
         index = bot.db.users._nick_index
         jids = index.get(target_nick, [])
         if not jids:
@@ -919,7 +919,7 @@ async def show_profile(bot, sender_jid, nick, args, msg, is_room):
     # Determine target JID and display name
     if args:
         # Try to resolve by nick in room or globally
-        target_nick = args[0]
+        target_nick = " ".join(args).strip()
         # Room context
         if (
             is_room or (
