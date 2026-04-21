@@ -9,6 +9,7 @@ Commands:
 
 import aiohttp
 import logging
+import urllib
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
@@ -17,7 +18,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "weather_time",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Gives weather according to users location (supports PM/DM)",
     "category": "info",
     "requires": ["rooms"],
@@ -120,7 +121,8 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
         )
         return
 
-    url = f"https://wttr.in/{location}?format=4&m"
+    enc_location = urllib.parse.quote(location, safe="")
+    url = f"https://wttr.in/{enc_location}?format=4&m"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=8) as resp:
