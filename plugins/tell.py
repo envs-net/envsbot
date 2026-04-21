@@ -10,10 +10,13 @@ Supports nicks with spaces. Command format: {prefix}tell <nick with spaces>: <me
 
 import datetime
 import pytz
+import logging
 from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
+
+log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "tell",
@@ -66,15 +69,15 @@ async def get_timezone(bot, jid):
 
 async def tell_store(bot, recv_jid, payload):
     store = bot.db.users.plugin("tell")
-    messages = await store.get(recv_jid, "messages") or []
+    messages = await store.get(recv_jid, "tell_messages") or []
     messages.append(payload)
-    await store.set(recv_jid, "messages", messages)
+    await store.set(recv_jid, "tell_messages", messages)
 
 
 async def tell_fetch(bot, recv_jid):
     store = bot.db.users.plugin("tell")
-    messages = await store.get(recv_jid, "messages") or []
-    await store.set(recv_jid, "messages", [])
+    messages = await store.get(recv_jid, "tell_messages") or []
+    await store.set(recv_jid, "tell_messages", [])
     return messages
 
 
@@ -101,6 +104,7 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     rec_jid = await get_real_jid(bot, rec_nick)
     if not rec_jid:
         bot.reply(msg, f"Could not find user '{rec_nick}'. (Maybe they never spoke?)")
+        log.info(f"[TELL] Failed to store message for '{rec_nick}' - user not found.")
         return
 
     send_jid = await get_real_jid(bot, sender_nick)
@@ -117,6 +121,7 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     }
     await tell_store(bot, rec_jid, payload)
     bot.reply(msg, f"[TELL] I'll deliver your message to {rec_nick} when they join.")
+    log.info(f"[TELL] Stored message for {rec_nick} ({rec_jid}) from {sender_nick} ({send_jid}): {message}")
 
 
 async def deliver_tell_messages(bot, msg):
@@ -149,6 +154,7 @@ async def deliver_tell_messages(bot, msg):
             f"[TELL] ({timestr}) {entry['send_nick']} - {entry['recv_nick']}: {entry['message']}",
             mention=True,
         )
+        log.info(f"[TELL] Delivered tell message to {nick} ({rec_jid}): {entry['message']}")
 
 
 def on_load(bot):
