@@ -112,7 +112,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
         room = msg["from"].bare
         nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
         if args:
-            target_nick = args[0]
+            target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
             if not info or not info.get("jid"):
                 bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
@@ -129,7 +129,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         # Direct message: allow querying someone else by their nick, fallback to self
         if args:
-            target_nick = args[0]
+            target_nick = " ".join(args).strip()
             # DM context: lookup globally
             index = bot.db.users._nick_index
             jids = index.get(target_nick, [])
@@ -188,7 +188,7 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
         room = msg["from"].bare
         nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
         if args:
-            target_nick = args[0]
+            target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
             if not info or not info.get("jid"):
                 bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
@@ -205,7 +205,7 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         # Direct message: allow querying someone else by their nick, fallback to self
         if args:
-            target_nick = args[0]
+            target_nick = " ".join(args).strip()
             # DM context: lookup globally
             index = bot.db.users._nick_index
             jids = index.get(target_nick, [])
