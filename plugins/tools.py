@@ -1,11 +1,14 @@
 """
-Tools plugin: Utility commands for bot interaction and timezone-aware time/date lookups.
+Tools plugin: Utility commands for bot interaction including ping/pong, message echo,
+timezone-aware time/date lookups, and Unix timestamp conversion.
 
-Provides basic bot health checks and allows users to query the current time and date
-in their configured timezone or another user's timezone.
+Provides basic bot health checks, message echoing, and allows users to query the current
+time and date in their configured timezone or another user's timezone, as well as convert
+Unix timestamps.
 
 Commands:
     {prefix}ping
+    {prefix}echo <message>
     {prefix}time [nick]
     {prefix}date [nick]
     {prefix}utc
@@ -13,10 +16,41 @@ Commands:
 """
 
 import pytz
+import logging
 from datetime import datetime
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
+
+log = logging.getLogger(__name__)
+
+PLUGIN_META = {
+    "name": "tools",
+    "version": "0.1.2",
+    "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
+    "category": "utility",
+}
+
+
+async def get_display_name(bot, jid):
+    store = bot.db.users.plugin("users")
+    try:
+        roomnicks = await store.get(jid, "roomnicks")
+        for room in roomnicks or []:
+            if room:
+                display_name = roomnicks[room][0]
+                break
+    except Exception as e:
+        log.warning(
+                    "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
+                    jid, e
+        )
+        display_name = "unknown"
+    log.info(
+        "[PROFILE] 👤 Profile lookup for self: %s",
+        display_name
+    )
+    return display_name
 
 
 def get_pm_target(sender_jid, nick):
@@ -41,6 +75,28 @@ async def ping_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, "🏓 Pong!", ephemeral=False)
 
 
+@command("echo", role=Role.USER)
+async def echo_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Repeat a message back to the user.
+
+    Usage:
+        {prefix}echo <message>
+
+    Examples:
+        {prefix}echo Hello World!
+    """
+    if not args:
+        bot.reply(msg, f"🔴 Usage: {config.get('prefix', ',')}echo <message>")
+        return
+
+    # Join all arguments to handle multi-word messages
+    message = " ".join(args)
+
+    # Escape any special characters for safety if needed
+    bot.reply(msg, f"🔊 {message}", ephemeral=False)
+
+
 @command("time", role=Role.USER, aliases=["t"])
 async def time_command(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -49,8 +105,9 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     Usage:
         {prefix}time
         {prefix}time <nick>
-
     """
+    profile_store = bot.db.users.profile()
+
     if is_room:
         room = msg["from"].bare
         nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
@@ -70,9 +127,31 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
             target_jid = str(info["jid"])
             display_name = nick
     else:
-        target_jid, display_name = get_pm_target(sender_jid, nick)
+        # Direct message: allow querying someone else by their nick, fallback to self
+        if args:
+            target_nick = args[0]
+            # DM context: lookup globally
+            index = bot.db.users._nick_index
+            jids = index.get(target_nick, [])
+            if not jids:
+                log.warning(
+                    "[PROFILE] 🔴  Nick '%s' not found globally",
+                    target_nick
+                )
+                bot.reply(
+                    msg,
+                    f"🔴  Nick '{target_nick}' not found."
+                )
+                return
+            for jid in jids:
+                if jid:
+                    target_jid = jid
+                    break
+            display_name = target_nick
+        else:
+            target_jid, display_name = get_pm_target(sender_jid, nick)
+            display_name = await get_display_name(bot, target_jid)
 
-    profile_store = bot.db.users.profile()
     timezone = await profile_store.get(target_jid, "TIMEZONE")
     location = await profile_store.get(target_jid, "LOCATION")
 
@@ -93,7 +172,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     now = datetime.now(tzinfo)
     formatted = now.strftime("%Y-%m-%d %H:%M:%S")
     loc_str = f" ({location})" if location else ""
-    bot.reply(msg, f"🕒 Time for {display_name}: {formatted} ({tzone}){loc_str}", ephemeral=False)
+    bot.reply(msg, f"⏰ Time for {display_name}: {formatted} {tzone}{loc_str}", ephemeral=False)
 
 
 @command("date", role=Role.USER)

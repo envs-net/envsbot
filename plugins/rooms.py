@@ -38,67 +38,71 @@ JOINED_ROOMS = {}
 
 # Handlers
 async def on_muc_presence(bot, pres):
-    room = pres["from"].bare
-    nick = pres["from"].resource
-    role = pres["muc"].get("role")
-    jid = pres["muc"].get("jid")
-    affiliation = pres["muc"].get("affiliation")
+    try:
+        room = pres["from"].bare
+        nick = pres["from"].resource
+        role = pres["muc"].get("role")
+        jid = pres["muc"].get("jid")
+        affiliation = pres["muc"].get("affiliation")
 
-    if jid is None:
-        jid = pres["from"]
+        if jid is None:
+            jid = pres["from"]
 
-    jid_bare = str(jid.bare) if jid else None
+        jid_bare = str(jid.bare) if jid else None
 
-    if room in JOINED_ROOMS:
-        room_info = JOINED_ROOMS[room]
-    else:
-        room_info = {
-            "nick": "unknown",
-            "autojoin": "unknown",
-            "status": None,
-            "affiliation": "unknown",
-            "role": "unknown",
-            "nicks": {}
-        }
+        # Defensive: Use .get() instead of direct access
+        room_info = JOINED_ROOMS.get(room)
+        if room_info is None:
+            room_info = {
+                "nick": "unknown",
+                "autojoin": "unknown",
+                "status": None,
+                "affiliation": "unknown",
+                "role": "unknown",
+                "nicks": {}
+            }
 
-    if pres["type"] == "unavailable":
-        if JOINED_ROOMS.get(room) is None:
-            return
-        if nick == JOINED_ROOMS[room]["nick"]:
-            del JOINED_ROOMS[room]
-        else:
-            try:
-                if nick in JOINED_ROOMS[room]["nicks"]:
-                    del JOINED_ROOMS[room]["nicks"][nick]
-            except KeyError:
-                log.debug(f"[ROOMS] KeyError while trying to del '{nick}'"
-                          f" from '{room}'")
+        if pres["type"] == "unavailable":
+            if JOINED_ROOMS.get(room) is None:
+                return
+            if nick == JOINED_ROOMS.get(room, {}).get("nick"):
+                JOINED_ROOMS.pop(room, None)
+            else:
+                try:
+                    nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
+                    if nick in nicks:
+                        del nicks[nick]
+                except Exception as e:
+                    log.debug(f"[ROOMS] Error removing nick '{nick}' from '{room}': {e}")
 
-    new_nick = room_info["nicks"].get(nick)
-    if new_nick is None:
-        new_nick = {
-            "jid": jid_bare if jid is not None else str(pres["from"]),
-            "affiliation":
-                affiliation if affiliation is not None else "unknown",
-            "role": role if role is not None else "unknown"
-        }
-    if affiliation is not None:
-        new_nick["affiliation"] = affiliation
-    if role is not None:
-        new_nick["role"] = role
-
-    room_info["nicks"][nick] = new_nick
-
-    if jid_bare == bot.boundjid.bare:
+        new_nick = room_info["nicks"].get(nick)
+        if new_nick is None:
+            new_nick = {
+                "jid": jid_bare if jid is not None else str(pres["from"]),
+                "affiliation":
+                    affiliation if affiliation is not None else "unknown",
+                "role": role if role is not None else "unknown"
+            }
         if affiliation is not None:
-            if affiliation != room_info["affiliation"]:
-                room_info["affiliation"] = affiliation
-        if role != room_info["role"]:
-            room_info["role"] = role
-        if nick != room_info["nick"]:
-            room_info["nick"] = nick
+            new_nick["affiliation"] = affiliation
+        if role is not None:
+            new_nick["role"] = role
 
-    JOINED_ROOMS[room] = room_info
+        room_info["nicks"][nick] = new_nick
+
+        if jid_bare == bot.boundjid.bare:
+            if affiliation is not None:
+                if affiliation != room_info["affiliation"]:
+                    room_info["affiliation"] = affiliation
+            if role != room_info["role"]:
+                room_info["role"] = role
+            if nick != room_info["nick"]:
+                room_info["nick"] = nick
+
+        JOINED_ROOMS[room] = room_info
+
+    except Exception as e:
+        log.exception(f"[ROOMS] Error in on_muc_presence: {e}")
 
 
 # -------------------------------------------------
@@ -498,10 +502,16 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         joined = room_jid in JOINED_ROOMS
 
         if joined:
-            nick = JOINED_ROOMS[room_jid]["nick"]
-            bot.plugin["xep_0045"].leave_muc(room_jid, nick)
+            room_data = JOINED_ROOMS.get(room_jid)
+            if room_data:
+                nick_to_leave = room_data.get("nick")
+                if nick_to_leave:
+                    try:
+                        bot.plugin["xep_0045"].leave_muc(room_jid, nick_to_leave)
+                    except Exception as e:
+                        log.warning(f"[ROOMS] Error leaving room: {e}")
 
-            del JOINED_ROOMS[room_jid]
+            JOINED_ROOMS.pop(room_jid, None)
 
             if room_jid in bot.presence.joined_rooms:
                 del bot.presence.joined_rooms[room_jid]
@@ -563,19 +573,24 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
               f" {'AUTOJOIN':8} {'STATUS'}")
     lines += ["", "📋 JOINED rooms", header, "-" * len(header)]
 
-    for room, data in JOINED_ROOMS.items():
-        nick = data["nick"]
-        affiliation = data["affiliation"]
-        role = data["role"]
-        autojoin = data["autojoin"]
-        status = data.get("status") or ""
-        autojoin_flag = "yes" if autojoin else "no"
+    # Make defensive copy to avoid race conditions
+    joined_rooms_copy = dict(JOINED_ROOMS)
+    for room, data in joined_rooms_copy.items():
+        try:
+            nick = data.get("nick", "unknown")
+            affiliation = data.get("affiliation", "unknown")
+            role = data.get("role", "unknown")
+            autojoin = data.get("autojoin", False)
+            status = data.get("status") or ""
+            autojoin_flag = "yes" if autojoin else "no"
 
-        # Only display status if not empty and not empty JSON
-        status_display = status if status and status != "{}" else ""
+            # Only display status if not empty and not empty JSON
+            status_display = status if status and status != "{}" else ""
 
-        lines.append(f"{room:40} {nick:15} {affiliation:10} {role:10}"
-                     f" {autojoin_flag:8} {status_display}")
+            lines.append(f"{room:40} {nick:15} {affiliation:10} {role:10}"
+                         f" {autojoin_flag:8} {status_display}")
+        except Exception as e:
+            log.debug(f"[ROOMS] Error formatting room info for {room}: {e}")
 
     output = "\n".join(lines)
     bot.reply(msg, f"{output}")
@@ -704,13 +719,17 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
     try:
         muc = bot.plugin["xep_0045"]
 
-        if room_jid in JOINED_ROOMS:
-            nick = JOINED_ROOMS[room_jid]["nick"]
-            muc.leave_muc(room_jid, nick)
+        room_data = JOINED_ROOMS.get(room_jid)
+        if room_data:
+            nick_to_leave = room_data.get("nick")
+            if nick_to_leave:
+                try:
+                    muc.leave_muc(room_jid, nick_to_leave)
+                except Exception as e:
+                    log.warning(f"[ROOMS] Error leaving MUC: {e}")
 
         # --- Delete room completely from JOINED_ROOMS --
-        if room_jid in JOINED_ROOMS:
-            del JOINED_ROOMS[room_jid]
+        JOINED_ROOMS.pop(room_jid, None)
 
         if room_jid in bot.presence.joined_rooms:
             del bot.presence.joined_rooms[room_jid]

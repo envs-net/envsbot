@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 # === set up logging ===
 log = logging.getLogger(__name__)
@@ -63,20 +64,33 @@ class PresenceManager:
         Broadcast the current presence status to all relevant targets,
         including joined rooms if available. Logs the status update.
         """
-        show = self.status["show"]
-        status = self.status["status"]
+        show = self.status.get("show", "online")
+        status = self.status.get("status", "")
 
-        self.bot.send_presence(pshow=show, pstatus=status)
+        try:
+            self.bot.send_presence(pshow=show, pstatus=status)
+        except Exception as e:
+            log.exception(f"[PRESENCE] Failed to send presence: {e}")
 
-        # --- Get JOINED_ROOMS from "rooms" plugin ---
-        rooms_plugin = self.bot.bot_plugins.plugins.get("rooms", None)
-        if rooms_plugin is not None:
-            rooms = dict(rooms_plugin.JOINED_ROOMS)
-            for room in rooms.keys():
-                self.bot.send_presence(
-                    pto=f"{room}/{rooms[room]['nick']}",
-                    pshow=show,
-                    pstatus=status)
+        # --- Get JOINED_ROOMS from "rooms" plugin (safe access) ---
+        try:
+            rooms_plugin = self.bot.bot_plugins.plugins.get("rooms", None)
+            if rooms_plugin is not None:
+                # Make a defensive copy to avoid race conditions
+                rooms_copy = dict(rooms_plugin.JOINED_ROOMS)
+                for room, room_data in rooms_copy.items():
+                    try:
+                        nick = room_data.get("nick")
+                        if nick:
+                            self.bot.send_presence(
+                                pto=f"{room}/{nick}",
+                                pshow=show,
+                                pstatus=status)
+                    except Exception as e:
+                        log.debug(f"[PRESENCE] Failed to send presence to room {room}: {e}")
+        except Exception as e:
+            log.debug(f"[PRESENCE] Error accessing rooms plugin: {e}")
+
         # log message
         log.info(f"[PRESENCE] {self.emoji(show)} Status set: "
                  f"'{show}': [{status}]")
@@ -92,5 +106,5 @@ class PresenceManager:
         Returns:
             str: The emoji corresponding to the presence state.
         """
-        show = show or self.status["show"]
+        show = show or self.status.get("show", "online")
         return self.emojis.get(show, "")

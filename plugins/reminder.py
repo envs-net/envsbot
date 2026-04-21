@@ -4,21 +4,21 @@ Schedule and manage reminders.
 Schedule reminders to notify you at a later time.
 
 **Commands:**
-• remind <duration> <message> — Set a new reminder
-• reminders — List all your pending reminders
-• remind delete <id> — Delete a reminder by ID
+• {prefix}remind <duration> <message> — Set a new reminder
+• {prefix}reminders — List all your pending reminders
+• {prefix}remind delete <id> — Delete a reminder by ID
 
 **Duration Formats:**
 • Single: 10s, 5m, 1h, 2d
 • Combined: 1h30m, 2d5h, 3d12h30m45s
 
 **Examples:**
-• ;remind 30m Take a break
-• ;remind 1h Important meeting
-• ;remind 2d5h3m20s Long term goal with exact time
-• ;remind 1h30m Team standup
-• ;reminders
-• ;remind delete 1
+• {prefix}remind 30m Take a break
+• {prefix}remind 1h Important meeting
+• {prefix}remind 2d5h3m20s Long term goal with exact time
+• {prefix}remind 1h30m Team standup
+• {prefix}reminders
+• {prefix}remind delete 1
 
 **Limits:**
 • Maximum reminder duration: 365 days
@@ -31,7 +31,6 @@ import re
 import logging
 from utils.command import command, Role
 from utils.config import config
-from database.reminders import MAX_REMINDER_SECONDS
 
 log = logging.getLogger(__name__)
 

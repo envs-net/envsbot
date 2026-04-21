@@ -105,7 +105,7 @@ class Bot(slixmpp.ClientXMPP):
                     mbody=f"{notif['nick']}: ✅ Bot restart complete!",
                     mtype="groupchat"
                 )
-                message.send()
+                await self._safe_send_message(message)
                 log.info("[ADMIN] Bot restart notification sent to room %s", notif["room"])
             else:
                 # Send private message
@@ -114,12 +114,30 @@ class Bot(slixmpp.ClientXMPP):
                     mbody="✅ Bot restart complete!",
                     mtype="chat"
                 )
-                message.send()
+                await self._safe_send_message(message)
                 log.info("[ADMIN] Bot restart notification sent to %s", notif["sender"])
         except FileNotFoundError:
-            pass
+            pass  # Expected if no restart notification
         except Exception as e:
-            log.error("[ADMIN] Failed to send restart notification: %s", e)
+            log.error("[ADMIN] Failed to process restart notification: %s", e)
+
+    async def _safe_send_message(self, message):
+        """
+        Safely send a message with proper error handling.
+
+        Handles both sync and async send() methods.
+        Logs any errors that occur.
+
+        Args:
+            message: slixmpp Message object to send
+        """
+        try:
+            result = message.send()
+            # Check if send() is a coroutine (async)
+            if inspect.iscoroutine(result):
+                await result
+        except Exception as e:
+            log.exception("[BOT] Failed to send message: %s", e)
 
     # fired on "session_start"
     async def on_start(self, event):
@@ -147,33 +165,40 @@ class Bot(slixmpp.ClientXMPP):
 
     # fired when a MUC room message arrives
     async def on_muc_message(self, msg):
-        room = msg['from'].bare
-        nick = msg['mucnick']
-        # ignore messages from ourselves (our nick)
-        if self.presence.joined_rooms.get(room) == nick:
-            return
+        try:
+            room = msg['from'].bare
+            nick = msg.get('mucnick')  # Use .get() for safety
 
-        # proceed to command handling
-        if msg["type"] == "groupchat":
-            await self.handle_command(
-                msg["body"],
-                msg["from"],
-                msg["mucnick"],
-                msg,
-                True
-            )
+            # ignore messages from ourselves (our nick)
+            bot_nick = self.presence.joined_rooms.get(room)
+            if bot_nick == nick:
+                return
+
+            # proceed to command handling
+            if msg["type"] == "groupchat":
+                await self.handle_command(
+                    msg["body"],
+                    msg["from"],
+                    nick,
+                    msg,
+                    True
+                )
+        except Exception as e:
+            log.exception("[BOT] Error in on_muc_message: %s", e)
 
     # fired when a direct message to the bot or a MUC DM arrives
     async def on_private_message(self, msg):
-
-        if msg["type"] in ("chat", "normal"):
-            await self.handle_command(
-                msg["body"],
-                msg["from"],
-                None,
-                msg,
-                False
-            )
+        try:
+            if msg["type"] in ("chat", "normal"):
+                await self.handle_command(
+                    msg["body"],
+                    msg["from"],
+                    None,
+                    msg,
+                    False
+                )
+        except Exception as e:
+            log.exception("[BOT] Error in on_private_message: %s", e)
 
     # -------------------------------------------------
     # HELPER FUNCTIONS
@@ -185,12 +210,21 @@ class Bot(slixmpp.ClientXMPP):
         """
         import slixmpp
         from plugins.rooms import JOINED_ROOMS
-        jid = slixmpp.JID(jid).bare
 
-        owner_jid = slixmpp.JID(config["owner"]).bare
+        try:
+            jid = slixmpp.JID(jid).bare
+        except Exception as e:
+            log.warning("[BOT] Failed to parse JID '%s': %s", jid, e)
+            return Role.NONE
+
+        try:
+            owner_jid = slixmpp.JID(config["owner"]).bare
+        except Exception as e:
+            log.warning("[BOT] Failed to parse owner JID: %s", e)
+            owner_jid = None
 
         # owner override
-        if jid == owner_jid:
+        if owner_jid and jid == owner_jid:
             return Role.OWNER
 
         row = await self.db.users.get(jid)
@@ -204,18 +238,23 @@ class Bot(slixmpp.ClientXMPP):
             return Role.NONE
 
         # Elevate to MODERATOR if user is admin/owner in any joined room
-        if room and room in JOINED_ROOMS:
-            nicks = JOINED_ROOMS[room].get("nicks", {})
-            for nick_info in nicks.values():
-                if str(nick_info.get("jid")) == str(jid):
-                    affiliation = nick_info.get("affiliation", "")
-                    if (affiliation in ("admin", "owner")
-                            and db_role > Role.MODERATOR):
-                        return Role.MODERATOR
+        if room:
+            room_info = JOINED_ROOMS.get(room)
+            if room_info:
+                nicks = room_info.get("nicks", {})
+                for nick_info in nicks.values():
+                    try:
+                        if str(nick_info.get("jid")) == str(jid):
+                            affiliation = nick_info.get("affiliation", "")
+                            if (affiliation in ("admin", "owner")
+                                    and db_role > Role.MODERATOR):
+                                return Role.MODERATOR
+                    except Exception as e:
+                        log.debug("[BOT] Error checking room affiliation: %s", e)
         return db_role
 
     def reply(self, msg, text, mention=True, thread=True, rate_limit=True,
-              ephemeral=True):
+              ephemeral=False):
         """
         Smart reply helper for plugins.
 
@@ -224,6 +263,7 @@ class Bot(slixmpp.ClientXMPP):
         - Supports message threading
         - Formats multi-line responses
         - Basic per-user rate limiting
+        - Safe message sending
 
         Args:
             msg: Original message object
@@ -231,6 +271,7 @@ class Bot(slixmpp.ClientXMPP):
             mention (bool): Mention sender in group chats
             thread (bool): Thread reply if possible
             rate_limit (bool): Apply anti-spam limit
+            ephemeral (bool): Mark as ephemeral (no-store)
         """
 
         # Convert list responses into multi-line text
@@ -247,54 +288,73 @@ class Bot(slixmpp.ClientXMPP):
                 nick = msg.get("mucnick") or msg["from"].resource
                 body = f"{nick}: {text}"
 
-            message = self.make_message(
-                mto=msg["from"].bare,
-                mbody=body,
-                mtype="groupchat"
-            )
+            try:
+                message = self.make_message(
+                    mto=msg["from"].bare,
+                    mbody=body,
+                    mtype="groupchat"
+                )
 
-            if thread:
-                thread_id = msg.get("thread") or msg.get("id")
-                if thread_id:
-                    try:
-                        message["thread"] = thread_id
-                    except Exception:
-                        log.exception("[BOT] 🔴 Setting Thread failed!")
+                if thread:
+                    thread_id = msg.get("thread") or msg.get("id")
+                    if thread_id:
+                        try:
+                            message["thread"] = thread_id
+                        except Exception:
+                            log.debug("[BOT] Setting thread failed!")
 
-            # Make reply ephemeral
-            if ephemeral:
-                message.append(ET.Element("{urn:xmpp:hints}no-store"))
-            # send reply
-            message.send()
+                # Make reply ephemeral
+                if ephemeral:
+                    message.append(ET.Element("{urn:xmpp:hints}no-store"))
 
-            # support test MockMessage
-            if hasattr(msg, "replies"):
-                msg.replies.append(text)
+                # send reply safely
+                asyncio.create_task(self._reply_send_wrapper(message))
+
+                # support test MockMessage
+                if hasattr(msg, "replies"):
+                    msg.replies.append(text)
+
+            except Exception as e:
+                log.exception("[BOT] Error creating groupchat reply: %s", e)
 
         else:
 
-            message = self.make_message(
-                mto=msg["from"],
-                mbody=text,
-                mtype="chat"
-            )
+            try:
+                message = self.make_message(
+                    mto=msg["from"],
+                    mbody=text,
+                    mtype="chat"
+                )
 
-            if thread:
-                thread_id = msg.get("thread") or msg.get("id")
-                if thread_id:
-                    try:
-                        message["thread"] = thread_id
-                    except Exception:
-                        pass
+                if thread:
+                    thread_id = msg.get("thread") or msg.get("id")
+                    if thread_id:
+                        try:
+                            message["thread"] = thread_id
+                        except Exception:
+                            pass
 
-            # Make reply ephemeral
-            message.append(ET.Element("{urn:xmpp:hints}no-store"))
-            # Send message
-            message.send()
+                # Make reply ephemeral
+                message.append(ET.Element("{urn:xmpp:hints}no-store"))
 
-            # support test MockMessage
-            if hasattr(msg, "replies"):
-                msg.replies.append(text)
+                # send reply safely
+                asyncio.create_task(self._reply_send_wrapper(message))
+
+                # support test MockMessage
+                if hasattr(msg, "replies"):
+                    msg.replies.append(text)
+
+            except Exception as e:
+                log.exception("[BOT] Error creating private reply: %s", e)
+
+    async def _reply_send_wrapper(self, message):
+        """
+        Wrapper to send messages asynchronously with error handling.
+        """
+        try:
+            await self._safe_send_message(message)
+        except Exception as e:
+            log.exception("[BOT] Error in reply send wrapper: %s", e)
 
     # -------------------------------------------------
     # UNIFIED COMMAND HANDLER
@@ -372,14 +432,24 @@ class Bot(slixmpp.ClientXMPP):
         jid = None
         room = None
         muc = self.plugin.get("xep_0045", None)
-        if muc:
-            room = msg['from'].bare
-            nick = msg.get("mucnick") or msg["from"].resource
-            jid = muc.get_jid_property(room, nick, "jid")
+
+        try:
+            if muc:
+                room = msg['from'].bare
+                nick = msg.get("mucnick") or msg["from"].resource
+                jid = muc.get_jid_property(room, nick, "jid")
+        except Exception as e:
+            log.debug("[BOT] Error getting JID from MUC: %s", e)
+
+        # Fallback to sender_jid if JID resolution failed
         if jid is None:
             jid = sender_jid
         else:
-            jid = str(slixmpp.JID(jid).bare)
+            try:
+                jid = str(slixmpp.JID(jid).bare)
+            except Exception as e:
+                log.warning("[BOT] Failed to parse resolved JID: %s", e)
+                jid = str(sender_jid)
 
         # Apply rate limiting on ingress
         allowed, retry_after = await self.rate_limiter.allow(jid)
@@ -387,7 +457,7 @@ class Bot(slixmpp.ClientXMPP):
             # Avoid notifying the whole room; log and occasional
             # admin notification only
             if self.rate_limiter.notify_allowed(jid):
-                log.info(("[BOT] 🟡️Rate-limited %s "
+                log.info(("[BOT] 🟡️ Rate-limited %s "
                           "in room %s (retry_after=%.1fs)"),
                          jid, room, retry_after)
             return
@@ -453,10 +523,18 @@ async def main():
         log.info("[XMPP] Shutdown request")
 
         xmpp.disconnect()
-        await xmpp.disconnected
+
+        try:
+            await asyncio.wait_for(xmpp.disconnected, timeout=2.0)
+        except asyncio.TimeoutError:
+            log.warning("[XMPP] Disconnect timeout")
+
     finally:
         log.info("[XMPP] disconnected. Closing Database...")
-        await asyncio.shield(xmpp.db.close())
+        try:
+            await xmpp.db.close()
+        except Exception as e:
+            log.exception(f"[XMPP] Error closing database: {e}")
         log.info("[XMPP] ✅ Database closed! End!")
 
 if __name__ == "__main__":

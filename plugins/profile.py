@@ -21,11 +21,31 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "profile",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "User profile management",
     "category": "info",
-    "requires": ["rooms"],
 }
+
+
+async def get_display_name(bot, jid):
+    store = bot.db.users.plugin("users")
+    try:
+        roomnicks = await store.get(jid, "roomnicks")
+        for room in roomnicks or []:
+            if room:
+                display_name = roomnicks[room][0]
+                break
+    except Exception as e:
+        log.warning(
+                    "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
+                    jid, e
+        )
+        display_name = "unknown"
+    log.info(
+        "[PROFILE] 👤 Profile lookup for self: %s",
+        display_name
+    )
+    return display_name
 
 
 def resolve_real_jid(bot, msg, is_room):
@@ -734,7 +754,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
     # 3. No args: use requesting user
     else:
         target_jid = resolve_real_jid(bot, msg, is_room)
-        display_name = nick
+        display_name = await get_display_name(bot, target_jid) or nick
         profile_store = bot.db.users.profile()
         value = await profile_store.get(target_jid, field)
         log.info(f"[PROFILE] {user_jid} looking up {field} for"
@@ -795,7 +815,7 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
         display_name = target_nick
     else:
         target_jid = resolve_real_jid(bot, msg, is_room)
-        display_name = nick
+        display_name = await get_display_name(bot, target_jid) or nick
     profile_store = bot.db.users.profile()
     value = await profile_store.get(target_jid, "BIRTHDAY")
     if not value:
@@ -962,11 +982,7 @@ async def show_profile(bot, sender_jid, nick, args, msg, is_room):
     else:
         # No args: show own profile
         target_jid = resolve_real_jid(bot, msg, is_room)
-        display_name = nick
-        log.info(
-            "[PROFILE] 👤 Profile lookup for self: %s",
-            display_name
-        )
+        display_name = await get_display_name(bot, target_jid) or nick
 
     profile_store = bot.db.users.profile()
     fields = [

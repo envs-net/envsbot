@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "birthday_notify",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "🎂 Automatic birthday notifications in rooms (opt-in per room)",
     "category": "fun",
     "requires": ["rooms", "profile"],
@@ -180,12 +180,17 @@ async def _check_user_birthday(bot, user_jid_str: str, nick: str, room_jid):
         else:
             msg_text = f"🎂 Happy Birthday {nick}! 🎉"
 
-        msg = bot.make_message(
-            mto=room_jid,
-            mbody=msg_text,
-            mtype="groupchat"
-        )
-        msg.send()
+        try:
+            msg = bot.make_message(
+                mto=room_jid,
+                mbody=msg_text,
+                mtype="groupchat"
+            )
+            # Use safe send method
+            await bot._safe_send_message(msg)
+        except Exception as e:
+            log.exception(f"[BIRTHDAY] 🔴 Failed to send birthday message: {e}")
+            return
 
         # Mark as announced
         ANNOUNCED_TODAY[user_jid_str] = today_str
@@ -298,16 +303,14 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Enable or disable birthday notifications for this room (MUC direct message only).
     """
+    from_jid = msg["from"].bare
+    is_muc_pm = from_jid in JOINED_ROOMS
+
     # Only allow in MUC direct message (not groupchat, not direct to bot)
-    if not (
-        msg.get("type") in ("chat", "normal")
-        and hasattr(msg["from"], "bare")
-        and "@" in str(msg["from"].bare)
-    ):
+    if is_room or not is_muc_pm:
         bot.reply(
             msg,
-            "This command can only be used in a MUC direct message "
-            "(not in groupchat or direct to the bot)."
+            "🔴 This command can only be used in a MUC DM."
         )
         return
 
@@ -320,67 +323,69 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     subcmd = args[0]
-    room_jid = str(msg['from'].bare)
+    room_jid = str(from_jid)
     store = bot.db.users.plugin("birthday_notify")
     key = "birthday_notify_enabled_rooms"
 
     if subcmd == "on":
-        # Get current dict
         enabled_rooms = await store.get_global(key, default={})
         if not isinstance(enabled_rooms, dict):
             enabled_rooms = {}
-        # Add this room
-        enabled_rooms[room_jid] = True
-        # Save back
-        await store.set_global(key, enabled_rooms)
-        # Manually write to DB
-        runtime_data = bot.db.users._runtime_cache.get(GLOBAL_JID, {"plugins": {}})
-        await bot.db.execute(
-            """
-            INSERT INTO users_runtime (jid, last_updated, data)
-            VALUES (?, ?, ?)
-            ON CONFLICT(jid)
-            DO UPDATE SET
-                last_updated = excluded.last_updated,
-                data = excluded.data
-            """,
-            (GLOBAL_JID, datetime.datetime.now(datetime.timezone.utc).isoformat(), json.dumps(runtime_data))
-        )
-        # Clear cache
-        bot.db.users._runtime_cache.pop(GLOBAL_JID, None)
-        bot.reply(msg, "✅ Birthday notifications ENABLED for this room 🎂")
-        log.info(f"[BIRTHDAY] ✅ Enabled for room: {room_jid}")
+
+        if room_jid not in enabled_rooms or not enabled_rooms[room_jid]:
+            enabled_rooms[room_jid] = True
+            await store.set_global(key, enabled_rooms)
+            # Manually write to DB
+            runtime_data = bot.db.users._runtime_cache.get(GLOBAL_JID, {"plugins": {}})
+            await bot.db.execute(
+                """
+                INSERT INTO users_runtime (jid, last_updated, data)
+                VALUES (?, ?, ?)
+                ON CONFLICT(jid)
+                DO UPDATE SET
+                    last_updated = excluded.last_updated,
+                    data = excluded.data
+                """,
+                (GLOBAL_JID, datetime.datetime.now(datetime.timezone.utc).isoformat(), json.dumps(runtime_data))
+            )
+            # Clear cache
+            bot.db.users._runtime_cache.pop(GLOBAL_JID, None)
+            bot.reply(msg, "✅ Birthday notifications ENABLED for this room 🎂")
+            log.info(f"[BIRTHDAY] ✅ Enabled for room: {room_jid}")
+        else:
+            bot.reply(msg, "ℹ️ Birthday notifications already enabled.")
 
     elif subcmd == "off":
-        # Get current dict
         enabled_rooms = await store.get_global(key, default={})
         if not isinstance(enabled_rooms, dict):
             enabled_rooms = {}
-        # Remove this room
-        enabled_rooms.pop(room_jid, None)
-        # Save back
-        await store.set_global(key, enabled_rooms)
-        # Manually write to DB
-        runtime_data = bot.db.users._runtime_cache.get(GLOBAL_JID, {"plugins": {}})
-        await bot.db.execute(
-            """
-            INSERT INTO users_runtime (jid, last_updated, data)
-            VALUES (?, ?, ?)
-            ON CONFLICT(jid)
-            DO UPDATE SET
-                last_updated = excluded.last_updated,
-                data = excluded.data
-            """,
-            (GLOBAL_JID, datetime.datetime.now(datetime.timezone.utc).isoformat(), json.dumps(runtime_data))
-        )
-        # Clear cache
-        bot.db.users._runtime_cache.pop(GLOBAL_JID, None)
-        bot.reply(msg, "✅ Birthday notifications DISABLED for this room")
-        log.info(f"[BIRTHDAY] ✅ Disabled for room: {room_jid}")
+
+        if room_jid in enabled_rooms and enabled_rooms[room_jid]:
+            enabled_rooms.pop(room_jid, None)
+            await store.set_global(key, enabled_rooms)
+            # Manually write to DB
+            runtime_data = bot.db.users._runtime_cache.get(GLOBAL_JID, {"plugins": {}})
+            await bot.db.execute(
+                """
+                INSERT INTO users_runtime (jid, last_updated, data)
+                VALUES (?, ?, ?)
+                ON CONFLICT(jid)
+                DO UPDATE SET
+                    last_updated = excluded.last_updated,
+                    data = excluded.data
+                """,
+                (GLOBAL_JID, datetime.datetime.now(datetime.timezone.utc).isoformat(), json.dumps(runtime_data))
+            )
+            # Clear cache
+            bot.db.users._runtime_cache.pop(GLOBAL_JID, None)
+            bot.reply(msg, "✅ Birthday notifications DISABLED for this room")
+            log.info(f"[BIRTHDAY] ✅ Disabled for room: {room_jid}")
+        else:
+            bot.reply(msg, "ℹ️ Birthday notifications already disabled.")
 
     elif subcmd == "status":
         enabled = await _is_enabled_for_room(bot, room_jid)
-        status = "✅ ENABLED 🎂" if enabled else "❌ DISABLED"
+        status = "✅ ENABLED 🎂" if enabled else "🛑 DISABLED"
         bot.reply(msg, f"Birthday notifications: {status}")
 
 

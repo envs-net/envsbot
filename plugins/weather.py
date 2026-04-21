@@ -17,17 +17,37 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "weather_time",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Gives weather according to users location (supports PM/DM)",
     "category": "info",
     "requires": ["rooms"],
 }
 
+log = logging.getLogger(__name__)
+
+
+async def get_display_name(bot, jid):
+    store = bot.db.users.plugin("users")
+    try:
+        roomnicks = await store.get(jid, "roomnicks")
+        for room in roomnicks or []:
+            if room:
+                display_name = roomnicks[room][0]
+                break
+    except Exception as e:
+        log.warning(
+                    "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
+                    jid, e
+        )
+        display_name = "unknown"
+    log.info(
+        "[PROFILE] 👤 Profile lookup for self: %s",
+        display_name
+    )
+    return display_name
+
 
 def get_pm_target(sender_jid, nick):
-    """
-    Returns (bare_jid, nick_for_display)
-    """
     if hasattr(sender_jid, "bare"):
         bare_jid = sender_jid.bare
     else:
@@ -39,13 +59,13 @@ def get_pm_target(sender_jid, nick):
 async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the current weather for your configured location or another user's location.
-
     Usage:
         {prefix}weather
         {prefix}weather <nick>
     """
+    profile_store = bot.db.users.profile()
+
     if is_room:
-        # Multi-User Chat: get target jid from nick
         room = msg["from"].bare
         nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
         if args:
@@ -64,9 +84,31 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
             target_jid = str(info["jid"])
             display_name = nick
     else:
-        target_jid, display_name = get_pm_target(sender_jid, nick)
+        # Direct message: allow querying someone else by their nick, fallback to self
+        if args:
+            target_nick = args[0]
+            # DM context: lookup globally
+            index = bot.db.users._nick_index
+            jids = index.get(target_nick, [])
+            if not jids:
+                log.warning(
+                    "[PROFILE] 🔴  Nick '%s' not found globally",
+                    target_nick
+                )
+                bot.reply(
+                    msg,
+                    f"🔴  Nick '{target_nick}' not found."
+                )
+                return
+            for jid in jids:
+                if jid:
+                    target_jid = jid
+                    break
+            display_name = target_nick
+        else:
+            target_jid, display_name = get_pm_target(sender_jid, nick)
+            display_name = await get_display_name(bot, target_jid)
 
-    profile_store = bot.db.users.profile()
     location = await profile_store.get(target_jid, "LOCATION")
     timezone = await profile_store.get(target_jid, "TIMEZONE")
 

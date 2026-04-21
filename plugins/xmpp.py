@@ -27,20 +27,20 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
-    "Requires": ["rooms"],
+    "requires": ["rooms"],
 }
 
 HELP_TEXT = """
 XMPP Utility Commands:
   {prefix}x help                  - Show this help message
   {prefix}x version <domain>      - Show server software version (XEP-0092)
-  {prefix}x items <domain>        - List service items (XEP-0030)
+  {prefix}x items <domain|jid>    - List service items (XEP-0030)
   {prefix}x contact <domain>      - Show server contact information (XEP-0030)
-  {prefix}x info <domain>         - Show identities & features (XEP-0030)
-  {prefix}x ping <jid|domain>     - Ping entity (XEP-0199)
+  {prefix}x info <domain|jid>     - Show identities & features (XEP-0030)
+  {prefix}x ping <domain|jid>     - Ping entity (XEP-0199)
   {prefix}x uptime <domain>       - Show server uptime (XEP-0012)
   {prefix}x srv <domain>          - DNS SRV lookup
   {prefix}x compliance <domain>   - Compliance score
@@ -89,6 +89,42 @@ def inform_if_jid(msg, target, bot, command_name, domain_only=False):
     return target
 
 
+def _validate_domain(domain: str) -> tuple[bool, str]:
+    """
+    Validate that a string is a valid domain name.
+
+    Returns:
+        (bool, str): (is_valid, error_message)
+    """
+    if not domain or not domain.strip():
+        return False, "Domain cannot be empty"
+
+    domain = domain.strip().lower()
+
+    # Must contain at least one dot (example.com, not just "localhost")
+    if '.' not in domain:
+        return False, f"'{domain}' is not a valid domain (must have at least one dot, e.g., example.com)"
+
+    # Check each label
+    labels = domain.split('.')
+    for label in labels:
+        if not label:
+            return False, f"'{domain}' has empty labels (e.g., 'example..com')"
+        if len(label) > 63:
+            return False, f"Label '{label}' in '{domain}' is too long (max 63 characters)"
+        # Valid characters: a-z, 0-9, hyphen (not at start/end)
+        if not all(c.isalnum() or c == '-' for c in label):
+            return False, f"Label '{label}' contains invalid characters"
+        if label.startswith('-') or label.endswith('-'):
+            return False, f"Label '{label}' cannot start or end with hyphen"
+
+    # TLD must be at least 2 characters
+    if len(labels[-1]) < 2:
+        return False, f"'{domain}' has invalid TLD (must be at least 2 characters)"
+
+    return True, ""
+
+
 @command("xmpp help", role=Role.USER, aliases=["x help"])
 async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -109,11 +145,21 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp version <domain>
         {prefix}x version <domain>
     """
-    target, error = _resolve_target(bot, args, msg, is_room, nick)
-    if error:
-        bot.reply(msg, f"❌ {error}")
+    if not args or len(args) < 1:
+        bot.reply(msg, "❌ Missing domain")
         return
-    target = inform_if_jid(msg, target, bot, "version", domain_only=True)
+
+    target = get_domain_from_jid(args[0])
+
+    # Validate domain
+    is_valid, error_msg = _validate_domain(target)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
+    if "@" in args[0]:
+        bot.reply(msg, f"Note: 'version' only works with domains. Using '{target}' from '{args[0]}'.")
+
     try:
         result = await bot.plugin["xep_0092"].get_version(jid=target, timeout=8)
         name, version, os_info = None, None, None
@@ -158,11 +204,21 @@ async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp uptime <domain>
         {prefix}x uptime <domain>
     """
-    target, error = _resolve_target(bot, args, msg, is_room, nick)
-    if error:
-        bot.reply(msg, f"❌ {error}")
+    if not args or len(args) < 1:
+        bot.reply(msg, "❌ Missing domain")
         return
-    target = inform_if_jid(msg, target, bot, "uptime", domain_only=True)
+
+    target = get_domain_from_jid(args[0])
+
+    # Validate domain
+    is_valid, error_msg = _validate_domain(target)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
+    if "@" in args[0]:
+        bot.reply(msg, f"Note: 'uptime' only works with domains. Using '{target}' from '{args[0]}'.")
+
     try:
         result = await bot.plugin["xep_0012"].get_last_activity(jid=target, timeout=8)
         seconds = result['last_activity']['seconds']
@@ -246,11 +302,21 @@ async def cmd_xmpp_contact(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp contact <domain>
         {prefix}x contact <domain>
     """
-    target, error = _resolve_target(bot, args, msg, is_room, nick)
-    if error:
-        bot.reply(msg, f"❌ {error}")
+    if not args or len(args) < 1:
+        bot.reply(msg, "❌ Missing domain")
         return
-    target = inform_if_jid(msg, target, bot, "contact", domain_only=True)
+
+    target = get_domain_from_jid(args[0])
+
+    # Validate domain
+    is_valid, error_msg = _validate_domain(target)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
+    if "@" in args[0]:
+        bot.reply(msg, f"Note: 'contact' only works with domains. Using '{target}' from '{args[0]}'.")
+
     try:
         info = await bot.plugin["xep_0030"].get_info(jid=target, timeout=8)
         disco_info = info.get('disco_info', {})
@@ -389,31 +455,111 @@ async def cmd_xmpp_ping(bot, sender_jid, nick, args, msg, is_room):
 async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
     """
     Perform DNS SRV lookups for XMPP services.
+
+    Checks for:
+    - _xmpp-client._tcp (Client-to-Server)
+    - _xmpp-server._tcp (Server-to-Server)
+    - _xmpps-client._tcp (XMPP over TLS)
+    - _xmpps-server._tcp (XMPP-S Server)
+
     Usage:
         {prefix}xmpp srv <domain>
         {prefix}x srv <domain>
+
+    Examples:
+        {prefix}x srv example.com
+        {prefix}x srv user@example.com    (uses example.com)
     """
     if not args or len(args) < 1:
-        bot.reply(msg, "❌ Missing domain")
+        bot.reply(msg, "❌ Missing domain\nUsage: {prefix}x srv <domain>")
         return
+
     domain = get_domain_from_jid(args[0])
+
+    # Validate domain
+    is_valid, error_msg = _validate_domain(domain)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
     if "@" in args[0]:
         bot.reply(msg, f"Note: 'srv' only works with domains. Using '{domain}' from '{args[0]}'.")
+
     try:
+        import dns.resolver
+        import dns.exception
+    except ImportError:
+        bot.reply(msg, "🔴 DNS library not installed. Install python-dnspython: pip install dnspython")
+        return
+
+    try:
+        # Services to check
+        services = [
+            '_xmpp-client._tcp',
+            '_xmpp-server._tcp',
+            '_xmpps-client._tcp',
+            '_xmpps-server._tcp',
+        ]
+
         srv_records = {}
-        for service in ['_xmpp-client', '_xmpp-server']:
+
+        for service in services:
+            srv_name = f"{service}.{domain}"
             try:
-                results = socket.getaddrinfo(
-                    f"{service}._tcp.{domain}", None,
-                    family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-                )
-                srv_records[service] = "Found"
-            except socket.gaierror:
-                srv_records[service] = "Not found"
-        result = f"🔍 DNS SRV records for {domain}:\n"
-        for service, status in srv_records.items():
-            result += f"  • {service}: {status}\n"
+                answers = dns.resolver.resolve(srv_name, 'SRV', raise_on_no_answer=False)
+
+                if not answers:
+                    srv_records[service] = "❌ Not found"
+                    continue
+
+                records = []
+                for rdata in answers:
+                    target = str(rdata.target).rstrip('.')
+                    port = rdata.port
+                    priority = rdata.priority
+                    weight = rdata.weight
+                    records.append({
+                        'target': target,
+                        'port': port,
+                        'priority': priority,
+                        'weight': weight
+                    })
+
+                # Sort by priority, then by weight
+                records.sort(key=lambda x: (x['priority'], -x['weight']))
+
+                # Format for display
+                formatted = []
+                for rec in records:
+                    formatted.append(
+                        f"{rec['target']}:{rec['port']} "
+                        f"(priority={rec['priority']}, weight={rec['weight']})"
+                    )
+
+                srv_records[service] = "\n    ".join(formatted)
+
+            except dns.exception.DNSException as e:
+                srv_records[service] = f"❌ Not found ({type(e).__name__})"
+            except Exception as e:
+                srv_records[service] = f"❌ Error: {e}"
+
+        # Build result
+        result = f"🔍 DNS SRV records for **{domain}**:\n"
+
+        found_any = False
+        for service in services:
+            status = srv_records[service]
+            if "Not found" not in status and "Error" not in status:
+                found_any = True
+                result += f"\n**{service}:**\n    {status}"
+            else:
+                result += f"\n**{service}:** {status}"
+
+        if not found_any:
+            result += "\n\n⚠️ No SRV records found for this domain!"
+
         bot.reply(msg, result)
+
     except Exception as e:
         bot.reply(msg, f"🔴 DNS lookup failed: {e}")
 
@@ -430,9 +576,18 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
     if not args or len(args) < 1:
         bot.reply(msg, "❌ Missing domain")
         return
+
     domain = get_domain_from_jid(args[0])
+
+    # Validate domain
+    is_valid, error_msg = _validate_domain(domain)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
     if "@" in args[0]:
         bot.reply(msg, f"Note: 'compliance' only works with domains. Using '{domain}' from '{args[0]}'.")
+
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://compliance.conversations.im/server/{domain}/"

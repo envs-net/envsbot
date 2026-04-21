@@ -23,10 +23,10 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "sed",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
-    "Requires": ["rooms"],
+    "requires": ["rooms"],
 }
 
 SED_KEY = "SED"
@@ -322,8 +322,8 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
     Handle sed corrections or enable/disable sed in a room.
 
     Usage:
-        {prefix}sed on|off              - Enable/disable sed (room only, moderator only)
-        {prefix}sed status              - Show if sed is enabled in this room
+        {prefix}sed on|off              - Enable/disable sed (MUC DM only)
+        {prefix}sed status              - Show if sed is enabled in this room (MUC DM only)
         {prefix}sed <pattern> <replacement> [flags] - Apply correction
 
     Examples:
@@ -335,43 +335,46 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
     from_jid = msg["from"].bare
     is_muc_pm = from_jid in JOINED_ROOMS
 
-    # Handle status command
+    # Handle status command (MUC PM ONLY)
     if args and args[0] == "status":
-        if is_room or is_muc_pm:
-            # This is a room or MUC-PM
-            store = await get_sed_store(bot)
-            enabled_rooms = await store.get_global(SED_KEY, default={})
+        if is_room or not is_muc_pm:
+            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
+            return
 
-            if from_jid in enabled_rooms and enabled_rooms[from_jid]:
-                bot.reply(msg, "✅ SED corrections are **enabled** in this room.")
-            else:
-                bot.reply(msg, "🛑 SED corrections are **disabled** in this room.")
+        store = await get_sed_store(bot)
+        enabled_rooms = await store.get_global(SED_KEY, default={})
+
+        if from_jid in enabled_rooms and enabled_rooms[from_jid]:
+            bot.reply(msg, "✅ SED corrections are **enabled** in this room.")
         else:
-            # This is a true DM
-            bot.reply(msg, "ℹ️ SED corrections are **always available** in DMs.")
+            bot.reply(msg, "🛑 SED corrections are **disabled** in this room.")
         return
 
-    # Handle on/off commands (room and MUC-PM only)
-    if (
-        (is_room or is_muc_pm)
-        and args and args[0] in ("on", "off")
-    ):
-        if from_jid not in JOINED_ROOMS:
-            bot.reply(msg, "This room is not a joined room.")
+    # Handle on/off commands (MUC PM ONLY)
+    if args and args[0] in ("on", "off"):
+        if is_room or not is_muc_pm:
+            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
             return
 
         store = await get_sed_store(bot)
         enabled_rooms = await store.get_global(SED_KEY, default={})
 
         if args[0] == "on":
-            enabled_rooms[from_jid] = True
-            await store.set_global(SED_KEY, enabled_rooms)
-            bot.reply(msg, "✅ SED corrections enabled in this room.")
+            if from_jid not in enabled_rooms or not enabled_rooms[from_jid]:
+                enabled_rooms[from_jid] = True
+                await store.set_global(SED_KEY, enabled_rooms)
+                bot.reply(msg, "✅ SED corrections enabled in this room.")
+                log.info(f"[SED] Room {from_jid} enabled")
+            else:
+                bot.reply(msg, "ℹ️ SED corrections already enabled.")
         else:
-            if from_jid in enabled_rooms:
+            if from_jid in enabled_rooms and enabled_rooms[from_jid]:
                 del enabled_rooms[from_jid]
                 await store.set_global(SED_KEY, enabled_rooms)
-            bot.reply(msg, "🛑 SED corrections disabled in this room.")
+                bot.reply(msg, "🛑 SED corrections disabled in this room.")
+                log.info(f"[SED] Room {from_jid} disabled")
+            else:
+                bot.reply(msg, "ℹ️ SED corrections already disabled.")
         return
 
     if not args or len(args) < 2:

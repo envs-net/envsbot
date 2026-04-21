@@ -38,10 +38,9 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "urlcheck",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
-    "requires": ["users"],
 }
 
 URLCHECK_KEY = "URLCHECK"
@@ -82,53 +81,66 @@ async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
     Usage:
         {prefix}urlcheck on
         {prefix}urlcheck off
+        {prefix}urlcheck status
     """
-    # Only allow in MUC direct message (not groupchat, not direct to bot)
-    if not (
-        msg.get("type") in ("chat", "normal")
-        and hasattr(msg["from"], "bare")
-        and "@" in str(msg["from"].bare)
-    ):
-        bot.reply(
-            msg,
-            "This command can only be used in a MUC direct message "
-            "(not in groupchat or direct to the bot)."
-        )
+    from_jid = msg["from"].bare
+    is_muc_pm = from_jid in JOINED_ROOMS
+
+    # Handle status command (MUC PM ONLY)
+    if args and args[0] == "status":
+        if is_room or not is_muc_pm:
+            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
+            return
+
+        store = await get_urlcheck_store(bot)
+        enabled_rooms = await store.get_global(URLCHECK_KEY, default={})
+
+        if from_jid in enabled_rooms and enabled_rooms[from_jid]:
+            bot.reply(msg, "✅ URL checking is **enabled** in this room.")
+        else:
+            bot.reply(msg, "🛑 URL checking is **disabled** in this room.")
         return
 
-    room = msg["from"].bare
+    # Handle on/off commands (MUC PM ONLY)
+    if args and args[0] in ("on", "off"):
+        if is_room or not is_muc_pm:
+            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
+            return
 
-    # Check if the bot is actually joined to this room
-    if room not in JOINED_ROOMS:
-        bot.reply(
-            msg,
-            "This room is not a joined room. URL checking can only be "
-            "enabled or disabled for joined rooms."
-        )
+        store = await get_urlcheck_store(bot)
+        enabled_rooms = await store.get_global(URLCHECK_KEY, default={})
+
+        if args[0] == "on":
+            if from_jid not in enabled_rooms or not enabled_rooms[from_jid]:
+                enabled_rooms[from_jid] = True
+                await store.set_global(URLCHECK_KEY, enabled_rooms)
+                bot.reply(msg, "✅ URL checking enabled in this room.")
+                log.info(f"[URLCHECK] Room {from_jid} enabled")
+            else:
+                bot.reply(msg, "ℹ️ URL checking already enabled.")
+        else:
+            if from_jid in enabled_rooms and enabled_rooms[from_jid]:
+                del enabled_rooms[from_jid]
+                await store.set_global(URLCHECK_KEY, enabled_rooms)
+                bot.reply(msg, "🛑 URL checking disabled in this room.")
+                log.info(f"[URLCHECK] Room {from_jid} disabled")
+            else:
+                bot.reply(msg, "ℹ️ URL checking already disabled.")
         return
 
-    if not args or args[0] not in ("on", "off"):
-        bot.reply(msg, f"Usage: {bot.prefix}urlcheck <on|off>")
+    if not args or args[0] not in ("on", "off", "status"):
+        bot.reply(msg, f"Usage: {bot.prefix}urlcheck <on|off|status>")
         return
-
-    store = await get_urlcheck_store(bot)
-    enabled_rooms = await store.get_global(URLCHECK_KEY, default={})
-
-    if args[0] == "on":
-        enabled_rooms[room] = True
-        await store.set_global(URLCHECK_KEY, enabled_rooms)
-        bot.reply(msg, "✅ URL checking enabled in this room.")
-    else:
-        if room in enabled_rooms:
-            del enabled_rooms[room]
-            await store.set_global(URLCHECK_KEY, enabled_rooms)
-        bot.reply(msg, "🛑 URL checking disabled in this room.")
 
 
 async def on_groupchat_message(bot, msg):
     room = msg["from"].bare
     nick = msg.get("mucnick") or msg["from"].resource
-    if JOINED_ROOMS.get(room, {}).get("nick") == nick:
+    body = msg.get("body", "").strip()
+
+    # IMPORTANT: Only ignore URLCHECK's own replies to prevent loops.
+    # But process URLs from the bot (e.g., xkcd) anyway!
+    if body.startswith("[URL]") or body.startswith("[YOUTUBE]"):
         return
 
     # Only process URLs if the room is a joined room
