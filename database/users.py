@@ -430,33 +430,6 @@ class UserManager:
         now = datetime.now(timezone.utc).isoformat()
         await self.set(jid, "last_seen", now)
 
-    async def get_all_users(self):
-        # 1. Load all JIDs from DB
-        rows = await self.db.execute_fetchall(
-            "SELECT * FROM users"
-        )
-
-        users = []
-
-        # 2. Populate cache from DB (without overwriting dirty cache)
-        for row in rows:
-            user = dict(row)
-            jid = user["jid"]
-
-            # Only populate if not already cached
-            if jid not in self._users_cache:
-                self._users_cache[jid] = user
-
-            users.append(self._users_cache[jid])
-
-        # 3. Include cache-only users (not yet flushed to DB)
-        for jid, user in self._users_cache.items():
-            if jid not in {u["jid"] for u in users}:
-                users.append(user)
-
-        # 4. Return sorted result (by jid for determinism)
-        return sorted(users, key=lambda u: u["jid"])
-
     async def delete(self, jid):
         # 1. Delete from database
         await self.db.execute(

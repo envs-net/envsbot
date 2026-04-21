@@ -1,5 +1,7 @@
 # envsbot
 
+---
+
 A modular XMPP bot built with Python 3 and slixmpp.
 
 ---
@@ -12,13 +14,13 @@ A modular XMPP bot built with Python 3 and slixmpp.
 
 ## 🌐 envs pubnix/tilde
 
-envsbot is developed with the **envs pubnix** environment in mind, but is not limited to it. It takes the tildebot IRC bot as model and hopefully will include all of its features and more (especially for XMPP) in future.
+envsbot is developed with the **envs pubnix** environment in mind, but is not limited to it. It takes the tildebot IRC bot as model and hopefully will include all of its features and more (especially in XMPP groupchats and DMs).
 
 ---
 
 ## About
 
-envsbot is now in a usable state: the core framework is mostly stable, although probably not bug-free, supports dynamic plugin loading, and provides a structured command system. I can begin developing user plugins to extend the bot's functionality.
+envsbot is now in a usable state: the core framework is mostly stable, although probably not bug-free, supports dynamic plugin loading, and provides a structured command system. We are now developing new plugins and features on top of it.
 
 - Plugin-based architecture
 - Dynamic plugin loading/reloading
@@ -28,178 +30,86 @@ envsbot is now in a usable state: the core framework is mostly stable, although 
 
 ---
 
-## Full Command list
+## Available Plugins
 
-Here's a full command list of all included plugins so far. The commands have to
-be prefixed with the configured "prefix" in the configuration file like ",help"
-for example. Most of them have aliases or shortcuts, which you can find out
-with the "help" command.
+Below is a list of available plugins in `plugins/` and their descriptions.  
+Descriptions are derived from plugin docstrings or, if needed, from code analysis.
 
-Room admins are automatically elevated to Role.MODERATOR for the specific room
-if they're not already MODERATORS or higher globally.
+- **_admin**  
+  Admin management commands.  
+  _Exposes administrative commands for bot management, such as restart, shutdown, and status monitoring. Lets OWNERs restart or gracefully shut down the bot, and ADMINs view detailed resource and thread status._
 
----
+- **_reg_profile**  
+  Bot profile initialization plugin.  
+  _Manages the bot’s public XMPP profile and its own database profile during startup or reload. No user commands; sets DB profile, vCard, and avatar as needed._
 
-### Plugin: _reg_profile
-**Description:** Bot DB profile, Bot avatar and vCard profile management. Only
-run on startup and plugin reload. Only updates, if something changes.
+- **birthday_notify**  
+  Birthday notification plugin.  
+  _Parses user birthday data, stores it, and automatically sends birthday notifications to users in group chats or private messages based on configured dates._
 
-_No commands provided._
+- **dice**  
+  Dice rolling plugin.  
+  _Roll dice with optional modifiers and success conditions (e.g., `,dice 3d20 -5 >= 30`). Useful for games and randomization._
 
----
+- **help**  
+  📚 Help system for the bot.  
+  _Dynamic help for plugins and commands, showing documentation in private messages based on user role._
 
-### Plugin: \_test
-**Description:** Testing commands for the bot.
+- **information**  
+  Info plugin.  
+  _Commands for fetching the latest toots from Fediverse users and Urban Dictionary term search._
 
-| Command        | Role | Description                                   |
-|----------------|------|-----------------------------------------------|
-| \_ping          | NONE | Responds with "test pong" for diagnostics     |
-| \_reloadtest    | NONE | Verifies command registration after reload    |
+- **plugins**  
+  Plugin management commands.  
+  _Administrative commands for managing plugins at runtime, including load, unload, reload, and listing plugins._
 
----
+- **profile**  
+  Profile management plugin.  
+  _Allows users to set and display their NAME, LOCATION, TIMEZONE, BIRTHDAY, PRONOUNS, SPECIES, EMAIL, and personal URLs. Fields can be queried for yourself or others._
 
-### Plugin: dice
-**Description:** Roll dice with optional modifiers and success conditions.
+- **reminder**  
+  Reminder system plugin.  
+  _Lets users schedule reminders (one-time or repeating) and sends reminders as private messages or group chat notices at the appropriate time._
 
-| Command                                 | Role | Description                                         |
-|------------------------------------------|------|-----------------------------------------------------|
-| dice \<num\>d\<sides\> \[mod\] \[op\] \[target\]  | USER | Roll dice with optional modifier and success check  (op: \<=, \>=, \>, \<) |
+- **rooms**  
+  Room management and persistence.  
+  _Administrative commands for managing XMPP MUC rooms stored in the bot's database, including adding, updating, joining, syncing rooms, and setting rooms to autojoin._
 
----
+- **rss**  
+  RSS Feed watcher plugin.  
+  _Checks configured RSS/Atom feeds periodically and posts updates to rooms. Allows adding, deleting, and listing feeds per room._
 
-### Plugin: help
-**Description:** Dynamic help for plugins and commands.
+- **sed**  
+  Substitute/replace command plugin.  
+  _Enables IRC/Slack-style “s/foo/bar/” corrections for previous messages in the same room or private conversation._
 
-| Command                | Role | Description                                 |
-|------------------------|------|---------------------------------------------|
-| help \[\<plugin\>\|{prefix}\<command\>\] | NONE | Show help for plugins or commands           |
+- **status**  
+  Bot presence and status management.  
+  _Lets moderators change the bot's XMPP presence (online, away, DND, etc.) and allows users to view the bot's current presence and status._
 
----
+- **tools**  
+  Utility tools and core bot commands.  
+  _Provides ping/pong, echo, timezone-aware time and date lookup, UTC time, and Unix timestamp conversion. The `{prefix}time` and `{prefix}date` commands are now part of this plugin._
 
-### Plugin: information
-**Description:** Acronym, thesaurus, fediverse, and Urban Dictionary lookup.
+- **urlcheck**  
+  URL Check plugin.  
+  _Automatic URL title and YouTube info fetching for group chats with spam avoidance/cooldown. Moderators may enable or disable this per room._
 
-| Command                        | Role    | Description                                         |
-|---------------------------------|---------|-----------------------------------------------------|
-| acronym \<word\>                  | USER    | Look up the meaning of an acronym                   |
-| fediverse \<@user@instance\>      | USER    | Show the latest public toot from a Fediverse user   |
-| thesaurus \<lang\>:\<word\>         | USER    | Look up synonyms for a word in English or German    |
-| thesaurus langs                 | USER    | List available thesaurus languages                  |
-| udict \<term\>                    | USER    | Search Urban Dictionary for a term                  |
+- **users**  
+  Users plugin.  
+  _Manages automatic user registration by JID, tracks last-seen and per-room nickname history, allows lookup and administrative updating of user roles._
 
----
+- **weather**  
+  Weather info plugin.  
+  _Shows current weather for a user’s configured location via wttr.in, supporting group chat and private queries._
 
-### Plugin: plugins
-**Description:** Runtime plugin management
+- **xkcd**  
+  XKCD comic plugin.  
+  _Fetches and displays XKCD web comics and explanations for given comic numbers or random selections._
 
-| Command                        | Role   | Description                                 |
-|---------------------------------|--------|---------------------------------------------|
-| plugin info \<plugin\>            | ADMIN  | Show metadata of a plugin                   |
-| plugin list                     | ADMIN  | List all plugins grouped by category        |
-| plugin load \<plugin\|all\>        | ADMIN  | Load a plugin or all plugins                |
-| plugin reload \<plugin\|all\>      | ADMIN  | Reload a plugin or all plugins              |
-| plugin unload \<plugin\>           | ADMIN  | Unload a plugin                             |
-
----
-
-### Plugin: profile
-**Description:** User profile management
-
-| Command                                         | Role    | Description                                         |
-|--------------------------------------------------|---------|----------------------------------------------------|
-| birthday \[nick\]                                  | USER    | Show the birthday of a user and days until next     |
-| config birthday \<YYYY-MM-DD\|MM-DD\>               | USER    | Set your birthday in your profile                  |
-| config email \<your@email\>                        | USER    | Set your email in your profile                     |
-| config fullname \<your full name\>                 | USER    | Set some descriptive name in your profile                 |
-| config location \<your location\>                  | USER    | Set your location in your profile                  |
-| config pronouns \<your pronouns\>                  | USER    | Set your pronouns in your profile                  |
-| config species \<your species\>                    | USER    | Set your species in your profile                   |
-| config timezone \<timezone\>                       | USER    | Set your timezone in your profile                  |
-| config url add \<url\> \[description\]               | USER    | Add a URL with optional description to your profile|
-| config url delete \<url\>                          | USER    | Delete a URL from your profile                     |
-| config url list                                  | USER    | List your stored URLs                              |
-| email \[nick\]                                     | USER    | Show the email of a user                           |
-| fullname \[nick\]                                  | USER    | Show the full name of a user                       |
-| profile \[nick\]                                   | USER    | Show all profile data for yourself or another user  |
-| pronouns \[nick\]                                  | USER    | Show the pronouns of a user                        |
-| species \[nick\]                                   | USER    | Show the species of a user                         |
-| urls \[nick\]                                      | USER    | Show the URLs of a user                            |
-
----
-
-### Plugin: rooms
-**Description:** Database-backed room management
-
-| Command                                 | Role    | Description                                               |
-|------------------------------------------|---------|----------------------------------------------------------|
-| rooms add \<room\_jid\> \<nick\> \[autojoin\]   | ADMIN   | Add a new room configuration to the database             |
-| rooms delete \<room\_jid\> \[force\]          | ADMIN   | Remove a room configuration from the database            |
-| rooms join \<room\_jid\> \[nick\]             | ADMIN   | Join a room immediately and add it to the database       |
-| rooms leave \<room\_jid\>                   | ADMIN   | Leave a joined room immediately (runtime only)           |
-| rooms list                               | ADMIN   | Show all rooms stored in the database                    |
-| rooms sync                               | ADMIN   | Synchronize runtime rooms with database configuration    |
-| rooms update \<room\_jid\> \<field\> \<value\>  | ADMIN   | Update a configuration field of a stored room            |
-
----
-
-### Plugin: rss
-**Description:** RSS/Atom feed watcher and poster
-
-| Command                        | Role      | Description                                               |
-|---------------------------------|-----------|----------------------------------------------------------|
-| rss add \<url\>                   | MODERATOR | Add an RSS feed to the current room                      |
-| rss delete \<url\>                | MODERATOR | Remove an RSS feed from the current room                 |
-| rss list                        | MODERATOR | List all RSS feeds configured (globally)       |
-
----
-
-### Plugin: status
-**Description:** Bot presence and status management
-
-| Command                | Role    | Description                                      |
-|------------------------|---------|--------------------------------------------------|
-| status                 | NONE    | Display the current bot presence and status      |
-| status set \<show\> \[message\] | ADMIN   | Change the bot presence and optional status msg  |
-
----
-
-### Plugin: tools
-**Description:** XMPP utility tools (ping, diagnostics, etc.)
-
-| Command                | Role | Description                                   |
-|------------------------|------|-----------------------------------------------|
-| ping \<jid\|nick\|server\>        | USER | Ping an XMPP JID, room JID/nick, nick or server     |
-
----
-
-### Plugin: urlcheck
-**Description:** URL title and YouTube info fetcher for groupchats
-
-| Command                | Role       | Description                                      |
-|------------------------|------------|--------------------------------------------------|
-| urlcheck \<on\|off\>      | MODERATOR  | Enable or disable URL checking in a room. Shows info about an URL or YouTube Video if set to "on"         |
-
----
-
-### Plugin: users
-**Description:** User management with caching, nick lookup and logging
-
-| Command                        | Role   | Description                                   |
-|---------------------------------|--------|-----------------------------------------------|
-| users delete \<jid\>              | ADMIN  | Delete a user                                 |
-| users info \<jid\|nick\>           | ADMIN  | Show user info by JID or nickname             |
-| users list \[room\_jid\]           | ADMIN  | List all users of a room                      |
-| users role \<jid\> \<role\>         | ADMIN  | Update a user's role                          |
-
----
-
-### Plugin: weather\_time
-**Description:** Gives weather and time according to users location
-
-| Command                | Role | Description                                   |
-|------------------------|------|-----------------------------------------------|
-| time \[nick\]            | USER | Show the current time for a user's timezone   |
-| weather \[nick\]         | USER | Show the current weather for a user's location|
+- **xmpp**  
+  XMPP protocol extension plugin.  
+  Handles protocol-specific actions, possibly including advanced XMPP commands, pubsub, message carbons, or XMPP integration features for core bot or plugin functionality.
 
 ---
 
@@ -223,7 +133,7 @@ _No commands provided._
    ```
 
 4. **Configure the bot:**
-   - Copy `config_sample.json` to `config.json` and edit with your XMPP credentials and settings.
+    - Copy `config_sample.json` to `config.json` and edit with your XMPP credentials and settings.
 
 5. **Run the bot:**
    ```sh
@@ -234,20 +144,19 @@ _No commands provided._
 
 ## TODO
 
-- [X] Plugin Management Plugin \[core\]
-- [X] User Management Plugin \[core\]
-- [X] Room Management Plugin \[core\]
-- [X] Profile Management Plugin \[core\]
+- [X] Plugin Management Plugin [core]
+- [X] User Management Plugin [core]
+- [X] Room Management Plugin [core]
+- [X] Profile Management Plugin [core]
 - [ ] Add more plugins
 - [ ] Improve documentation and usage examples
 - [ ] Enhance error handling and logging
 - [ ] Choosable Plugins on startup in configuration file
-- [ ] Improve documentation for configuration file
+- [X] Improve documentation for configuration file
 
 ---
 
 ## License
 
-This project is licensed under the **GPL-3.0-only** License. See the [LICENSE](LICENSE) file for details. Future versions of the GPL License are explicitly excluded!
+This project is licensed under the **GPL-3.0-only** License. See the [LICENSE](LICENSE) file for details. Future versions of the GPL License are explicitly
 
----

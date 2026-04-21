@@ -203,7 +203,30 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
             target_jid = str(info["jid"])
             display_name = nick
     else:
-        target_jid, display_name = get_pm_target(sender_jid, nick)
+        # Direct message: allow querying someone else by their nick, fallback to self
+        if args:
+            target_nick = args[0]
+            # DM context: lookup globally
+            index = bot.db.users._nick_index
+            jids = index.get(target_nick, [])
+            if not jids:
+                log.warning(
+                    "[PROFILE] 🔴  Nick '%s' not found globally",
+                    target_nick
+                )
+                bot.reply(
+                    msg,
+                    f"🔴  Nick '{target_nick}' not found."
+                )
+                return
+            for jid in jids:
+                if jid:
+                    target_jid = jid
+                    break
+            display_name = target_nick
+        else:
+            target_jid, display_name = get_pm_target(sender_jid, nick)
+            display_name = await get_display_name(bot, target_jid)
 
     profile_store = bot.db.users.profile()
     timezone = await profile_store.get(target_jid, "TIMEZONE")
