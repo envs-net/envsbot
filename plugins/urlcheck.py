@@ -135,10 +135,17 @@ async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
 
 async def on_groupchat_message(bot, msg):
     room = msg["from"].bare
-    nick = msg.get("mucnick") or msg["from"].resource
+    nick = msg["from"].resource
     body = msg.get("body", "").strip()
 
-    # IMPORTANT: Only ignore URLCHECK's own replies to prevent loops.
+    # ==== Prevent processing own messages ====
+    try:
+        bot_nick = JOINED_ROOMS[room]["nick"]
+        if bot_nick == nick:
+            return
+    except KeyError:
+        return
+
     # But process URLs from the bot (e.g., xkcd) anyway!
     if body.startswith("[URL]") or body.startswith("[YOUTUBE]"):
         return
