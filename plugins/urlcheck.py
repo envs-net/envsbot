@@ -162,9 +162,26 @@ async def on_groupchat_message(bot, msg):
 
     text = msg.get("body", "")
     thread_id = msg.get("thread") or msg.get("id")
+
     # Only match URLs in lines that do not start with ">"
-    lines = [line for line in text.splitlines()
-             if not line.lstrip().startswith(">")]
+    # and ignore lines between the first ``` and the next ```,
+    # matching anywhere in the line
+    lines = []
+    in_code_block = False
+    codeblock_started = False
+    for line in text.splitlines():
+        if not codeblock_started and "```" in line:
+            in_code_block = True
+            codeblock_started = True
+            continue  # skip the line with opening ```
+        if in_code_block and "```" in line:
+            in_code_block = False
+            continue  # skip the line with closing ```
+        if in_code_block:
+            continue  # skip lines inside code block
+        if not line.lstrip().startswith(">"):
+            lines.append(line)
+
     urls = []
     for line in lines:
         urls.extend(URL_RE.findall(line))
