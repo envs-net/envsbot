@@ -18,12 +18,13 @@ from functools import partial
 from collections import deque, defaultdict
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
+from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "sed",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
     "requires": ["rooms"],
@@ -256,6 +257,16 @@ def extract_sed_command(body):
     return body.strip()
 
 
+def _is_direct_dm(msg, is_room):
+    """Return True for normal 1:1 DMs, but not MUC PMs."""
+    return (not is_room) and (msg["from"].bare not in JOINED_ROOMS)
+
+
+def _sed_reply(bot, msg, text, is_room):
+    """Reply from sed. Disable thread in normal DMs to avoid duplicate rendering."""
+    bot.reply(msg, text, mention=False, thread=not _is_direct_dm(msg, is_room))
+
+
 async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, flags_str):
     """Process a sed correction."""
     if is_room:
@@ -286,26 +297,26 @@ async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, 
         last_msg = get_last_message(room)
 
     if not last_msg:
-        bot.reply(msg, "❌ No previous message found to correct.")
+        _sed_reply(bot, msg, "❌ No previous message found to correct.", is_room)
         return
 
     try:
         new_msg, num_replacements = apply_sed(last_msg, pattern, replacement, flags_str)
     except Exception as e:
-        bot.reply(msg, f"❌ Error applying sed: {e}")
+        _sed_reply(bot, msg, f"❌ Error applying sed: {e}", is_room)
         return
 
     if num_replacements == -1:
         # Timeout occurred
-        bot.reply(msg, "⏱️ Regex timeout - pattern took too long to process!")
+        _sed_reply(bot, msg, "⏱️ Regex timeout - pattern took too long to process!", is_room)
         return
 
     if new_msg is None:
-        bot.reply(msg, f"❌ Regex error. Check your pattern: {pattern}")
+        _sed_reply(bot, msg, f"❌ Regex error. Check your pattern: {pattern}", is_room)
         return
 
     if num_replacements == 0:
-        bot.reply(msg, f"❌ Pattern '{pattern}' not found in last message.")
+        _sed_reply(bot, msg, f"❌ Pattern '{pattern}' not found in last message.", is_room)
         return
 
     if is_room:
@@ -313,7 +324,7 @@ async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, 
     else:
         response = new_msg
 
-    bot.reply(msg, response, mention=False)
+    _sed_reply(bot, msg, response, is_room)
 
 
 @command("sed", role=Role.USER)
@@ -332,49 +343,16 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
         {prefix}sed -- xxx l
         {prefix}sed ERROR Error i
     """
-    from_jid = msg["from"].bare
-    is_muc_pm = from_jid in JOINED_ROOMS
-
-    # Handle status command (MUC PM ONLY)
-    if args and args[0] == "status":
-        if is_room or not is_muc_pm:
-            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
-            return
-
-        store = await get_sed_store(bot)
-        enabled_rooms = await store.get_global(SED_KEY, default={})
-
-        if from_jid in enabled_rooms and enabled_rooms[from_jid]:
-            bot.reply(msg, "✅ SED corrections are **enabled** in this room.")
-        else:
-            bot.reply(msg, "🛑 SED corrections are **disabled** in this room.")
-        return
-
-    # Handle on/off commands (MUC PM ONLY)
-    if args and args[0] in ("on", "off"):
-        if is_room or not is_muc_pm:
-            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
-            return
-
-        store = await get_sed_store(bot)
-        enabled_rooms = await store.get_global(SED_KEY, default={})
-
-        if args[0] == "on":
-            if from_jid not in enabled_rooms or not enabled_rooms[from_jid]:
-                enabled_rooms[from_jid] = True
-                await store.set_global(SED_KEY, enabled_rooms)
-                bot.reply(msg, "✅ SED corrections enabled in this room.")
-                log.info(f"[SED] Room {from_jid} enabled")
-            else:
-                bot.reply(msg, "ℹ️ SED corrections already enabled.")
-        else:
-            if from_jid in enabled_rooms and enabled_rooms[from_jid]:
-                del enabled_rooms[from_jid]
-                await store.set_global(SED_KEY, enabled_rooms)
-                bot.reply(msg, "🛑 SED corrections disabled in this room.")
-                log.info(f"[SED] Room {from_jid} disabled")
-            else:
-                bot.reply(msg, "ℹ️ SED corrections already disabled.")
+    # on/off/status are room-management actions and must be restricted
+    # explicitly. Keep the original SED message/event behavior unchanged.
+    if await handle_room_toggle_command(
+        bot, msg, is_room, args,
+        store_getter=get_sed_store,
+        key=SED_KEY,
+        label="SED corrections",
+        storage="dict",
+        log_prefix="[SED]",
+    ):
         return
 
     if not args or len(args) < 2:
