@@ -18,12 +18,13 @@ import random
 
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
+from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "xkcd",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "XKCD comic fetcher and broadcaster with full indexing",
     "category": "fun",
     "requires": ["rooms"],
@@ -397,50 +398,17 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
     # Fall back to a comma if the bot does not expose one.
     command_prefix = getattr(bot, "prefix", ",")
 
-    # status only in MUC PM
-    if args and args[0] == "status":
-        if is_room or not is_muc_pm:
-            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
-            return
-
-        store = await get_xkcd_store(bot)
-        subscribed = await store.get_global(XKCD_KEY, default={"rooms": []})
-        rooms = subscribed.get("rooms", [])
-
-        if from_jid in rooms:
-            bot.reply(msg, "✅ XKCD posting is **enabled** in this room.")
-        else:
-            bot.reply(msg, "🛑 XKCD posting is **disabled** in this room.")
-        return
-
-    # on/off only in MUC PM
-    if args and args[0] in ("on", "off"):
-        if is_room or not is_muc_pm:
-            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
-            return
-
-        store = await get_xkcd_store(bot)
-        subscribed = await store.get_global(XKCD_KEY, default={"rooms": []})
-        rooms = subscribed.get("rooms", [])
-
-        if args[0] == "on":
-            if from_jid not in rooms:
-                rooms.append(from_jid)
-                subscribed["rooms"] = rooms
-                await store.set_global(XKCD_KEY, subscribed)
-                bot.reply(msg, "✅ XKCD posting enabled in this room.")
-                log.info(f"[XKCD] Room {from_jid} subscribed")
-            else:
-                bot.reply(msg, "ℹ️ XKCD posting already enabled.")
-        else:
-            if from_jid in rooms:
-                rooms.remove(from_jid)
-                subscribed["rooms"] = rooms
-                await store.set_global(XKCD_KEY, subscribed)
-                bot.reply(msg, "🛑 XKCD posting disabled in this room.")
-                log.info(f"[XKCD] Room {from_jid} unsubscribed")
-            else:
-                bot.reply(msg, "ℹ️ XKCD posting already disabled.")
+    # on/off/status are room-management actions and must be restricted
+    # explicitly. Viewing/searching XKCD remains available to users.
+    if await handle_room_toggle_command(
+        bot, msg, is_room, args,
+        store_getter=get_xkcd_store,
+        key=XKCD_KEY,
+        label="XKCD posting",
+        storage="list",
+        list_field="rooms",
+        log_prefix="[XKCD]",
+    ):
         return
 
     # Commands in MUC PM only work when XKCD is enabled for that room
