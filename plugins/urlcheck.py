@@ -33,12 +33,13 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
+from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "urlcheck",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
 }
@@ -73,64 +74,29 @@ async def get_urlcheck_store(bot):
     return bot.db.users.plugin("urlcheck")
 
 
-@command("urlcheck", role=Role.MODERATOR)
+@command("urlcheck", role=Role.USER)
 async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
     """
-    Enable or disable URL checking in this room (MUC direct message only).
+    Enable, disable or show URL checking status for this room.
 
-    Usage:
-        {prefix}urlcheck on
-        {prefix}urlcheck off
-        {prefix}urlcheck status
+    Permission handling is delegated to utils.plugin_helper so on/off/status
+    behaves consistently across all room-scoped plugins.
     """
-    from_jid = msg["from"].bare
-    is_muc_pm = from_jid in JOINED_ROOMS
-
-    # Handle status command (MUC PM ONLY)
-    if args and args[0] == "status":
-        if is_room or not is_muc_pm:
-            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
-            return
-
-        store = await get_urlcheck_store(bot)
-        enabled_rooms = await store.get_global(URLCHECK_KEY, default={})
-
-        if from_jid in enabled_rooms and enabled_rooms[from_jid]:
-            bot.reply(msg, "✅ URL checking is **enabled** in this room.")
-        else:
-            bot.reply(msg, "🛑 URL checking is **disabled** in this room.")
+    handled = await handle_room_toggle_command(
+        bot,
+        msg,
+        is_room,
+        args,
+        store_getter=get_urlcheck_store,
+        key=URLCHECK_KEY,
+        label="URL checking",
+        storage="dict",
+        log_prefix="[URLCHECK]",
+    )
+    if handled:
         return
 
-    # Handle on/off commands (MUC PM ONLY)
-    if args and args[0] in ("on", "off"):
-        if is_room or not is_muc_pm:
-            bot.reply(msg, "🔴 This command can only be used in a MUC DM.")
-            return
-
-        store = await get_urlcheck_store(bot)
-        enabled_rooms = await store.get_global(URLCHECK_KEY, default={})
-
-        if args[0] == "on":
-            if from_jid not in enabled_rooms or not enabled_rooms[from_jid]:
-                enabled_rooms[from_jid] = True
-                await store.set_global(URLCHECK_KEY, enabled_rooms)
-                bot.reply(msg, "✅ URL checking enabled in this room.")
-                log.info(f"[URLCHECK] Room {from_jid} enabled")
-            else:
-                bot.reply(msg, "ℹ️ URL checking already enabled.")
-        else:
-            if from_jid in enabled_rooms and enabled_rooms[from_jid]:
-                del enabled_rooms[from_jid]
-                await store.set_global(URLCHECK_KEY, enabled_rooms)
-                bot.reply(msg, "🛑 URL checking disabled in this room.")
-                log.info(f"[URLCHECK] Room {from_jid} disabled")
-            else:
-                bot.reply(msg, "ℹ️ URL checking already disabled.")
-        return
-
-    if not args or args[0] not in ("on", "off", "status"):
-        bot.reply(msg, f"Usage: {bot.prefix}urlcheck <on|off|status>")
-        return
+    bot.reply(msg, f"Usage: {bot.prefix}urlcheck <on|off|status>")
 
 
 async def on_groupchat_message(bot, msg):
