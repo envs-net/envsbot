@@ -13,7 +13,7 @@ import logging
 import textwrap
 import datetime
 import urllib
-# from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
 from utils.plugin_helper import handle_room_toggle_command
@@ -55,7 +55,7 @@ async def _format_profile_field_for_nick(field, label, values,
         else:
             lines.append("    • —")
         return lines
-    elif field in ["EMAIL", "NICKNAME", "ORG", "NOTE"]:
+    elif field in ["URL", "EMAIL", "NICKNAME", "ORG", "NOTE"]:
         lines = []
         if rooms:
             lines.append(f"{label} - {display_name} in {', '.join(rooms)}:")
@@ -106,9 +106,9 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         if value is None or value == "" or value == []:
             log.warning("[PROFILE] 🔴  No %s for requested user '%s'",
                         field, target_nick)
-            bot.reply(msg, f"ℹ️ No {label} set for nick '{args[0]}'.")
+            bot.reply(msg, f"ℹ️ No {label} set for nick '{target_nick}'.")
             return
-        if field in ["FULLNAME", "BDAY", "URL", "NICKNAME", "ORG",
+        if field in ["URL", "NICKNAME", "ORG",
                      "NOTE", "EMAIL"]:
             lines = await _format_profile_field_for_nick(field, label,
                                                         vcard[field],
@@ -141,9 +141,9 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
         if value is None or value == "" or value == []:
             log.warning("[PROFILE] 🔴  No %s for requested user '%s'",
                         field, target_nick)
-            bot.reply(msg, f"ℹ️ No {label} set for nick '{args[0]}'.")
+            bot.reply(msg, f"ℹ️ No {label} set for nick '{target_nick}'.")
             return
-        if field in ["FULLNAME", "BDAY", "URL", "NICKNAME", "ORG",
+        if field in ["URL", "NICKNAME", "ORG",
                      "NOTE", "EMAIL"]:
             lines = await _format_profile_field_for_nick(field, label,
                                                         vcard[field],
@@ -198,7 +198,6 @@ async def get_info(bot, msg, target_nick):
             log.info(f"[VCARD] No vCard found for '{target_nick}'.")
             return None, None
 
-        log.info(f"[VCARD] vCard for '{target_nick}' (never real jid!) received.")
         _, vcard = _format_vcard_reply(vcard_info, target_nick, muc_jid)
         log.info(f"[VCARD] vCard for '{target_nick}': {vcard}")
 
@@ -269,7 +268,8 @@ def _format_vcard_reply(vcard, nick, muc_jid):
     if nicknames:
         lines.append(f"• Nicknames: {nicknames}")
         c["NICKNAME"] = nicknames
-    bday = vcard.get("BDAY")
+    c["BDAY"] = None
+    bday = vcard["BDAY"]
     if bday:
         lines.append(f"• Birthday: {bday}")
         c["BDAY"] = bday
@@ -388,8 +388,9 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
             log.info(f"[VCARD] No vCard found for '{target_nick}' ({muc_jid})")
             return
 
-        lines, _ = _format_vcard_reply(vcard, target_nick, muc_jid)
+        lines, vcard = _format_vcard_reply(vcard, target_nick, muc_jid)
         bot.reply(msg, lines)
+        log.info(f"[VCARD] vCard for '{target_nick}': {vcard}")
         log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) sent (never real jid!).")
     except Exception as e:
         bot.reply(msg, f"🔴 Failed to fetch vCard for {target_nick}: {e}")
@@ -531,7 +532,7 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
 
     _, vcard = await get_info(bot, msg, target_nick)
     value = None
-    if vcard.get("BDAY"):
+    if vcard["BDAY"] is not None:
         value = vcard["BDAY"]
     if value is None or value == "" or value == []:
         bot.reply(msg, f"ℹ️ No Birthday set for {display_name}.")

@@ -17,7 +17,6 @@ Commands:
     {prefix}x compliance <domain>   - Compliance score from compliance.conversations.im.
 """
 import time
-import socket
 import slixmpp
 import aiohttp
 import asyncio
