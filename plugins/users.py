@@ -288,7 +288,6 @@ async def update_last_seen(bot, real_jid: str):
 async def users_info(bot, sender, nick, args, msg, is_room):
     """
     Show user info by JID or nickname from 'users' database table.
-    (NOT profile!)
 
     Usage:
         {prefix}users info <jid|nick>
@@ -546,7 +545,7 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
     """
     Delete a user. The user will be created again as soon as the bot gets aware
     of that user again. The user will start with a completely deleted runtime
-    DB and an empty profile.
+    DB.
 
     Usage:
         {prefix}users delete <jid>

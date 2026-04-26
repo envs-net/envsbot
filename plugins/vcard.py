@@ -106,6 +106,10 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
     """
     Set your TIMEZONE in Linux format eg. for '{prefix}time [nick]' command.
 
+    Check your timezone at:
+    https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+    Use the "TZ identiier" from the list.
+
     Usage:
         {prefix}timezone set <timezone>
         {prefix}tz set <timezone>
@@ -145,7 +149,7 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, f"✅ TIMEZONE set to: {timezone}")
 
 
-async def _format_profile_field_for_nick(field, label, values,
+async def _format_vcard_field_for_nick(field, label, values,
                                          display_name, rooms=None):
     def indent_lines(lines, indent="    "):
         return [lines[0]] + [indent + l if l.strip() else l for l in lines[1:]]
@@ -205,7 +209,7 @@ async def _format_profile_field_for_nick(field, label, values,
         return lines
 
 
-async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+async def _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              field, label):
     """
     Helper to fetch and display a profile field for a user nick.
@@ -245,7 +249,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
             return
         if field in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "NICKNAME",
                      "ORG", "NOTE", "EMAIL"]:
-            lines = await _format_profile_field_for_nick(field, label,
+            lines = await _format_vcard_field_for_nick(field, label,
                                                         value,
                                                         display_name,
                                                         [room])
@@ -285,7 +289,7 @@ async def _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
             return
         if field in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "NICKNAME",
                      "ORG", "NOTE", "EMAIL"]:
-            lines = await _format_profile_field_for_nick(field, label,
+            lines = await _format_vcard_field_for_nick(field, label,
                                                         value,
                                                         display_name,
                                                         [room])
@@ -568,7 +572,7 @@ async def get_fullname(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}fullname Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "FN", "Full Name")
 
 @command("nicknames", role=Role.USER, aliases=["nicks"])
@@ -583,7 +587,7 @@ async def get_nicknames(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}nicknames Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "NICKNAME", "Nicknames")
 
 
@@ -600,7 +604,7 @@ async def get_timezone(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}timezone Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "TIMEZONE", "Timezone")
 
 @command("organisations", role=Role.USER, aliases=["orgs"])
@@ -615,7 +619,7 @@ async def get_organisations(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}orgs Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "ORG", "Organisations")
 
 
@@ -630,7 +634,7 @@ async def get_notes(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}notes Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "NOTE", "Notes")
 
 
@@ -646,7 +650,7 @@ async def get_email(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}email Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "EMAIL", "Emails")
 
 
@@ -662,7 +666,7 @@ async def get_urls(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}urls Envsi
     """
-    await _get_profile_field(bot, sender_jid, nick, args, msg, is_room,
+    await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
                              "URL", "URLs")
 
 

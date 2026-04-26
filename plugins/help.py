@@ -17,7 +17,7 @@ Command help:
 
 Examples:
   {prefix}help rooms
-  {prefix}help {prefix}profile
+  {prefix}help {prefix}timezone
   {prefix}help {prefix}status set
 
 Notes

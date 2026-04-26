@@ -24,20 +24,6 @@
   "avatar": "avatar.jpg",
   "avatar_type": "image/jpeg",
 
-  "profile": {
-    "_comment1": "This is the bot's DB profile. All the UPPERCASE keys can be used",
-    "FULLNAME": "Descriptive Name of the Bot",
-    "SPECIES": "Some creative species string",
-    "PRONOUNS": "it/its",
-    "TIMEZONE": "Europe/Berlin",
-    "LOCATION": "Nuremberg/Germany",
-    "EMAIL": "<owner>@domain.tld",
-    "_comment2": "YOU MUST NOT USE MORE THAN 6 (SIX) [URL, DESCRIPTION] PAIRS IN THIS LIST!!!",
-    "URLS": [["https://example.com", "Example Link description"],
-            ["https://github.com/dan-envs/envsbot", "EnvsBot Github Repository"],
-            ["https://envs.net/", "Envs Pubnix/Tilde Community Homepage"]]
-  },
-
   "_comment8": "The XMPP temp-vcard in JSON format. Look at https://xmpp.org/extensions/xep-0054.html for which fields you can use and how they're structured. These are the ones I know they work. You don't need to use all of them. If you want to use more than one NOTE/EMAIL/URL/WHATEVER, you have to find out how to put them in json format in the slixmpp documentation.",
   "vcard": {
     "FN": "Blue Bot",
@@ -46,15 +32,13 @@
       "FAMILY": "Bot",
       "GIVEN": "Blue"
     },
+    "BDAY": "2026-03-05",
     "ORG": {
       "ORGNAME": "Example Org",
       "ORGUNIT": "Automation"
     },
     "EMAIL": {
       "USERID": "bot@example.org"
-    },
-    "TEL": {
-      "NUMBER": "+49-000-000000"
     },
     "URL": "https://example.org",
     "ADR": {
