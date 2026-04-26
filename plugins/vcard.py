@@ -101,6 +101,39 @@ async def _check_user_exists(bot, sender_jid, msg):
     return True
 
 
+async def vcard_field(bot, msg, target_nick, field):
+    """
+    Helper to fetch a specific vCard field(s) for a given nick.
+    Must be called from MUC PM or groupchat context with a valid
+    target_nick present in the room.
+
+    Supports fields: "FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "ORG",
+    "NOTE", "EMAIL".
+
+    Returns "None" if field is not present.
+    """
+    if field not in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "NICKNAME",
+                     "ORG", "NOTE", "EMAIL"]:
+        log.warning("[VCARD] 🔴  Invalid vCard field requested: %s", field)
+        return None
+    if field == "TIMEZONE":
+        store = await get_vcard_store(bot)
+        jid = JOINED_ROOMS.get(msg["from"].bare, {}).get("nicks", {}).get(target_nick, {}).get("jid")
+        if not jid:
+            log.warning(f"[VCARD] 🔴  Nick '{target_nick}' not found in room"
+                        f"'{msg['from'].bare}' for TIMEZONE lookup")
+            return None
+        value = await store.get(str(jid), "TIMEZONE")
+        log.info(f"[VCARD] TIMEZONE lookup for nick '{target_nick}'"
+                 f" with JID '{jid}' in room '{msg['from'].bare}': {value}")
+        if not value:
+            return None
+        return value
+    vcard_info = await get_vcard(bot, msg, target_nick)
+    _, vcard = _format_vcard_reply(vcard_info, None, None)
+    return vcard[field]
+
+
 @command("timezone set", role=Role.USER, aliases=["tz set"])
 async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -240,7 +273,7 @@ async def _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
             bot.reply(msg, f"🔴  No {label} found in vCard for nick '{target_nick}'.")
             return
         display_name = target_nick
-        log.info(f"[VCARD] {sender_jid} looking up {field} for"
+        log.info(f"[VCARD] {sender_jid} looking up {field} for "
                  f"'{target_nick}'")
         if value is None or value == "" or value == []:
             log.warning("[VCARD] 🔴  No %s for requested user '%s'",
