@@ -17,6 +17,7 @@ Commands:
 
 import pytz
 import logging
+import slixmpp
 from datetime import datetime
 from utils.command import command, Role
 from utils.config import config
@@ -32,36 +33,30 @@ PLUGIN_META = {
 }
 
 
-async def get_display_name(bot, jid):
-    store = bot.db.users.plugin("users")
-    try:
-        roomnicks = await store.get(jid, "roomnicks")
-        for room in roomnicks or []:
-            if room:
-                display_name = roomnicks[room][0]
-                break
-    except Exception as e:
-        log.warning(
-                    "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
-                    jid, e
-        )
-        display_name = "unknown"
-    log.info(
-        "[PROFILE] 👤 Profile lookup for self: %s",
-        display_name
+def resolve_real_jid(bot, msg, is_room):
+    """
+    Resolve the real sender JID in all contexts (groupchat, MUC PM, or DM).
+    """
+    jid = None
+    muc = bot.plugin.get("xep_0045", None)
+    if muc:
+        room = msg['from'].bare
+        nick = msg["from"].resource
+        log.debug("[PROFILE] Resolving real JID for room: %s, nick: %s", room, nick)
+        jid = muc.get_jid_property(room, nick, "jid")
+    if jid is None:
+        jid = msg["from"]
+    return str(slixmpp.JID(jid).bare)
+
+
+def _is_muc_pm(msg):
+    """Returns True if msg is a MUC direct message (not public groupchat)."""
+    return (
+        msg.get("type") in ("chat", "normal")
+        and hasattr(msg["from"], "bare")
+        and "@" in str(msg["from"].bare)
+        and str(msg["from"].bare) in JOINED_ROOMS
     )
-    return display_name
-
-
-def get_pm_target(sender_jid, nick):
-    """
-    Returns (bare_jid, nick_for_display)
-    """
-    if hasattr(sender_jid, "bare"):
-        bare_jid = sender_jid.bare
-    else:
-        bare_jid = str(sender_jid).split('/')[0]
-    return bare_jid, nick
 
 
 @command("ping", role=Role.USER, aliases=["pong"])
@@ -108,9 +103,9 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     """
     profile_store = bot.db.users.profile()
 
-    if is_room:
-        room = msg["from"].bare
-        nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
+    room = msg["from"].bare
+    nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
+    if is_room or _is_muc_pm(msg):
         if args:
             target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
@@ -128,29 +123,10 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
             display_name = nick
     else:
         # Direct message: allow querying someone else by their nick, fallback to self
-        if args:
-            target_nick = " ".join(args).strip()
-            # DM context: lookup globally
-            index = bot.db.users._nick_index
-            jids = index.get(target_nick, [])
-            if not jids:
-                log.warning(
-                    "[PROFILE] 🔴  Nick '%s' not found globally",
-                    target_nick
-                )
-                bot.reply(
-                    msg,
-                    f"🔴  Nick '{target_nick}' not found."
-                )
-                return
-            for jid in jids:
-                if jid:
-                    target_jid = jid
-                    break
-            display_name = target_nick
-        else:
-            target_jid, display_name = get_pm_target(sender_jid, nick)
-            display_name = await get_display_name(bot, target_jid)
+        log.info("[TOOLS] Forbidden try to use the 'time' command in DM by %s",
+                nicks.get(nick, {}).get("nick", "unknown"))
+        bot.reply(msg, "🔴  The 'time' command in DMs is not allowed")
+        return
 
     timezone = await profile_store.get(target_jid, "TIMEZONE")
     location = await profile_store.get(target_jid, "LOCATION")
@@ -184,9 +160,9 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}date
         {prefix}date <nick>
     """
-    if is_room:
-        room = msg["from"].bare
-        nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
+    room = msg["from"].bare
+    nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
+    if is_room or _is_muc_pm(msg):
         if args:
             target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
@@ -203,30 +179,11 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
             target_jid = str(info["jid"])
             display_name = nick
     else:
-        # Direct message: allow querying someone else by their nick, fallback to self
-        if args:
-            target_nick = " ".join(args).strip()
-            # DM context: lookup globally
-            index = bot.db.users._nick_index
-            jids = index.get(target_nick, [])
-            if not jids:
-                log.warning(
-                    "[PROFILE] 🔴  Nick '%s' not found globally",
-                    target_nick
-                )
-                bot.reply(
-                    msg,
-                    f"🔴  Nick '{target_nick}' not found."
-                )
-                return
-            for jid in jids:
-                if jid:
-                    target_jid = jid
-                    break
-            display_name = target_nick
-        else:
-            target_jid, display_name = get_pm_target(sender_jid, nick)
-            display_name = await get_display_name(bot, target_jid)
+        # Direct messages are not allowed
+        log.info("[TOOLS] Forbidden try to use the 'date' command in DM by %s",
+                nicks.get(nick, {}).get("nick", "unknown"))
+        bot.reply(msg, "🔴  The 'date' command in DMs is not allowed")
+        return
 
     profile_store = bot.db.users.profile()
     timezone = await profile_store.get(target_jid, "TIMEZONE")
@@ -289,7 +246,7 @@ async def timestamp_command(bot, sender_jid, nick, args, msg, is_room):
     try:
         # Get user's timezone
         profile_store = bot.db.users.profile()
-        target_jid, _ = get_pm_target(sender_jid, nick)
+        target_jid = resolve_real_jid(bot, msg, is_room)
         timezone = await profile_store.get(target_jid, "TIMEZONE")
 
         if timezone:

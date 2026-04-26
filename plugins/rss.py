@@ -17,7 +17,6 @@ import logging
 import time
 import html
 import hashlib
-import io
 from difflib import SequenceMatcher
 from urllib.parse import urljoin
 
@@ -33,7 +32,7 @@ except ImportError:
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms"],

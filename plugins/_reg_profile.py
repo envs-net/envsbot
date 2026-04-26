@@ -35,7 +35,7 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "profile",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "description": "Bot avatar and vCard profile management",
     "category": "core",
 }
@@ -45,7 +45,6 @@ log = logging.getLogger(__name__)
 
 AVATAR_HASH_FILE = "avatar_hash.asc"
 VCARD_HASH_FILE = "vcard_hash.asc"
-PROFILE_HASH_FILE = "profile_hash.asc"
 
 
 # -------------------------------------------------
@@ -106,7 +105,7 @@ def write_hash(path, value):
         with open(path, "w") as f:
             f.write(value)
     except Exception as e:
-        log.error(f"Failed writing hash file {path}: {e}")
+        log.error(f"[_REG_PROFILE] 🔴 Failed writing hash file {path}: {e}")
 
 
 def sha1(data):
@@ -203,7 +202,7 @@ async def update_vcard(bot):
     stored_hash = read_hash(VCARD_HASH_FILE)
 
     if stored_hash == new_hash:
-        log.info("[PROFILE] vCard unchanged — skipping update")
+        log.info("[_REG_PROFILE] vCard unchanged — skipping update")
         return
 
     iq = bot.make_iq_set()
@@ -219,81 +218,10 @@ async def update_vcard(bot):
 
         write_hash(VCARD_HASH_FILE, new_hash)
 
-        log.info("[PROFILE]✅ vCard updated")
+        log.info("[_REG_PROFILE]✅ vCard updated")
 
     except Exception as e:
-        log.error(f"[PROFILE]🔴 vCard update failed: {e}")
-
-
-# -------------------------------------------------
-# PROFILE UPDATE
-# -------------------------------------------------
-async def update_profile(bot):
-    """
-    Update the profile in the bot's own database
-
-    Parameters
-    ----------
-    bot : Bot
-        Instance of the bot class derived from the Slixmpp client.
-
-    Process
-    -------
-    1. Retrieve the "profile" configuration from ``config``.
-    2. Serialize the configuration and compute its SHA1 hash.
-    3. Compare the hash with the previously stored hash.
-    4. If unchanged, skip the update.
-    5. Otherwise update profile
-
-    Notes
-    -----
-    The profile is taken from the config.json file (like the vcard)
-    and only updated when it changes.
-    """
-
-    cfg = config.get("profile")
-
-    if not cfg:
-        return
-
-    serialized = json.dumps(cfg, sort_keys=True).encode()
-
-    new_hash = sha1(serialized)
-    stored_hash = read_hash(PROFILE_HASH_FILE)
-
-    if stored_hash == new_hash:
-        log.info("[PROFILE] DB profile unchanged — skipping update")
-        return
-
-    try:
-        um = bot.db.users
-        if await um.get(str(bot.boundjid.bare)) is None:
-            await um.create(str(bot.boundjid.bare), config.get("nick", None))
-        profile_store = bot.db.users.profile()
-
-        await profile_store.set(str(bot.boundjid.bare), "FULLNAME",
-                                cfg.get("FULLNAME", None))
-        await profile_store.set(str(bot.boundjid.bare), "SPECIES",
-                                cfg.get("SPECIES", None))
-        await profile_store.set(str(bot.boundjid.bare), "PRONOUNS",
-                                cfg.get("PRONOUNS", None))
-        await profile_store.set(str(bot.boundjid.bare), "TIMEZONE",
-                                cfg.get("TIMEZONE", None))
-        await profile_store.set(str(bot.boundjid.bare), "BIRTHDAY",
-                                cfg.get("BIRTHDAY", None))
-        await profile_store.set(str(bot.boundjid.bare), "LOCATION",
-                                cfg.get("LOCATION", None))
-        await profile_store.set(str(bot.boundjid.bare), "EMAIL",
-                                cfg.get("EMAIL", None))
-        await profile_store.set(str(bot.boundjid.bare), "URLS",
-                                cfg.get("URLS", []))
-
-        write_hash(PROFILE_HASH_FILE, new_hash)
-
-        log.info("[PROFILE]✅ DB profile updated")
-
-    except Exception as e:
-        log.error(f"[PROFILE]🔴 vCard update failed: {e}")
+        log.error(f"[_REG_PROFILE]🔴 vCard update failed: {e}")
 
 
 # -------------------------------------------------
@@ -336,7 +264,7 @@ async def update_avatar(bot):
         return
 
     if not os.path.exists(avatar_path):
-        log.warning("[PROFILE]🟡️ Avatar file not found")
+        log.warning("[_REG_PROFILE]🟡️ Avatar file not found")
         return
 
     try:
@@ -348,11 +276,11 @@ async def update_avatar(bot):
         stored_hash = read_hash(AVATAR_HASH_FILE)
 
         if stored_hash == new_hash:
-            log.info("[PROFILE] Avatar unchanged — skipping upload")
+            log.info("[_REG_PROFILE] Avatar unchanged — skipping upload")
             return
 
         if avatar_type not in ("image/png", "image/jpeg"):
-            log.error("[PROFILE]🔴 Avatar must be PNG or JPEG")
+            log.error("[_REG_PROFILE]🔴 Avatar must be PNG or JPEG")
             return
 
         pubsub = bot["xep_0084"]
@@ -369,10 +297,10 @@ async def update_avatar(bot):
 
         write_hash(AVATAR_HASH_FILE, new_hash)
 
-        log.info("[PROFILE]✅ Avatar updated")
+        log.info("[_REG_PROFILE]✅ Avatar updated")
 
     except Exception as e:
-        log.error(f"[PROFILE]🔴 Avatar update failed: {e}")
+        log.error(f"[_REG_PROFILE]🔴 Avatar update failed: {e}")
 
 
 # -------------------------------------------------
@@ -402,7 +330,13 @@ async def setup_profile(bot):
 
     await bot.get_roster()
 
-    await update_profile(bot)
+    try:
+        um = bot.db.users
+        if await um.get(str(bot.boundjid.bare)) is None:
+            await um.create(str(bot.boundjid.bare), config.get("nick", None))
+        log.info("[_REG_PROFILE]✅ user DB entry created or already exists")
+    except Exception as e:
+        log.error(f"['_REG_PROFILE]🔴 user DB entry creation failed: {e}")
 
     await update_vcard(bot)
 
