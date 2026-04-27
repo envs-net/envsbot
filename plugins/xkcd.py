@@ -158,13 +158,13 @@ async def send_xkcd_room(bot, room_id: str, comic: dict[str, Any] | None):
         # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
 
-        log.info(
+        log.debug(
             "[XKCD] Sending comic #%s to room %s via direct URL + OOB",
             comic.get("num"),
             room_id,
         )
         await send_url_with_oob(bot, room_id, img_url, "groupchat")
-        log.info("[XKCD] ✅ Comic #%s sent to room", comic.get("num"))
+        log.debug("[XKCD] ✅ Comic #%s sent to room", comic.get("num"))
 
     except Exception as exc:
         log.exception(
@@ -197,13 +197,13 @@ async def send_xkcd_dm(bot, target_jid: str, comic: dict[str, Any] | None):
         # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
 
-        log.info(
+        log.debug(
             "[XKCD] Sending comic #%s to DM %s via direct URL + OOB",
             comic.get("num"),
             target_jid,
         )
         await send_url_with_oob(bot, target_jid, img_url, "chat")
-        log.info("[XKCD] ✅ Comic #%s sent to DM", comic.get("num"))
+        log.debug("[XKCD] ✅ Comic #%s sent to DM", comic.get("num"))
 
     except Exception as exc:
         log.exception(
