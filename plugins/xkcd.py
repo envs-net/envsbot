@@ -1,30 +1,34 @@
-"""
-XKCD Comic plugin.
+"""XKCD Comic plugin.
 
 Periodically checks for new XKCD comics and posts them to subscribed rooms.
-Provides commands to view current or specific XKCD comics.
+Provides commands to view current, specific, random, and searched XKCD comics.
 
 Commands:
-    {prefix}xkcd [number]              - Show current or specific XKCD comic
-    {prefix}xkcd on/off/status         - Enable/disable XKCD posting in this room
-    {prefix}xkcd search <query> [page] - Search for XKCD by title/alt
-    {prefix}xkcd random                - Show a random XKCD comic
+• {prefix}xkcd - Show latest comic
+• {prefix}xkcd <number> - Show specific XKCD comic
+• {prefix}xkcd on/off/status - Enable/disable XKCD posting in this room
+• {prefix}xkcd search <query> [page] - Search for XKCD by title/alt
+• {prefix}xkcd random - Show a random XKCD comic
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
-import aiohttp
 import random
+from typing import Any
 
-from utils.command import command, Role
+import aiohttp
+
 from plugins.rooms import JOINED_ROOMS
+from utils.command import Role, command
 from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "xkcd",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "description": "XKCD comic fetcher and broadcaster with full indexing",
     "category": "fun",
     "requires": ["rooms"],
@@ -33,15 +37,20 @@ PLUGIN_META = {
 XKCD_KEY = "XKCD"
 XKCD_LAST_ID_KEY = "XKCD_LAST_ID"
 XKCD_INDEX_KEY = "XKCD_INDEX"
+
 XKCD_API_URL = "https://xkcd.com/{}/info.0.json"
 XKCD_LATEST_URL = "https://xkcd.com/info.0.json"
 XKCD_COMIC_URL = "https://xkcd.com/{}"
-CHECK_INTERVAL = 3600  # Check every hour
-CHECK_TASK = None
-INDEX_TASK = None
+
+CHECK_INTERVAL = 3600
+INDEX_START_DELAY_SECONDS = 30
+INDEX_REQUEST_DELAY_SECONDS = 0.15
+
+CHECK_TASK: asyncio.Task | None = None
+INDEX_TASK: asyncio.Task | None = None
 LAST_COMIC_ID = 0
 
-# XKCD comic #404 intentionally does not exist
+# XKCD comic #404 intentionally does not exist.
 MISSING_COMIC_IDS = {404}
 
 
@@ -50,29 +59,39 @@ async def get_xkcd_store(bot):
     return bot.db.users.plugin("xkcd")
 
 
-async def fetch_xkcd(url):
+async def fetch_xkcd(url: str, session: aiohttp.ClientSession | None = None):
     """Fetch XKCD comic info from API."""
     try:
-        async with aiohttp.ClientSession() as session:
+        if session is not None:
             async with session.get(url, timeout=10) as resp:
                 if resp.status == 200:
                     return await resp.json()
-    except Exception as e:
-        log.warning(f"[XKCD] Failed to fetch {url}: {e}")
-    return None
+                log.debug("[XKCD] Non-200 response for %s: %s", url, resp.status)
+                return None
+
+        async with aiohttp.ClientSession() as own_session:
+            async with own_session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                log.debug("[XKCD] Non-200 response for %s: %s", url, resp.status)
+                return None
+
+    except Exception as exc:
+        log.warning("[XKCD] Failed to fetch %s: %s", url, exc)
+        return None
 
 
-async def get_latest_xkcd():
+async def get_latest_xkcd(session: aiohttp.ClientSession | None = None):
     """Fetch the latest XKCD comic."""
-    return await fetch_xkcd(XKCD_LATEST_URL)
+    return await fetch_xkcd(XKCD_LATEST_URL, session=session)
 
 
-async def get_xkcd(comic_id):
+async def get_xkcd(comic_id: int, session: aiohttp.ClientSession | None = None):
     """Fetch a specific XKCD comic by ID."""
-    return await fetch_xkcd(XKCD_API_URL.format(comic_id))
+    return await fetch_xkcd(XKCD_API_URL.format(comic_id), session=session)
 
 
-def format_comic_message(comic):
+def format_comic_message(comic: dict[str, Any]) -> str:
     """Format XKCD comic info text."""
     num = comic.get("num", "?")
     title = comic.get("title", "No title")
@@ -80,27 +99,24 @@ def format_comic_message(comic):
 
     msg = f"🎨 XKCD #{num}: {title}\n"
     if alt:
-        msg += f"📝 {alt}\n"
+        msg += f"💬 {alt}\n"
     msg += f"🔗 {XKCD_COMIC_URL.format(num)}"
-
     return msg
 
 
-def normalize_image_url(url):
+def normalize_image_url(url: str | None) -> str | None:
     """Ensure image URL has a usable scheme."""
     if not url:
         return None
-    if url.startswith("http://") or url.startswith("https://"):
+    if url.startswith(("http://", "https://")):
         return url
     if url.startswith("//"):
         return "https:" + url
     return url
 
 
-async def send_url_with_oob(bot, target, url, mtype):
-    """
-    Send a URL in the message body and include XEP-0066 OOB data.
-    """
+async def send_url_with_oob(bot, target, url: str, mtype: str):
+    """Send a URL in the message body and include XEP-0066 OOB data."""
     message = bot.make_message(
         mto=target,
         mbody=url,
@@ -109,25 +125,24 @@ async def send_url_with_oob(bot, target, url, mtype):
 
     try:
         message["oob"]["url"] = url
-    except Exception as e:
-        log.debug(f"[XKCD] Could not attach XEP-0066 OOB data: {e}")
+    except Exception as exc:
+        log.debug("[XKCD] Could not attach XEP-0066 OOB data: %s", exc)
 
     message.send()
 
 
-async def send_xkcd_room(bot, room_id, comic):
-    """Send XKCD comic to a room (for broadcasting and room commands)."""
+async def send_xkcd_room(bot, room_id: str, comic: dict[str, Any] | None):
+    """Send XKCD comic to a room."""
     if not comic:
         return
 
     try:
         img_url = normalize_image_url(comic.get("img"))
         if not img_url:
-            log.warning(f"[XKCD] No image URL in comic {comic.get('num')}")
+            log.warning("[XKCD] No image URL in comic %s", comic.get("num"))
             return
 
         info_msg = format_comic_message(comic)
-
         bot.reply(
             {
                 "from": type("F", (), {"bare": room_id})(),
@@ -140,30 +155,38 @@ async def send_xkcd_room(bot, room_id, comic):
             ephemeral=False,
         )
 
-        # Ensure the info message lands before the image URL/OOB message
+        # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
 
-        log.info(f"[XKCD] Sending comic #{comic.get('num')} to room {room_id} via direct URL + OOB")
+        log.info(
+            "[XKCD] Sending comic #%s to room %s via direct URL + OOB",
+            comic.get("num"),
+            room_id,
+        )
         await send_url_with_oob(bot, room_id, img_url, "groupchat")
-        log.info(f"[XKCD] ✅ Comic #{comic.get('num')} sent to room")
+        log.info("[XKCD] ✅ Comic #%s sent to room", comic.get("num"))
 
-    except Exception as e:
-        log.exception(f"[XKCD] Failed to send comic {comic.get('num')} to room {room_id}: {e}")
+    except Exception as exc:
+        log.exception(
+            "[XKCD] Failed to send comic %s to room %s: %s",
+            comic.get("num"),
+            room_id,
+            exc,
+        )
 
 
-async def send_xkcd_dm(bot, target_jid, comic):
-    """Send XKCD comic via DM (including MUC PM) with XEP-0066 OOB."""
+async def send_xkcd_dm(bot, target_jid: str, comic: dict[str, Any] | None):
+    """Send XKCD comic via DM, including MUC PM, with XEP-0066 OOB."""
     if not comic:
         return
 
     try:
         img_url = normalize_image_url(comic.get("img"))
         if not img_url:
-            log.warning(f"[XKCD] No image URL in comic {comic.get('num')}")
+            log.warning("[XKCD] No image URL in comic %s", comic.get("num"))
             return
 
         info_msg = format_comic_message(comic)
-
         message = bot.make_message(
             mto=target_jid,
             mbody=info_msg,
@@ -171,32 +194,43 @@ async def send_xkcd_dm(bot, target_jid, comic):
         )
         message.send()
 
-        # Ensure the info message lands before the image URL/OOB message
+        # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
 
-        log.info(f"[XKCD] Sending comic #{comic.get('num')} to DM {target_jid} via direct URL + OOB")
+        log.info(
+            "[XKCD] Sending comic #%s to DM %s via direct URL + OOB",
+            comic.get("num"),
+            target_jid,
+        )
         await send_url_with_oob(bot, target_jid, img_url, "chat")
-        log.info(f"[XKCD] ✅ Comic #{comic.get('num')} sent to DM")
+        log.info("[XKCD] ✅ Comic #%s sent to DM", comic.get("num"))
 
-    except Exception as e:
-        log.exception(f"[XKCD] Failed to send comic {comic.get('num')} to DM {target_jid}: {e}")
+    except Exception as exc:
+        log.exception(
+            "[XKCD] Failed to send comic %s to DM %s: %s",
+            comic.get("num"),
+            target_jid,
+            exc,
+        )
 
 
-async def get_last_comic_id(bot):
+async def get_last_comic_id(bot) -> int:
     """Get last posted comic ID from database."""
     store = await get_xkcd_store(bot)
     data = await store.get_global(XKCD_LAST_ID_KEY, default={"id": 0})
-    return data.get("id", 0)
+    if not isinstance(data, dict):
+        return 0
+    return int(data.get("id", 0) or 0)
 
 
-async def save_last_comic_id(bot, comic_id):
+async def save_last_comic_id(bot, comic_id: int):
     """Save last posted comic ID to database."""
     store = await get_xkcd_store(bot)
     await store.set_global(XKCD_LAST_ID_KEY, {"id": comic_id})
-    log.debug(f"[XKCD] Saved last comic ID to DB: {comic_id}")
+    log.debug("[XKCD] Saved last comic ID to DB: %s", comic_id)
 
 
-async def add_comic_to_index(bot, comic):
+async def add_comic_to_index(bot, comic: dict[str, Any] | None):
     """Add a comic to the search index."""
     if not comic:
         return
@@ -207,6 +241,9 @@ async def add_comic_to_index(bot, comic):
 
     store = await get_xkcd_store(bot)
     search_index = await store.get_global(XKCD_INDEX_KEY, default={})
+    if not isinstance(search_index, dict):
+        search_index = {}
+
     search_index[str(comic_id)] = {
         "title": comic.get("title", ""),
         "alt": comic.get("alt", ""),
@@ -214,118 +251,186 @@ async def add_comic_to_index(bot, comic):
     await store.set_global(XKCD_INDEX_KEY, search_index)
 
 
-async def get_subscribed_rooms(bot):
-    """Return subscribed rooms."""
+async def get_subscribed_rooms(bot) -> list[str]:
+    """Return subscribed rooms.
+
+    Supports both legacy list storage:
+        {"rooms": ["room@conference.example"]}
+
+    and new dict storage:
+        {"room@conference.example": True}
+    """
     store = await get_xkcd_store(bot)
-    subscribed = await store.get_global(XKCD_KEY, default={"rooms": []})
-    return subscribed.get("rooms", [])
+    state = await store.get_global(XKCD_KEY, default={})
+
+    if not isinstance(state, dict):
+        return []
+
+    # Legacy format.
+    rooms = state.get("rooms")
+    if isinstance(rooms, list):
+        return [str(room) for room in rooms if room]
+
+    # New format.
+    return [str(room) for room, enabled in state.items() if enabled is True]
 
 
-async def broadcast_comic_to_subscribed_rooms(bot, comic):
+async def migrate_xkcd_room_storage(bot):
+    """Migrate legacy {'rooms': [...]} storage to {room_jid: True}."""
+    store = await get_xkcd_store(bot)
+    state = await store.get_global(XKCD_KEY, default={})
+
+    if not isinstance(state, dict):
+        return
+
+    rooms = state.get("rooms")
+    if not isinstance(rooms, list):
+        return
+
+    migrated = {str(room): True for room in rooms if room}
+    await store.set_global(XKCD_KEY, migrated)
+
+    log.info("[XKCD] Migrated %s subscribed rooms to dict storage", len(migrated))
+
+
+async def broadcast_comic_to_subscribed_rooms(bot, comic: dict[str, Any]):
     """Broadcast a comic to all subscribed rooms."""
     rooms = await get_subscribed_rooms(bot)
-    log.info(f"[XKCD] Broadcasting comic #{comic.get('num')} to {len(rooms)} rooms")
+    log.info("[XKCD] Broadcasting comic #%s to %s rooms", comic.get("num"), len(rooms))
 
     for room_id in rooms:
         if room_id in JOINED_ROOMS:
             try:
                 await send_xkcd_room(bot, room_id, comic)
                 await asyncio.sleep(0.5)
-            except Exception as e:
-                log.exception(f"[XKCD] Error sending comic #{comic.get('num')} to {room_id}: {e}")
+            except Exception as exc:
+                log.exception(
+                    "[XKCD] Error sending comic #%s to %s: %s",
+                    comic.get("num"),
+                    room_id,
+                    exc,
+                )
         else:
-            log.warning(f"[XKCD] Room {room_id} not in JOINED_ROOMS")
+            log.warning("[XKCD] Room %s not in JOINED_ROOMS", room_id)
 
 
 async def build_full_index(bot):
     """Build full search index of all XKCD comics."""
     try:
-        latest = await get_latest_xkcd()
-        if not latest:
-            log.warning("[XKCD] Could not fetch latest comic for indexing")
-            return
+        await asyncio.sleep(INDEX_START_DELAY_SECONDS)
 
-        store = await get_xkcd_store(bot)
-        search_index = await store.get_global(XKCD_INDEX_KEY, default={})
-        current_max_id = latest.get("num", 0)
-
-        expected_count = current_max_id - len(MISSING_COMIC_IDS)
-
-        if search_index and len(search_index) >= expected_count:
-            log.info(f"[XKCD] Search index up to date with {len(search_index)} entries")
-            return
-
-        log.info(
-            f"[XKCD] Building full search index up to comic #{current_max_id} "
-            f"(currently have {len(search_index)}/{expected_count})..."
-        )
-
-        indexed = 0
-        failed = 0
-
-        for comic_id in range(1, current_max_id + 1):
-            if comic_id in MISSING_COMIC_IDS:
-                continue
-            if str(comic_id) in search_index:
-                continue
-
-            try:
-                comic = await get_xkcd(comic_id)
-                if comic:
-                    search_index[str(comic_id)] = {
-                        "title": comic.get("title", ""),
-                        "alt": comic.get("alt", ""),
-                    }
-                    indexed += 1
-
-                    if indexed % 200 == 0:
-                        await store.set_global(XKCD_INDEX_KEY, search_index)
-                        log.info(f"[XKCD] Indexed {indexed} new comics...")
-
-                    await asyncio.sleep(0.05)
-                else:
-                    failed += 1
-                    log.debug(f"[XKCD] Comic #{comic_id} could not be fetched")
-            except asyncio.CancelledError:
-                log.info(f"[XKCD] Index building cancelled after {indexed} new comics")
-                await store.set_global(XKCD_INDEX_KEY, search_index)
+        async with aiohttp.ClientSession() as session:
+            latest = await get_latest_xkcd(session=session)
+            if not latest:
+                log.warning("[XKCD] Could not fetch latest comic for indexing")
                 return
-            except Exception as e:
-                log.debug(f"[XKCD] Failed to index comic #{comic_id}: {e}")
-                failed += 1
 
-        await store.set_global(XKCD_INDEX_KEY, search_index)
-        log.info(f"[XKCD] ✅ Search index complete! Added {indexed} comics ({failed} failed)")
+            store = await get_xkcd_store(bot)
+            search_index = await store.get_global(XKCD_INDEX_KEY, default={})
+            if not isinstance(search_index, dict):
+                search_index = {}
 
-    except Exception as e:
-        log.exception(f"[XKCD] Error building search index: {e}")
+            current_max_id = int(latest.get("num", 0) or 0)
+            expected_count = current_max_id - len(
+                {comic_id for comic_id in MISSING_COMIC_IDS if comic_id <= current_max_id}
+            )
+
+            if search_index and len(search_index) >= expected_count:
+                log.info(
+                    "[XKCD] Search index up to date with %s entries",
+                    len(search_index),
+                )
+                return
+
+            log.info(
+                "[XKCD] Building full search index up to comic #%s "
+                "(currently have %s/%s)...",
+                current_max_id,
+                len(search_index),
+                expected_count,
+            )
+
+            indexed = 0
+            failed = 0
+
+            for comic_id in range(1, current_max_id + 1):
+                if comic_id in MISSING_COMIC_IDS:
+                    continue
+
+                if str(comic_id) in search_index:
+                    continue
+
+                try:
+                    comic = await get_xkcd(comic_id, session=session)
+                    if comic:
+                        search_index[str(comic_id)] = {
+                            "title": comic.get("title", ""),
+                            "alt": comic.get("alt", ""),
+                        }
+                        indexed += 1
+
+                        if indexed % 200 == 0:
+                            await store.set_global(XKCD_INDEX_KEY, search_index)
+                            log.info("[XKCD] Indexed %s new comics...", indexed)
+
+                        await asyncio.sleep(INDEX_REQUEST_DELAY_SECONDS)
+                    else:
+                        failed += 1
+                        log.debug("[XKCD] Comic #%s could not be fetched", comic_id)
+
+                except asyncio.CancelledError:
+                    log.info(
+                        "[XKCD] Index building cancelled after %s new comics",
+                        indexed,
+                    )
+                    await store.set_global(XKCD_INDEX_KEY, search_index)
+                    raise
+
+                except Exception as exc:
+                    log.debug("[XKCD] Failed to index comic #%s: %s", comic_id, exc)
+                    failed += 1
+
+            await store.set_global(XKCD_INDEX_KEY, search_index)
+            log.info(
+                "[XKCD] ✅ Search index complete! Added %s comics (%s failed)",
+                indexed,
+                failed,
+            )
+
+    except asyncio.CancelledError:
+        log.debug("[XKCD] Index task cancelled")
+        raise
+
+    except Exception as exc:
+        log.exception("[XKCD] Error building search index: %s", exc)
 
 
-async def catch_up_missing_comics(bot, start_id, end_id):
+async def catch_up_missing_comics(bot, start_id: int, end_id: int):
     """Fetch, index, and broadcast comics from start_id to end_id inclusive."""
     global LAST_COMIC_ID
 
     if end_id < start_id:
         return
 
-    log.info(f"[XKCD] ⏳ Catching up from #{start_id} to #{end_id}")
+    log.info("[XKCD] ⏳ Catching up from #%s to #%s", start_id, end_id)
 
-    for comic_id in range(start_id, end_id + 1):
-        if comic_id in MISSING_COMIC_IDS:
+    async with aiohttp.ClientSession() as session:
+        for comic_id in range(start_id, end_id + 1):
+            if comic_id in MISSING_COMIC_IDS:
+                LAST_COMIC_ID = comic_id
+                await save_last_comic_id(bot, comic_id)
+                continue
+
+            comic = await get_xkcd(comic_id, session=session)
+            if not comic:
+                log.warning("[XKCD] Could not fetch comic #%s", comic_id)
+                continue
+
+            await add_comic_to_index(bot, comic)
+            await broadcast_comic_to_subscribed_rooms(bot, comic)
+
             LAST_COMIC_ID = comic_id
             await save_last_comic_id(bot, comic_id)
-            continue
-
-        comic = await get_xkcd(comic_id)
-        if not comic:
-            log.warning(f"[XKCD] Could not fetch comic #{comic_id}")
-            continue
-
-        await add_comic_to_index(bot, comic)
-        await broadcast_comic_to_subscribed_rooms(bot, comic)
-
-        LAST_COMIC_ID = comic_id
-        await save_last_comic_id(bot, comic_id)
 
 
 async def xkcd_check_loop(bot):
@@ -339,16 +444,16 @@ async def xkcd_check_loop(bot):
             return
 
         LAST_COMIC_ID = await get_last_comic_id(bot)
-        current_id = latest.get("num", 0)
+        current_id = int(latest.get("num", 0) or 0)
 
         if LAST_COMIC_ID == 0:
             LAST_COMIC_ID = current_id
             await save_last_comic_id(bot, current_id)
-            log.info(f"[XKCD] 🚀 First run: Initialized from comic #{current_id}")
+            log.info("[XKCD] First run: Initialized from comic #%s", current_id)
         elif current_id > LAST_COMIC_ID:
             await catch_up_missing_comics(bot, LAST_COMIC_ID + 1, current_id)
         else:
-            log.debug(f"[XKCD] Polling started: No new comics (last={LAST_COMIC_ID})")
+            log.debug("[XKCD] Polling started: No new comics (last=%s)", LAST_COMIC_ID)
 
         while True:
             try:
@@ -359,116 +464,131 @@ async def xkcd_check_loop(bot):
                     log.warning("[XKCD] Failed to fetch latest comic")
                     continue
 
-                current_id = latest.get("num", 0)
-                log.debug(f"[XKCD] Poll check: last={LAST_COMIC_ID}, current={current_id}")
+                current_id = int(latest.get("num", 0) or 0)
+                log.debug(
+                    "[XKCD] Poll check: last=%s, current=%s",
+                    LAST_COMIC_ID,
+                    current_id,
+                )
 
                 if current_id > LAST_COMIC_ID:
                     await catch_up_missing_comics(bot, LAST_COMIC_ID + 1, current_id)
 
             except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log.exception(f"[XKCD] Error in check loop: {e}")
+                raise
+
+            except Exception as exc:
+                log.exception("[XKCD] Error in check loop: %s", exc)
 
     except asyncio.CancelledError:
         log.debug("[XKCD] Check loop cancelled")
+        raise
 
 
 @command("xkcd", role=Role.USER)
 async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
-    """
-    Manage and view XKCD comics.
-
-    Usage:
-        {prefix}xkcd                    - Show latest comic
-        {prefix}xkcd <number>           - Show specific comic
-        {prefix}xkcd on                 - Enable XKCD in this room (MUC DM only)
-        {prefix}xkcd off                - Disable XKCD in this room (MUC DM only)
-        {prefix}xkcd status             - Show XKCD status in this room (MUC DM only)
-        {prefix}xkcd search <query> [page] - Search for XKCD by title/alt
-        {prefix}xkcd random             - Show random XKCD
-    """
-
-    from_jid = msg["from"].bare
+    """Manage and view XKCD comics."""
+    from_jid = str(msg["from"].bare)
+    target_jid = str(msg["from"])
     is_muc_pm = from_jid in JOINED_ROOMS
 
-    log.debug(f"[XKCD] Command: args={args}, is_room={is_room}, is_muc_pm={is_muc_pm}, from_jid={from_jid}")
+    log.debug(
+        "[XKCD] Command: args=%s, is_room=%s, is_muc_pm=%s, from_jid=%s",
+        args,
+        is_room,
+        is_muc_pm,
+        from_jid,
+    )
 
     # Try to read configured command prefix for help text.
     # Fall back to a comma if the bot does not expose one.
     command_prefix = getattr(bot, "prefix", ",")
 
-    # on/off/status are room-management actions and must be restricted
-    # explicitly. Viewing/searching XKCD remains available to users.
+    lowered_args = [str(arg).lower() for arg in args]
+
+    # on/off/status are room-management actions and must be restricted explicitly.
+    # This now uses dict storage, consistent with the other room opt-in plugins.
     if await handle_room_toggle_command(
-        bot, msg, is_room, args,
+        bot,
+        msg,
+        is_room,
+        lowered_args,
         store_getter=get_xkcd_store,
         key=XKCD_KEY,
         label="XKCD posting",
-        storage="list",
-        list_field="rooms",
+        storage="dict",
         log_prefix="[XKCD]",
     ):
         return
 
-    # Commands in MUC PM only work when XKCD is enabled for that room
+    # Commands in MUC PM only work when XKCD is enabled for that room.
     if is_muc_pm:
-        store = await get_xkcd_store(bot)
-        subscribed = await store.get_global(XKCD_KEY, default={"rooms": []})
-        rooms = subscribed.get("rooms", [])
-
+        rooms = await get_subscribed_rooms(bot)
         if from_jid not in rooms:
-            bot.reply(msg, "🛑 XKCD is not enabled in this room. Use ',xkcd on' in a MUC DM to enable it.")
-            log.info(f"[XKCD] Command blocked: XKCD not enabled in {from_jid}")
+            bot.reply(
+                msg,
+                "ℹ️ XKCD is not enabled in this room.\n"
+                f"Use '{command_prefix}xkcd on' in a MUC DM to enable it.",
+            )
+            log.info("[XKCD] Command blocked: XKCD not enabled in %s", from_jid)
             return
 
     # search command with pagination
-    if args and args[0] == "search":
+    if lowered_args and lowered_args[0] == "search":
         if len(args) < 2:
-            bot.reply(msg, "❌ Usage: xkcd search <query> [page]")
+            bot.reply(msg, f"❌ Usage: {command_prefix}xkcd search <query> [page]")
             return
 
         page = 1
-        if len(args) >= 3 and args[-1].isdigit():
+        if len(args) >= 3 and str(args[-1]).isdigit():
             page = int(args[-1])
-            query = " ".join(args[1:-1]).lower()
+            query = " ".join(str(arg) for arg in args[1:-1]).lower()
         else:
-            query = " ".join(args[1:]).lower()
+            query = " ".join(str(arg) for arg in args[1:]).lower()
 
         if not query:
-            bot.reply(msg, "❌ Usage: xkcd search <query> [page]")
+            bot.reply(msg, f"❌ Usage: {command_prefix}xkcd search <query> [page]")
             return
 
         if page < 1:
             bot.reply(msg, "❌ Page number must be 1 or greater.")
             return
 
-        log.debug(f"[XKCD] Searching for: {query} (page {page})")
+        log.debug("[XKCD] Searching for: %s (page %s)", query, page)
 
         store = await get_xkcd_store(bot)
         search_index = await store.get_global(XKCD_INDEX_KEY, default={})
-
-        if not search_index:
-            bot.reply(msg, "❌ Search index not built. Please wait for indexing to complete.")
+        if not isinstance(search_index, dict) or not search_index:
+            bot.reply(msg, "❌ Search index not built.\nPlease wait for indexing to complete.")
             return
 
         results = []
         for comic_id_str, comic_data in search_index.items():
+            if not isinstance(comic_data, dict):
+                continue
+
             title = comic_data.get("title", "").lower()
             alt = comic_data.get("alt", "").lower()
 
             if query in title or query in alt:
-                results.append({
-                    "id": int(comic_id_str),
-                    "title": comic_data.get("title", ""),
-                    "alt": comic_data.get("alt", ""),
-                })
+                try:
+                    comic_id = int(comic_id_str)
+                except ValueError:
+                    continue
+
+                results.append(
+                    {
+                        "id": comic_id,
+                        "title": comic_data.get("title", ""),
+                        "alt": comic_data.get("alt", ""),
+                    }
+                )
 
         if not results:
             bot.reply(msg, f"❌ No XKCDs found matching '{query}'")
             return
 
-        results.sort(key=lambda x: x["id"], reverse=True)
+        results.sort(key=lambda item: item["id"], reverse=True)
 
         per_page = 10
         total_results = len(results)
@@ -477,7 +597,9 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         if page > total_pages:
             bot.reply(
                 msg,
-                f"❌ Page {page} does not exist. There {'is' if total_pages == 1 else 'are'} only {total_pages} page{'s' if total_pages != 1 else ''}."
+                f"❌ Page {page} does not exist.\n"
+                f"There {'is' if total_pages == 1 else 'are'} only {total_pages} "
+                f"page{'s' if total_pages != 1 else ''}.",
             )
             return
 
@@ -486,7 +608,7 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         page_results = results[start:end]
 
         msg_lines = [
-            f"🔍 Found {total_results} results for '{query}' (page {page}/{total_pages}):"
+            f"🔎 Found {total_results} results for '{query}' (page {page}/{total_pages}):"
         ]
 
         for i, result in enumerate(page_results, start + 1):
@@ -506,25 +628,28 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     # random command
-    if args and args[0] == "random":
+    if lowered_args and lowered_args[0] == "random":
         latest = await get_latest_xkcd()
         if not latest:
             bot.reply(msg, "❌ Failed to fetch XKCD data.")
             return
 
-        max_id = latest.get("num", 1)
+        max_id = int(latest.get("num", 1) or 1)
 
-        while True:
+        for _ in range(20):
             random_id = random.randint(1, max_id)
             if random_id not in MISSING_COMIC_IDS:
                 break
+        else:
+            bot.reply(msg, "❌ Failed to pick a valid random XKCD.")
+            return
 
         comic = await get_xkcd(random_id)
         if comic:
             if is_room:
                 await send_xkcd_room(bot, from_jid, comic)
             else:
-                await send_xkcd_dm(bot, str(msg["from"]), comic)
+                await send_xkcd_dm(bot, target_jid, comic)
         else:
             bot.reply(msg, f"❌ Failed to fetch XKCD #{random_id}.")
         return
@@ -538,15 +663,20 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
                 bot.reply(msg, f"❌ XKCD #{comic_id} does not exist.")
                 return
 
+            if comic_id < 1:
+                bot.reply(msg, "❌ XKCD number must be 1 or greater.")
+                return
+
             comic = await get_xkcd(comic_id)
             if comic:
                 if is_room:
                     await send_xkcd_room(bot, from_jid, comic)
                 else:
-                    await send_xkcd_dm(bot, str(msg["from"]), comic)
+                    await send_xkcd_dm(bot, target_jid, comic)
             else:
                 bot.reply(msg, f"❌ XKCD #{comic_id} not found.")
             return
+
         except ValueError:
             pass
 
@@ -556,7 +686,7 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         if is_room:
             await send_xkcd_room(bot, from_jid, latest)
         else:
-            await send_xkcd_dm(bot, str(msg["from"]), latest)
+            await send_xkcd_dm(bot, target_jid, latest)
     else:
         bot.reply(msg, "❌ Failed to fetch latest XKCD.")
 
@@ -567,21 +697,42 @@ async def on_load(bot):
 
     log.info("[XKCD] Plugin loading...")
 
-    # Register XEP-0066 if available
+    # Register XEP-0066 if available.
     try:
         if not bot.plugin.get("xep_0066", None):
             bot.register_plugin("xep_0066")
             log.info("[XKCD] XEP-0066 (Out of Band Data) registered")
-    except Exception as e:
-        log.debug(f"[XKCD] Could not register XEP-0066: {e}")
+    except Exception as exc:
+        log.debug("[XKCD] Could not register XEP-0066: %s", exc)
+
+    try:
+        await migrate_xkcd_room_storage(bot)
+    except Exception as exc:
+        log.exception("[XKCD] Failed to migrate room storage: %s", exc)
+
+    # Avoid duplicate tasks on plugin reload.
+    if INDEX_TASK and not INDEX_TASK.done():
+        INDEX_TASK.cancel()
+        try:
+            await INDEX_TASK
+        except asyncio.CancelledError:
+            pass
+
+    if CHECK_TASK and not CHECK_TASK.done():
+        CHECK_TASK.cancel()
+        try:
+            await CHECK_TASK
+        except asyncio.CancelledError:
+            pass
 
     INDEX_TASK = asyncio.create_task(build_full_index(bot))
     CHECK_TASK = asyncio.create_task(xkcd_check_loop(bot))
+
     log.info("[XKCD] Plugin loaded, check loop started")
 
 
 async def on_unload(bot):
-    """Unload the XKCD plugin and stop the check loop."""
+    """Unload the XKCD plugin and stop background tasks."""
     global CHECK_TASK, INDEX_TASK
 
     log.info("[XKCD] Plugin unloading...")
@@ -599,5 +750,8 @@ async def on_unload(bot):
             await CHECK_TASK
         except asyncio.CancelledError:
             pass
+
+    INDEX_TASK = None
+    CHECK_TASK = None
 
     log.info("[XKCD] Plugin unloaded")
