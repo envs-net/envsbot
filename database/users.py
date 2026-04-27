@@ -8,98 +8,6 @@ GLOBAL_JID = "__GLOBAL__"
 log = logging.getLogger(__name__)
 
 
-class ProfileStore:
-    def __init__(self, user_manager):
-        self.um = user_manager
-
-    async def _load_from_db(self, jid: str):
-        cursor = await self.um.db.execute(
-            "SELECT data, last_updated FROM users_profile WHERE jid = ?",
-            (jid,),
-        )
-        row = await cursor.fetchone()
-
-        if not row:
-            self.um._profile_meta[jid] = None
-            return {"plugins": {}}
-        if row[0] is None:
-            self.um._profile_meta[jid] = None
-            return {"plugins": {}}
-
-        raw_data, last_updated = row
-
-        try:
-            data = json.loads(raw_data)
-        except Exception:
-            log.exception("[PROFILE] Failed to decode JSON for %s", jid)
-            data = {}
-
-        # Store timestamp in meta ALWAYS (even on error)
-        self.um._profile_meta[jid] = last_updated
-
-        return data
-
-    async def get(self, jid: str, key: str = None):
-        """
-        Get profile data (cached).
-
-        - Loads from DB on first access
-        - Returns full profile or specific key
-        """
-        # Ensure cache exists
-        if jid not in self.um._profile_cache:
-            data = await self._load_from_db(jid)
-            self.um._profile_cache[jid] = data
-
-        profile = self.um._profile_cache[jid]
-
-        if key is None:
-            return profile
-
-        return profile.get(key)
-
-    async def set(self, jid: str, key: str, value):
-        """
-        Set profile value (cached, no immediate DB write).
-        """
-
-        # Get update time
-        now = datetime.now(timezone.utc).isoformat()
-
-        # Ensure cache exists
-        if jid not in self.um._profile_cache:
-            data = await self._load_from_db(jid)
-            self.um._profile_cache[jid] = data
-
-        self.um._profile_cache[jid][key] = value
-        self.um._profile_meta[jid] = now
-        self.um._dirty_profiles.add(jid)
-
-    async def delete(self, jid: str, key: str):
-        """
-        Delete a key from profile (cached).
-        """
-        now = datetime.now(timezone.utc).isoformat()
-
-        if jid not in self.um._profile_cache:
-            data = await self._load_from_db(jid)
-            self.um._profile_cache[jid] = data
-
-        profile = self.um._profile_cache[jid]
-
-        if key in profile:
-            del profile[key]
-            self.um._profile_meta[jid] = now
-            self.um._dirty_profiles.add(jid)
-
-    async def clear(self, jid: str):
-        """
-        Clear entire profile (cached).
-        """
-        self.um._profile_cache[jid] = {}
-        self.um._dirty_profiles.add(jid)
-
-
 class PluginRuntimeStore:
     """
     Cache-backed runtime storage for plugin-specific user data.
@@ -125,7 +33,7 @@ class PluginRuntimeStore:
     - `_runtime_cache[jid]` always contains the full JSON blob for that user.
     - `_dirty_runtime` tracks jids whose runtime data must be flushed.
     - The UserManager is responsible for writing cached data to the database,
-      typically in the order: users → runtime → profile.
+      typically in the order: users → runtime.
 
     This design ensures:
     - High performance (fewer DB writes)
@@ -301,7 +209,7 @@ class UserManager:
     Manages users + in-memory cache.
 
     Responsibilities:
-    - Cache users, profile, runtime
+    - Cache users, runtime
     - Provide helper functions (get_value, set_value)
     - Manage users table
 
@@ -316,14 +224,11 @@ class UserManager:
         self._nick_index_lock = asyncio.Lock()
 
         self._users_cache = {}
-        self._profile_cache = {}
         self._runtime_cache = {}
 
-        self._profile_meta = {}
         self._runtime_meta = {}
 
         self._dirty_users = set()
-        self._dirty_profiles = set()
         self._dirty_runtime = set()
 
     # ------------------------------------------------------------------
@@ -343,18 +248,6 @@ class UserManager:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             registered INTEGER DEFAULT FALSE
-        )
-        """)
-
-        await self.db.execute("""
-        CREATE TABLE IF NOT EXISTS users_profile (
-            jid TEXT PRIMARY KEY,
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            data TEXT DEFAULT '{}' NOT NULL,
-            FOREIGN KEY (jid)
-                REFERENCES users(jid)
-                ON DELETE CASCADE
-                ON UPDATE CASCADE
         )
         """)
 
@@ -438,23 +331,16 @@ class UserManager:
         )
 
         await self.db.execute(
-            "DELETE FROM users_profile WHERE jid = ?",
-            (jid,)
-        )
-
-        await self.db.execute(
             "DELETE FROM users_runtime WHERE jid = ?",
             (jid,)
         )
 
         # 2. Remove from caches
         self._users_cache.pop(jid, None)
-        self._profile_cache.pop(jid, None)
         self._runtime_cache.pop(jid, None)
 
         # 3. Clean dirty flags
         self._dirty_users.discard(jid)
-        self._dirty_profiles.discard(jid)
         self._dirty_runtime.discard(jid)
 
         # 4. Remove from _nick_index
@@ -528,19 +414,6 @@ class UserManager:
                 )
             )
 
-    async def _write_profile(self, jid, data):
-        timestamp = self._profile_meta.get(jid)
-        await self.db.execute(
-            """
-            INSERT INTO users_profile (jid, last_updated, data)
-            VALUES (?, ?, ?)
-            ON CONFLICT(jid) DO UPDATE SET
-                last_updated = excluded.last_updated,
-                data = excluded.data
-            """,
-            (jid, timestamp, json.dumps(data)),
-        )
-
     async def _write_runtime(self, jid: str, data: dict):
         """
         Persist full runtime JSON blob for a user.
@@ -575,8 +448,7 @@ class UserManager:
             }
             await store.set_global("_nick_index", serializable_index)
 
-        if not (self._dirty_users or self._dirty_runtime
-                or self._dirty_profiles):
+        if not (self._dirty_users or self._dirty_runtime):
             return
 
         # Start transaction using SAVEPOINT (thread-safe alternative)
@@ -596,13 +468,6 @@ class UserManager:
                 data = self._runtime_cache.get(jid) or {"plugins": {}}
                 await self._write_runtime(jid, data)
 
-            # ----------------------------------------------------------
-            # 3. PROFILE
-            # ----------------------------------------------------------
-            for jid in self._dirty_profiles:
-                data = self._profile_cache.get(jid, {})
-                await self._write_profile(jid, data)
-
             # Commit transaction
             await self.db.execute("RELEASE flush_checkpoint")
             log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
@@ -620,7 +485,6 @@ class UserManager:
         # ----------------------------------------------------------
         self._dirty_users.clear()
         self._dirty_runtime.clear()
-        self._dirty_profiles.clear()
 
     # ------------------------------------------------------------------
     # Plugin API
@@ -628,10 +492,3 @@ class UserManager:
 
     def plugin(self, plugin_name: str):
         return PluginRuntimeStore(self, plugin_name)
-
-    # ------------------------------------------------------------------
-    # Profile API
-    # ------------------------------------------------------------------
-
-    def profile(self):
-        return ProfileStore(self)

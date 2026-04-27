@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
     "category": "utility",
 }
@@ -101,8 +101,6 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}time
         {prefix}time <nick>
     """
-    profile_store = bot.db.users.profile()
-
     room = msg["from"].bare
     nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
     if is_room or _is_muc_pm(msg):
@@ -128,8 +126,8 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🔴  The 'time' command in DMs is not allowed")
         return
 
-    timezone = await profile_store.get(target_jid, "TIMEZONE")
-    location = await profile_store.get(target_jid, "LOCATION")
+    store = bot.db.users.plugin("vcard")
+    timezone = await store.get(target_jid, "TIMEZONE")
 
     if not timezone:
         bot.reply(msg, f"🟡️ No TIMEZONE set for {display_name}. Using UTC. "
@@ -147,7 +145,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
 
     now = datetime.now(tzinfo)
     formatted = now.strftime("%Y-%m-%d %H:%M:%S")
-    loc_str = f" ({location})" if location else ""
+    loc_str = ""
     bot.reply(msg, f"⏰ Time for {display_name}: {formatted} {tzone}{loc_str}", ephemeral=False)
 
 
@@ -185,9 +183,8 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🔴  The 'date' command in DMs is not allowed")
         return
 
-    profile_store = bot.db.users.profile()
-    timezone = await profile_store.get(target_jid, "TIMEZONE")
-    location = await profile_store.get(target_jid, "LOCATION")
+    store = bot.db.users.plugin("vcard")
+    timezone = await store.get(target_jid, "TIMEZONE")
 
     if not timezone:
         bot.reply(msg, f"🟡️ No TIMEZONE set for {display_name}. Using UTC. "
@@ -205,7 +202,7 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
 
     now = datetime.now(tzinfo)
     formatted = now.strftime("%Y-%m-%d")
-    loc_str = f" ({location})" if location else ""
+    loc_str = ""
     bot.reply(msg, f"📅 Date for {display_name}: {formatted} ({tzone}){loc_str}", ephemeral=False)
 
 
@@ -245,9 +242,9 @@ async def timestamp_command(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         # Get user's timezone
-        profile_store = bot.db.users.profile()
+        store = bot.db.users.plugin("vcard")
         target_jid = resolve_real_jid(bot, msg, is_room)
-        timezone = await profile_store.get(target_jid, "TIMEZONE")
+        timezone = await store.get(target_jid, "TIMEZONE")
 
         if timezone:
             try:

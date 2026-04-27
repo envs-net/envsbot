@@ -26,7 +26,6 @@ envsbot is now in a usable state: the core framework is mostly stable, although 
 - Dynamic plugin loading/reloading
 - Command decorators
 - SQLite-backed database layer
-- Test suite for core and plugins
 
 ---
 
@@ -41,7 +40,7 @@ Descriptions are derived from plugin docstrings or, if needed, from code analysi
 
 - **_reg_profile**  
   Bot profile initialization plugin.  
-  _Manages the bot’s public XMPP profile and its own database profile during startup or reload. No user commands; sets DB profile, vCard, and avatar as needed._
+  _Manages the bot’s public XMPP profile during startup or reload. No user commands; sets vCard and avatar as needed._
 
 - **birthday_notify**  
   Birthday notification plugin.  
@@ -62,10 +61,6 @@ Descriptions are derived from plugin docstrings or, if needed, from code analysi
 - **plugins**  
   Plugin management commands.  
   _Administrative commands for managing plugins at runtime, including load, unload, reload, and listing plugins._
-
-- **profile**  
-  Profile management plugin.  
-  _Allows users to set and display their NAME, LOCATION, TIMEZONE, BIRTHDAY, PRONOUNS, SPECIES, EMAIL, and personal URLs. Fields can be queried for yourself or others._
 
 - **reminder**  
   Reminder system plugin.  
@@ -147,7 +142,6 @@ Descriptions are derived from plugin docstrings or, if needed, from code analysi
 - [X] Plugin Management Plugin [core]
 - [X] User Management Plugin [core]
 - [X] Room Management Plugin [core]
-- [X] Profile Management Plugin [core]
 - [ ] Add more plugins
 - [ ] Improve documentation and usage examples
 - [ ] Enhance error handling and logging

@@ -2,23 +2,21 @@
 Bot profile initialization plugin.
 
 This plugin manages the public profile of the bot on the XMPP
-network and the profile for the bot in its own "users_profile"
-database table during session startup.
+network.
 
 No Commands
 -----------
 This plugin has no commands, it is just run at startup or on reload
-and sets the DB profile, vCard and the Avatar if they've changed.
+and sets the vCard and the Avatar if they've changed.
 
 Responsibilities
 ----------------
-• Insert or update the bots own database profile
 • Publish or update the bot vCard (XEP-0054)
 • Publish or update the bot avatar (XEP-0084)
 • Do Avatar publishing using PEP (Personal Eventing Protocol) (XEP-0163)
 • Avoid unnecessary updates using SHA1 hash comparison
 
-If the configured DB profile, avatar or vCard data has not changed since
+If the configured avatar or vCard data has not changed since
 the last run, the plugin skips the update to reduce network
 traffic.
 
@@ -34,8 +32,8 @@ import os
 from utils.config import config
 
 PLUGIN_META = {
-    "name": "profile",
-    "version": "0.2.0",
+    "name": "_reg_profile",
+    "version": "0.2.2",
     "description": "Bot avatar and vCard profile management",
     "category": "core",
 }
@@ -374,3 +372,18 @@ async def on_load(bot):
     bot.register_plugin("xep_0084")
 
     await setup_profile(bot)
+
+
+async def on_ready(bot):
+    """
+    Sets the timezone of the bot in the PluginRuntimeStore(GLOBAL)
+    if the bot is fully set up.
+
+    Parameters
+    ----------
+    bot : Bot
+        The main bot instance.
+    """
+    # Set timezone on startup from config file
+    store = bot.db.users.plugin("vcard")
+    await store.set(str(bot.boundjid.bare), "TIMEZONE", config.get("timezone", "UTC"))
