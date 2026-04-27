@@ -23,13 +23,38 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "rooms",
-    "version": "0.1.0",
+    "version": "0.2.1",
     "description": "Database-backed room management",
     "category": "core",
 }
 
 # joined rooms module global
 JOINED_ROOMS = {}
+
+# ------------------------------------------------
+# Default Plugin Setup for rooms
+#
+# IMPORTANT NOTE: This only works for "type": "dict"
+# ------------------------------------------------
+PLUGIN_DEFAULTS = {
+    "help": False,
+    "sed": True,
+    "urlcheck": True,
+    "vcard": True,
+    "weather": True,
+    "xkcd": True,
+    "xmpp": True,
+}
+PLUGIN_STORE_CONFIG = {
+    "help": {"type": "dict", "key": "HELP"},
+    "sed": {"type": "dict", "key": "SED"},
+    "urlcheck": {"type": "dict", "key": "URLCHECK"},
+    "vcard": {"type": "dict", "key": "VCARD"},
+    "weather": {"type": "dict", "key": "WEATHER"},
+    "xkcd": {"type": "dict", "key": "XKCD"},
+    "xmpp": {"type": "dict", "key": "XMPP"},
+}
+# ------------------------------------------------
 
 
 # -------------------------------------------------
@@ -329,6 +354,83 @@ async def autojoin_rooms(bot):
 
 
 # -------------------------------------------------
+# Set Room Control Defaults (for plugins that use room control)
+# -------------------------------------------------
+async def set_room_control_defaults(bot, room_jid, defaults=None):
+    """
+    Correctly resets all plugin room controls to defaults.
+    The key used for set_global/get_global IS the plugin name.
+    """
+    if defaults is None:
+        defaults = PLUGIN_DEFAULTS
+
+    for plugin, should_enable in defaults.items():
+        conf = PLUGIN_STORE_CONFIG[plugin]
+        typ = conf["type"]
+        key = conf["key"]
+        store = bot.db.users.plugin(plugin)
+
+        if typ == "dict":
+            state = await store.get_global(key, default={})
+            if not isinstance(state, dict):
+                state = {}
+            if should_enable:
+                state[room_jid] = True
+            else:
+                state.pop(room_jid, None)
+            log.info(f"[ROOMS][DICT] Setting defaults for plugin '{plugin}': {state}")
+            await store.set_global(plugin, state)
+
+        elif typ == "list":
+            list_field = conf.get("list_field", "rooms")
+            state = await store.get_global(key, default={list_field: []})
+            if not isinstance(state, dict):
+                state = {list_field: []}
+            rooms = state.get(list_field, [])
+            if not isinstance(rooms, list):
+                rooms = []
+            if should_enable:
+                if room_jid not in rooms:
+                    rooms.append(room_jid)
+            else:
+                if room_jid in rooms:
+                    rooms.remove(room_jid)
+            state[list_field] = rooms
+            log.info(f"[ROOMS][LIST] Setting defaults for plugin '{plugin}': {rooms}")
+            await store.set_global(plugin, state)
+        else:
+            raise ValueError(f"Unsupported storage type: {typ} for plugin {plugin}")
+
+
+# -------------------------------------------------
+# ROOMS SETDEFAULTS
+# -------------------------------------------------
+@command("rooms setdefaults", role=Role.ADMIN, aliases=["room setdefaults"])
+async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Reset all plugin room controls to the defaults for the specified room.
+
+    Usage: {prefix}room setdefaults <room_jid>
+    """
+    if not args:
+        bot.reply(msg, f"Usage: {config.get('prefix', ',')} setdefaults <room_jid>")
+        return
+    room_jid = args[0]
+    room = await bot.db.rooms.get(room_jid)
+    if not room:
+        bot.reply(msg, f"🔴 Room '{room_jid}' does not exist in the database.")
+        log.warning(f"[ROOMS] 🟡️ Room '{room_jid}' not found in DB for setdefaults!")
+        return
+    try:
+        await set_room_control_defaults(bot, room_jid)
+        bot.reply(msg, f"✅ Restored plugin defaults for room '{room_jid}'.")
+        log.info(f"[ROOMS] ✅ Restored plugin defaults for room '{room_jid}'.")
+    except Exception as e:
+        bot.reply(msg, f"🔴 Error restoring defaults: {e}")
+        log.exception(f"[ROOMS] 🔴 Error restoring defaults for room '{room_jid}': {e}")
+
+
+# -------------------------------------------------
 # ROOMS ADD
 # -------------------------------------------------
 
@@ -382,11 +484,16 @@ async def rooms_add(bot, sender_jid, nick, args, msg, is_room):
 
         log.info("[ROOMS] ➕ Added room %s nick=%s autojoin=%s",
                  room_jid, room_nick, autojoin)
+        try:
+            await set_room_control_defaults(bot, room_jid)
+            log.info(f"[ROOMS] ✅ Set plugin defaults for new room '{room_jid}'.")
+            bot.reply(msg, f"✅ Room added: {room_jid}. Plugin defaults set.")
+        except Exception as e:
+            log.exception(f"[ROOMS] 🔴 Error setting plugin defaults for new room '{room_jid}': {e}")
+            bot.reply(msg, f"🔴 Error setting plugin defaults: {e}")
+        return
 
-    bot.reply(
-        msg,
-        f"✅ Room added: {room_jid}",
-    )
+    bot.reply(msg, f"[ROOMS] 🔴 Room already exists: {room_jid}")
 
 
 # -------------------------------------------------
