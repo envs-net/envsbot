@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "rooms",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Database-backed room management",
     "category": "core",
 }
@@ -362,8 +362,11 @@ async def autojoin_rooms(bot):
 # -------------------------------------------------
 async def set_room_control_defaults(bot, room_jid, defaults=None):
     """
-    Correctly resets all plugin room controls to defaults.
-    The key used for set_global/get_global IS the plugin name.
+    Reset all plugin room controls to their configured defaults.
+
+    Important:
+    The storage key is not always the plugin name. Use the configured
+    PLUGIN_STORE_CONFIG[plugin]["key"] for get_global/set_global.
     """
     if defaults is None:
         defaults = PLUGIN_DEFAULTS
@@ -378,30 +381,37 @@ async def set_room_control_defaults(bot, room_jid, defaults=None):
             state = await store.get_global(key, default={})
             if not isinstance(state, dict):
                 state = {}
+
             if should_enable:
                 state[room_jid] = True
             else:
                 state.pop(room_jid, None)
-            log.info(f"[ROOMS][DICT] Setting defaults for plugin '{plugin}': {state}")
-            await store.set_global(plugin, state)
+
+            log.info(f"[ROOMS][DICT] Setting defaults for plugin '{plugin}' key '{key}': {state}")
+            await store.set_global(key, state)
 
         elif typ == "list":
             list_field = conf.get("list_field", "rooms")
             state = await store.get_global(key, default={list_field: []})
             if not isinstance(state, dict):
                 state = {list_field: []}
+
             rooms = state.get(list_field, [])
             if not isinstance(rooms, list):
                 rooms = []
+
             if should_enable:
                 if room_jid not in rooms:
                     rooms.append(room_jid)
             else:
                 if room_jid in rooms:
                     rooms.remove(room_jid)
+
             state[list_field] = rooms
-            log.info(f"[ROOMS][LIST] Setting defaults for plugin '{plugin}': {rooms}")
-            await store.set_global(plugin, state)
+
+            log.info(f"[ROOMS][LIST] Setting defaults for plugin '{plugin}' key '{key}': {rooms}")
+            await store.set_global(key, state)
+
         else:
             raise ValueError(f"Unsupported storage type: {typ} for plugin {plugin}")
 
