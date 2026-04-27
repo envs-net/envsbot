@@ -14,6 +14,11 @@ Use the "TZ identiier" from the list.
 The weather plugin now uses the "LOCATION" and/or "CTRY" (country) fields from
 your vCard to determine the location for weather reports, if set. If you have
 more than one address the first one found will be used.
+
+IMPORTANT: You may have to activate the vcard commands if not activated by
+default with the command:
+    {prefix}vcard on
+
 """
 
 import logging
@@ -31,7 +36,7 @@ VCARD_KEY = "VCARD"
 
 PLUGIN_META = {
     "name": "vcard",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "Lookup and display vCard of a MUC occupant by MUC JID only",
     "category": "info",
     "requires": ["rooms"],
@@ -534,6 +539,18 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
     Look up the vCard of a user by MUC nick (MUC JID only), never real JID!
 
     Usage: {prefix}vcard [<nick>|on|off|status]
+
+    IMPORTANT: You may have to activate the vcard commands if not activated
+    by default with the command:
+        {prefix}vcard on
+
+    Usage:
+        {prefix}vcard on|off|status
+            - Enable, disable or check status of vCard commands in this room.
+        {prefix}vcard [nick]
+            - Look up the vCard of a user by their MUC nickname in this room.
+              or omit the nick for your own vCard
+
     """
 
     handled = await handle_room_toggle_command(
