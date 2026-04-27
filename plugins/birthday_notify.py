@@ -158,9 +158,16 @@ async def _check_user_birthday(bot, user_jid_str: str, nick: str, room_jid):
                                mtype="chat",
                                mbody="None")
 
+        # Get user's birthday from profile
+        birthday = await vcard_field(bot, msg, nick, "BDAY")
+        log.info(f"[BIRTHDAY] Checking {nick} ({user_jid_str}) in room {room_jid} - birthday: {birthday}")
+
+        if not birthday:
+            return
+        
         # Load from DB if not in memory
         if user_jid_str not in ANNOUNCED_TODAY:
-            announced_date = await vcard_field(bot, msg, nick, "BDAY")
+            announced_date = birthday
             if announced_date:
                 ANNOUNCED_TODAY[user_jid_str] = announced_date
 
@@ -168,10 +175,6 @@ async def _check_user_birthday(bot, user_jid_str: str, nick: str, room_jid):
         if ANNOUNCED_TODAY.get(user_jid_str) == today_str:
             return
 
-        # Get user's birthday from profile
-        birthday = await vcard_field(bot, msg, nick, "BDAY")
-        if not birthday:
-            return
 
         # Check if today is their birthday
         if not _is_birthday_today(birthday):
@@ -221,6 +224,7 @@ async def _check_and_announce_birthdays(bot):
     Only announces in rooms where birthday_notify is enabled.
     """
     try:
+        log.info(f"[BIRTHDAY] Already announced: {ANNOUNCED_TODAY}")
         for room_jid, room_data in JOINED_ROOMS.items():
             # Check if enabled for this room
             enabled = await _is_enabled_for_room(bot, str(room_jid))
