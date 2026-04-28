@@ -158,13 +158,13 @@ async def send_xkcd_room(bot, room_id: str, comic: dict[str, Any] | None):
         # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
 
-        log.info(
+        log.debug(
             "[XKCD] Sending comic #%s to room %s via direct URL + OOB",
             comic.get("num"),
             room_id,
         )
         await send_url_with_oob(bot, room_id, img_url, "groupchat")
-        log.info("[XKCD] ✅ Comic #%s sent to room", comic.get("num"))
+        log.debug("[XKCD] ✅ Comic #%s sent to room", comic.get("num"))
 
     except Exception as exc:
         log.exception(
@@ -197,13 +197,13 @@ async def send_xkcd_dm(bot, target_jid: str, comic: dict[str, Any] | None):
         # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
 
-        log.info(
+        log.debug(
             "[XKCD] Sending comic #%s to DM %s via direct URL + OOB",
             comic.get("num"),
             target_jid,
         )
         await send_url_with_oob(bot, target_jid, img_url, "chat")
-        log.info("[XKCD] ✅ Comic #%s sent to DM", comic.get("num"))
+        log.debug("[XKCD] ✅ Comic #%s sent to DM", comic.get("num"))
 
     except Exception as exc:
         log.exception(
@@ -691,8 +691,27 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "❌ Failed to fetch latest XKCD.")
 
 
+async def _cancel_task(task: asyncio.Task | None, name: str):
+    """Cancel a background task safely."""
+    if not task:
+        return
+
+    if task.done():
+        return
+
+    log.debug("[XKCD] Cancelling %s task...", name)
+    task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        log.debug("[XKCD] %s task cancelled", name)
+    except Exception as exc:
+        log.exception("[XKCD] Error while cancelling %s task: %s", name, exc)
+
+
 async def on_load(bot):
-    """Load the XKCD plugin and start the check loop."""
+    """Load the XKCD plugin and start background tasks safely."""
     global CHECK_TASK, INDEX_TASK
 
     log.info("[XKCD] Plugin loading...")
@@ -711,24 +730,22 @@ async def on_load(bot):
         log.exception("[XKCD] Failed to migrate room storage: %s", exc)
 
     # Avoid duplicate tasks on plugin reload.
-    if INDEX_TASK and not INDEX_TASK.done():
-        INDEX_TASK.cancel()
-        try:
-            await INDEX_TASK
-        except asyncio.CancelledError:
-            pass
+    await _cancel_task(INDEX_TASK, "index")
+    await _cancel_task(CHECK_TASK, "check")
 
-    if CHECK_TASK and not CHECK_TASK.done():
-        CHECK_TASK.cancel()
-        try:
-            await CHECK_TASK
-        except asyncio.CancelledError:
-            pass
+    INDEX_TASK = None
+    CHECK_TASK = None
 
-    INDEX_TASK = asyncio.create_task(build_full_index(bot))
-    CHECK_TASK = asyncio.create_task(xkcd_check_loop(bot))
+    INDEX_TASK = asyncio.create_task(
+        build_full_index(bot),
+        name="xkcd-index",
+    )
+    CHECK_TASK = asyncio.create_task(
+        xkcd_check_loop(bot),
+        name="xkcd-check",
+    )
 
-    log.info("[XKCD] Plugin loaded, check loop started")
+    log.info("[XKCD] Plugin loaded, background tasks started")
 
 
 async def on_unload(bot):
@@ -737,19 +754,8 @@ async def on_unload(bot):
 
     log.info("[XKCD] Plugin unloading...")
 
-    if INDEX_TASK and not INDEX_TASK.done():
-        INDEX_TASK.cancel()
-        try:
-            await INDEX_TASK
-        except asyncio.CancelledError:
-            pass
-
-    if CHECK_TASK and not CHECK_TASK.done():
-        CHECK_TASK.cancel()
-        try:
-            await CHECK_TASK
-        except asyncio.CancelledError:
-            pass
+    await _cancel_task(INDEX_TASK, "index")
+    await _cancel_task(CHECK_TASK, "check")
 
     INDEX_TASK = None
     CHECK_TASK = None
