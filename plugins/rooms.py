@@ -7,6 +7,12 @@ can add rooms, update their configuration, remove them, view the
 current list of rooms, and control whether the bot joins or leaves
 rooms at runtime.
 
+Newly created rooms will be created with the plugin defaults (on/off)
+defined in the "rooms" plugin.
+
+You can set the rooms plugins back to the defaults with the following command:
+    {prefix}room setdefaults <room_jid>
+
 Rooms can optionally be configured with an *autojoin* flag so the
 bot automatically joins them when it starts.
 """
@@ -419,17 +425,27 @@ async def set_room_control_defaults(bot, room_jid, defaults=None):
 # -------------------------------------------------
 # ROOMS SETDEFAULTS
 # -------------------------------------------------
-@command("rooms setdefaults", role=Role.ADMIN, aliases=["room setdefaults"])
+@command("rooms set_plugin_defaults", role=Role.ADMIN,
+         aliases=["room set_plugin_defaults",
+                  "rooms spd", "room spd"])
 async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
     """
     Reset all plugin room controls to the defaults for the specified room.
+    If the room_jid is omitted, the current room will be used.
 
-    Usage: {prefix}room setdefaults <room_jid>
+    Usage:
+        {prefix}room set_plugin_defaults [room_jid]
+        {preffix}room spd [room_jid]
     """
-    if not args:
-        bot.reply(msg, f"Usage: {config.get('prefix', ',')} setdefaults <room_jid>")
+    try:
+        room_jid = args[0]
+    except (KeyError, IndexError):
+        room_jid = msg['from'].bare
+    if room_jid not in JOINED_ROOMS:
+        bot.reply(msg, f"🔴 Room '{room_jid}' is not currently joined. Please join the room first before setting defaults.")
+        log.warning(f"[ROOMS] 🟡️ Room '{room_jid}' not joined for setdefaults!")
         return
-    room_jid = args[0]
+
     room = await bot.db.rooms.get(room_jid)
     if not room:
         bot.reply(msg, f"🔴 Room '{room_jid}' does not exist in the database.")
@@ -442,6 +458,67 @@ async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
     except Exception as e:
         bot.reply(msg, f"🔴 Error restoring defaults: {e}")
         log.exception(f"[ROOMS] 🔴 Error restoring defaults for room '{room_jid}': {e}")
+
+
+# -------------------------------------------------
+# ROOMS PLUGINS
+# -------------------------------------------------
+@command("rooms plugins", role=Role.MODERATOR, aliases=["room plugins"])
+async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Show recent plugin setup for current room.
+
+    Usage: {prefix}room plugins
+    """
+    room_jid = msg['from'].bare
+    if room_jid not in JOINED_ROOMS:
+        bot.reply(msg, f"🔴 Room '{room_jid}' is not currently joined. Please join the room first to view plugin settings.")
+        log.warning(f"[ROOMS] 🟡️ Room '{room_jid}' not joined for plugins command!")
+        return
+
+    lines = [f"📋 Plugin settings for room '{room_jid}'"]
+    for plugin, should_enable in PLUGIN_DEFAULTS.items():
+        conf = PLUGIN_STORE_CONFIG[plugin]
+        typ = conf["type"]
+        key = conf["key"]
+        store = bot.db.users.plugin(plugin)
+
+        if typ == "dict":
+            state = await store.get_global(key, default={})
+            if not isinstance(state, dict):
+                state = {}
+
+            line = f"• {plugin}: {'enabled' if state.get(room_jid) else 'disabled'}"
+            line += "  |  Default: "
+            default = "on" if PLUGIN_DEFAULTS.get(plugin, False) else "off"
+            line += default
+            modified = (PLUGIN_DEFAULTS.get(plugin, False) != bool(state.get(room_jid)))
+            line += " (modified)" if modified else ""
+            lines.append(line)
+
+        elif typ == "list":
+            list_field = conf.get("list_field", "rooms")
+            state = await store.get_global(key, default={list_field: []})
+            if not isinstance(state, dict):
+                state = {list_field: []}
+
+            rooms = state.get(list_field, [])
+            if not isinstance(rooms, list):
+                rooms = []
+
+            line = f"• {plugin}: {'enabled' if room_jid in rooms else 'disabled'}"
+            line += "  |  Default: "
+            default = "on" if PLUGIN_DEFAULTS.get(plugin, False) else "off"
+            line += default
+            modified = (PLUGIN_DEFAULTS.get(plugin, False) != (room_jid in rooms))
+            line += " (modified)" if modified else ""
+            lines.append(line)
+
+        else:
+            raise ValueError(f"Unsupported storage type: {typ} for plugin {plugin}")
+
+    log.info(f"[ROOMS] Displaying plugin settings for room '{room_jid}'")
+    bot.reply(msg, "\n".join(lines))
 
 
 # -------------------------------------------------
