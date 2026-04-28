@@ -191,4 +191,6 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
         log.warning(f"[WEATHER] 🌦️ Exception fetching weather for {display_name} at {location}")
         return
 
-    bot.reply(msg, f"🌤️ Weather for {display_name}: {weather.strip()} ({location})", ephemeral=False)
+    weather_loc = weather.split(":")[0].strip()
+    weather_desc = ":".join(weather.split(":")[1:]).strip()
+    bot.reply(msg, f"🌤️ Weather for {display_name}: {weather_loc.title()}: {weather_desc.strip()} ({location})", ephemeral=False)

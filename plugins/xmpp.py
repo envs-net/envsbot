@@ -23,6 +23,9 @@ import asyncio
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
 from utils.config import config
+from utils.plugin_helper import handle_room_toggle_command
+
+XMPP_KEY = "XMPP"
 
 PLUGIN_META = {
     "name": "xmpp",
@@ -35,6 +38,7 @@ PLUGIN_META = {
 HELP_TEXT = """
 XMPP Utility Commands:
   {prefix}x help                  - Show this help message
+  {prefix}x <on|off|status>       - Toggle usage or show status
   {prefix}x version <domain>      - Show server software version (XEP-0092)
   {prefix}x items <domain|jid>    - List service items (XEP-0030)
   {prefix}x contact <domain>      - Show server contact information (XEP-0030)
@@ -44,6 +48,20 @@ XMPP Utility Commands:
   {prefix}x srv <domain>          - DNS SRV lookup
   {prefix}x compliance <domain>   - Compliance score
 """.format(prefix=config.get("prefix", ""))
+
+
+async def get_xmpp_store(bot):
+    return bot.db.users.plugin("xmpp")
+
+
+def _is_muc_pm(msg):
+    """Returns True if msg is a MUC direct message (not public groupchat)."""
+    return (
+        msg.get("type") in ("chat", "normal")
+        and hasattr(msg["from"], "bare")
+        and "@" in str(msg["from"].bare)
+        and str(msg["from"].bare) in JOINED_ROOMS
+    )
 
 
 def _resolve_target(bot, args, msg, is_room, nick):
@@ -124,6 +142,33 @@ def _validate_domain(domain: str) -> tuple[bool, str]:
     return True, ""
 
 
+@command("xmpp", role=Role.USER, aliases=["x"])
+async def cmd_xmpp(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Toggle xmpp commands on or off or show status.
+
+    Usage:
+        {prefix}xmpp <on|off|status>
+    """
+
+    handled = await handle_room_toggle_command(
+        bot,
+        msg,
+        is_room,
+        args,
+        store_getter=get_xmpp_store,
+        key=XMPP_KEY,
+        label="Use XMPP commands",
+        storage="dict",
+        log_prefix="[XMPP]",
+    )
+    if handled:
+        return
+
+    bot.reply(msg, "Usage: {prefix}xmpp <on|off|status>".format(prefix=config.get("prefix", "")))
+    return
+
+
 @command("xmpp help", role=Role.USER, aliases=["x help"])
 async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -133,6 +178,12 @@ async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp help
         {prefix}x help
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     bot.reply(msg, HELP_TEXT)
 
 
@@ -144,6 +195,12 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp version <domain>
         {prefix}x version <domain>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     if not args or len(args) < 1:
         bot.reply(msg, "❌ Missing domain")
         return
@@ -203,6 +260,12 @@ async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp uptime <domain>
         {prefix}x uptime <domain>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     if not args or len(args) < 1:
         bot.reply(msg, "❌ Missing domain")
         return
@@ -257,6 +320,12 @@ async def cmd_xmpp_items(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp items <domain|jid>
         {prefix}x items <domain|jid>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     target, error = _resolve_target(bot, args, msg, is_room, nick)
     if error:
         bot.reply(msg, f"❌ {error}")
@@ -301,6 +370,12 @@ async def cmd_xmpp_contact(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp contact <domain>
         {prefix}x contact <domain>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     if not args or len(args) < 1:
         bot.reply(msg, "❌ Missing domain")
         return
@@ -368,6 +443,12 @@ async def cmd_xmpp_info(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp info <domain|jid>
         {prefix}x info <domain|jid>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     target, error = _resolve_target(bot, args, msg, is_room, nick)
     if error:
         bot.reply(msg, f"❌ {error}")
@@ -425,6 +506,12 @@ async def cmd_xmpp_ping(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp ping <jid|domain>
         {prefix}x ping <jid|domain>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     target, error = _resolve_target(bot, args, msg, is_room, nick)
     if error:
         bot.reply(msg, f"❌ {error}")
@@ -469,6 +556,12 @@ async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x srv example.com
         {prefix}x srv user@example.com    (uses example.com)
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     if not args or len(args) < 1:
         bot.reply(msg, "❌ Missing domain\nUsage: {prefix}x srv <domain>")
         return
@@ -572,6 +665,12 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp compliance <domain>
         {prefix}x compliance <domain>
     """
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     if not args or len(args) < 1:
         bot.reply(msg, "❌ Missing domain")
         return

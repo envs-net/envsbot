@@ -10,6 +10,8 @@ Usage
 -----
 General help:
   {prefix}help
+Turn on help in rooms:
+  {prefix}help inroom <on|off|status>
 Plugin help:
   {prefix}help <plugin>
 Command help:
@@ -22,7 +24,6 @@ Examples:
 
 Notes
 -----
-• Help is only available via private chat to prevent spam.
 • Commands are filtered by user role.
 • Plugins always display their full docstring.
 • Command help displays the full command docstring.
@@ -38,16 +39,24 @@ from utils.command import (
     Role,
     COMMANDS
 )
+from utils.plugin_helper import handle_room_toggle_command
 from utils.config import config
 
 log = logging.getLogger(__name__)
 
+HELP_KEY = "HELP"
+
 PLUGIN_META = {
     "name": "help",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
 }
+
+
+# Store getter
+async def get_help_store(bot):
+    return bot.db.users.plugin("help")
 
 
 # --------------------------------------------------
@@ -182,8 +191,11 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 
     prefix = config.get("prefix", ",")
 
-    if is_room:
-        bot.reply(msg, "ℹ️ Help is only available via private message.")
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_help_store(bot)
+    enabled_rooms = await store.get_global(HELP_KEY, default={})
+    if is_room and msg["from"].bare not in enabled_rooms:
+        bot.reply(msg, "ℹ️ Help is only available via private message in this room.")
         return
 
     query = " ".join(args).strip()
@@ -306,3 +318,30 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
             lines.append(_format_command(cmd, prefix))
 
     bot.reply(msg, lines)
+
+@command("help inroom", role=Role.USER, aliases=["h inroom"])
+async def help_inroom_command(bot, sender_jid, sender_nick, args, msg, is_room):
+    """
+    Toggles usage of help inside a particular chat room.
+    This is stored on a per-room basis and does not affect private messages.
+
+    Usage:
+        {prefix}help inroom <on|off|status>
+    """
+
+    handled = await handle_room_toggle_command(
+        bot,
+        msg,
+        is_room,
+        args,
+        store_getter=get_help_store,
+        key=HELP_KEY,
+        label="In-Room Help",
+        storage="dict",
+        log_prefix="[HELP]",
+    )
+    if handled:
+        return
+
+    bot.reply(msg, f"Usage: {config.get('prefix', ',')}help inroom <on|off|status>")
+    return

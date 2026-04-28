@@ -2,10 +2,12 @@
 Tell plugin for Envsbot.
 
 Allows users to leave messages for other users who are not present in a room.
-Messages are stored using the recipient's real_jid and delivered the next time the
-recipient joins the room via the 'groupchat_presence' event.
+Messages are stored using the recipient's real_jid and delivered the next time
+the recipient joins the room via the 'groupchat_presence' event.
 
-Supports nicks with spaces. Command format: {prefix}tell <nick with spaces>: <message>
+Supports nicks with spaces, separated with a colon ":" from the message.
+
+Command format: {prefix}tell <nick with spaces>: <message>
 """
 
 import datetime
@@ -16,16 +18,34 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
+from utils.plugin_helper import handle_room_toggle_command
+from plugins.rooms import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
 
+TELL_KEY = "TELL"
+
 PLUGIN_META = {
     "name": "tell",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Store and deliver messages for users when they join a room again.",
     "category": "utility",
-    "requires": [],
+    "requires": ["rooms"],
 }
+
+
+async def get_tell_store(bot):
+    return bot.db.users.plugin("tell")
+
+
+def _is_muc_pm(msg):
+    """Returns True if msg is a MUC direct message (not public groupchat)."""
+    return (
+        msg.get("type") in ("chat", "normal")
+        and hasattr(msg["from"], "bare")
+        and "@" in str(msg["from"].bare)
+        and str(msg["from"].bare) in JOINED_ROOMS
+    )
 
 
 def parse_nick_and_message(args_str):
@@ -59,7 +79,7 @@ async def get_timezone(bot, jid):
     Get the user's timezone from the global PluginRuntimeStore,
     fallback to UTC.
     """
-    store = await bot.db.users.plugin("vcard")
+    store = bot.db.users.plugin("vcard")
     tzname = None
     if store:
         tzname = store.get(jid, "TIMEZONE")
@@ -93,7 +113,30 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     Stores a message for a user (with or without spaces in their nick).
     Will be delivered when they join the room again.
     Only available in groupchats.
+
+    NOTE the colon after the nick to separate the target nick from the message!
     """
+
+    handled = await handle_room_toggle_command(
+        bot,
+        msg,
+        is_room,
+        args,
+        store_getter=get_tell_store,
+        key=TELL_KEY,
+        label="Use 'tell' command",
+        storage="dict",
+        log_prefix="[TELL]",
+    )
+    if handled:
+        return
+
+    # Check, if command is allowed in this context (room or MUC PM)
+    store = await get_tell_store(bot)
+    enabled_rooms = await store.get_global(TELL_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
     prefix = config.get("prefix", ",")
     if not is_room:
         bot.reply(msg, f"This command is only available in groupchats.")

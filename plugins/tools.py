@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
     "category": "utility",
 }
@@ -120,7 +120,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
             target_jid = str(info["jid"])
             display_name = nick
     else:
-        # Direct message: allow querying someone else by their nick, fallback to self
+        # Direct messages to bot are vorbidden
         log.info("[TOOLS] Forbidden try to use the 'time' command in DM by %s",
                 nicks.get(nick, {}).get("nick", "unknown"))
         bot.reply(msg, "🔴  The 'time' command in DMs is not allowed")
@@ -131,7 +131,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
 
     if not timezone:
         bot.reply(msg, f"🟡️ No TIMEZONE set for {display_name}. Using UTC. "
-                       f"Set with {config.get('prefix', ',')}config timezone <zone>")
+                       f"Set with {config.get('prefix', ',')}tz set <timezone>")
         tzinfo = pytz.UTC
         tzone = "UTC"
     else:
@@ -188,7 +188,7 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
 
     if not timezone:
         bot.reply(msg, f"🟡️ No TIMEZONE set for {display_name}. Using UTC. "
-                       f"Set with {config.get('prefix', ',')}config timezone <zone>")
+                       f"Set with {config.get('prefix', ',')}tz set <timezone>")
         tzinfo = pytz.UTC
         tzone = "UTC"
     else:

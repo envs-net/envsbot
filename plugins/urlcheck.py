@@ -19,6 +19,8 @@ period.
 Command:
     {prefix}urlcheck on
     {prefix}urlcheck off
+    {prefix}urlcheck status
+
 """
 import re
 import aiohttp
@@ -81,6 +83,12 @@ async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
 
     Permission handling is delegated to utils.plugin_helper so on/off/status
     behaves consistently across all room-scoped plugins.
+
+    Usage:
+        {prefix}urlcheck on - Enable URL checking in this room
+        {prefix}urlcheck off - Disable URL checking in this room
+        {prefix}urlcheck status - Show if URL checking is enabled in this room
+
     """
     handled = await handle_room_toggle_command(
         bot,
@@ -101,13 +109,13 @@ async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
 
 async def on_groupchat_message(bot, msg):
     room = msg["from"].bare
-    nick = msg["from"].resource
+    nick = msg.get("mucnick")
     body = msg.get("body", "").strip()
 
     # ==== Prevent processing own messages ====
     try:
         bot_nick = JOINED_ROOMS[room]["nick"]
-        if bot_nick == nick:
+        if bot_nick == nick or bot_nick == msg["from"].resource:
             return
     except KeyError:
         return
