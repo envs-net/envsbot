@@ -1,9 +1,14 @@
 """
-Info plugin: Show the current weather for a user's location configured in
-their vCard. Only works in groupchats or MUC DMs where the user has a vCard
-with a LOCATION field.
+Info plugin: Show the current weather for a user's location
+configured in their vCard. Only works in groupchats or MUC DMs
+where the user has a vCard with a LOCATION field.
+
+IMPORTANT: You may need to turn the plugins usage on with the following
+command in each room you want to use it in:
+    {prefix}weather on
 
 Commands:
+    {prefix}weather <on|off|status>
     {prefix}weather [nick]
 """
 

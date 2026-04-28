@@ -1,22 +1,34 @@
-"""
-SED plugin for message correction.
+"""SED plugin for message correction.
 
-This plugin allows users to correct their previous messages using sed-like syntax.
-Keeps only the last 10 messages per room in memory.
+Allows users to correct previous messages using sed-like syntax.
+
+IMPORTANT: You must enable SED corrections in a room for this to work.
+Use this command to turn it on/off or show its status:
+    {prefix}sed <on|off|status>
 
 Commands:
-    s/<pattern>/<replacement>/<flags> - Correct last message
-    s#<pattern>#<replacement>#<flags> - Alternative delimiter
-    {prefix}sed <pattern> <replacement> [flags] - Alternative syntax
-    {prefix}sed on/off - Enable/disable sed plugin in this room (moderator only)
-    {prefix}sed status - Show if sed is enabled in this room
+• s/pattern/replacement/flags
+• s#pattern#replacement#flags
+• {prefix}sed <pattern> <replacement> [flags]
+• {prefix}sed on/off/status
+
+Flags:
+• i - case insensitive
+• m - multiline
+• s - dotall
+• g - global replace
+• l - literal mode
 """
-import re
+
 import logging
-import threading
+import multiprocessing
+import queue
+import re
+from collections import defaultdict, deque
 from functools import partial
-from collections import deque, defaultdict
+
 from utils.command import command, Role
+from utils.config import config
 from plugins.rooms import JOINED_ROOMS
 from utils.plugin_helper import handle_room_toggle_command
 
@@ -24,115 +36,163 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "sed",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
     "requires": ["rooms"],
 }
 
 SED_KEY = "SED"
-REGEX_TIMEOUT = 1.0  # second for regex substitution (0.2 - 2.0 good values)
 
-# Store only last 10 messages per room
+# Hard timeout for regex substitution.
+REGEX_TIMEOUT = 1.0
+
+# Practical limits to reduce abuse.
+MAX_PATTERN_LENGTH = 256
+MAX_REPLACEMENT_LENGTH = 1000
+MAX_INPUT_LENGTH = 5000
+MAX_OUTPUT_LENGTH = 8000
+
+# Store only last 10 messages per room/DM.
 MESSAGE_CACHE = defaultdict(lambda: deque(maxlen=10))
 
-# Track processed messages to avoid duplicates (use stanza_id instead of object id)
+# Track processed messages to avoid duplicates.
 PROCESSED_STANZAS = set()
+PROCESSED_STANZA_ORDER = deque(maxlen=10000)
 
+
+# ============================================================================
+# MESSAGE CACHE / IDS
+# ============================================================================
 
 def get_stanza_id(msg):
-    """Extract the stanza_id from a message."""
-    stanza_id = msg.get('stanza_id')
+    """Extract stanza_id from a message."""
+    stanza_id = msg.get("stanza_id")
+
     if stanza_id:
-        return stanza_id.get('id')
+        return stanza_id.get("id")
+
     return None
+
+
+def remember_stanza(stanza_id: str | None) -> bool:
+    """Return False if stanza was already processed."""
+    if not stanza_id:
+        return True
+
+    if stanza_id in PROCESSED_STANZAS:
+        return False
+
+    if len(PROCESSED_STANZA_ORDER) == PROCESSED_STANZA_ORDER.maxlen:
+        old = PROCESSED_STANZA_ORDER.popleft()
+        PROCESSED_STANZAS.discard(old)
+
+    PROCESSED_STANZAS.add(stanza_id)
+    PROCESSED_STANZA_ORDER.append(stanza_id)
+
+    return True
 
 
 def get_reply_target(msg):
     """Get the ID of the message this is a reply to."""
-    if 'reply' in msg:
-        reply = msg.get('reply')
+    if "reply" in msg:
+        reply = msg.get("reply")
+
         if reply:
-            return reply.get('id')
+            return reply.get("id")
+
     return None
 
 
-def extract_reply_quote(body):
+def extract_reply_quote(body: str):
     """Extract the original message from a reply quote."""
-    lines = body.strip().split('\n')
+    lines = body.strip().split("\n")
     quoted_lines = []
 
     for line in lines:
-        if line.startswith('>'):
-            # Remove the '> ' prefix
+        if line.startswith(">"):
             quoted_lines.append(line[2:] if len(line) > 1 else "")
         else:
             break
 
-    return '\n'.join(quoted_lines) if quoted_lines else None
+    return "\n".join(quoted_lines) if quoted_lines else None
 
 
-def cache_message(room, nick, body, stanza_id):
-    """Add message to cache (only keeps last 10 per room)."""
-    MESSAGE_CACHE[room].append({
-        'nick': nick,
-        'body': body,
-        'stanza_id': stanza_id
-    })
+def cache_message(room: str, nick: str | None, body: str, stanza_id: str | None):
+    """Add message to cache."""
+    MESSAGE_CACHE[room].append(
+        {
+            "nick": nick,
+            "body": body,
+            "stanza_id": stanza_id,
+        }
+    )
 
 
-def get_last_message(room):
+def get_last_message(room: str):
     """Get the last message from cache."""
     if not MESSAGE_CACHE[room]:
         return None
-    return MESSAGE_CACHE[room][-1]['body']
+
+    return MESSAGE_CACHE[room][-1]["body"]
 
 
-def get_message_by_id(room, msg_id):
-    """Get a message by its stanza_id from cache."""
+def get_message_by_id(room: str, msg_id: str):
+    """Get a message by stanza_id from cache."""
     if not MESSAGE_CACHE[room]:
         return None
 
     for msg_data in MESSAGE_CACHE[room]:
-        if msg_data['stanza_id'] == msg_id:
-            return msg_data['body']
+        if msg_data["stanza_id"] == msg_id:
+            return msg_data["body"]
 
     return None
 
 
+def _room_key_from_msg(msg, is_room: bool) -> str:
+    if is_room:
+        return msg["from"].bare
+
+    room_full = str(msg["from"])
+    return room_full.split("/", 1)[0] if "/" in room_full else room_full
+
+
+# ============================================================================
+# SED PARSING
+# ============================================================================
+
 def read_until_delimiter(raw_statement: str, delimiter: str, require: bool = True):
-    """
-    Read string until unescaped delimiter is found.
-    Handles escaped delimiters (\\/).
-    """
+    """Read until an unescaped delimiter is found."""
     value = ""
+
     while True:
         try:
             sep_index = raw_statement.index(delimiter)
         except ValueError:
             if require:
                 raise ValueError(f"Delimiter '{delimiter}' not found")
+
             return raw_statement, value
 
         if sep_index == 0:
             return value, raw_statement[1:]
-        elif raw_statement[sep_index - 1] == "\\":
-            # Escaped delimiter, include it
+
+        if raw_statement[sep_index - 1] == "\\":
             value += raw_statement[:sep_index - 1] + delimiter
             raw_statement = raw_statement[sep_index + 1:]
         else:
-            # Unescaped delimiter found
             value += raw_statement[:sep_index]
             raw_statement = raw_statement[sep_index + 1:]
             return value, raw_statement
 
 
-def parse_sed_command(text):
+def parse_sed_command(text: str):
+    """Parse s/pattern/replacement/flags or s#pattern#replacement#flags.
+
+    Returns:
+        (pattern, replacement, flags) or (None, None, None)
     """
-    Parse sed-like command: s/pattern/replacement/flags or s#pattern#replacement#flags
-    Returns (pattern, replacement, flags) or (None, None, None) on error
-    """
-    if not text.startswith('s'):
+    if not text.startswith("s"):
         return None, None, None
 
     if len(text) < 2:
@@ -140,30 +200,89 @@ def parse_sed_command(text):
 
     delimiter = text[1]
 
-    # Only allow / or # as delimiters
-    if delimiter not in ('/', '#'):
+    if delimiter not in ("/", "#"):
         return None, None, None
 
     try:
         raw_statement = text[2:]
         pattern, raw_statement = read_until_delimiter(raw_statement, delimiter)
-        replacement, flags_str = read_until_delimiter(raw_statement, delimiter, require=False)
+        replacement, flags_str = read_until_delimiter(
+            raw_statement,
+            delimiter,
+            require=False,
+        )
         return pattern, replacement, flags_str
+
     except ValueError:
         return None, None, None
 
 
-def apply_sed(original_text, pattern, replacement, flags_str):
-    """
-    Apply sed substitution to text with timeout protection using threading.
-    Thread-safe alternative to signal-based timeout.
+def _command_prefix() -> str:
+    return config.get("prefix", ",")
 
-    Flags:
-        i - case insensitive
-        m - multiline
-        s - dotall
-        g - global replace
-        l - literal mode (treat pattern as literal string, not regex)
+
+def is_sed_command(body: str) -> bool:
+    """Check if a message is a sed command, ignoring reply quotes."""
+    prefix = _command_prefix()
+    lines = body.strip().split("\n")
+
+    for line in lines:
+        if line.startswith(">"):
+            continue
+
+        stripped = line.strip()
+
+        if stripped.startswith("s") and len(stripped) > 2 and stripped[1] in ("/", "#"):
+            return True
+
+        prefixed = f"{prefix}sed "
+        if stripped.startswith(prefixed):
+            rest = stripped[len(prefixed):].strip()
+            parts = rest.split(None, 2)
+
+            if len(parts) >= 2 and parts[0].lower() not in {"on", "off", "status"}:
+                return True
+
+        return False
+
+    return False
+
+
+def extract_sed_command(body: str) -> str:
+    """Extract sed command from message body."""
+    prefix = _command_prefix()
+    lines = body.strip().split("\n")
+
+    for line in lines:
+        if line.startswith(">"):
+            continue
+
+        stripped = line.strip()
+
+        prefixed = f"{prefix}sed "
+        if stripped.startswith(prefixed):
+            rest = stripped[len(prefixed):].strip()
+            parts = rest.split(None, 2)
+
+            if len(parts) >= 2:
+                pattern = parts[0]
+                replacement = parts[1]
+                flags = parts[2] if len(parts) > 2 else ""
+                return f"s/{pattern}/{replacement}/{flags}"
+
+        return stripped
+
+    return body.strip()
+
+
+# ============================================================================
+# REGEX APPLICATION
+# ============================================================================
+
+def _regex_worker(result_queue, original_text, pattern, replacement, flags_str):
+    """Run regex substitution in a child process.
+
+    This gives us a real timeout: the parent can terminate the process.
     """
     try:
         re_flags = 0
@@ -171,128 +290,165 @@ def apply_sed(original_text, pattern, replacement, flags_str):
         literal_mode = False
 
         for flag in flags_str.lower():
-            if flag == 'i':
+            if flag == "i":
                 re_flags |= re.IGNORECASE
-            elif flag == 'm':
+            elif flag == "m":
                 re_flags |= re.MULTILINE
-            elif flag == 's':
+            elif flag == "s":
                 re_flags |= re.DOTALL
-            elif flag == 'g':
+            elif flag == "g":
                 global_replace = True
-            elif flag == 'l':
+            elif flag == "l":
                 literal_mode = True
 
         if literal_mode:
             pattern = re.escape(pattern)
 
-        # Thread-safe timeout using threading.Timer
-        result = [None, None]
-        exception = [None]
+        count = 0 if global_replace else 1
+        new_text, num_replacements = re.subn(
+            pattern,
+            replacement,
+            original_text,
+            count=count,
+            flags=re_flags,
+        )
 
-        def do_regex():
-            try:
-                if global_replace:
-                    result[0], result[1] = re.subn(pattern, replacement, original_text, flags=re_flags)
-                else:
-                    result[0], result[1] = re.subn(pattern, replacement, original_text, count=1, flags=re_flags)
-            except Exception as e:
-                exception[0] = e
+        result_queue.put(("ok", new_text, num_replacements))
 
-        thread = threading.Thread(target=do_regex, daemon=True)
-        thread.start()
-        thread.join(timeout=REGEX_TIMEOUT)
+    except re.error as exc:
+        result_queue.put(("regex_error", str(exc), 0))
 
-        if thread.is_alive():
-            log.warning("[SED] Regex timeout - possible ReDoS attack: pattern=%s", pattern)
+    except Exception as exc:
+        result_queue.put(("error", str(exc), 0))
+
+
+def apply_sed(original_text: str, pattern: str, replacement: str, flags_str: str):
+    """Apply sed substitution with hard timeout protection.
+
+    Returns:
+        (new_text, num_replacements)
+        (None, -1) on timeout
+        (None, 0) on regex/validation error
+    """
+    try:
+        if len(original_text) > MAX_INPUT_LENGTH:
+            original_text = original_text[:MAX_INPUT_LENGTH]
+
+        if len(pattern) > MAX_PATTERN_LENGTH:
+            return None, 0
+
+        if len(replacement) > MAX_REPLACEMENT_LENGTH:
+            return None, 0
+
+        valid_flags = {"i", "m", "s", "g", "l"}
+
+        for flag in flags_str.lower():
+            if flag not in valid_flags:
+                return None, 0
+
+        ctx = multiprocessing.get_context("fork")
+        result_queue = ctx.Queue(maxsize=1)
+
+        process = ctx.Process(
+            target=_regex_worker,
+            args=(
+                result_queue,
+                original_text,
+                pattern,
+                replacement,
+                flags_str,
+            ),
+        )
+
+        process.start()
+        process.join(REGEX_TIMEOUT)
+
+        if process.is_alive():
+            process.terminate()
+            process.join(0.2)
+
+            if process.is_alive():
+                process.kill()
+                process.join(0.2)
+
+            log.warning("[SED] Regex timeout - possible ReDoS pattern=%r", pattern)
             return None, -1
 
-        if exception[0]:
-            if isinstance(exception[0], re.error):
-                return None, 0
-            raise exception[0]
+        try:
+            status, value, num_replacements = result_queue.get_nowait()
+        except queue.Empty:
+            return None, 0
 
-        return result[0], result[1]
-    except Exception as e:
-        log.exception("[SED] Unexpected error in apply_sed: %s", e)
+        if status == "ok":
+            if len(value) > MAX_OUTPUT_LENGTH:
+                value = value[:MAX_OUTPUT_LENGTH] + "…"
+            return value, num_replacements
+
+        if status == "regex_error":
+            log.debug("[SED] Regex error for pattern=%r: %s", pattern, value)
+            return None, 0
+
+        log.warning("[SED] Regex worker error for pattern=%r: %s", pattern, value)
         return None, 0
 
+    except Exception as exc:
+        log.exception("[SED] Unexpected error in apply_sed: %s", exc)
+        return None, 0
+
+
+# ============================================================================
+# BOT INTEGRATION
+# ============================================================================
 
 async def get_sed_store(bot):
     """Get the database store for sed settings."""
     return bot.db.users.plugin("sed")
 
 
-def is_sed_command(body):
-    """Check if a message is a sed command (ignores reply quotes)."""
-    lines = body.strip().split('\n')
-    for line in lines:
-        if not line.startswith('>'):
-            # Check for s/pattern/replacement/ format
-            if line.startswith('s') and len(line) > 2 and line[1] in ('/', '#'):
-                return True
-            # Check for ;sed CORRECTION format (not ;sed on/off/status)
-            if line.startswith(';sed '):
-                parts = line[5:].strip().split(None, 2)
-                # Only treat as sed command if there are at least 2 parts (pattern + replacement)
-                if len(parts) >= 2:
-                    return True
-    return False
-
-
-def extract_sed_command(body):
-    """Extract sed command from message body (removes reply quote if present)."""
-    lines = body.strip().split('\n')
-    for line in lines:
-        if not line.startswith('>'):
-            # If it's a ;sed command, convert it to s/pattern/replacement/ format
-            if line.startswith(';sed '):
-                # Extract the pattern and replacement from ";sed pattern replacement [flags]"
-                parts = line[5:].strip().split(None, 2)
-                if len(parts) >= 2:
-                    pattern = parts[0]
-                    replacement = parts[1]
-                    flags = parts[2] if len(parts) > 2 else ""
-                    return f"s/{pattern}/{replacement}/{flags}"
-            return line.strip()
-    return body.strip()
-
-
-def _is_direct_dm(msg, is_room):
+def _is_direct_dm(msg, is_room: bool) -> bool:
     """Return True for normal 1:1 DMs, but not MUC PMs."""
     return (not is_room) and (msg["from"].bare not in JOINED_ROOMS)
 
 
-def _sed_reply(bot, msg, text, is_room):
-    """Reply from sed. Disable thread in normal DMs to avoid duplicate rendering."""
-    bot.reply(msg, text, mention=False, thread=not _is_direct_dm(msg, is_room))
+def _sed_reply(bot, msg, text: str, is_room: bool):
+    """Reply from sed.
+
+    Disable thread in normal DMs to avoid duplicate rendering.
+    """
+    bot.reply(
+        msg,
+        text,
+        mention=False,
+        thread=not _is_direct_dm(msg, is_room),
+    )
 
 
-async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, flags_str):
+async def process_sed_correction(
+    bot,
+    nick,
+    msg,
+    is_room: bool,
+    pattern: str,
+    replacement: str,
+    flags_str: str,
+):
     """Process a sed correction."""
-    if is_room:
-        room = msg['from'].bare
-    else:
-        # For DMs: remove the resource-ID
-        room_full = str(msg['from'])
-        room = room_full.split('/')[0] if '/' in room_full else room_full
-
+    room = _room_key_from_msg(msg, is_room)
     body = msg.get("body", "").strip()
-
     last_msg = None
 
-    # 1. Try to extract from reply quote first (works for both rooms and DMs)
-    if body.startswith('>'):
+    if body.startswith(">"):
         quoted_msg = extract_reply_quote(body)
+
         if quoted_msg:
             last_msg = quoted_msg
 
-    # 2. Try to get message from reply target ID (fallback)
     if not last_msg and is_room:
         reply_target_id = get_reply_target(msg)
+
         if reply_target_id:
             last_msg = get_message_by_id(room, reply_target_id)
 
-    # 3. Fall back to last message in cache (works for both rooms and DMs)
     if not last_msg:
         last_msg = get_last_message(room)
 
@@ -300,23 +456,38 @@ async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, 
         _sed_reply(bot, msg, "❌ No previous message found to correct.", is_room)
         return
 
-    try:
-        new_msg, num_replacements = apply_sed(last_msg, pattern, replacement, flags_str)
-    except Exception as e:
-        _sed_reply(bot, msg, f"❌ Error applying sed: {e}", is_room)
-        return
+    new_msg, num_replacements = apply_sed(
+        last_msg,
+        pattern,
+        replacement,
+        flags_str,
+    )
 
     if num_replacements == -1:
-        # Timeout occurred
-        _sed_reply(bot, msg, "⏱️ Regex timeout - pattern took too long to process!", is_room)
+        _sed_reply(
+            bot,
+            msg,
+            "⏱️ Regex timeout - pattern took too long to process.",
+            is_room,
+        )
         return
 
     if new_msg is None:
-        _sed_reply(bot, msg, f"❌ Regex error. Check your pattern: {pattern}", is_room)
+        _sed_reply(
+            bot,
+            msg,
+            f"❌ Regex error or invalid sed expression. Check your pattern: {pattern}",
+            is_room,
+        )
         return
 
     if num_replacements == 0:
-        _sed_reply(bot, msg, f"❌ Pattern '{pattern}' not found in last message.", is_room)
+        _sed_reply(
+            bot,
+            msg,
+            f"❌ Pattern '{pattern}' not found in last message.",
+            is_room,
+        )
         return
 
     if is_room:
@@ -329,24 +500,12 @@ async def process_sed_correction(bot, nick, msg, is_room, pattern, replacement, 
 
 @command("sed", role=Role.USER)
 async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
-    """
-    Handle sed corrections or enable/disable sed in a room.
-
-    Usage:
-        {prefix}sed on|off              - Enable/disable sed (MUC DM only)
-        {prefix}sed status              - Show if sed is enabled in this room (MUC DM only)
-        {prefix}sed <pattern> <replacement> [flags] - Apply correction
-
-    Examples:
-        {prefix}sed hello hi
-        {prefix}sed test prod g
-        {prefix}sed -- xxx l
-        {prefix}sed ERROR Error i
-    """
-    # on/off/status are room-management actions and must be restricted
-    # explicitly. Keep the original SED message/event behavior unchanged.
+    """Handle sed corrections or enable/disable sed in a room."""
     if await handle_room_toggle_command(
-        bot, msg, is_room, args,
+        bot,
+        msg,
+        is_room,
+        args,
         store_getter=get_sed_store,
         key=SED_KEY,
         label="SED corrections",
@@ -355,19 +514,29 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
     ):
         return
 
+    prefix = _command_prefix()
+
     if not args or len(args) < 2:
-        bot.reply(msg, "❌ Usage: {prefix}sed <pattern> <replacement> [flags]")
+        bot.reply(msg, f"❌ Usage: {prefix}sed <pattern> <replacement> [flags]")
         return
 
     pattern = args[0]
     replacement = args[1]
     flags_str = args[2] if len(args) > 2 else ""
 
-    await process_sed_correction(bot, msg.get("mucnick"), msg, is_room, pattern, replacement, flags_str)
+    await process_sed_correction(
+        bot,
+        msg.get("mucnick"),
+        msg,
+        is_room,
+        pattern,
+        replacement,
+        flags_str,
+    )
 
 
 async def on_message(bot, msg):
-    """Handle sed commands and cache messages."""
+    """Handle sed commands and cache normal messages."""
     try:
         body = msg.get("body", "").strip()
 
@@ -377,66 +546,62 @@ async def on_message(bot, msg):
         if msg.get("from") == bot.boundjid:
             return
 
-        # Use stanza_id for tracking instead of object id (more reliable)
         stanza_id = get_stanza_id(msg)
-        if stanza_id and stanza_id in PROCESSED_STANZAS:
-            return
 
-        if stanza_id:
-            PROCESSED_STANZAS.add(stanza_id)
-            if len(PROCESSED_STANZAS) > 10000:
-                PROCESSED_STANZAS.clear()
+        if not remember_stanza(stanza_id):
+            return
 
         is_room = msg.get("type") == "groupchat"
         nick = msg.get("mucnick") if is_room else None
+        room = _room_key_from_msg(msg, is_room)
 
-        if is_room:
-            room = msg['from'].bare
-        else:
-            # For DMs: remove the resource-ID
-            room_full = str(msg['from'])
-            room = room_full.split('/')[0] if '/' in room_full else room_full
-
-        # Check if sed is enabled in rooms (always enabled for DMs)
         if is_room:
             store = await get_sed_store(bot)
             enabled_rooms = await store.get_global(SED_KEY, default={})
-            if room not in enabled_rooms:
+
+            if not isinstance(enabled_rooms, dict):
+                enabled_rooms = {}
+
+            if enabled_rooms.get(room) is not True:
                 return
 
-            # Check if message is from the bot itself
             bot_nick = bot.presence.joined_rooms.get(room)
+
             if bot_nick and bot_nick == nick:
                 return
 
-        # Handle sed command BEFORE caching
         if is_sed_command(body):
             sed_cmd = extract_sed_command(body)
             pattern, replacement, flags_str = parse_sed_command(sed_cmd)
 
             if pattern is not None:
-                await process_sed_correction(bot, nick, msg, is_room, pattern, replacement, flags_str)
+                await process_sed_correction(
+                    bot,
+                    nick,
+                    msg,
+                    is_room,
+                    pattern,
+                    replacement,
+                    flags_str,
+                )
 
-            # Don't cache sed commands!
             return
 
-        # Cache non-sed messages (keeps last 10 per room/user for both rooms and DMs)
         cache_message(room, nick, body, stanza_id)
 
-    except Exception as e:
-        log.exception("[SED] Error in on_message: %s", e)
+    except Exception as exc:
+        log.exception("[SED] Error in on_message: %s", exc)
 
 
 async def on_load(bot):
-    """Register the message event handler."""
+    """Register the message event handlers."""
     bot.bot_plugins.register_event(
         "sed",
         "groupchat_message",
-        partial(on_message, bot)
+        partial(on_message, bot),
     )
-
     bot.bot_plugins.register_event(
         "sed",
         "message",
-        partial(on_message, bot)
+        partial(on_message, bot),
     )

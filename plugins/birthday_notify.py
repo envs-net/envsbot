@@ -233,7 +233,7 @@ async def _is_enabled_for_room(bot, room_jid: str) -> bool:
     try:
         store = bot.db.users.plugin("birthday_notify")
         enabled_rooms = await store.get_global(
-            "birthday_notify_enabled_rooms",
+            "birthday_notify",
             default={},
         )
 
@@ -639,7 +639,7 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
         is_room,
         args,
         store_getter=_get_birthday_store,
-        key="birthday_notify_enabled_rooms",
+        key="birthday_notify",
         label="Birthday notifications",
         storage="dict",
         log_prefix="[BIRTHDAY]",

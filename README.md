@@ -31,80 +31,67 @@ envsbot is now in a usable state: the core framework is mostly stable, although 
 
 ## Available Plugins
 
-Below is a list of available plugins in `plugins/` and their descriptions.  
-Descriptions are derived from plugin docstrings or, if needed, from code analysis.
+Below is a complete list of Python plugins in `plugins/` (maybe not completely recent), each with a summary excerpted from its docstring. Only concise summaries are included—full command lists are omitted for clarity.
 
-- **_admin**  
-  Admin management commands.  
-  _Exposes administrative commands for bot management, such as restart, shutdown, and status monitoring. Lets OWNERs restart or gracefully shut down the bot, and ADMINs view detailed resource and thread status._
+### **_admin**
+> Admin management commands. Provides administrative controls for bot restart, shutdown, and status monitoring.
 
-- **_reg_profile**  
-  Bot profile initialization plugin.  
-  _Manages the bot’s public XMPP profile during startup or reload. No user commands; sets vCard and avatar as needed._
+### **_reg_profile**
+> Bot profile initialization plugin. Handles the public XMPP profile (vCard, avatar) for the bot, publishing or updating these automatically on startup or reload, and performs updates only when changes are detected.
 
-- **birthday_notify**  
-  Birthday notification plugin.  
-  _Parses user birthday data, stores it, and automatically sends birthday notifications to users in group chats or private messages based on configured dates._
+### **birthday_notify**
+> Birthday notification plugin. Sends automated birthday greetings in rooms, supporting per-room opt-in, caching, multiple date formats, and only notifying users present in the room on their birthday.
 
-- **dice**  
-  Dice rolling plugin.  
-  _Roll dice with optional modifiers and success conditions (e.g., `,dice 3d20 -5 >= 30`). Useful for games and randomization._
+### **dice**
+> Dice rolling plugin. Provides commands for rolling dice with optional modifiers and success conditions—useful for games or randomization tasks.
 
-- **help**  
-  📚 Help system for the bot.  
-  _Dynamic help for plugins and commands, showing documentation in private messages based on user role._
+### **help**
+> Help system for the bot. Offers dynamic help for plugins, commands, and multi-word commands, showing documentation filtered by user role.
 
-- **information**  
-  Info plugin.  
-  _Commands for fetching the latest toots from Fediverse users and Urban Dictionary term search._
+### **information**
+> Info plugin. Includes commands for fetching the latest Fediverse toots and searching Urban Dictionary.
 
-- **plugins**  
-  Plugin management commands.  
-  _Administrative commands for managing plugins at runtime, including load, unload, reload, and listing plugins._
+### **plugins**
+> Plugin management commands. Enables administrative loading, unloading, reloading, and listing of plugins at runtime using the PluginManager API.
 
-- **reminder**  
-  Reminder system plugin.  
-  _Lets users schedule reminders (one-time or repeating) and sends reminders as private messages or group chat notices at the appropriate time._
+### **reminder**
+> Schedules and manages reminders for users. Allows users to receive automated notifications/messages after specified time intervals.
 
-- **rooms**  
-  Room management and persistence.  
-  _Administrative commands for managing XMPP MUC rooms stored in the bot's database, including adding, updating, joining, syncing rooms, and setting rooms to autojoin._
+### **rooms**
+> Room management and persistence. Implements administrative tools for managing XMPP MUC rooms, including adding, updating, autojoin settings, and configuration storage in the database.
 
-- **rss**  
-  RSS Feed watcher plugin.  
-  _Checks configured RSS/Atom feeds periodically and posts updates to rooms. Allows adding, deleting, and listing feeds per room._
+### **rss**
+> RSS Feed watcher plugin. Periodically checks user-specified RSS/Atom feeds and posts new updates to rooms; supports adding/removing feeds per room.
 
-- **sed**  
-  Substitute/replace command plugin.  
-  _Enables IRC/Slack-style “s/foo/bar/” corrections for previous messages in the same room or private conversation._
+### **sed**
+> SED plugin for message correction. Allows users to correct previous messages in chats or rooms using sed-like commands (e.g., s/foo/bar/).
 
-- **status**  
-  Bot presence and status management.  
-  _Lets moderators change the bot's XMPP presence (online, away, DND, etc.) and allows users to view the bot's current presence and status._
+### **status**
+> Bot presence and status management. Lets moderators and users view or change the bot's XMPP presence (online, away, DND, etc.) and status message.
 
-- **tools**  
-  Utility tools and core bot commands.  
-  _Provides ping/pong, echo, timezone-aware time and date lookup, UTC time, and Unix timestamp conversion. The `{prefix}time` and `{prefix}date` commands are now part of this plugin._
+### **tell**
+> Tell plugin for Envsbot. Enables users to leave messages for others when they're offline, delivering messages the next time the recipient joins the room.
 
-- **urlcheck**  
-  URL Check plugin.  
-  _Automatic URL title and YouTube info fetching for group chats with spam avoidance/cooldown. Moderators may enable or disable this per room._
+### **tools**
+> Utility tools and core bot commands. Offers basic bot health checks (ping/pong), message echo, timezone-aware time/date lookups, UTC, and Unix timestamp conversions.
 
-- **users**  
-  Users plugin.  
-  _Manages automatic user registration by JID, tracks last-seen and per-room nickname history, allows lookup and administrative updating of user roles._
+### **urlcheck**
+> URL Check plugin. Watches groupchat messages for URLs and posts HTML page titles or YouTube video info, with configurable room-based enable/disable and spam avoidance.
 
-- **weather**  
-  Weather info plugin.  
-  _Shows current weather for a user’s configured location via wttr.in, supporting group chat and private queries._
+### **users**
+> Users plugin. Handles user registration, per-room nickname and last-seen tracking, JID and nick lookups, and user role management.
 
-- **xkcd**  
-  XKCD comic plugin.  
-  _Fetches and displays XKCD web comics and explanations for given comic numbers or random selections._
+### **vcard**
+> vCard Lookup plugin. Lets users access vCard details like names, birthdays, organizations, URLs, etc., for themselves or others (when public), and interacts with location-based features.
 
-- **xmpp**  
-  XMPP protocol extension plugin.  
-  Handles protocol-specific actions, possibly including advanced XMPP commands, pubsub, message carbons, or XMPP integration features for core bot or plugin functionality.
+### **weather**
+> Shows current weather for a user’s location. Looks up weather info via wttr.in based on each user’s vCard location; available in groupchats or MUC DMs.
+
+### **xkcd**
+> XKCD Comic plugin. Fetches, broadcasts, and allows searching of XKCD comics, with support for random and specific comics, and periodic posting to subscribed rooms.
+
+### **xmpp**
+> XMPP utility commands plugin. Supplies various XMPP-related utilities: server ping, service discovery, DNS SRV record lookups, compliance checks, and more via simple commands.
 
 ---
 

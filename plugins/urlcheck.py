@@ -16,7 +16,8 @@ Output of the same URL is temporary disabled for 2 minutes, after first
 fetch, to avoid spam if the same URL is posted multiple times in a short
 period.
 
-Command:
+Use the following commands to turn "urlcheck" on/off or show its status in
+a room (use MUC PM):
     {prefix}urlcheck on
     {prefix}urlcheck off
     {prefix}urlcheck status

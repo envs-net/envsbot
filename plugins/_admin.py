@@ -38,6 +38,29 @@ def set_bot_start_time(bot):
         BOT_START_TIME = datetime.now()
 
 
+def human_time(seconds: int) -> str:
+    """Convert seconds to human-readable string."""
+    seconds = int(seconds)
+    if seconds <= 0:
+        return "0s"
+
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+
+    parts = []
+    if d:
+        parts.append(f"{d}d")
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
+    if s or not parts:
+        parts.append(f"{s}s")
+
+    return " ".join(parts)
+
+
 @command("bot restart", role=Role.OWNER, aliases=["restart"])
 async def bot_restart(bot, sender, nick, args, msg, is_room):
     """
@@ -149,27 +172,9 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
         lines.append(f"JID: {bot.boundjid}")
         lines.append("")
 
-        # Uptime
-        if BOT_START_TIME:
-            uptime = datetime.now() - BOT_START_TIME
-            hours, remainder = divmod(int(uptime.total_seconds()), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            uptime_str = f"{hours}h {minutes}m {seconds}s"
-            lines.append(f"Uptime: {uptime_str}")
-            lines.append("")
-
-        # Connected rooms (from rooms plugin)
-        try:
-            from plugins.rooms import JOINED_ROOMS
-            joined_rooms = len(JOINED_ROOMS)
-            lines.append(f"Connected Rooms: {joined_rooms}")
-            if joined_rooms > 0:
-                for room, room_data in sorted(JOINED_ROOMS.items()):
-                    room_nick = room_data.get("nick", "unknown")
-                    lines.append(f"  • {room} (nick: {room_nick})")
-            lines.append("")
-        except Exception as e:
-            log.debug("[ADMIN] Could not get rooms info: %s", e)
+        # Database status
+        db_status = "✅ Connected" if bot.db else "❌ Disconnected"
+        lines.append(f"Database: {db_status}")
 
         # Loaded plugins
         loaded_plugins = len(bot.bot_plugins.plugins)
@@ -177,10 +182,11 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
         lines.append(f"Plugins: {loaded_plugins}/{available_plugins} loaded")
         lines.append("")
 
-        # Database status
-        db_status = "✅ Connected" if bot.db else "❌ Disconnected"
-        lines.append(f"Database: {db_status}")
-        lines.append("")
+        # Uptime
+        if BOT_START_TIME:
+            uptime = datetime.now() - BOT_START_TIME
+            uptime_str = human_time(uptime.total_seconds())
+            lines.append(f"Uptime: {uptime_str}")
 
         # Memory usage
         try:
@@ -188,7 +194,6 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
             memory_info = process.memory_info()
             memory_mb = memory_info.rss / 1024 / 1024
             lines.append(f"Memory Usage: {memory_mb:.1f} MB")
-            lines.append("")
         except Exception as e:
             log.debug("[ADMIN] Could not get memory info: %s", e)
 
@@ -204,8 +209,21 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
 
             lines.append(f"CPU Usage: {cpu_percent:.1f}% (Process)")
             lines.append(f"System Load: {cpu_load:.2f} ({cpu_count} cores)")
+            lines.append("")
         except Exception as e:
             log.debug("[ADMIN] Could not get CPU info: %s", e)
+
+        # Connected rooms (from rooms plugin)
+        try:
+            from plugins.rooms import JOINED_ROOMS
+            joined_rooms = len(JOINED_ROOMS)
+            lines.append(f"Connected Rooms: {joined_rooms}")
+            if joined_rooms > 0:
+                for room, room_data in sorted(JOINED_ROOMS.items()):
+                    room_nick = room_data.get("nick", "unknown")
+                    lines.append(f"  • {room} (nick: {room_nick})")
+        except Exception as e:
+            log.debug("[ADMIN] Could not get rooms info: %s", e)
 
         bot.reply(msg, lines)
 

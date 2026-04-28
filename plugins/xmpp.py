@@ -6,6 +6,7 @@ servers and users, such as pinging a JID, querying service discovery info,
 checking compliance scores, and performing DNS SRV lookups.
 
 Commands:
+    {prefix}x <on|off|status>       - Toggle usage of XMPP commands in a room or show status.
     {prefix}x help                  - Displays all available commands.
     {prefix}x version <domain>      - Shows the software version of an XMPP server (XEP-0092).
     {prefix}x items <domain|jid>    - Lists service items of an XMPP server (XEP-0030).
@@ -148,7 +149,7 @@ async def cmd_xmpp(bot, sender_jid, nick, args, msg, is_room):
     Toggle xmpp commands on or off or show status.
 
     Usage:
-        {prefix}xmpp <on|off|status>
+        {prefix}xmpp on|off|status - Toggle usage or show status
     """
 
     handled = await handle_room_toggle_command(
