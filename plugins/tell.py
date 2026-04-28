@@ -7,7 +7,12 @@ the recipient joins the room via the 'groupchat_presence' event.
 
 Supports nicks with spaces, separated with a colon ":" from the message.
 
-Command format: {prefix}tell <nick with spaces>: <message>
+IMPORTANT: You must turn on the plugin for each room where you want to use it,
+if not already enabled by default, with:
+    {prefix}tell <on|off|status>
+
+Usage:
+    {prefix}tell <nick with spaces>: <message>
 """
 
 import datetime
@@ -108,13 +113,19 @@ async def tell_fetch(bot, recv_jid):
 @command("tell", role=Role.USER)
 async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     """
-    {prefix}tell <nick (may include spaces)>: <message>
 
     Stores a message for a user (with or without spaces in their nick).
     Will be delivered when they join the room again.
     Only available in groupchats.
 
     NOTE the colon after the nick to separate the target nick from the message!
+
+    IMPORTANT: You must turn on the plugin for each room where you want to
+    use it, if not already enabled by default, with:
+        {prefix}tell <on|off|status>
+
+    Usage:
+        {prefix}tell <nick (may include spaces)>: <message>
     """
 
     handled = await handle_room_toggle_command(

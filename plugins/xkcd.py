@@ -3,6 +3,9 @@
 Periodically checks for new XKCD comics and posts them to subscribed rooms.
 Provides commands to view current, specific, random, and searched XKCD comics.
 
+IMPORTANT: You may turn this plugin on for the current room with the command:
+    {prefix}xkcd on
+
 Commands:
 • {prefix}xkcd - Show latest comic
 • {prefix}xkcd <number> - Show specific XKCD comic

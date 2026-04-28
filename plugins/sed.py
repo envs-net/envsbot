@@ -2,6 +2,10 @@
 
 Allows users to correct previous messages using sed-like syntax.
 
+IMPORTANT: You must enable SED corrections in a room for this to work.
+Use this command to turn it on/off or show its status:
+    {prefix}sed <on|off|status>
+
 Commands:
 • s/pattern/replacement/flags
 • s#pattern#replacement#flags

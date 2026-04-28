@@ -6,6 +6,9 @@ This plugin provides dynamic help for:
 • Commands
 • Multi-word commands
 
+IMPORTANT: You can turn on/off the in-room help with the command:
+    {prefix}help inroom <on|off|status>
+
 Usage
 -----
 General help:
