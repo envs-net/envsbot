@@ -4,7 +4,6 @@ import aiosqlite
 
 from .users import UserManager
 from .rooms import Rooms
-from .reminders import RemindersManager
 
 from utils.config import config
 
@@ -17,7 +16,7 @@ class DatabaseManager:
     Central database manager.
 
     Handles the SQLite connection and exposes
-    table managers for users, rooms, and reminders.
+    table managers for users and rooms.
 
     Also runs background tasks that periodically
     flush cached user data to the database.
@@ -30,7 +29,6 @@ class DatabaseManager:
 
         self.users = None
         self.rooms = None
-        self.reminders = None
 
         self.flush_interval = flush_interval
 
@@ -54,11 +52,9 @@ class DatabaseManager:
 
         self.users = UserManager(self.conn)
         self.rooms = Rooms(self.conn)
-        self.reminders = RemindersManager(self)
 
         await self.users.init()
         await self.rooms.init()
-        await self.reminders.init()
 
         # add asyncio sqlite3 stop event
         self._stop_event = asyncio.Event()

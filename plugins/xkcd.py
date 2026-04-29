@@ -25,6 +25,7 @@ import aiohttp
 
 from plugins.rooms import JOINED_ROOMS
 from utils.command import Role, command
+from utils.config import config
 from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
@@ -503,9 +504,7 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         from_jid,
     )
 
-    # Try to read configured command prefix for help text.
-    # Fall back to a comma if the bot does not expose one.
-    command_prefix = getattr(bot, "prefix", ",")
+    command_prefix = config.get("prefix", ",")
 
     lowered_args = [str(arg).lower() for arg in args]
 

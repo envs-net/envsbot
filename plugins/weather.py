@@ -17,7 +17,7 @@ import logging
 import urllib
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
-from plugins.vcard import get_info
+from plugins.vcard import get_info, vcard_field
 from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
@@ -112,9 +112,9 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
 
     vcard = {}
     display_name = ""
-    if is_room:
+    if is_room and not _is_muc_pm(msg):
         log.info((f"[WEATHER] Command invoked in room {msg['from'].bare} by"
-                 f"{nick} with args: {args}"))
+                 f"{msg['from'].resource} with args: {args}"))
         muc_jid = msg["from"].bare
         if muc_jid not in enabled_rooms:
             return
@@ -126,49 +126,93 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
                          f"not found in room {muc_jid}"))
                 bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
                 return
-            display_name, vcard = await get_info(bot, msg, target_nick)
-            if vcard is None:
+            display_name = target_nick
+            try:
+                _locality = await vcard_field(bot, msg, target_nick, "LOCALITY", is_room=is_room)
+                _country = await vcard_field(bot, msg, target_nick, "CTRY", is_room=is_room)
+            except Exception as e:
+                log.warning(f"[WEATHER] Failed to get vCard fields for {target_nick}: {e}")
+                bot.reply(msg, f"🔴  Failed to retrieve vCard information for '{target_nick}'.")
+                return
+        else:
+            target_nick = msg["mucnick"]
+            if target_nick not in nicks:
+                log.info((f"[WEATHER] Lookup failed: Nick '{target_nick}'"
+                         f"not found in room {muc_jid}"))
+                bot.reply(msg, f"🔴  Your nick '{target_nick}' not found in this room.")
+                return
+            display_name = target_nick
+            try:
+                _locality = await vcard_field(bot, msg, target_nick, "LOCALITY", is_room=is_room)
+                _country = await vcard_field(bot, msg, target_nick, "CTRY", is_room=is_room)
+            except Exception as e:
+                log.warning(f"[WEATHER] Failed to get vCard fields for {target_nick}: {e}")
+                bot.reply(msg, f"🔴  Failed to retrieve vCard information for '{target_nick}'.")
+                return
+
+            log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received.")
+    elif _is_muc_pm(msg):
+        log.info((f"[WEATHER] Command invoked in room {msg['from'].bare} by"
+                 f"{msg['from'].resource} with args: {args}"))
+
+        muc_jid = msg["from"].bare
+        if muc_jid not in enabled_rooms:
+            return
+        nicks = JOINED_ROOMS.get(muc_jid, {}).get("nicks", {})
+        if args:
+            target_nick = " ".join(args).strip()
+            if target_nick not in nicks:
+                log.info((f"[WEATHER] Lookup failed: Nick '{target_nick}'"
+                         f"not found in room {muc_jid}"))
+                bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
+                return
+            display_name = target_nick
+            try:
+                _locality = await vcard_field(bot, msg, target_nick, "LOCALITY", is_room=is_room)
+                _country = await vcard_field(bot, msg, target_nick, "CTRY", is_room=is_room)
+            except Exception as e:
+                log.warning(f"[WEATHER] Failed to get vCard fields for {target_nick}: {e}")
+                bot.reply(msg, f"🔴  Failed to retrieve vCard information for '{target_nick}'.")
                 return
         else:
             target_nick = msg["from"].resource
             if target_nick not in nicks:
-                log.info(f"[WEATHER] Lookup failed: Nick '{target_nick}' not found in room {muc_jid}")
-                bot.reply(msg, f"🔴  Your Nick '{target_nick}' was not found in this room.")
+                log.info((f"[WEATHER] Lookup failed: Nick '{target_nick}'"
+                         f"not found in room {muc_jid}"))
+                bot.reply(msg, f"🔴  Your nick '{target_nick}' not found in this room.")
                 return
-            display_name, vcard = await get_info(bot, msg, target_nick)
-            if vcard is None:
+            display_name = target_nick
+            try:
+                _locality = await vcard_field(bot, msg, target_nick, "LOCALITY", is_room=is_room)
+                _country = await vcard_field(bot, msg, target_nick, "CTRY", is_room=is_room)
+            except Exception as e:
+                log.warning(f"[WEATHER] Failed to get vCard fields for {target_nick}: {e}")
+                bot.reply(msg, f"🔴  Failed to retrieve vCard information for '{target_nick}'.")
                 return
 
-            log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received (never real jid!).")
-    elif _is_muc_pm(msg):
-        log.info(f"[WEATHER] No target nick provided, using sender's nick '{nick}' for lookup.")
-        target_nick = msg["from"].resource
-        muc_jid = msg["from"].bare
-        if muc_jid not in enabled_rooms:
-            return
-        nicks = JOINED_ROOMS.get(msg["from"].bare, {}).get("nicks", {})
-        if target_nick not in nicks:
-            log.info(f"[WEATHER] Lookup failed: Your Nick '{target_nick}' not found in room {muc_jid}")
-            bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
-            return
-        display_name, vcard = await get_info(bot, msg, target_nick)
-        if vcard is None:
-            return
-
-        log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received (never real jid!).")
+            log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received.")
     else:
-        # DM Weather requests not allowed!
-        log.info(f"[WEATHER] Command invoked in DM by {nick} with args: {args}")
-        bot.reply(msg, "🔴  Weather command is only available in groupchats or MUC DMs.")
-        return
+        # DM comtext
+        targret_nick = msg["from"].bare
+        if args:
+            log.warning(f"[WEATHER] Command invoked by '{targret_nick}' in DM with args: {args}")
+            bot.reply(msg, "🔴  In a DM, you cannot specify a different nick. Just use the command without arguments to get your weather.")
+            return
+        try:
+            _locality = await vcard_field(bot, msg, targret_nick, "LOCALITY", is_room=False)
+            _country = await vcard_field(bot, msg, targret_nick, "CTRY", is_room=False)
+        except Exception as e:
+            log.warning(f"[WEATHER] Failed to get vCard fields for {targret_nick}: {e}")
+            bot.reply(msg, "🔴  Failed to retrieve your vCard information.")
+            return
 
     location = None
-    if vcard.get("CTRY") is not None:
-        location = vcard.get("CTRY", "")
-    if location is not None and vcard.get("LOCALITY") is not None:
-        location += f"/{vcard.get('LOCALITY', '')}"
-    elif location is None and vcard.get("LOCALITY") is not None:
-        location = vcard.get("LOCALITY", "")
+    if _country is not None:
+        location = _country
+    if location is not None and _locality is not None:
+        location += f"/{_locality}"
+    elif location is None and _locality is not None:
+        location = _locality
     else:
         location = ""
 

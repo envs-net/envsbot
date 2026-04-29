@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
     "category": "utility",
 }
@@ -121,10 +121,12 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
             display_name = nick
     else:
         # Direct messages to bot are vorbidden
-        log.info("[TOOLS] Forbidden try to use the 'time' command in DM by %s",
-                nicks.get(nick, {}).get("nick", "unknown"))
-        bot.reply(msg, "🔴  The 'time' command in DMs is not allowed")
-        return
+        if args:
+            log.info(f"[VCARD] Direct message with args from '{msg['from'].bare}'")
+            bot.reply(msg, "🔴  In direct messages, you can only look up your own vCard. Use the command without args.")
+            return
+        target_jid = str(msg["from"].bare)
+        display_name = target_jid
 
     store = bot.db.users.plugin("vcard")
     timezone = await store.get(target_jid, "TIMEZONE")
@@ -178,10 +180,12 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
             display_name = nick
     else:
         # Direct messages are not allowed
-        log.info("[TOOLS] Forbidden try to use the 'date' command in DM by %s",
-                nicks.get(nick, {}).get("nick", "unknown"))
-        bot.reply(msg, "🔴  The 'date' command in DMs is not allowed")
-        return
+        if args:
+            log.info(f"[VCARD] Direct message with args from '{msg['from'].bare}'")
+            bot.reply(msg, "🔴  In direct messages, you can only look up your own vCard. Use the command without args.")
+            return
+        target_jid = str(msg["from"].bare)
+        display_name = target_jid
 
     store = bot.db.users.plugin("vcard")
     timezone = await store.get(target_jid, "TIMEZONE")

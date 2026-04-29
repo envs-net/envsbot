@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "rooms",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "Database-backed room management",
     "category": "core",
 }
@@ -46,6 +46,7 @@ PLUGIN_DEFAULTS = {
     "help": False,
     "birthday_notify": False,
     "tell": True,
+    "reminder": True,
     "sed": True,
     "urlcheck": True,
     "vcard": True,
@@ -57,6 +58,7 @@ PLUGIN_STORE_CONFIG = {
     "help": {"type": "dict", "key": "HELP"},
     "birthday_notify": {"type": "dict", "key": "birthday_notify"},
     "tell": {"type": "dict", "key": "TELL"},
+    "reminder": {"type": "dict", "key": "REMINDER"},
     "sed": {"type": "dict", "key": "SED"},
     "urlcheck": {"type": "dict", "key": "URLCHECK"},
     "vcard": {"type": "dict", "key": "VCARD"},

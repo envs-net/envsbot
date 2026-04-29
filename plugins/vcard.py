@@ -106,7 +106,7 @@ async def _check_user_exists(bot, sender_jid, msg):
     return True
 
 
-async def vcard_field(bot, msg, target_nick, field):
+async def vcard_field(bot, msg, target_nick, field, is_room=False):
     """
     Helper to fetch a specific vCard field(s) for a given nick.
     Must be called from MUC PM or groupchat context with a valid
@@ -118,12 +118,12 @@ async def vcard_field(bot, msg, target_nick, field):
     Returns "None" if field is not present.
     """
     if field not in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "NICKNAME",
-                     "ORG", "NOTE", "EMAIL"]:
+                    "ORG", "NOTE", "EMAIL", "LOCALITY", "CTRY"]:
         log.warning("[VCARD] 🔴  Invalid vCard field requested: %s", field)
         return None
     if field == "TIMEZONE":
         store = await get_vcard_store(bot)
-        if msg["to"].bare == bot.boundjid.bare:
+        if not is_room and not _is_muc_pm(msg):
             jid = msg["from"].bare
         else:
             jid = JOINED_ROOMS.get(msg["from"].bare, {}).get("nicks", {}).get(target_nick, {}).get("jid")
