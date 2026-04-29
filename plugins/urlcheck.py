@@ -30,6 +30,7 @@ import html
 
 import isodate
 
+from urllib.parse import urlparse, urlunparse, urljoin
 from datetime import datetime
 from functools import partial
 
@@ -64,7 +65,6 @@ YOUTUBE_RE = re.compile(
     """,
     re.I,
 )
-
 # Dict of URLs which have been requested with timestamp to avoid fetching
 # the same URL multiple times in a short period
 # formant _url_timestamp[room][url] = timestamp
@@ -186,7 +186,8 @@ async def on_groupchat_message(bot, msg):
             final_url, status, ctype, title, content_size, mdesc = (
                 await fetch_url_title(url, max_redirects=3)
             )
-            st = f"(Status: {status})" if status != 200 else ""
+
+            st = f"(Status: {status})" if status in [200, 403] else ""
             if is_youtube_url(final_url):
                 yt_info, title, uploader, length_str, views = (
                     await fetch_youtube_info(final_url)
@@ -236,11 +237,14 @@ async def on_groupchat_message(bot, msg):
 
                     message.send()
                     continue
-            # log.info(f"[URLCHECK] ctype is: {ctype}")
-            if ctype and ctype.startswith("text/html") and title:
+            if ctype:
+                is_ok = "text/html" in ctype
+            if is_ok and title:
+                _body = f"[URL] {html.unescape(title)} {st} - ({final_url})"
+                _body += f"\nDesc: '{html.unescape(mdesc)}'"
                 message = bot.make_message(
                     mto=msg["from"].bare,
-                    mbody=f'[URL] "{html.unescape(title)}" {st} ({final_url})',
+                    mbody=_body.strip(),
                     mtype="groupchat"
                 )
                 if thread_id:
@@ -311,9 +315,6 @@ def has_xep_0392_link_metadata(msg):
 
 
 async def fetch_url_title(url, max_redirects=3):
-    from urllib.parse import urlparse, urlunparse
-
-    # Save the original fragment
     parsed_orig = urlparse(url)
     orig_fragment = parsed_orig.fragment
 
@@ -334,30 +335,37 @@ async def fetch_url_title(url, max_redirects=3):
                     status in (301, 302, 303, 307, 308)
                     and "Location" in resp.headers
                 ):
-                    url = resp.headers["Location"]
+                    url = urljoin(str(resp.url), resp.headers["Location"])
                     continue
-                if ctype.startswith("text/html"):
+                if "text/html" in ctype:
                     log.info(f"[URLCHECK] Fetching: {url}")
-                    # Only read the full HTML if it's a github.com URL
-                    # (with strict prefix check)
-                    if (url.startswith("https://github.com/") or
-                            url.startswith("http://github.com/")):
-                        raw = await resp.content.read()
-                    else:
-                        raw = await resp.content.read(128 * 1024)
-                    try:
-                        text = raw.decode(
-                            resp.charset or "utf-8",
-                            errors="replace"
-                        )
-                    except Exception:
-                        text = raw.decode("utf-8", errors="replace")
+                    window = b""
+                    max_window = 16384  # 16 KB window
+                    text = ""
+                    found_title = False
+                    found_desc = False
+                    chunk_count = 0
+                    async for chunk in resp.content.iter_chunked(8192):
+                        window += chunk
+                        if len(window) > max_window:
+                            window = window[-max_window:]
+                        try:
+                            text = window.decode(resp.charset or "utf-8", errors="replace")
+                        except Exception:
+                            text = window.decode("utf-8", errors="replace")
+                        title, mdesc = extract_html_title_desc(text)
+                        found_title = bool(title)
+                        found_desc = bool(mdesc)
+                        chunk_count += 1
+                        if found_title and found_desc:
+                            break
+                    # After reading, extract whatever is available
                     title, mdesc = extract_html_title_desc(text)
-                    # Re-attach the original fragment if present
                     final_url = resp.url.human_repr()
                     if orig_fragment:
                         parsed_final = urlparse(final_url)
                         final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
+                    log.info(f"[URLCHECK] URL: {final_url}, Chunks read: {chunk_count}")
                     return (
                         final_url, status,
                         ctype, title, None, mdesc
@@ -367,6 +375,7 @@ async def fetch_url_title(url, max_redirects=3):
                     if orig_fragment:
                         parsed_final = urlparse(final_url)
                         final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
+                    log.info(f"[URLCHECK] URL: {final_url}, Chunks read: {chunk_count}")
                     return (
                         final_url, status, ctype,
                         None, content_size, None
@@ -374,9 +383,12 @@ async def fetch_url_title(url, max_redirects=3):
         raise Exception("Too many redirects")
 
 
-def extract_html_title_desc(html):
-    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
-    title = m.group(1).strip() if m else None
+def extract_html_title_desc(html, is_wikipedia=False):
+    title = None
+    if not title:
+        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        if m:
+            title = m.group(1).strip()
     desc = None
     mdesc = re.search(
         r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']',
