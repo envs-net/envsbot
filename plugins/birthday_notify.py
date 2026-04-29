@@ -644,7 +644,11 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
         storage="dict",
         log_prefix="[BIRTHDAY]",
     ):
-        if subcmd == "on":
+        if (
+            subcmd == "on"
+            and not is_room
+            and str(msg["from"].bare) in JOINED_ROOMS
+        ):
             room_jid = str(msg["from"].bare)
             asyncio.create_task(_check_room_birthdays(bot, room_jid))
         return

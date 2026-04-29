@@ -66,11 +66,16 @@ PROCESSED_STANZA_ORDER = deque(maxlen=10000)
 # ============================================================================
 
 def get_stanza_id(msg):
-    """Extract stanza_id from a message."""
+    """Extract a stable message id from a stanza."""
     stanza_id = msg.get("stanza_id")
-
     if stanza_id:
-        return stanza_id.get("id")
+        value = stanza_id.get("id")
+        if value:
+            return value
+
+    msg_id = msg.get("id")
+    if msg_id:
+        return str(msg_id)
 
     return None
 
