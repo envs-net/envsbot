@@ -646,7 +646,6 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
         timezone = None
         if is_room or core._is_muc_pm(msg):
             if args:
-                jid, _, _ = await core.get_real_jid(bot, msg)
                 if jid:
                     timezone = await store.get(str(jid), "TIMEZONE")
             else:
