@@ -32,7 +32,6 @@ from plugins import core
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
 
 VCARD_KEY = "VCARD"
 
@@ -383,8 +382,8 @@ async def get_vcard(bot, msg, jid=None):
             raise RuntimeError("vCard support (xep_0054) is not enabled in this bot.")
         try:
             result = await vcard_plugin.get_vcard(jid=str(jid), cached=False, timeout=10)
-        except Exception as e:
-            log.exception(f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
+        except (IqError, Exception) as e:
+            log.info(f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
             result = None
         else:
             log.info(f"[VCARD] ✅ vCard fetch for '{jid}' completed")
@@ -572,7 +571,7 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
 
     jid = None
     if is_room or core._is_muc_pm(msg):
-        handled = await handle_room_toggle_command(
+        handled = await core.handle_room_toggle_command(
             bot,
             msg,
             is_room,

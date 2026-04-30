@@ -37,7 +37,7 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
+from plugins.core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ PLUGIN_META = {
     "version": "0.2.4",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
+    "reqires": ["rooms", "core"],
 }
 
 URLCHECK_KEY = "URLCHECK"

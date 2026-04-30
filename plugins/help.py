@@ -42,8 +42,9 @@ from utils.command import (
     Role,
     COMMANDS
 )
-from utils.plugin_helper import handle_room_toggle_command
 from utils.config import config
+
+from plugins.core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ PLUGIN_META = {
     "version": "0.2.0",
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
+    "requires": ["core"],
 }
 
 

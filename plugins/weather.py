@@ -19,7 +19,6 @@ from plugins import core
 from plugins import vcard
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +83,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}weather <nick>
     """
 
-    handled = await handle_room_toggle_command(
+    handled = await core.handle_room_toggle_command(
         bot,
         msg,
         is_room,
