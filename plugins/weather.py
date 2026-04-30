@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "weather",
-    "version": "0.4.0",
+    "version": "0.4.2",
     "description": ("Gives weather according to users location (supports MUCs"
                     "and MUC DMs)"),
     "category": "info",
@@ -196,12 +196,13 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         # DM comtext
         targret_nick = msg["from"].bare
+        display_name = targret_nick
         if args:
             log.warning(f"[WEATHER] Command invoked by '{targret_nick}' in DM with args: {args}")
             bot.reply(msg, "🔴  In a DM, you cannot specify a different nick. Just use the command without arguments to get your weather.")
             return
         try:
-            _vcard = await vcard.get_user_vcard(bot, msg, target_nick)
+            _vcard = await vcard.get_user_vcard(bot, msg)
             _locality = _vcard.get("LOCALITY", None)
             _region = _vcard.get("REGION", None)
             _country = _vcard.get("CTRY", None)
