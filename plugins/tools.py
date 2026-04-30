@@ -17,7 +17,7 @@ Commands:
 
 import pytz
 import logging
-import slixmpp
+from plugins import core
 from datetime import datetime
 from utils.command import command, Role
 from utils.config import config
@@ -27,36 +27,11 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.3.0",
+    "version": "0.3.2",
     "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
     "category": "utility",
+    "requires": ["core", "vcard"],
 }
-
-
-def resolve_real_jid(bot, msg, is_room):
-    """
-    Resolve the real sender JID in all contexts (groupchat, MUC PM, or DM).
-    """
-    jid = None
-    muc = bot.plugin.get("xep_0045", None)
-    if muc:
-        room = msg['from'].bare
-        nick = msg["from"].resource
-        log.debug("[PROFILE] Resolving real JID for room: %s, nick: %s", room, nick)
-        jid = muc.get_jid_property(room, nick, "jid")
-    if jid is None:
-        jid = msg["from"]
-    return str(slixmpp.JID(jid).bare)
-
-
-def _is_muc_pm(msg):
-    """Returns True if msg is a MUC direct message (not public groupchat)."""
-    return (
-        msg.get("type") in ("chat", "normal")
-        and hasattr(msg["from"], "bare")
-        and "@" in str(msg["from"].bare)
-        and str(msg["from"].bare) in JOINED_ROOMS
-    )
 
 
 @command("ping", role=Role.USER, aliases=["pong"])
@@ -103,7 +78,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     """
     room = msg["from"].bare
     nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
-    if is_room or _is_muc_pm(msg):
+    if is_room or core._is_muc_pm(msg):
         if args:
             target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
@@ -162,7 +137,7 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
     """
     room = msg["from"].bare
     nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
-    if is_room or _is_muc_pm(msg):
+    if is_room or core._is_muc_pm(msg):
         if args:
             target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
@@ -247,7 +222,7 @@ async def timestamp_command(bot, sender_jid, nick, args, msg, is_room):
     try:
         # Get user's timezone
         store = bot.db.users.plugin("vcard")
-        target_jid = resolve_real_jid(bot, msg, is_room)
+        target_jid = JOINED_ROOMS.get(msg["from"].bare, {}).get("nicks", {}).get(nick, {}).get("jid", str(msg["from"].bare))
         timezone = await store.get(target_jid, "TIMEZONE")
 
         if timezone:

@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "birthday_notify",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "Automatic birthday notifications in rooms (opt-in per room)",
     "category": "fun",
     "requires": ["rooms", "vcard"],
@@ -384,7 +384,7 @@ async def _get_birthday_from_vcard(bot, room_jid, nick: str):
         return True, _normalize_bday_value(birthday)
 
     except Exception as exc:
-        log.warning(
+        log.debug(
             "[BIRTHDAY] Could not fetch BDAY from vCard for nick %s in room %s: %s",
             nick,
             room_jid,
