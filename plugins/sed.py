@@ -30,7 +30,7 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from plugins.core import handle_room_toggle_command
+from plugins._core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ PLUGIN_META = {
     "version": "0.3.3",
     "description": "Message correction using sed-like syntax",
     "category": "tools",
-    "requires": ["rooms", "core"],
+    "requires": ["rooms", "_core"],
 }
 
 SED_KEY = "SED"

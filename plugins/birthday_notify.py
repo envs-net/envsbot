@@ -34,7 +34,7 @@ from typing import Any
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from plugins.core import get_profile, handle_room_toggle_command
+from plugins._core import get_profile, handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ PLUGIN_META = {
     "version": "1.1.1",
     "description": "Automatic birthday notifications in rooms (opt-in per room)",
     "category": "fun",
-    "requires": ["rooms", "core"],
+    "requires": ["rooms", "_core"],
 }
 
 # Track announcements in memory: {(room_jid, user_jid): "YYYY-MM-DD"}

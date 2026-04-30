@@ -18,7 +18,7 @@ from plugins.rooms import JOINED_ROOMS
 from plugins.vcard import get_user_vcard
 
 PLUGIN_META = {
-    "name": "core",
+    "name": "_core",
     "version": "0.2.2",
     "description": "Core utilities and shared helpers for other plugins.",
     "category": "internal",

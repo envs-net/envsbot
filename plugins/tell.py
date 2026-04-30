@@ -24,7 +24,7 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from plugins.core import (
+from plugins._core import (
     handle_room_toggle_command,
     get_jids_from_nick_index
 )
@@ -38,7 +38,7 @@ PLUGIN_META = {
     "version": "0.2.0",
     "description": "Store and deliver messages for users when they join a room again.",
     "category": "utility",
-    "requires": ["rooms", "core"],
+    "requires": ["rooms", "_core"],
 }
 
 

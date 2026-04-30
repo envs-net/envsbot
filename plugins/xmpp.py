@@ -24,7 +24,7 @@ import asyncio
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
 from utils.config import config
-from plugins.core import handle_room_toggle_command
+from plugins._core import handle_room_toggle_command
 
 XMPP_KEY = "XMPP"
 
@@ -33,7 +33,7 @@ PLUGIN_META = {
     "version": "0.2.2",
     "description": "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
-    "requires": ["rooms", "core"],
+    "requires": ["rooms", "_core"],
 }
 
 HELP_TEXT = """

@@ -15,7 +15,7 @@ Commands:
 import aiohttp
 import logging
 import urllib
-from plugins import core
+from plugins import _core
 from plugins import vcard
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
@@ -28,7 +28,7 @@ PLUGIN_META = {
     "description": ("Gives weather according to users location (supports MUCs"
                     "and MUC DMs)"),
     "category": "info",
-    "requires": ["core", "rooms", "vcard"],
+    "requires": ["_core", "rooms", "vcard"],
 }
 
 WEATHER_KEY = "WEATHER"
@@ -83,7 +83,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}weather <nick>
     """
 
-    handled = await core.handle_room_toggle_command(
+    handled = await _core.handle_room_toggle_command(
         bot,
         msg,
         is_room,
@@ -101,7 +101,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     enabled_rooms = await store.get_global(WEATHER_KEY, default={})
 
     display_name = ""
-    if is_room and not core._is_muc_pm(msg):
+    if is_room and not _core._is_muc_pm(msg):
         log.info((f"[WEATHER] Command invoked in room {msg['from'].bare} by"
                  f"{msg['from'].resource} with args: {args}"))
         muc_jid = msg["from"].bare
@@ -146,7 +146,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
                 return
 
             log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received.")
-    elif core._is_muc_pm(msg):
+    elif _core._is_muc_pm(msg):
         log.info((f"[WEATHER] Command invoked in room {msg['from'].bare} by"
                  f"{msg['from'].resource} with args: {args}"))
 
