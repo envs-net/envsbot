@@ -45,6 +45,7 @@ JOINED_ROOMS = {}
 PLUGIN_DEFAULTS = {
     "help": False,
     "birthday_notify": False,
+    "ducks": False,
     "tell": True,
     "reminder": True,
     "sed": True,
@@ -57,6 +58,7 @@ PLUGIN_DEFAULTS = {
 PLUGIN_STORE_CONFIG = {
     "help": {"type": "dict", "key": "HELP"},
     "birthday_notify": {"type": "dict", "key": "birthday_notify"},
+    "ducks": {"type": "dict", "key": "DUCKS"},
     "tell": {"type": "dict", "key": "TELL"},
     "reminder": {"type": "dict", "key": "REMINDER"},
     "sed": {"type": "dict", "key": "SED"},
