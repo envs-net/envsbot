@@ -26,7 +26,7 @@ import aiohttp
 from plugins.rooms import JOINED_ROOMS
 from utils.command import Role, command
 from utils.config import config
-from utils.plugin_helper import handle_room_toggle_command
+from plugins._core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ PLUGIN_META = {
     "version": "1.1.2",
     "description": "XKCD comic fetcher and broadcaster with full indexing",
     "category": "fun",
-    "requires": ["rooms"],
+    "requires": ["rooms", "_core"],
 }
 
 XKCD_KEY = "XKCD"

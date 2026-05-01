@@ -49,7 +49,7 @@ import pytz
 
 from utils.command import command, Role
 from utils.config import config
-from utils.plugin_helper import handle_room_toggle_command
+from plugins._core import handle_room_toggle_command
 from plugins.rooms import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ PLUGIN_META = {
     "version": "0.2.1",
     "description": "Schedule and manage reminders",
     "category": "utility",
+    "requires": ["_core", "rooms"],
 }
 
 # In-memory storage of active asyncio tasks: {reminder_id: task}

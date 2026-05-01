@@ -37,7 +37,7 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
+from plugins._core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ PLUGIN_META = {
     "version": "0.2.4",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
+    "reqires": ["rooms", "_core"],
 }
 
 URLCHECK_KEY = "URLCHECK"
@@ -241,7 +242,8 @@ async def on_groupchat_message(bot, msg):
                 is_ok = "text/html" in ctype
             if is_ok and title:
                 _body = f"[URL] {html.unescape(title)} {st} - ({final_url})"
-                _body += f"\nDesc: '{html.unescape(mdesc)}'"
+                if isinstance(mdesc, str):
+                    _body += f"\nDesc: '{html.unescape(mdesc)}'"
                 message = bot.make_message(
                     mto=msg["from"].bare,
                     mbody=_body.strip(),

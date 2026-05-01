@@ -34,8 +34,7 @@ from typing import Any
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
-from plugins.vcard import vcard_field
+from plugins._core import get_profile, handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +43,7 @@ PLUGIN_META = {
     "version": "1.1.1",
     "description": "Automatic birthday notifications in rooms (opt-in per room)",
     "category": "fun",
-    "requires": ["rooms", "vcard"],
+    "requires": ["rooms", "_core"],
 }
 
 # Track announcements in memory: {(room_jid, user_jid): "YYYY-MM-DD"}
@@ -161,7 +160,7 @@ def _calculate_age(birthday_str: str) -> int | None:
 
 
 def _normalize_bday_value(value: Any) -> str | None:
-    """Normalize BDAY values returned by vcard_field()."""
+    """Normalize BDAY values returned by get_profile() dict."""
     if value is None:
         return None
 
@@ -369,8 +368,8 @@ async def _get_birthday_from_vcard(bot, room_jid, nick: str):
         (True, birthday_or_none) when the vCard lookup completed.
         (False, None) when the lookup failed/errored.
 
-    This intentionally uses the public vcard_field() helper and does not depend
-    on vCard plugin internals.
+    This intentionally uses the public get_profile() helper dict and
+    does not depend on vCard plugin internals.
     """
     try:
         lookup_msg = bot.make_message(
@@ -380,7 +379,8 @@ async def _get_birthday_from_vcard(bot, room_jid, nick: str):
             mbody="",
         )
 
-        birthday = await vcard_field(bot, lookup_msg, nick, "BDAY", is_room=True)
+        profile = await get_profile(bot, lookup_msg, f"{room_jid}/{nick}")
+        birthday = profile.get("BDAY")
         return True, _normalize_bday_value(birthday)
 
     except Exception as exc:
@@ -399,7 +399,7 @@ async def _get_birthday_cached_or_live(bot, room_jid, user_jid: str, nick: str):
     Behavior:
     - fresh positive cache: use cached BDAY
     - fresh negative cache: skip live lookup and return None
-    - missing/stale cache: refresh via vcard_field()
+    - missing/stale cache: refresh via get_profile() dict["BDAY"]
     - failed live lookup: fall back to stale positive cache if available
     - failed live lookup: do NOT create a negative cache entry
     """

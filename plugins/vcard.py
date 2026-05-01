@@ -26,30 +26,59 @@ import textwrap
 import pytz
 import datetime
 import urllib
+from slixmpp.exceptions import IqError
 
-from plugins import core
+from plugins import _core
 
 from utils.command import command, Role
 from utils.config import config
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
 
 VCARD_KEY = "VCARD"
 
 PLUGIN_META = {
     "name": "vcard",
-    "version": "0.4.0",
+    "version": "0.4.2",
     "description": "Lookup and display vCard of a MUC occupant by MUC JID only",
     "category": "info",
-    "requires": ["rooms", "core"],
+    "requires": ["rooms", "_core"],
 }
 
 log = logging.getLogger(__name__)
 
 
 async def get_user_vcard(bot, msg, jid=None):
+    """ Fetch and return the vCard information for a user.
+
+    This function retrieves the vCard for the specified JID (or the sender
+    if not provided), formats the vCard data, and adds the user's timezone
+    from the database if available.
+
+    Args:
+        bot: The bot instance.
+        msg: The message object (context for resolving JID if not provided).
+        jid: (Optional) The JID of the user whose vCard to fetch.
+             If None, resolves from msg.
+
+    Returns:
+        dict: A dictionary containing vCard fields (e.g., FN, NICKNAME,
+        BDAY, URL, ORG, NOTE, EMAIL, LOCALITY, REGION, COUNTRY, TZ).
+              The "TZ" field is populated from the database if available.
+    """
     vcard_info = await get_vcard(bot, msg, jid)
     _, _vcard = _format_vcard_reply(vcard_info, None, None)
+
+    # add Timezone from DB if available
+    store = await get_vcard_store(bot)
+    timezone = None
+    jid, _, _ = await _core.get_real_jid(bot, msg)
+    if jid is not None:
+        timezone = await store.get(str(jid), "TIMEZONE")
+    else:
+        jid, _, _ = await _core.get_real_jid(bot, msg)
+        timezone = await store.get(str(jid), "TIMEZONE")
+    _vcard["TZ"] = timezone
+
     return _vcard
 
 
@@ -69,10 +98,10 @@ async def vcard_field(bot, msg, target_nick, field, is_room=False):
         return None
     if field == "TIMEZONE":
         store = await get_vcard_store(bot)
-        if not is_room and not core._is_muc_pm(msg):
+        if not is_room and not _core._is_muc_pm(msg):
             jid = msg["from"].bare
         else:
-            jid = JOINED_ROOMS.get(msg["from"].bare, {}).get("nicks", {}).get(target_nick, {}).get("jid")
+            jid = _core.get_real_jid_from_occupant(bot, msg, target_nick)
         if not jid:
             log.warning(f"[VCARD] 🔴  Nick '{target_nick}' not found in room"
                         f"'{msg['from'].bare}' for TIMEZONE lookup")
@@ -111,15 +140,15 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
-    if not is_room and not core._is_muc_pm(msg):
+    if not is_room and not _core._is_muc_pm(msg):
         jid = msg["from"].bare
     else:
-        jid, _, _ = await core.get_real_jid(bot, msg)
+        jid, _, _ = await _core.get_real_jid(bot, msg)
     log.info("[VCARD] ✅ set_timezone called by %s", jid)
-    if not await core._check_user_exists(bot, jid, msg):
+    if not await _core._check_user_exists(bot, jid, msg):
         return
     if not args or len(args) != 1:
         log.warning("[VCARD] 🔴  TIMEZONE missing/invalid args for %s",
@@ -214,7 +243,7 @@ async def _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
     Helper to fetch and display a profile field for a user nick.
     """
     # 1. Room context (groupchat) or MUC PM: lookup nick in room
-    if (is_room or core._is_muc_pm(msg)) and args:
+    if (is_room or _core._is_muc_pm(msg)) and args:
         target_nick = " ".join(args).strip()
         room = msg["from"].bare
         joined = JOINED_ROOMS.get(room, {})
@@ -227,11 +256,11 @@ async def _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
             return
         if field == "TIMEZONE":
             store = bot.db.users.plugin("vcard")
-            jid = JOINED_ROOMS.get(room, {}).get("nicks", {}).get(target_nick, {}).get("jid")
+            jid = nick_info.get("jid")
             value = await store.get(str(jid), "TIMEZONE")
             log.info(f"[VCARD] TIMEZONE lookup for nick '{target_nick}' with JID '{jid}' in room '{room}': {value}")
         else:
-            jid = JOINED_ROOMS.get(room, {}).get("nicks", {}).get(target_nick, {}).get("jid")
+            jid = nick_info.get("jid")
             vcard = await get_user_vcard(bot, msg, jid)
             value = vcard[field]
         if value is None or value == "" or value == []:
@@ -257,7 +286,7 @@ async def _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
             bot.reply(msg, lines)
         return
     # 2. Request own vCard information
-    elif (is_room or core._is_muc_pm(msg)) and not args:
+    elif (is_room or _core._is_muc_pm(msg)) and not args:
         target_nick = msg["from"].resource
         room = msg["from"].bare
         joined = JOINED_ROOMS.get(room, {})
@@ -347,19 +376,15 @@ async def get_vcard(bot, msg, jid=None):
     Helper function to fetch vCard for a given JID using the xep_0054 plugin.
     """
     if jid is None:
-        jid, _is_muc_pm, _is_muc_groupchat = await core.get_real_jid(bot, msg)
-    # Only fetch vCard for real user JIDs, not for MUC bare JIDs or nicks
-    if not jid or jid in JOINED_ROOMS:
-        log.warning(f"[VCARD] Not a real user JID for vCard lookup: {jid}")
-        return None
+        jid, _, _ = await _core.get_real_jid(bot, msg)
     try:
         vcard_plugin = bot.plugin.get("xep_0054", None)
         if not vcard_plugin:
             raise RuntimeError("vCard support (xep_0054) is not enabled in this bot.")
         try:
-            result = await vcard_plugin.get_vcard(jid=jid, cached=False, timeout=10)
-        except Exception as e:
-            log.exception(f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
+            result = await vcard_plugin.get_vcard(jid=str(jid), cached=False, timeout=10)
+        except (IqError, Exception) as e:
+            log.info(f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
             result = None
         else:
             log.info(f"[VCARD] ✅ vCard fetch for '{jid}' completed")
@@ -546,8 +571,8 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
     """
 
     jid = None
-    if is_room or core._is_muc_pm(msg):
-        handled = await handle_room_toggle_command(
+    if is_room or _core._is_muc_pm(msg):
+        handled = await _core.handle_room_toggle_command(
             bot,
             msg,
             is_room,
@@ -564,7 +589,7 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
 
-    if (is_room or core._is_muc_pm(msg)) and args:
+    if (is_room or _core._is_muc_pm(msg)) and args:
         target_nick = " ".join(args).strip()
         muc_jid = f"{msg['from'].bare}"
         if muc_jid not in enabled_rooms:
@@ -580,7 +605,7 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
         if not jid:
             bot.reply(msg, f"🔴  Could not resolve JID for nick '{target_nick}'.")
             return
-    elif (is_room or core._is_muc_pm(msg)) and not args:
+    elif (is_room or _core._is_muc_pm(msg)) and not args:
         target_nick = msg["from"].resource
         muc_jid = f"{msg['from'].bare}"
         if muc_jid not in enabled_rooms:
@@ -597,7 +622,7 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
             bot.reply(msg, f"🔴  Could not resolve your JID for nick '{target_nick}'.")
             return
     else:
-    # DM context: lookup sender's own vCard by JID
+        # DM context: lookup sender's own vCard by JID
         if args:
             log.info(f"[VCARD] Direct message with args from '{msg['from'].bare}'")
             bot.reply(msg, "🔴  In direct messages, you can only look up your own vCard. Use the command without args.")
@@ -619,18 +644,18 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
         # add Timezone from DB if available
         store = await get_vcard_store(bot)
         timezone = None
-        if is_room or core._is_muc_pm(msg):
+        if is_room or _core._is_muc_pm(msg):
             if args:
-                jid, _, _ = await core.get_real_jid(bot, msg)
                 if jid:
                     timezone = await store.get(str(jid), "TIMEZONE")
             else:
-                jid, _, _ = await core.get_real_jid(bot, msg)
+                jid, _, _ = await _core.get_real_jid(bot, msg)
                 timezone = await store.get(str(jid), "TIMEZONE")
         else:
             timezone = await store.get(str(jid), "TIMEZONE")
         if timezone:
-            lines.append("")  # Blank line before timezone
+            if lines[-1] != "":
+                lines.append("")  # Blank line before timezone
             lines.append(f"• Timezone: {timezone}")
 
         bot.reply(msg, lines)
@@ -654,7 +679,7 @@ async def get_fullname(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -676,7 +701,7 @@ async def get_nicknames(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -699,7 +724,7 @@ async def get_timezone(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -720,7 +745,7 @@ async def get_organisations(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -741,7 +766,7 @@ async def get_notes(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -763,7 +788,7 @@ async def get_email(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -785,7 +810,7 @@ async def get_urls(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     await _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
@@ -807,11 +832,11 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
     # Check, if command is allowed in this context (room or MUC PM)
     store = await get_vcard_store(bot)
     enabled_rooms = await store.get_global(VCARD_KEY, default={})
-    if msg["from"].bare not in enabled_rooms and (is_room or core._is_muc_pm(msg)):
+    if msg["from"].bare not in enabled_rooms and (is_room or _core._is_muc_pm(msg)):
         return
 
     # 1. Room context (groupchat) or MUC PM: lookup nick in room
-    if (is_room or core._is_muc_pm(msg)) and args:
+    if (is_room or _core._is_muc_pm(msg)) and args:
         target_nick = " ".join(args).strip()
         room = msg["from"].bare
         joined = JOINED_ROOMS.get(room, {})
@@ -821,7 +846,8 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
             bot.reply(msg, f"🔴  Nick '{target_nick}' not found in this room.")
             return
         display_name = target_nick
-    elif (is_room or core._is_muc_pm(msg)) and not args:
+        jid = nick_info.get("jid")
+    elif (is_room or _core._is_muc_pm(msg)) and not args:
         target_nick = msg["from"].resource
         room = msg["from"].bare
         joined = JOINED_ROOMS.get(room, {})
@@ -830,18 +856,18 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
         if not nick_info:
             bot.reply(msg, f"🔴  Your Nick '{target_nick}' not found in this room.")
             return
+        jid = nick_info.get("jid")
         display_name = target_nick
     else:
         if args:
             log.info(f"[VCARD] Direct message with args from '{msg['from'].bare}'")
             bot.reply(msg, "🔴  In direct messages, you can only look up your own birthday. Use the command without args.")
             return
-        target_nick = None
-        room = None
-        jid = msg["from"].bare
+        room = "Direct Message"
+        jid = str(msg["from"].bare)
         display_name = jid
 
-    vcard = await get_info(bot, msg, jid=jid)
+    vcard = await get_info(bot, msg, jid)
     value = None
     if vcard and vcard["BDAY"] is not None:
         value = vcard["BDAY"]

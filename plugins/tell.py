@@ -23,8 +23,11 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from utils.plugin_helper import handle_room_toggle_command
 from plugins.rooms import JOINED_ROOMS
+from plugins._core import (
+    handle_room_toggle_command,
+    get_jids_from_nick_index
+)
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ PLUGIN_META = {
     "version": "0.2.0",
     "description": "Store and deliver messages for users when they join a room again.",
     "category": "utility",
-    "requires": ["rooms"],
+    "requires": ["rooms", "_core"],
 }
 
 
@@ -66,17 +69,6 @@ def parse_nick_and_message(args_str):
     if not nick or not message:
         return None, None
     return nick, message
-
-
-async def get_real_jid(bot, nick):
-    """Look up the real JID of a nick from the UserManager's _nick_index."""
-    idx = getattr(bot.db.users, "_nick_index", {})
-    value = idx.get(nick)
-    if isinstance(value, set):
-        return next(iter(value), None)
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value or None
 
 
 async def get_timezone(bot, jid):
@@ -159,14 +151,15 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
         bot.reply(msg, f"Usage: {prefix}tell <nick>: <message>")
         return
 
-    rec_jid = await get_real_jid(bot, rec_nick)
+    rec_jids = await get_jids_from_nick_index(bot, rec_nick)
+    rec_jid = rec_jids[0] if rec_jids else None
     if not rec_jid:
         bot.reply(msg, f"Could not find user '{rec_nick}'. (Maybe they never spoke?)")
         log.info(f"[TELL] Failed to store message for '{rec_nick}' - user not found.")
         return
 
-    send_jid = await get_real_jid(bot, sender_nick)
-    send_jid = send_jid or sender_jid
+    send_jids = await get_jids_from_nick_index(bot, sender_nick)
+    send_jid = send_jids[0] if send_jids else None
 
     now = datetime.datetime.now(datetime.timezone.utc).timestamp()
     payload = {
@@ -189,7 +182,8 @@ async def deliver_tell_messages(bot, msg):
     """
     room = str(msg["from"].bare)
     nick = str(msg["muc"]["nick"])
-    rec_jid = await get_real_jid(bot, nick)
+    rec_jids = await get_jids_from_nick_index(bot, nick)
+    rec_jid = rec_jids[0] if rec_jids else None
     if not rec_jid:
         return
 

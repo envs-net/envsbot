@@ -15,21 +15,20 @@ Commands:
 import aiohttp
 import logging
 import urllib
-from plugins import core
+from plugins import _core
 from plugins import vcard
 from utils.command import command, Role
 from plugins.rooms import JOINED_ROOMS
-from utils.plugin_helper import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "weather",
-    "version": "0.4.0",
+    "version": "0.4.2",
     "description": ("Gives weather according to users location (supports MUCs"
                     "and MUC DMs)"),
     "category": "info",
-    "requires": ["core", "rooms", "vcard"],
+    "requires": ["_core", "rooms", "vcard"],
 }
 
 WEATHER_KEY = "WEATHER"
@@ -84,7 +83,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}weather <nick>
     """
 
-    handled = await handle_room_toggle_command(
+    handled = await _core.handle_room_toggle_command(
         bot,
         msg,
         is_room,
@@ -102,7 +101,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     enabled_rooms = await store.get_global(WEATHER_KEY, default={})
 
     display_name = ""
-    if is_room and not core._is_muc_pm(msg):
+    if is_room and not _core._is_muc_pm(msg):
         log.info((f"[WEATHER] Command invoked in room {msg['from'].bare} by"
                  f"{msg['from'].resource} with args: {args}"))
         muc_jid = msg["from"].bare
@@ -147,7 +146,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
                 return
 
             log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received.")
-    elif core._is_muc_pm(msg):
+    elif _core._is_muc_pm(msg):
         log.info((f"[WEATHER] Command invoked in room {msg['from'].bare} by"
                  f"{msg['from'].resource} with args: {args}"))
 
@@ -196,12 +195,13 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         # DM comtext
         targret_nick = msg["from"].bare
+        display_name = targret_nick
         if args:
             log.warning(f"[WEATHER] Command invoked by '{targret_nick}' in DM with args: {args}")
             bot.reply(msg, "🔴  In a DM, you cannot specify a different nick. Just use the command without arguments to get your weather.")
             return
         try:
-            _vcard = await vcard.get_user_vcard(bot, msg, target_nick)
+            _vcard = await vcard.get_user_vcard(bot, msg, targret_nick)
             _locality = _vcard.get("LOCALITY", None)
             _region = _vcard.get("REGION", None)
             _country = _vcard.get("CTRY", None)

@@ -565,6 +565,9 @@ class PluginManager:
                             log.exception("[PLUGIN] failed to load: %s", plugin)
                             failed.add(plugin)
                 break
+            log.info("[PLUGIN] load_all progress: %d/%d loaded, %d failed", len(loaded), len(discovered), len(failed))
+            if len(failed) > 0:
+                log.warning("[PLUGIN] failed: %s", ", ".join(sorted(failed)))
 
     async def call_on_ready(self):
         """

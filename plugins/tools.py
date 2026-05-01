@@ -17,7 +17,7 @@ Commands:
 
 import pytz
 import logging
-from plugins import core
+from plugins import _core
 from datetime import datetime
 from utils.command import command, Role
 from utils.config import config
@@ -30,7 +30,7 @@ PLUGIN_META = {
     "version": "0.3.2",
     "description": "Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion",
     "category": "utility",
-    "requires": ["core", "vcard"],
+    "requires": ["_core", "vcard"],
 }
 
 
@@ -78,7 +78,7 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
     """
     room = msg["from"].bare
     nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
-    if is_room or core._is_muc_pm(msg):
+    if is_room or _core._is_muc_pm(msg):
         if args:
             target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
@@ -137,7 +137,7 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
     """
     room = msg["from"].bare
     nicks = JOINED_ROOMS.get(room, {}).get("nicks", {})
-    if is_room or core._is_muc_pm(msg):
+    if is_room or _core._is_muc_pm(msg):
         if args:
             target_nick = " ".join(args).strip()
             info = nicks.get(target_nick)
