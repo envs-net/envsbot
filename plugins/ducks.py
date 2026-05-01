@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "ducks",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Duck game for MUCs with room toggles and leaderboards",
     "category": "fun",
     "requires": ["rooms", "_core"],
@@ -57,12 +57,12 @@ DUCKS_LAST_KEY = "DUCKS_LAST"
 
 DEFAULT_MIN_MESSAGES = config.get("ducks", {}).get("min_messages", 100)
 DUCK_SPAWN_CHANCE = config.get("ducks", {}).get("spawn_chance", 20)
-DUCK_TIMEOUT = config.get("ducks", {}).get("timeout", 3600)
+DUCK_TIMEOUT = config.get("ducks", {}).get("timeout", 86400)
 COUNT_COMMAND_MESSAGES = config.get("ducks", {}).get("count_commands", False)
 
 ACTIVE_DUCKS = {}          # room_jid -> timestamp
 PENDING_DUCKS = set()      # room_jid waiting for delayed spawn
-MESSAGE_COUNTS = defaultdict(int)
+MESSAGE_COUNTS = defaultdict(int)   # room_jid -> message counter, -1 means duck scheduled
 SPAWN_TASKS = {}           # room_jid -> asyncio.Task
 EXPIRE_TASKS = {}          # room_jid -> asyncio.Task
 
@@ -382,16 +382,18 @@ async def _maybe_schedule_duck(bot, room_jid):
     if room_jid in ACTIVE_DUCKS or room_jid in PENDING_DUCKS:
         return
 
+    if MESSAGE_COUNTS[room_jid] == -1:
+        return
+
     MESSAGE_COUNTS[room_jid] += 1
 
     if MESSAGE_COUNTS[room_jid] < DEFAULT_MIN_MESSAGES:
         return
 
-    MESSAGE_COUNTS[room_jid] = 0
-
     if random.randint(1, DUCK_SPAWN_CHANCE) != 1:
         return
 
+    MESSAGE_COUNTS[room_jid] = -1
     delay = random.randint(5, 20)
     PENDING_DUCKS.add(room_jid)
     SPAWN_TASKS[room_jid] = asyncio.create_task(
