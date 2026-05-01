@@ -1,5 +1,5 @@
 """
-Poll plugin for XMPP MUCs.
+Poll plugin with room-local voting, history, and optional timed auto-close.
 
 Features:
 - Room-scoped enable/disable/status via MUC DM

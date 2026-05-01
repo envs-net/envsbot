@@ -1,5 +1,5 @@
 """
-Karma plugin for XMPP MUCs.
+Room-local karma plugin with nick++ / nick-- tracking.
 
 Provides simple room-local karma tracking using patterns like:
 
