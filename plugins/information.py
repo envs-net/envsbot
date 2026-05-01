@@ -2,15 +2,20 @@
 Info plugin.
 
 This plugin provides various information commands:
+- Wikipedia summary lookup
 - Fetch latest toot from a Fediverse user
 - Urban Dictionary term search
 
 Commands:
+    {prefix}wikipedia <search term>
     {prefix}fediverse <@user@instance>
     {prefix}udict <term>
+    {prefix}information on|off|status (to toggle in rooms)
 """
 
 import aiohttp
+import asyncio
+import requests
 import html
 import logging
 import re
@@ -19,14 +24,18 @@ from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
+from plugins._core import handle_room_toggle_command, _is_muc_pm
 
 log = logging.getLogger(__name__)
 
+INFO_KEY = "INFORMATION"
+
 PLUGIN_META = {
     "name": "information",
-    "version": "0.2.0",
-    "description": "Fediverse and Urban Dictionary lookup.",
+    "version": "0.3.1",
+    "description": "Wikipedia, Fediverse and Urban Dictionary lookup.",
     "category": "info",
+    "requires": ["_core"],
 }
 
 
@@ -57,6 +66,12 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}fediverse @Gargron@mastodon.social
     """
+    store = await get_info_store(bot)
+    enabled_rooms = await store.get_global(INFO_KEY, default={})
+    if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
+        bot.reply(msg, "ℹ️ Fediverse lookup is disabled in this room.")
+        return
+
     if not args:
         bot.reply(
             msg,
@@ -140,6 +155,12 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
     Example:
         {prefix}udict yeet
     """
+    store = await get_info_store(bot)
+    enabled_rooms = await store.get_global(INFO_KEY, default={})
+    if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
+        bot.reply(msg, "ℹ️ Urban Dictionary lookup is disabled in this room.")
+        return
+
     if not args:
         bot.reply(
             msg,
@@ -186,3 +207,96 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
         lines.append(permalink)
 
     bot.reply(msg, lines)
+
+# ---------------- Wikipedia ----------------
+
+WIKIPEDIA_API_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{}"
+
+
+def fetch_wikipedia_summary(term):
+    """
+    Query the Wikipedia REST API and return extracted data, or None on error.
+    """
+    url = WIKIPEDIA_API_URL.format(requests.utils.quote(term))
+    resp = requests.get(url, headers={"User-Agent": "envsbot/1.0"})
+    if resp.status_code == 200:
+        data = resp.json()
+        title = data.get("title")
+        summary = data.get("extract")
+        url = data.get("content_urls", {}).get("desktop", {}).get("page")
+        if title and summary and url:
+            return title, summary, url
+        # If it's a redirect/disambiguation, may contain other structure
+        elif data.get("type") == "disambiguation" and "titles" in data:
+            return data["titles"]["canonical"], "Disambiguation page", url
+    return None
+
+@command("wikipedia", role=Role.USER, aliases=["wiki"])
+async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Lookup a summary for a term using Wikipedia.
+
+    Usage:
+        {prefix}wikipedia <search term>
+        {prefix}wiki <search term>
+    """
+    store = await get_info_store(bot)
+    enabled_rooms = await store.get_global(INFO_KEY, default={})
+    if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
+        bot.reply(msg, "ℹ️ Wikipedia lookup is disabled in this room.")
+        return
+
+    if not args:
+        bot.reply(msg, "Usage: ,wikipedia <search term>")
+        return
+
+    term = " ".join(args)
+    # Run blocking HTTP in executor
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, fetch_wikipedia_summary, term
+    )
+
+    if result:
+        title, summary, url = result
+        lines = [
+            f"📖 Wikipedia: {title}",
+            summary,
+            f"URL: {url}",
+        ]
+        bot.reply(msg, lines)
+    else:
+        bot.reply(msg, f"No Wikipedia summary found for '{term}'.")
+
+
+@command("information", role=Role.MODERATOR)
+async def information_command(bot, sender_jid, nick, args, msg, is_room):
+    """
+    Toggle information plugin features in the current room.
+
+    Usage:
+        {prefix}information on|off|status
+    """
+    if not args:
+        bot.reply(msg, f"Usage: {config.get('prefix', ',')}information on|off|status")
+        return
+
+    if is_room or _is_muc_pm(msg):
+        handled = await handle_room_toggle_command(
+            bot,
+            msg,
+            is_room,
+            args,
+            store_getter=get_info_store,
+            key=INFO_KEY,
+            label="Get online infos",
+            storage="dict",
+            log_prefix="[INFORMATION]",
+        )
+        if handled:
+            return
+
+    bot.reply(msg, "Usage: {prefix}information on|off|status (in a room or PM)")
+
+
+async def get_info_store(bot):
+    return bot.db.users.plugin("information")
