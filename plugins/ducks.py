@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "ducks",
-    "version": "1.2.0",
+    "version": "1.1.0",
     "description": "Duck game for MUCs with room toggles and leaderboards",
     "category": "fun",
     "requires": ["rooms", "_core"],
