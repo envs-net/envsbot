@@ -11,7 +11,7 @@ Newly created rooms will be created with the plugin defaults (on/off)
 defined in the "rooms" plugin.
 
 You can set the rooms plugins back to the defaults with the following command:
-    {prefix}room setdefaults <room_jid>
+    {prefix}room set_plugin_defaults
 
 Rooms can optionally be configured with an *autojoin* flag so the
 bot automatically joins them when it starts.
@@ -45,6 +45,10 @@ JOINED_ROOMS = {}
 PLUGIN_DEFAULTS = {
     "help": False,
     "birthday_notify": False,
+    "ducks": False,
+    "karma": False,
+    "poll": False,
+    "information": True,
     "tell": True,
     "reminder": True,
     "sed": True,
@@ -57,6 +61,10 @@ PLUGIN_DEFAULTS = {
 PLUGIN_STORE_CONFIG = {
     "help": {"type": "dict", "key": "HELP"},
     "birthday_notify": {"type": "dict", "key": "birthday_notify"},
+    "ducks": {"type": "dict", "key": "DUCKS"},
+    "karma": {"type": "dict", "key": "KARMA"},
+    "poll": {"type": "dict", "key": "POLL"},
+    "information": {"type": "dict", "key": "INFORMATION"},
     "tell": {"type": "dict", "key": "TELL"},
     "reminder": {"type": "dict", "key": "REMINDER"},
     "sed": {"type": "dict", "key": "SED"},
@@ -427,22 +435,24 @@ async def set_room_control_defaults(bot, room_jid, defaults=None):
 # -------------------------------------------------
 # ROOMS SETDEFAULTS
 # -------------------------------------------------
-@command("rooms set_plugin_defaults", role=Role.ADMIN,
+@command("rooms set_plugin_defaults", role=Role.MODERATOR,
          aliases=["room set_plugin_defaults",
                   "rooms spd", "room spd"])
 async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
     """
-    Reset all plugin room controls to the defaults for the specified room.
-    If the room_jid is omitted, the current room will be used.
+    Reset all room plugins to the defaults for the current room.
 
     Usage:
-        {prefix}room set_plugin_defaults [room_jid]
-        {preffix}room spd [room_jid]
+        {prefix}room set_plugin_defaults
+        {prefix}room spd
     """
-    try:
-        room_jid = args[0]
-    except (KeyError, IndexError):
-        room_jid = msg['from'].bare
+    if is_room:
+        bot.reply(msg, "🔴 This command can only be used in MUC PMs. to the bot.")
+        return
+    if len(args) != 0:
+        bot.reply(msg, f"🟡️ Usage: {bot.prefix}room set_plugin_defaults")
+        return
+    room_jid = msg['from'].bare
     if room_jid not in JOINED_ROOMS:
         bot.reply(msg, f"🔴 Room '{room_jid}' is not currently joined. Please join the room first before setting defaults.")
         log.warning(f"[ROOMS] 🟡️ Room '{room_jid}' not joined for setdefaults!")
@@ -472,6 +482,12 @@ async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
 
     Usage: {prefix}room plugins
     """
+    if is_room:
+        bot.reply(msg, "🔴 This command can only be used in MUC PMs to the bot.")
+        return
+    if len(args) != 0:
+        bot.reply(msg, f"🟡️ Usage: {bot.prefix}room plugins")
+        return
     room_jid = msg['from'].bare
     if room_jid not in JOINED_ROOMS:
         bot.reply(msg, f"🔴 Room '{room_jid}' is not currently joined. Please join the room first to view plugin settings.")

@@ -1,8 +1,6 @@
 """Schedule and manage reminders.
 
 Schedule reminders to notify you at a later time.
-The reminder plugin is enabled by default.
-The plugin owns and initializes its SQLite table itself.
 
 Commands:
 • {prefix}remind <duration|date time> <message> - Set a new reminder
@@ -30,10 +28,8 @@ Examples:
 • {prefix}remind 01.05.2026 14:30 Birthday reminder
 • {prefix}reminders
 • {prefix}remind delete 1
-• {prefix}remind status
-• {prefix}reminder status
-• {prefix}reminder off
-• {prefix}reminder on
+• {prefix}remind <on|off|status>
+• {prefix}reminder <on|off|status>
 
 Limits:
 • Maximum reminder duration/date distance: 365 days by default

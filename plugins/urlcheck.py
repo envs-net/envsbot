@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "urlcheck",
-    "version": "0.2.4",
+    "version": "0.3.0",
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
     "reqires": ["rooms", "_core"],
@@ -179,6 +179,7 @@ async def on_groupchat_message(bot, msg):
         # else add it to _url_timestamps[room] with current timestamp
         if url in _url_timestamps[room]:
             log.info(f"[URLCHECK] 🟡 Fetching '{url}' temporary disabled")
+            _url_timestamps[room][url] = now  # update timestamp to extend block
             continue
         _url_timestamps[room][url] = now
 
@@ -227,23 +228,28 @@ async def on_groupchat_message(bot, msg):
                                 "[URLCHECK] Failed to set link metadata"
                                 f" for YouTube info: {e}"
                             )
-                    if (has_xep_0511 or
-                            has_xep_0392_link_metadata(msg)):
-                        # If original message has XEP-0511,
-                        # don't include YouTube info in the reply text
-                        for x in list(
-                            message.xml.findall("{urn:xmpp:ssn}x")
-                        ):
-                            message.xml.remove(x)
 
-                    message.send()
-                    continue
+                if (has_xep_0511 or
+                        has_xep_0392_link_metadata(msg)):
+                    # If original message has XEP-0511,
+                    # don't include YouTube info in the reply text
+                    for x in list(
+                        message.xml.findall("{urn:xmpp:ssn}x")
+                    ):
+                        message.xml.remove(x)
+
+                message.send()
+                continue
+
             if ctype:
                 is_ok = "text/html" in ctype
             if is_ok and title:
                 _body = f"[URL] {html.unescape(title)} {st} - ({final_url})"
-                if isinstance(mdesc, str):
-                    _body += f"\nDesc: '{html.unescape(mdesc)}'"
+                if mdesc and isinstance(mdesc, str):
+                    # Only include the first 2 non-empty lines (preserves short descs).
+                    lines = [line.strip() for line in mdesc.splitlines() if line.strip()]
+                    short_desc = "\n".join(lines[:2])
+                    _body += f"\nDesc: '{html.unescape(short_desc)}'"
                 message = bot.make_message(
                     mto=msg["from"].bare,
                     mbody=_body.strip(),
@@ -301,6 +307,10 @@ async def on_groupchat_message(bot, msg):
                 log.warning(f"[URLCHECK] Failed to fetch URL {url}: {e}")
 
 
+def strip_html_tags(text):
+    return re.sub(r"<[^>]+>", "", text or "")
+
+
 def is_youtube_url(url):
     return "youtube.com/watch" in url or "youtu.be/" in url
 
@@ -319,8 +329,14 @@ def has_xep_0392_link_metadata(msg):
 async def fetch_url_title(url, max_redirects=3):
     parsed_orig = urlparse(url)
     orig_fragment = parsed_orig.fragment
-
-    async with aiohttp.ClientSession() as session:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+    }
+    async with aiohttp.ClientSession(headers=headers) as session:
         for _ in range(max_redirects):
             async with session.get(
                 url, allow_redirects=False, timeout=8
@@ -340,29 +356,41 @@ async def fetch_url_title(url, max_redirects=3):
                     url = urljoin(str(resp.url), resp.headers["Location"])
                     continue
                 if "text/html" in ctype:
-                    log.info(f"[URLCHECK] Fetching: {url}")
                     window = b""
-                    max_window = 16384  # 16 KB window
-                    text = ""
-                    found_title = False
-                    found_desc = False
+                    max_window = 32768  # 32 KB to be safe for large Wiki pages
                     chunk_count = 0
+                    title_found = None
+                    desc_found = None
                     async for chunk in resp.content.iter_chunked(8192):
                         window += chunk
                         if len(window) > max_window:
-                            window = window[-max_window:]
+                            break
                         try:
                             text = window.decode(resp.charset or "utf-8", errors="replace")
                         except Exception:
                             text = window.decode("utf-8", errors="replace")
-                        title, mdesc = extract_html_title_desc(text)
-                        found_title = bool(title)
-                        found_desc = bool(mdesc)
+
+                        # Extract separately on each iteration
+                        title, desc = extract_html_title_desc(text)
+                        if title and not title_found:
+                            title_found = title
+                            # Optionally break here for speed, OR keep reading if you want description
+                        if desc and not desc_found:
+                            desc_found = desc
                         chunk_count += 1
-                        if found_title and found_desc:
-                            break
-                    # After reading, extract whatever is available
-                    title, mdesc = extract_html_title_desc(text)
+
+                    # Fallback in case title/desc were not yet found
+                    try:
+                        text = window.decode(resp.charset or "utf-8", errors="replace")
+                    except Exception:
+                        text = window.decode("utf-8", errors="replace")
+                    if not title_found or not desc_found:
+                        t, d = extract_html_title_desc(text)
+                        if not title_found:
+                            title_found = t
+                        if not desc_found:
+                            desc_found = d
+
                     final_url = resp.url.human_repr()
                     if orig_fragment:
                         parsed_final = urlparse(final_url)
@@ -370,7 +398,7 @@ async def fetch_url_title(url, max_redirects=3):
                     log.info(f"[URLCHECK] URL: {final_url}, Chunks read: {chunk_count}")
                     return (
                         final_url, status,
-                        ctype, title, None, mdesc
+                        ctype, title_found, None, desc_found
                     )
                 else:
                     final_url = resp.url.human_repr()
@@ -387,16 +415,22 @@ async def fetch_url_title(url, max_redirects=3):
 
 def extract_html_title_desc(html, is_wikipedia=False):
     title = None
-    if not title:
-        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
-        if m:
-            title = m.group(1).strip()
+    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+    if m:
+        title = m.group(1).strip()
     desc = None
-    mdesc = re.search(
-        r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']',
-        html, re.I | re.S)
-    if mdesc:
-        desc = mdesc.group(1).strip()
+
+    # Strictly only match a single <meta ...> tag PER LINE:
+    meta_tag_re = re.compile(r'<meta\b([^>]*)>', re.I)
+    for match in meta_tag_re.finditer(html):
+        attrs = match.group(1)
+        # Extract attributes as key-value pairs
+        name = re.search(r'name=["\']description["\']', attrs, re.I)
+        content = re.search(r'content=["\']([^"\']*)["\']', attrs, re.I)
+        if name and content:
+            desc = content.group(1).strip()
+            break
+
     return title, desc
 
 
