@@ -30,6 +30,7 @@ import logging
 import random
 import time
 from collections import defaultdict
+from datetime import date
 from functools import partial
 
 from slixmpp import JID
@@ -43,7 +44,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "ducks",
-    "version": "1.2.1",
+    "version": "1.3.0",
     "description": "Duck game for MUCs with room toggles and leaderboards",
     "category": "fun",
     "requires": ["rooms", "_core"],
@@ -54,17 +55,22 @@ DUCK = r"・゜゜・。。・゜゜\_o< QUACK!"
 DUCKS_KEY = "DUCKS"
 DUCKS_INDEX_KEY = "DUCKS_ROOM_INDEX"
 DUCKS_LAST_KEY = "DUCKS_LAST"
+DUCKS_DAILY_KEY = "DUCKS_DAILY"
 
-DEFAULT_MIN_MESSAGES = config.get("ducks", {}).get("min_messages", 100)
-DUCK_SPAWN_CHANCE = config.get("ducks", {}).get("spawn_chance", 20)
-DUCK_TIMEOUT = config.get("ducks", {}).get("timeout", 86400)
-COUNT_COMMAND_MESSAGES = config.get("ducks", {}).get("count_commands", False)
+duck_cfg = config.get("ducks", {})
+DEFAULT_MIN_MESSAGES = duck_cfg.get("min_messages", 150)
+DEFAULT_MAX_MESSAGES = duck_cfg.get("max_messages", 500)
+DUCK_SPAWN_CHANCE = duck_cfg.get("spawn_chance", 20)
+MAX_DUCKS_PER_DAY = duck_cfg.get("max_ducks_per_day", 3)
+DUCK_TIMEOUT = duck_cfg.get("timeout", 0)
+COUNT_COMMAND_MESSAGES = duck_cfg.get("count_commands", False)
 
-ACTIVE_DUCKS = {}          # room_jid -> timestamp
-PENDING_DUCKS = set()      # room_jid waiting for delayed spawn
+ACTIVE_DUCKS = {}              # room_jid -> timestamp
+PENDING_DUCKS = set()          # room_jid waiting for delayed spawn
 MESSAGE_COUNTS = defaultdict(int)   # room_jid -> message counter, -1 means duck scheduled
-SPAWN_TASKS = {}           # room_jid -> asyncio.Task
-EXPIRE_TASKS = {}          # room_jid -> asyncio.Task
+NEXT_DUCK_THRESHOLDS = {}      # room_jid -> random threshold before spawn rolls begin
+SPAWN_TASKS = {}               # room_jid -> asyncio.Task
+EXPIRE_TASKS = {}              # room_jid -> asyncio.Task
 
 BEFRIEND_REACTIONS = [
     "The duck waddles happily. 🦆💕",
@@ -131,6 +137,60 @@ def _duck_reply(bot, msg, text: str):
         mention=False,
         thread=True,
     )
+
+
+def _today_str() -> str:
+    return date.today().isoformat()
+
+
+def _get_random_threshold() -> int:
+    min_msgs = int(DEFAULT_MIN_MESSAGES)
+    max_msgs = int(DEFAULT_MAX_MESSAGES)
+    if max_msgs < min_msgs:
+        max_msgs = min_msgs
+    return random.randint(min_msgs, max_msgs)
+
+
+def _ensure_threshold(room_jid: str) -> int:
+    threshold = NEXT_DUCK_THRESHOLDS.get(room_jid)
+    if threshold is None:
+        threshold = _get_random_threshold()
+        NEXT_DUCK_THRESHOLDS[room_jid] = threshold
+    return threshold
+
+
+def _reset_room_cycle(room_jid: str):
+    MESSAGE_COUNTS[room_jid] = 0
+    NEXT_DUCK_THRESHOLDS[room_jid] = _get_random_threshold()
+
+
+async def _get_daily_duck_data(bot):
+    store = await get_ducks_store(bot)
+    return await store.get_global(DUCKS_DAILY_KEY, default={})
+
+
+async def _get_daily_duck_count(bot, room_jid: str) -> int:
+    data = await _get_daily_duck_data(bot)
+    room_data = data.get(room_jid, {})
+    if room_data.get("date") != _today_str():
+        return 0
+    return int(room_data.get("count", 0))
+
+
+async def _increment_daily_duck_count(bot, room_jid: str) -> int:
+    store = await get_ducks_store(bot)
+    data = await store.get_global(DUCKS_DAILY_KEY, default={})
+    today = _today_str()
+
+    room_data = data.get(room_jid, {})
+    if room_data.get("date") != today:
+        room_data = {"date": today, "count": 0}
+
+    room_data["count"] = int(room_data.get("count", 0)) + 1
+    data[room_jid] = room_data
+
+    await store.set_global(DUCKS_DAILY_KEY, data)
+    return room_data["count"]
 
 
 async def _ensure_user_exists(bot, user_jid: str, nickname: str | None = None):
@@ -350,15 +410,24 @@ async def _spawn_duck_after_delay(bot, room_jid, delay):
         if room_jid not in PENDING_DUCKS:
             return
 
+        daily_count = await _get_daily_duck_count(bot, room_jid)
+        if MAX_DUCKS_PER_DAY > 0 and daily_count >= MAX_DUCKS_PER_DAY:
+            log.info("[DUCKS] Daily duck limit reached in %s", room_jid)
+            _reset_room_cycle(room_jid)
+            return
+
         PENDING_DUCKS.discard(room_jid)
         ACTIVE_DUCKS[room_jid] = time.time()
-        MESSAGE_COUNTS[room_jid] = 0
+        _reset_room_cycle(room_jid)
+
+        await _increment_daily_duck_count(bot, room_jid)
 
         old_expire = EXPIRE_TASKS.pop(room_jid, None)
         if old_expire:
             old_expire.cancel()
 
-        EXPIRE_TASKS[room_jid] = asyncio.create_task(_expire_duck(bot, room_jid))
+        if DUCK_TIMEOUT > 0:
+            EXPIRE_TASKS[room_jid] = asyncio.create_task(_expire_duck(bot, room_jid))
 
         bot.reply(
             {
@@ -386,12 +455,17 @@ async def _maybe_schedule_duck(bot, room_jid):
     if room_jid in ACTIVE_DUCKS or room_jid in PENDING_DUCKS:
         return
 
+    daily_count = await _get_daily_duck_count(bot, room_jid)
+    if MAX_DUCKS_PER_DAY > 0 and daily_count >= MAX_DUCKS_PER_DAY:
+        return
+
     if MESSAGE_COUNTS[room_jid] == -1:
         return
 
     MESSAGE_COUNTS[room_jid] += 1
 
-    if MESSAGE_COUNTS[room_jid] < DEFAULT_MIN_MESSAGES:
+    threshold = _ensure_threshold(room_jid)
+    if MESSAGE_COUNTS[room_jid] < threshold:
         return
 
     if random.randint(1, DUCK_SPAWN_CHANCE) != 1:
@@ -403,7 +477,12 @@ async def _maybe_schedule_duck(bot, room_jid):
     SPAWN_TASKS[room_jid] = asyncio.create_task(
         _spawn_duck_after_delay(bot, room_jid, delay)
     )
-    log.info("[DUCKS] Duck scheduled for %s in %ss", room_jid, delay)
+    log.info(
+        "[DUCKS] Duck scheduled for %s in %ss (threshold=%s)",
+        room_jid,
+        delay,
+        threshold,
+    )
 
 
 async def _handle_no_duck(bot, msg, room_jid, display_name):
@@ -488,7 +567,7 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
         if _core._is_muc_pm(msg) and args and args[0].lower() == "off":
             ACTIVE_DUCKS.pop(room_jid, None)
             PENDING_DUCKS.discard(room_jid)
-            MESSAGE_COUNTS[room_jid] = 0
+            _reset_room_cycle(room_jid)
 
             spawn_task = SPAWN_TASKS.pop(room_jid, None)
             if spawn_task:
@@ -659,5 +738,6 @@ async def on_unload(bot):
     ACTIVE_DUCKS.clear()
     PENDING_DUCKS.clear()
     MESSAGE_COUNTS.clear()
+    NEXT_DUCK_THRESHOLDS.clear()
 
     log.info("[DUCKS] Plugin unloaded")
