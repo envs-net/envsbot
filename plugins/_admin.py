@@ -19,13 +19,16 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "admin",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "Bot administration commands",
     "category": "core",
 }
 
 # Use a temp file to store restart notification data
-RESTART_NOTIFICATION_FILE = os.path.join(tempfile.gettempdir(), "bot_restart_notification.json")
+RESTART_NOTIFICATION_FILE = os.path.join(
+    tempfile.gettempdir(),
+    "bot_restart_notification.json"
+)
 
 # Track bot start time
 BOT_START_TIME = None
@@ -59,6 +62,24 @@ def human_time(seconds: int) -> str:
         parts.append(f"{s}s")
 
     return " ".join(parts)
+
+
+def human_size(size_bytes: int) -> str:
+    """Convert bytes to human-readable size string."""
+    if size_bytes < 0:
+        return "unknown"
+
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(size_bytes)
+
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+
+    return f"{size_bytes} B"
 
 
 @command("bot restart", role=Role.OWNER, aliases=["restart"])
@@ -97,16 +118,19 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
     # Store restart notification info to file
     notification_data = {
         "sender": str(sender),
-        "sender_bare": str(sender.bare) if hasattr(sender, 'bare') else str(sender),
+        "sender_bare": str(sender.bare) if hasattr(sender, "bare") else str(sender),
         "nick": nick,
-        "room": str(msg['from'].bare) if msg.get("type") == "groupchat" else None,
-        "is_room": is_room
+        "room": str(msg["from"].bare) if msg.get("type") == "groupchat" else None,
+        "is_room": is_room,
     }
 
     try:
-        with open(RESTART_NOTIFICATION_FILE, 'w') as f:
+        with open(RESTART_NOTIFICATION_FILE, "w") as f:
             json.dump(notification_data, f)
-        log.info("[ADMIN] Restart notification saved to %s", RESTART_NOTIFICATION_FILE)
+        log.info(
+            "[ADMIN] Restart notification saved to %s",
+            RESTART_NOTIFICATION_FILE
+        )
     except Exception as e:
         log.error("[ADMIN] Failed to save restart notification: %s", e)
 
@@ -173,8 +197,19 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
         lines.append("")
 
         # Database status
-        db_status = "✅ Connected" if bot.db else "❌ Disconnected"
+        db_status = "✅ Connected" if getattr(bot, "db", None) else "❌ Disconnected"
         lines.append(f"Database: {db_status}")
+
+        # Database size
+        try:
+            db_path = getattr(bot.db, "path", None)
+            if db_path and os.path.exists(db_path):
+                db_size = os.path.getsize(db_path)
+                lines.append(f"Database Size: {human_size(db_size)}")
+            elif db_path:
+                lines.append(f"Database Size: file not found ({db_path})")
+        except Exception as e:
+            log.debug("[ADMIN] Could not get database size: %s", e)
 
         # Loaded plugins
         loaded_plugins = len(bot.bot_plugins.plugins)
@@ -182,11 +217,23 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
         lines.append(f"Plugins: {loaded_plugins}/{available_plugins} loaded")
         lines.append("")
 
-        # Uptime
+        # Bot uptime
         if BOT_START_TIME:
-            uptime = datetime.now() - BOT_START_TIME
-            uptime_str = human_time(uptime.total_seconds())
-            lines.append(f"Uptime: {uptime_str}")
+            bot_uptime = datetime.now() - BOT_START_TIME
+            bot_uptime_str = human_time(bot_uptime.total_seconds())
+            lines.append(f"Bot Uptime: {bot_uptime_str}")
+
+        # Server/XMPP connection uptime
+        try:
+            connection_start = getattr(bot, "connection_start_time", None)
+            if connection_start:
+                connection_uptime = datetime.now() - connection_start
+                connection_uptime_str = human_time(
+                    connection_uptime.total_seconds()
+                )
+                lines.append(f"Server Connection: {connection_uptime_str}")
+        except Exception as e:
+            log.debug("[ADMIN] Could not get connection uptime: %s", e)
 
         # Memory usage
         try:
@@ -202,7 +249,11 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
             process = psutil.Process(os.getpid())
             loop = asyncio.get_event_loop()
 
-            cpu_percent = await loop.run_in_executor(None, process.cpu_percent, 1.0)
+            cpu_percent = await loop.run_in_executor(
+                None,
+                process.cpu_percent,
+                1.0
+            )
 
             cpu_load = psutil.getloadavg()[0]
             cpu_count = psutil.cpu_count()
