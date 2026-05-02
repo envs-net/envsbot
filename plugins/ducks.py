@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "ducks",
-    "version": "1.1.0",
+    "version": "1.2.1",
     "description": "Duck game for MUCs with room toggles and leaderboards",
     "category": "fun",
     "requires": ["rooms", "_core"],
@@ -283,7 +283,7 @@ async def _get_user_stats(bot, target: str):
     room_index = await store.get_global(DUCKS_INDEX_KEY, default={})
 
     totals = {
-        "display_name": target,
+        "display_name": None,
         "befriended": 0,
         "trapped": 0,
         "rooms": {},
@@ -292,10 +292,14 @@ async def _get_user_stats(bot, target: str):
 
     for room_jid, room_data in room_index.items():
         for _, data in room_data.items():
-            if data.get("display_name", "").lower() != target_lower:
+            display_name = data.get("display_name", "")
+            if display_name.lower() != target_lower:
                 continue
+
             found = True
-            totals["display_name"] = data.get("display_name", target)
+            if not totals["display_name"]:
+                totals["display_name"] = display_name
+
             bef = int(data.get("befriended", 0))
             trap = int(data.get("trapped", 0))
             totals["befriended"] += bef
@@ -543,25 +547,26 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     if sub == "stats":
-        target = args[1] if len(args) > 1 else await _resolve_real_jid(bot, msg)
+        target = " ".join(args[1:]).strip() if len(args) > 1 else await _resolve_real_jid(bot, msg)
         if not target:
             _duck_reply(bot, msg, "❌ Could not determine target user.")
             return
 
         stats = await _get_user_stats(bot, target)
         if not stats:
-            _duck_reply(bot, msg, f"📊 No duck stats found for {target}.")
+            _duck_reply(bot, msg, "📊 No duck stats found for that user.")
             return
 
         room_stats = stats.get("rooms", {}).get(room_jid, {})
         current_bef = int(room_stats.get("befriended", 0))
         current_trap = int(room_stats.get("trapped", 0))
+        safe_name = stats.get("display_name") or "That user"
 
         _duck_reply(
             bot,
             msg,
             (
-                f"📊 {stats.get('display_name', target)} has befriended "
+                f"📊 {safe_name} has befriended "
                 f"{int(stats.get('befriended', 0))} and trapped "
                 f"{int(stats.get('trapped', 0))} ducks "
                 f"({current_bef}/{current_trap} in {room_jid})"

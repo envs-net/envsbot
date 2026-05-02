@@ -6,6 +6,7 @@ import json
 
 from slixmpp.xmlstream import ET
 
+from datetime import datetime
 from utils.presence_manager import PresenceManager
 from utils.plugin_manager import PluginManager
 from utils.rate_limiter import TokenBucketRateLimiter
@@ -37,6 +38,7 @@ class Bot(slixmpp.ClientXMPP):
         self.nick = config.get("nick", "bot")
         self.admins = []
         self.prefix = config.get("prefix", ",")
+        self.connection_start_time = None
 
         # Rate limiter (in-memory, per process)
         # capacity=4, refill 1 token every 0.5s
@@ -141,6 +143,7 @@ class Bot(slixmpp.ClientXMPP):
 
     # fired on "session_start"
     async def on_start(self, event):
+        self.connection_start_time = datetime.now()
         # send startup presence
         self.presence.broadcast()
         # Get roster

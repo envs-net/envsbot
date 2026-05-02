@@ -25,8 +25,10 @@ a room (use MUC PM):
 """
 import re
 import aiohttp
+import asyncio
 import logging
 import html
+import requests
 
 import isodate
 
@@ -160,7 +162,15 @@ async def on_groupchat_message(bot, msg):
 
     urls = []
     for line in lines:
-        urls.extend(URL_RE.findall(line))
+        # If the line contains a URL, extract all URLs from the line
+        _urls = URL_RE.findall(line)
+        for url in _urls:
+            parsed = urlparse(url) if url else None
+            if parsed is not None and parsed.scheme in ("http", "https"):
+                # skip reddit links
+                if parsed.netloc.lower().endswith("reddit.com"):
+                    continue
+            urls.extend([url])
     if not urls:
         return
 
@@ -185,8 +195,10 @@ async def on_groupchat_message(bot, msg):
 
         try:
             # handle up to 3 redirects manually
+            loop = asyncio.get_running_loop()
             final_url, status, ctype, title, content_size, mdesc = (
-                await fetch_url_title(url, max_redirects=3)
+                await loop.run_in_executor(
+                        None, fetch_url_title, url, 3)
             )
 
             st = f"(Status: {status})" if status in [200, 403] else ""
@@ -326,7 +338,14 @@ def has_xep_0392_link_metadata(msg):
     )
 
 
-async def fetch_url_title(url, max_redirects=3):
+def fetch_url_title(url, max_redirects=3):
+    """
+    Fetch the final URL after redirects, status code, content type, title
+    and description.
+
+    This is a synchronous version using requests (intended for running via
+    run_in_executor).
+    """
     parsed_orig = urlparse(url)
     orig_fragment = parsed_orig.fragment
     headers = {
@@ -336,81 +355,64 @@ async def fetch_url_title(url, max_redirects=3):
             "Chrome/124.0.0.0 Safari/537.36"
         ),
     }
-    async with aiohttp.ClientSession(headers=headers) as session:
+
+    session = requests.Session()
+    session.headers.update(headers)
+    # session.max_redirects is not available; handle manually with for loop
+
+    try:
         for _ in range(max_redirects):
-            async with session.get(
-                url, allow_redirects=False, timeout=8
-            ) as resp:
-                status = resp.status
-                ctype = resp.headers.get("Content-Type", "")
+            resp = session.get(url, allow_redirects=False, timeout=8, stream=True)
+            status = resp.status_code
+            ctype = resp.headers.get("Content-Type", "")
+            content_size = resp.headers.get("Content-Length")
+            try:
+                content_size = int(content_size) if content_size else None
+            except Exception:
                 content_size = None
-                if "Content-Length" in resp.headers:
-                    try:
-                        content_size = int(resp.headers["Content-Length"])
-                    except Exception:
-                        content_size = None
-                if (
-                    status in (301, 302, 303, 307, 308)
-                    and "Location" in resp.headers
-                ):
-                    url = urljoin(str(resp.url), resp.headers["Location"])
-                    continue
-                if "text/html" in ctype:
-                    window = b""
-                    max_window = 32768  # 32 KB to be safe for large Wiki pages
-                    chunk_count = 0
-                    title_found = None
-                    desc_found = None
-                    async for chunk in resp.content.iter_chunked(8192):
-                        window += chunk
-                        if len(window) > max_window:
-                            break
-                        try:
-                            text = window.decode(resp.charset or "utf-8", errors="replace")
-                        except Exception:
-                            text = window.decode("utf-8", errors="replace")
 
-                        # Extract separately on each iteration
-                        title, desc = extract_html_title_desc(text)
-                        if title and not title_found:
-                            title_found = title
-                            # Optionally break here for speed, OR keep reading if you want description
-                        if desc and not desc_found:
-                            desc_found = desc
-                        chunk_count += 1
+            # Handle redirect manually
+            if status in (301, 302, 303, 307, 308) and "Location" in resp.headers:
+                url = urljoin(resp.url, resp.headers["Location"])
+                continue
 
-                    # Fallback in case title/desc were not yet found
-                    try:
-                        text = window.decode(resp.charset or "utf-8", errors="replace")
-                    except Exception:
-                        text = window.decode("utf-8", errors="replace")
-                    if not title_found or not desc_found:
-                        t, d = extract_html_title_desc(text)
-                        if not title_found:
-                            title_found = t
-                        if not desc_found:
-                            desc_found = d
+            # Only try to find title/desc in text/html
+            if "text/html" in ctype:
+                #max_read = 65536  # 64KB max
+                buffer = ""
+                title_found = None
+                desc_found = None
+                for chunk in resp.iter_content(chunk_size=8192, decode_unicode=True):
+                    buffer += chunk
+                    if title_found is None:
+                        title_found, _ = extract_html_title_desc(buffer)
+                    if desc_found is None:
+                        _, desc_found = extract_html_title_desc(buffer)
+                    if title_found and desc_found:
+                        break
+                    #if len(buffer) >= max_read:
+                    #    break
+                final_url = resp.url
+                if orig_fragment:
+                    parsed_final = urlparse(final_url)
+                    final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
+                return (
+                    final_url, status,
+                    ctype, title_found, None, desc_found
+                )
+            else:
+                final_url = resp.url
+                if orig_fragment:
+                    parsed_final = urlparse(final_url)
+                    final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
+                return (
+                    final_url, status, ctype,
+                    None, content_size, None
+                )
 
-                    final_url = resp.url.human_repr()
-                    if orig_fragment:
-                        parsed_final = urlparse(final_url)
-                        final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
-                    log.info(f"[URLCHECK] URL: {final_url}, Chunks read: {chunk_count}")
-                    return (
-                        final_url, status,
-                        ctype, title_found, None, desc_found
-                    )
-                else:
-                    final_url = resp.url.human_repr()
-                    if orig_fragment:
-                        parsed_final = urlparse(final_url)
-                        final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
-                    log.info(f"[URLCHECK] URL: {final_url}, Chunks read: {chunk_count}")
-                    return (
-                        final_url, status, ctype,
-                        None, content_size, None
-                    )
         raise Exception("Too many redirects")
+    finally:
+        session.close()
 
 
 def extract_html_title_desc(html, is_wikipedia=False):
