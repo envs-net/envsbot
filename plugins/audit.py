@@ -66,7 +66,7 @@ async def _list_events(bot, *, limit: int = 20, actor: str | None = None):
 async def audit_last(bot, sender, nick, args, msg, is_room):
     """Show recent audit events."""
     page_request = parse_page_args(args)
-    limit = 50 if page_request.mode == "all" else 30
+    limit = 50 if page_request.all else 30
     if args and str(args[0]).isdigit():
         limit = max(1, min(int(args[0]), 100))
         page_request = parse_page_args([])
