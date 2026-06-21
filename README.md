@@ -3,6 +3,9 @@
 EnvsBot is a modular XMPP bot for rooms and direct chats, built with Python and slixmpp.
 It provides a plugin-based command framework, room-specific feature toggles, user/role management, SQLite persistence, generated command documentation, vCard/avatar publishing, and a growing set of utility, community and fun plugins.
 
+This repository is the **envs.net maintained fork** of the original EnvsBot project at [`redterminal-org/envsbot`](https://github.com/redterminal-org/envsbot).
+It is developed independently from Dan's original bot and tailored for the envs.net XMPP/pubnix setup, while remaining useful for other small XMPP communities.
+
 The bot was originally developed for the **envs pubnix/tilde** community and follows the spirit of classic tilde bots: useful, extensible, friendly in shared rooms, and easy to run on a small server.
 
 ---
