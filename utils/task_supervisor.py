@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Awaitable
+from unittest.mock import Mock
 
 log = logging.getLogger(__name__)
 
@@ -24,20 +26,42 @@ class TaskInfo:
     last_error: str | None
 
 
+def _is_plugin_task_creator(candidate: object) -> bool:
+    """Return whether *candidate* looks like PluginManager.create_task."""
+    if not callable(candidate) or isinstance(candidate, Mock):
+        return False
+    try:
+        signature = inspect.signature(candidate)
+    except (TypeError, ValueError):
+        return False
+
+    params = list(signature.parameters.values())
+    has_name_keyword = any(
+        param.name == "name"
+        and param.kind in (param.KEYWORD_ONLY, param.POSITIONAL_OR_KEYWORD)
+        for param in params
+    )
+    if not has_name_keyword:
+        return False
+
+    positional = [
+        param
+        for param in params
+        if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
+    ]
+    has_varargs = any(param.kind == param.VAR_POSITIONAL for param in params)
+    return has_varargs or len(positional) >= 2
+
+
 def create_plugin_task(bot, plugin: str, coro: Awaitable, *, name: str | None = None) -> asyncio.Task:
     """Create a supervised task when available, otherwise a plain task.
 
     The fallback keeps unit-test doubles and small plugin tests simple while
     production bots still get supervised lifecycle handling.
     """
-    try:
-        from unittest.mock import Mock
-    except Exception:  # pragma: no cover - defensive for unusual runtimes
-        Mock = ()
-
     manager = getattr(bot, "bot_plugins", None)
     creator = getattr(manager, "create_task", None)
-    if callable(creator) and not isinstance(creator, Mock):
+    if _is_plugin_task_creator(creator):
         return creator(plugin, coro, name=name)
     try:
         return asyncio.create_task(coro, name=name)
@@ -97,7 +121,7 @@ class TaskSupervisor:
                         exc_info=exc,
                     )
         except asyncio.CancelledError:
-            pass
+            return
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
         """Cancel all running tasks owned by a plugin."""
@@ -112,9 +136,19 @@ class TaskSupervisor:
                 try:
                     await task
                 except asyncio.CancelledError:
-                    pass
+                    continue
                 except Exception:
                     log.debug("[TASKS] Task raised during cancellation", exc_info=True)
+
+            plugin_tasks = self._by_plugin.get(plugin)
+            if plugin_tasks is not None:
+                for task in tasks:
+                    plugin_tasks.discard(task)
+                    meta = self._tasks.get(task, {})
+                    if task in pending or task.cancelled() or meta.get("last_error") is None:
+                        self._tasks.pop(task, None)
+                if not plugin_tasks:
+                    self._by_plugin.pop(plugin, None)
         return len(tasks)
 
     async def cancel_all(self, *, timeout: float = 5.0) -> int:
@@ -125,7 +159,7 @@ class TaskSupervisor:
             total += await self.cancel_plugin(plugin, timeout=timeout)
         return total
 
-    def snapshot(self, *, include_done: bool = False) -> list[TaskInfo]:
+    def snapshot(self, *, include_done: bool = True) -> list[TaskInfo]:
         """Return a stable snapshot of supervised task states."""
         items = []
         for task, meta in tuple(self._tasks.items()):
