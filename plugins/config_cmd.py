@@ -7,6 +7,7 @@ import json
 from utils.command import Role, command
 from utils.config import ConfigError, config, load_config, validate_config
 from utils.formatting import format_page, parse_page_args
+from utils.audit import audit_event
 
 PLUGIN_META = {
     "name": "config_cmd",
@@ -88,4 +89,5 @@ async def config_reload(bot, sender, nick, args, msg, is_room):
     if bot.prefix != old_prefix:
         notes.append(f"Prefix changed from {old_prefix!r} to {bot.prefix!r}.")
     notes.append("Connection credentials and DB path require a bot restart to fully apply.")
+    await audit_event(bot, "config_reloaded", actor=sender, target="config")
     bot.reply_ok(msg, "\n".join(notes))

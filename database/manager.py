@@ -4,6 +4,7 @@ import aiosqlite
 
 from .users import UserManager
 from .rooms import Rooms
+from .audit import AuditLog
 
 # logger for this module
 log = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class DatabaseManager:
 
         self.users = None
         self.rooms = None
+        self.audit = None
 
         self.flush_interval = flush_interval
 
@@ -50,11 +52,14 @@ class DatabaseManager:
 
         self.users = UserManager(self.conn)
         self.rooms = Rooms(self.conn)
+        self.audit = AuditLog(self.conn)
 
         await self._init_schema_migrations()
         await self.users.init()
         await self.rooms.init()
+        await self.audit.init()
         await self.mark_migration_applied("0001_initial_runtime_tables")
+        await self.mark_migration_applied("0002_audit_log")
 
         # add asyncio sqlite3 stop event
         self._stop_event = asyncio.Event()

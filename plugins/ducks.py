@@ -46,6 +46,7 @@ from plugins._core import (
     get_real_jid,
 )
 
+from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -440,8 +441,11 @@ async def _spawn_duck_after_delay(bot, room_jid, delay):
             old_expire.cancel()
 
         if DUCK_TIMEOUT > 0:
-            EXPIRE_TASKS[room_jid] = asyncio.create_task(
-                _expire_duck(bot, room_jid))
+            EXPIRE_TASKS[room_jid] = create_plugin_task(bot, 
+                "ducks",
+                _expire_duck(bot, room_jid),
+                name=f"duck-expire-{room_jid}",
+            )
 
         bot.reply(
             {
@@ -499,8 +503,10 @@ async def _maybe_schedule_duck(bot, room_jid):
 
     delay = random.randint(5, 20)
     PENDING_DUCKS.add(room_jid)
-    SPAWN_TASKS[room_jid] = asyncio.create_task(
-        _spawn_duck_after_delay(bot, room_jid, delay)
+    SPAWN_TASKS[room_jid] = create_plugin_task(bot, 
+        "ducks",
+        _spawn_duck_after_delay(bot, room_jid, delay),
+        name=f"duck-spawn-{room_jid}",
     )
     log.info(
         "[DUCKS] Duck scheduled for %s in %ss (threshold=%s)",

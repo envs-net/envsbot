@@ -45,6 +45,7 @@ from plugins._core import (
 # --------------------------------------------------------------------------
 from plugins.vcard import get_user_vcard as get_profile
 
+from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -627,7 +628,11 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
             and str(msg["from"].bare) in JOINED_ROOMS
         ):
             room_jid = str(msg["from"].bare)
-            asyncio.create_task(_check_room_birthdays(bot, room_jid))
+            create_plugin_task(bot, 
+                "birthday_notify",
+                _check_room_birthdays(bot, room_jid),
+                name=f"birthday-check-{room_jid}",
+            )
         return
 
     prefix = config.get("prefix", ",")
@@ -657,7 +662,11 @@ async def on_ready(bot):
             except asyncio.CancelledError:
                 log.debug("[BIRTHDAY] Previous birthday check task cancelled")
 
-        _BIRTHDAY_CHECK_TASK = asyncio.create_task(_birthday_check_loop(bot))
+        _BIRTHDAY_CHECK_TASK = create_plugin_task(bot, 
+            "birthday_notify",
+            _birthday_check_loop(bot),
+            name="birthday-check-loop",
+        )
 
         log.info(
             "[BIRTHDAY] ✅ Birthday notification system ready; "

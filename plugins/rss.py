@@ -39,6 +39,7 @@ PLUGIN_META = {
     "requires": ["rooms"],
 }
 
+from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
 
 RSS_KEY = "RSS"
@@ -607,8 +608,10 @@ async def ensure_task(bot, store, url, period):
     if url in CHECK_TASKS and not CHECK_TASKS[url].done():
         return
 
-    CHECK_TASKS[url] = asyncio.create_task(
-        rss_check_loop(bot, store, url, period)
+    CHECK_TASKS[url] = create_plugin_task(bot, 
+        "rss",
+        rss_check_loop(bot, store, url, period),
+        name=f"rss-check-{url}",
     )
 
 

@@ -35,6 +35,7 @@ import time
 from utils.command import command, Role
 from plugins import _core
 
+from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -391,10 +392,11 @@ def _schedule_auto_close(bot, room_jid: str, poll: dict):
         return
 
     delay = max(0, int(ends_at) - _now())
-    AUTO_CLOSE_TASKS[key] = asyncio.create_task(_auto_close_after(bot,
-                                                                  room_jid,
-                                                                  poll_id,
-                                                                  delay))
+    AUTO_CLOSE_TASKS[key] = create_plugin_task(bot, 
+        "poll",
+        _auto_close_after(bot, room_jid, poll_id, delay),
+        name=f"poll-autoclose-{room_jid}-{poll_id}",
+    )
 
 
 async def _restore_auto_close_tasks(bot):

@@ -25,6 +25,7 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
+from utils.audit import audit_event
 from utils.room_features import (
     format_room_feature_line,
     get_room_feature,
@@ -193,7 +194,7 @@ async def on_load(bot):
     if reload_rooms is not None:
         del bot._reload_rooms
 
-        for room, data in reload_rooms.items():
+        for room, data in tuple(reload_rooms.items()):
             # --- Get room data from DB ---
             db_room = await rooms_db.get(room)
             if db_room:
@@ -247,7 +248,7 @@ async def on_load(bot):
 async def on_unload(bot):
     bot._reload_rooms = dict(JOINED_ROOMS)
 
-    for room_jid, data in JOINED_ROOMS.items():
+    for room_jid, data in tuple(JOINED_ROOMS.items()):
         bot.plugin["xep_0045"].leave_muc(room_jid, data["nick"])
 
     bot.presence.joined_rooms.clear()
@@ -488,6 +489,12 @@ async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
         return
     try:
         await set_room_control_defaults(bot, room_jid)
+        await audit_event(
+            bot,
+            "room_plugin_defaults_restored",
+            actor=sender_jid,
+            target=room_jid,
+        )
         bot.reply(msg, f"✅ Restored plugin defaults for room '{room_jid}'.")
         log.info(f"[ROOMS] ✅ Restored plugin defaults for room '{room_jid}'.")
     except Exception as e:
@@ -564,6 +571,13 @@ async def _handle_room_feature_toggle(bot, msg, is_room, args, *, enabled: bool)
         bot.reply_info(msg, f"{state.name} is already {format_room_feature_line(state).split(': ', 1)[1]}.")
         return
 
+    await audit_event(
+        bot,
+        "room_feature_changed",
+        actor=msg["from"],
+        target=room_jid,
+        details={"plugin": state.name, "enabled": state.enabled},
+    )
     bot.reply_ok(msg, f"{state.name} is now {'enabled' if state.enabled else 'disabled'} for {room_jid}.")
 
 
@@ -635,6 +649,13 @@ async def rooms_add(bot, sender_jid, nick, args, msg, is_room):
                  room_jid, room_nick, autojoin)
         try:
             await set_room_control_defaults(bot, room_jid)
+            await audit_event(
+                bot,
+                "room_added",
+                actor=sender_jid,
+                target=room_jid,
+                details={"nick": room_nick, "autojoin": autojoin},
+            )
             log.info(f"[ROOMS] ✅ Set plugin defaults for new room '{
                      room_jid}'.")
             bot.reply(msg, f"✅ Room added: {room_jid}. Plugin defaults set.")
@@ -698,6 +719,13 @@ async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
             value = value.lower() in ("true", "1", "yes")
 
         await bot.db.rooms.update(room_jid, **{field: value})
+        await audit_event(
+            bot,
+            "room_updated",
+            actor=sender_jid,
+            target=room_jid,
+            details={field: value},
+        )
 
         log.info("[ROOMS] 🔧 Updated %s: %s=%s", room_jid, field, value)
 
@@ -780,6 +808,13 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
             log.info("[ROOMS] 🚶 Left room %s", room_jid)
 
         log.info("[ROOMS] 🗑️ Deleted room %s", room_jid)
+        await audit_event(
+            bot,
+            "room_deleted",
+            actor=sender_jid,
+            target=room_jid,
+            details={"left": joined},
+        )
 
         bot.reply(
             msg,
@@ -824,7 +859,7 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
     details.append("Joined rooms:")
     joined_rooms_copy = dict(JOINED_ROOMS)
     if joined_rooms_copy:
-        for room, data in sorted(joined_rooms_copy.items()):
+        for room, data in sorted(tuple(joined_rooms_copy.items())):
             try:
                 nick_name = data.get("nick", "unknown")
                 affiliation = data.get("affiliation", "unknown")
@@ -927,6 +962,13 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
             await bot.db.rooms.add(room_jid, room_nick, False)
 
         log.info("[ROOMS] 🚪 Joined room %s nick=%s", room_jid, room_nick)
+        await audit_event(
+            bot,
+            "room_joined",
+            actor=sender_jid,
+            target=room_jid,
+            details={"nick": room_nick},
+        )
 
         bot.reply(
             msg,
@@ -995,6 +1037,7 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
         bot.presence.broadcast()
 
         log.info("[ROOMS] 🚶 Left room %s", room_jid)
+        await audit_event(bot, "room_left", actor=sender_jid, target=room_jid)
 
         bot.reply(
             msg,
@@ -1052,7 +1095,7 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
     joined = []
 
     # Leave all currently joined rooms
-    for room in list(JOINED_ROOMS.keys()):
+    for room in tuple(JOINED_ROOMS.keys()):
         try:
             muc.leave_muc(room, JOINED_ROOMS[room]["nick"])
         except KeyError:
@@ -1089,6 +1132,13 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
 
     log.info("[ROOMS] 🔄 Synchronization complete: joined=%d left=%d",
              len(joined), len(left))
+    await audit_event(
+        bot,
+        "rooms_synced",
+        actor=sender_jid,
+        target="rooms",
+        details={"joined": len(joined), "left": len(left)},
+    )
 
     lines = ["🔄 Room synchronization complete"]
     if left:

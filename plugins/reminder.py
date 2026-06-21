@@ -53,6 +53,7 @@ from plugins._core import (
     parse_duration,
 )
 
+from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -796,7 +797,8 @@ def _schedule_task(
     if old_task and not old_task.done():
         old_task.cancel()
 
-    task = asyncio.create_task(
+    task = create_plugin_task(bot, 
+        "reminder",
         schedule_reminder_task(
             bot,
             reminder_id,
@@ -809,7 +811,8 @@ def _schedule_task(
             room_jid=room_jid,
             msg_mto=msg_mto,
             msg_type=msg_type,
-        )
+        ),
+        name=f"reminder-{reminder_id}",
     )
 
     ACTIVE_REMINDERS[reminder_id] = task

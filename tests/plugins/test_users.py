@@ -16,6 +16,7 @@ def mock_bot():
     bot.bot_plugins.plugins = {}
     bot.reply = MagicMock()
     bot.get_user_role = AsyncMock(return_value=users_mod.Role.USER)
+    bot.audit = AsyncMock()
     return bot
 
 
@@ -210,12 +211,11 @@ async def test_users_role_permission_logic(mock_bot, mock_msg):
             new=lambda x:
             types.SimpleNamespace(bare=x if isinstance(x, str) else str(x))):
         mock_bot.db.users.get = AsyncMock(
-            return_value={"jid": "senderjid@example.com",
-                          "role": users_mod.Role.ADMIN.value})
-        mock_bot.get_user_role = AsyncMock(
-            side_effect=[users_mod.Role.ADMIN, users_mod.Role.USER])
+            return_value={"jid": "receiver@example.com",
+                          "role": users_mod.Role.USER.value})
+        mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
         mock_bot.db.users.set = AsyncMock()
-        args = ["receiver@example.com", "user"]
+        args = ["receiver@example.com", "trusted"]
         with patch.object(mock_bot, "reply"):
             await users_mod.users_update(mock_bot, "senderjid@example.com",
                                          "nick", args, mock_msg, False)
@@ -226,7 +226,9 @@ async def test_users_role_permission_logic(mock_bot, mock_msg):
 async def test_users_delete_logic(mock_bot, mock_msg):
     with patch.object(users_mod, "prefix", ","):
         mock_bot.db.users.get = AsyncMock(
-            return_value={"jid": "to@delete", "role": 7})
+            return_value={"jid": "to@delete",
+                          "role": users_mod.Role.USER.value})
+        mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
         mock_bot.db.users.delete = AsyncMock()
         args = ["to@delete"]
         with patch.object(mock_bot, "reply"):

@@ -28,6 +28,7 @@ import psutil
 from plugins._core import JOINED_ROOMS
 from utils.command import COMMANDS, Role, command
 from utils.config import config
+from utils.audit import audit_event
 
 log = logging.getLogger(__name__)
 
@@ -234,6 +235,17 @@ def _xmpp_status_lines(bot, room_snapshot: tuple[tuple[str, dict], ...]) -> list
     ]
 
 
+def _task_summary_line(bot) -> str:
+    """Return a short supervised task summary."""
+    supervisor = getattr(bot, "tasks", None)
+    if supervisor is None:
+        return "Tasks: unavailable"
+    running, failed, finished = supervisor.summary()
+    if failed:
+        return f"Tasks: {running} running, {failed} failed, {finished} finished"
+    return f"Tasks: {running} running, {finished} finished"
+
+
 def _plugin_status_lines(bot) -> list[str]:
     """Return plugin and command status lines."""
     manager = getattr(bot, "bot_plugins", None)
@@ -249,6 +261,7 @@ def _plugin_status_lines(bot) -> list[str]:
     return [
         f"Loaded: {len(loaded_plugins)}/{available_count}",
         f"Commands: {command_count} (+{alias_count} aliases)",
+        _task_summary_line(bot),
     ]
 
 
@@ -343,6 +356,24 @@ def _plugin_detail_lines(bot) -> list[str]:
     return lines
 
 
+def _task_detail_lines(bot) -> list[str]:
+    """Return detailed supervised task lines for full status."""
+    supervisor = getattr(bot, "tasks", None)
+    if supervisor is None:
+        return ["unavailable"]
+    tasks = supervisor.snapshot(include_done=True)
+    if not tasks:
+        return ["—"]
+    lines = []
+    for task in tasks:
+        extra = f" | error={task.last_error}" if task.last_error else ""
+        lines.append(
+            f"{task.plugin}/{task.name} | {task.status} | "
+            f"created={task.created_at}{extra}"
+        )
+    return lines
+
+
 async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     """Build the complete status reply."""
     set_bot_start_time(bot)
@@ -361,6 +392,7 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     if full:
         lines.extend(_section("Rooms", _room_detail_lines(room_snapshot)))
         lines.extend(_section("Loaded plugins", _plugin_detail_lines(bot)))
+        lines.extend(_section("Background tasks", _task_detail_lines(bot)))
 
     return lines[:-1] if lines and lines[-1] == "" else lines
 
@@ -400,6 +432,7 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
     """
     bot.reply(msg, "🔄 Bot restarting...")
     log.info("[ADMIN] 🔄 Bot restart requested by %s", sender)
+    await audit_event(bot, "bot_restart", actor=sender, target="bot")
 
     # Wait a moment to ensure the reply is sent
     await asyncio.sleep(0.5)
@@ -467,6 +500,7 @@ async def bot_shutdown(bot, sender, nick, args, msg, is_room):
         return
     bot.reply(msg, "🛑 Bot shutting down...")
     log.info("[ADMIN] 🛑 Bot shutdown requested by %s", sender)
+    await audit_event(bot, "bot_shutdown", actor=sender, target="bot")
 
     subprocess.run(stop_cmd)
 

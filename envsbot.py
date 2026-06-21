@@ -12,6 +12,7 @@ from datetime import datetime
 from utils.presence_manager import PresenceManager
 from utils.plugin_manager import PluginManager
 from utils.rate_limiter import TokenBucketRateLimiter
+from utils.task_supervisor import TaskSupervisor
 from utils.config import (
     ConfigError,
     config,
@@ -48,6 +49,7 @@ class Bot(slixmpp.ClientXMPP):
         self.prefix = config.get("prefix", ",")
         self.version = get_latest_git_tag() or "unknown"
         self.connection_start_time = None
+        self.tasks = TaskSupervisor()
 
         # Rate limiter (in-memory, per process)
         # capacity=4, refill 1 token every 0.5s
@@ -160,6 +162,13 @@ class Bot(slixmpp.ClientXMPP):
     # fired on "session_start"
     async def on_start(self, event):
         self.connection_start_time = datetime.now()
+        # Advertise support for receiving MUC private messages. Some clients
+        # check entity capabilities before opening a MUC-PM to a bot occupant.
+        try:
+            self["xep_0030"].add_feature("http://jabber.org/protocol/muc#user")
+        except Exception:
+            log.debug("[BOT] Could not advertise MUC-PM feature", exc_info=True)
+
         # send startup presence
         self.presence.broadcast()
         # Get roster
@@ -264,7 +273,7 @@ class Bot(slixmpp.ClientXMPP):
             return db_role
 
         nicks = room_info.get("nicks", {})
-        for nick_info in nicks.values():
+        for nick_info in tuple(nicks.values()):
             try:
                 if str(nick_info.get("jid")) == str(jid):
                     affiliation = nick_info.get("affiliation", "")
@@ -380,6 +389,21 @@ class Bot(slixmpp.ClientXMPP):
     def reply_usage(self, msg, usage, **kwargs):
         """Send a command usage reply."""
         self.reply_warn(msg, f"Usage: {usage}", **kwargs)
+
+    async def audit(self, event, *, actor=None, target=None, details=None):
+        """Write an audit event if the audit log is available."""
+        try:
+            audit_log = getattr(getattr(self, "db", None), "audit", None)
+            if audit_log is None:
+                return
+            await audit_log.append(
+                event,
+                actor=str(actor) if actor is not None else None,
+                target=str(target) if target is not None else None,
+                details=details or {},
+            )
+        except Exception:
+            log.debug("[AUDIT] Failed to write audit event", exc_info=True)
 
     def reply(self, msg, text, mention=True, thread=True, rate_limit=True,
               ephemeral=False):
@@ -586,7 +610,7 @@ class Bot(slixmpp.ClientXMPP):
                 log.error(f"[BOT]🔴 Command '{cmd_name}' has no handler")
                 return
 
-            result = handler(self, sender_jid, nick, args, msg, is_room)
+            result = handler(self, jid, nick, args, msg, is_room)
             if inspect.isawaitable(result):
                 await result
 

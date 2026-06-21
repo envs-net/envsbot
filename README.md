@@ -14,9 +14,9 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * Generated command reference in [`docs/commands.md`](docs/commands.md) and runtime help guide in [`docs/help.md`](docs/help.md)
 * XMPP MUC and direct-message command handling
 * Room management with persistent autojoin rooms and per-room plugin toggles
-* User registration, role management, last-seen tracking and nickname lookup
+* User registration, hardened role management, last-seen tracking and nickname lookup
 * Safe runtime config inspection, validation and reload commands
-* SQLite-backed persistence with online status checks and documented offline maintenance
+* SQLite-backed persistence with online status checks, audit log and documented offline maintenance
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
 * RSS/Atom feed watcher for room announcements
 * URL metadata checks for links, files and YouTube videos
@@ -125,6 +125,8 @@ Examples assume the default command prefix `,`.
 | `,config show [all/page/last]` | Show redacted runtime configuration |
 | `,config validate` | Validate `config.json` |
 | `,config reload` | Reload runtime-safe configuration |
+| `,audit last [limit]` | Show recent administrative audit events |
+| `,audit user <jid>` | Show audit events for one actor |
 | `,db status` | Show SQLite path, size and integrity status |
 | `,plugins list [all/page/last]` | List loaded plugins |
 | `,plugins load <name>` | Load a plugin at runtime |
@@ -157,6 +159,7 @@ Core and administration:
 * `rooms` - room persistence, joining and per-room feature toggles
 * `users` - user registration, roles, admin listings and last-seen tracking
 * `config_cmd` - safe config inspection, validation and reload
+* `audit` - admin audit log viewer
 * `db` - SQLite online status checks
 * `presence` - bot presence/status controls
 

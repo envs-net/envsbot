@@ -190,6 +190,29 @@ class PluginManager:
         self._event_handlers.setdefault(plugin_name,
                                         []).append((event, handler))
 
+    def create_task(self, plugin_name, coro, *, name=None):
+        """Create a supervised background task for a plugin.
+
+        Plugins should use this helper instead of bare ``asyncio.create_task``
+        for long-running loops. The manager cancels these tasks on unload and
+        exposes them to the status command.
+        """
+        supervisor = getattr(self.bot, "tasks", None)
+        if supervisor is None:
+            task = asyncio.create_task(coro, name=name)
+            return task
+        return supervisor.create(plugin_name, coro, name=name)
+
+    async def _cancel_plugin_tasks(self, plugin_name):
+        """Cancel supervised tasks that belong to one plugin."""
+        supervisor = getattr(self.bot, "tasks", None)
+        if supervisor is None:
+            return 0
+        cancelled = await supervisor.cancel_plugin(plugin_name)
+        if cancelled:
+            log.debug("[PLUGIN] cancelled %d task(s) for %s", cancelled, plugin_name)
+        return cancelled
+
     # --------------------------------------------------
     # DISCOVERY
     # --------------------------------------------------
@@ -257,8 +280,10 @@ class PluginManager:
                     log.exception("[PLUGIN] failed to load: %s", plugin)
                     failed.add(plugin)
             else:
-                # Dependencies not yet loaded, try again later
-                pass
+                log.debug(
+                    "[PLUGIN] waiting for dependencies before loading %s",
+                    plugin,
+                )
         return loaded, failed, made_progress
 
     def _detach_module(self, module, name: str):
@@ -447,6 +472,8 @@ class PluginManager:
                                       name, e)
                         # Don't fail the entire unload, continue with cleanup
 
+                await self._cancel_plugin_tasks(name)
+
                 # Remove commands
                 COMMANDS.remove_by_plugin(name)
 
@@ -617,7 +644,7 @@ class PluginManager:
         connected. Use this for expensive initialization like loading data
         from the database.
         """
-        for name, module in self.plugins.items():
+        for name, module in tuple(self.plugins.items()):
             if hasattr(module, "on_ready"):
                 try:
                     log.debug("[PLUGIN] calling on_ready: %s", name)

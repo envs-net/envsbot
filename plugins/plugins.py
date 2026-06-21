@@ -11,6 +11,7 @@ import logging
 from utils.command import command, Role
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
+from utils.audit import audit_event
 
 log = logging.getLogger(__name__)
 
@@ -104,11 +105,13 @@ async def plugin_load(bot, sender, nick, args, msg, is_room):
 
     if target == "all":
         await bot.bot_plugins.load_all()
+        await audit_event(bot, "plugins_load_all", actor=sender, target="plugins")
         bot.reply(msg, "All plugins loaded (in dependency order).")
         return
 
     try:
         await bot.bot_plugins.load(target)
+        await audit_event(bot, "plugin_loaded", actor=sender, target=target)
         bot.reply(msg, f"Plugin '{target}' loaded.")
     except Exception as e:
         bot.reply(msg, f"Error loading '{target}': {e}")
@@ -135,6 +138,14 @@ async def plugin_unload(bot, sender, nick, args, msg, is_room):
         return
 
     success, message = await bot.bot_plugins.unload(name, force=force)
+    if success:
+        await audit_event(
+            bot,
+            "plugin_unloaded",
+            actor=sender,
+            target=name,
+            details={"force": force},
+        )
 
     bot.reply(msg, message)
 
@@ -185,6 +196,13 @@ async def plugin_reload(bot, sender_jid, nick, args, msg, is_room):
         else:
             errors.append(f"- plugins: {message}")
 
+        await audit_event(
+            bot,
+            "plugins_reloaded",
+            actor=sender_jid,
+            target="all",
+            details={"auto": auto, "successful": len(successful), "errors": len(errors)},
+        )
         if errors:
             error_text = "\n".join(errors)
             if auto:
@@ -200,4 +218,12 @@ async def plugin_reload(bot, sender_jid, nick, args, msg, is_room):
         return
 
     success, message = await bot.bot_plugins.reload(target, auto=auto)
+    if success:
+        await audit_event(
+            bot,
+            "plugin_reloaded",
+            actor=sender_jid,
+            target=target,
+            details={"auto": auto},
+        )
     bot.reply(msg, message)

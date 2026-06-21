@@ -28,6 +28,7 @@ from plugins.rooms import JOINED_ROOMS
 from utils.command import Role, command
 from utils.config import config
 
+from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -821,11 +822,13 @@ async def on_load(bot):
     INDEX_TASK = None
     CHECK_TASK = None
 
-    INDEX_TASK = asyncio.create_task(
+    INDEX_TASK = create_plugin_task(bot, 
+        "xkcd",
         build_full_index(bot),
         name="xkcd-index",
     )
-    CHECK_TASK = asyncio.create_task(
+    CHECK_TASK = create_plugin_task(bot, 
+        "xkcd",
         xkcd_check_loop(bot),
         name="xkcd-check",
     )

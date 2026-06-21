@@ -40,6 +40,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | Plugin | Category | Description |
 | --- | --- | --- |
 | `_admin` | `core` | Bot administration commands |
+| `audit` | `core` | Admin audit log viewer |
 | `birthday_notify` | `fun` | Automatic birthday notifications in rooms (opt-in per room) |
 | `config_cmd` | `core` | Safe config inspection, validation and reload commands. |
 | `db` | `core` | SQLite status and integrity inspection helpers. |
@@ -71,6 +72,8 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
+| `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
+| `,audit user` | `admin` | `private recommended` | Show recent audit events for one actor JID. |
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
 | `,bot status` | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
@@ -255,6 +258,43 @@ Examples:
 - `,bot status`
 - `,status`
 - `,bot status full`
+
+### audit
+
+Category: `core`
+
+Admin audit log viewer
+
+#### `,audit last`
+
+Show recent admin audit events.
+
+Role: `admin`  
+Context: `private recommended`  
+Category: `admin`  
+Usage: `,audit last [all|page|last|limit]`
+
+Aliases: `,audit`, `,audits last`
+
+Examples:
+
+- `,audit last`
+- `,audit last 2`
+
+#### `,audit user`
+
+Show recent audit events for one actor JID.
+
+Role: `admin`  
+Context: `private recommended`  
+Category: `admin`  
+Usage: `,audit user <jid>`
+
+Aliases: `,audits user`
+
+Examples:
+
+- `,audit user admin@example.org`
 
 ### birthday_notify
 
