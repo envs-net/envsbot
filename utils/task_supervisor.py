@@ -8,7 +8,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Awaitable
-from unittest.mock import Mock
 
 log = logging.getLogger(__name__)
 
@@ -26,9 +25,26 @@ class TaskInfo:
     last_error: str | None
 
 
+def _is_test_mock(candidate: object) -> bool:
+    """Return whether *candidate* looks like a unittest.mock object.
+
+    The supervisor runs in production code, so it intentionally avoids importing
+    testing utilities. Tests often use Mock/MagicMock placeholders, though, and
+    those should not be treated as real PluginManager.create_task methods.
+    """
+    candidate_type = type(candidate)
+    candidate_module = getattr(candidate_type, "__module__", "")
+    candidate_name = getattr(candidate_type, "__name__", "")
+    return candidate_module == "unittest.mock" and candidate_name in {
+        "Mock",
+        "MagicMock",
+        "AsyncMock",
+    }
+
+
 def _is_plugin_task_creator(candidate: object) -> bool:
     """Return whether *candidate* looks like PluginManager.create_task."""
-    if not callable(candidate) or isinstance(candidate, Mock):
+    if not callable(candidate) or _is_test_mock(candidate):
         return False
     try:
         signature = inspect.signature(candidate)
@@ -129,24 +145,39 @@ class TaskSupervisor:
         for task in tasks:
             task.cancel()
         if tasks:
-            done, pending = await asyncio.wait(tasks, timeout=timeout)
-            for task in pending:
-                log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
-            for task in done:
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    log.debug("[TASKS] Task raised during cancellation", exc_info=True)
+            pending: set[asyncio.Task] = set()
+            gather_future = asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                results = await asyncio.wait_for(gather_future, timeout=timeout)
+            except asyncio.TimeoutError:
+                pending = {task for task in tasks if not task.done()}
+                for task in pending:
+                    log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
+                for task in tasks:
+                    if not task.done():
+                        continue
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        log.debug("[TASKS] Task raised during cancellation", exc_info=True)
+            else:
+                for result in results:
+                    if isinstance(result, asyncio.CancelledError):
+                        continue
+                    if isinstance(result, Exception):
+                        log.debug(
+                            "[TASKS] Task raised during cancellation",
+                            exc_info=(type(result), result, result.__traceback__),
+                        )
 
             plugin_tasks = self._by_plugin.get(plugin)
             if plugin_tasks is not None:
                 for task in tasks:
                     plugin_tasks.discard(task)
                     meta = self._tasks.get(task, {})
-                    has_error = meta.get("last_error") is not None
-                    if task in pending or task.cancelled() or not has_error:
+                    if task in pending or task.cancelled() or meta.get("last_error") is None:
                         self._tasks.pop(task, None)
                 if not plugin_tasks:
                     self._by_plugin.pop(plugin, None)
