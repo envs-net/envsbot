@@ -96,11 +96,13 @@ async def test_snapshot_without_done_keeps_cancelled_and_failed_tasks():
     cancelled_task = supervisor.create("example", sleeper(), name="cancelled")
 
     assert await success_task == "ok"
-    with pytest.raises(RuntimeError):
-        await failure_task
+
+    failure_result = await asyncio.gather(failure_task, return_exceptions=True)
+    assert isinstance(failure_result[0], RuntimeError)
+
     cancelled_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await cancelled_task
+    cancelled_result = await asyncio.gather(cancelled_task, return_exceptions=True)
+    assert isinstance(cancelled_result[0], asyncio.CancelledError)
 
     items = supervisor.snapshot(include_done=False)
     statuses = {item.name: item.status for item in items}

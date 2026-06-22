@@ -146,6 +146,7 @@ class TaskSupervisor:
             task.cancel()
         if tasks:
             pending: set[asyncio.Task] = set()
+            results: list[object] = []
             gather_future = asyncio.gather(*tasks, return_exceptions=True)
             try:
                 results = await asyncio.wait_for(gather_future, timeout=timeout)
@@ -153,31 +154,28 @@ class TaskSupervisor:
                 pending = {task for task in tasks if not task.done()}
                 for task in pending:
                     log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
-                for task in tasks:
-                    if not task.done():
-                        continue
-                    try:
-                        task.result()
-                    except asyncio.CancelledError:
-                        continue
-                    except Exception:
-                        log.debug("[TASKS] Task raised during cancellation", exc_info=True)
-            else:
-                for result in results:
-                    if isinstance(result, asyncio.CancelledError):
-                        continue
-                    if isinstance(result, Exception):
-                        log.debug(
-                            "[TASKS] Task raised during cancellation",
-                            exc_info=(type(result), result, result.__traceback__),
-                        )
+
+                finished = [task for task in tasks if task.done()]
+                if finished:
+                    results = await asyncio.gather(*finished, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, asyncio.CancelledError):
+                    continue
+                if isinstance(result, Exception):
+                    log.debug(
+                        "[TASKS] Task raised during cancellation",
+                        exc_info=(type(result), result, result.__traceback__),
+                    )
 
             plugin_tasks = self._by_plugin.get(plugin)
             if plugin_tasks is not None:
                 for task in tasks:
                     plugin_tasks.discard(task)
                     meta = self._tasks.get(task, {})
-                    if task in pending or task.cancelled() or meta.get("last_error") is None:
+                    has_error = meta.get("last_error") is not None
+                    keep_for_diagnostics = has_error and task not in pending and not task.cancelled()
+                    if not keep_for_diagnostics:
                         self._tasks.pop(task, None)
                 if not plugin_tasks:
                     self._by_plugin.pop(plugin, None)
