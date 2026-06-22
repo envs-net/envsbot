@@ -12,6 +12,10 @@ from typing import Awaitable
 log = logging.getLogger(__name__)
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 @dataclass(frozen=True)
 class TaskInfo:
     """Read-only task state for status output and diagnostics."""
@@ -92,10 +96,6 @@ class TaskSupervisor:
         self._tasks: dict[asyncio.Task, dict] = {}
         self._by_plugin: dict[str, set[asyncio.Task]] = {}
 
-    @staticmethod
-    def _now() -> str:
-        return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
     def create(
         self,
         plugin: str,
@@ -109,7 +109,7 @@ class TaskSupervisor:
         meta = {
             "plugin": plugin,
             "name": task_name,
-            "created_at": self._now(),
+            "created_at": _now(),
             "done_at": None,
             "last_error": None,
         }
@@ -122,22 +122,21 @@ class TaskSupervisor:
         meta = self._tasks.get(task)
         if not meta:
             return
-        meta["done_at"] = self._now()
+        meta["done_at"] = _now()
         plugin = meta["plugin"]
         self._by_plugin.get(plugin, set()).discard(task)
-        try:
-            if task.done() and not task.cancelled():
-                exc = task.exception()
-                if exc is not None:
-                    meta["last_error"] = f"{type(exc).__name__}: {exc}"
-                    log.exception(
-                        "[TASKS] Background task failed: %s.%s",
-                        plugin,
-                        meta["name"],
-                        exc_info=exc,
-                    )
-        except asyncio.CancelledError:
+        if not task.done() or task.cancelled():
             return
+
+        exc = task.exception()
+        if exc is not None:
+            meta["last_error"] = f"{type(exc).__name__}: {exc}"
+            log.error(
+                "[TASKS] Background task failed: %s.%s",
+                plugin,
+                meta["name"],
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
         """Cancel all running tasks owned by a plugin."""

@@ -452,7 +452,6 @@ def fetch_url_title(url, max_redirects=None):
                     if title_found and desc_found:
                         break
                     if len(buffer) >= URLCHECK_MAX_READ_BYTES:
-                        buffer = buffer[:URLCHECK_MAX_READ_BYTES]
                         break
                 final_url = resp.url
                 if orig_fragment:
