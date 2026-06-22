@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 PLUGIN_META = {
     "name": "weather",
     "version": "0.5.0",
-    "description": ("Gives weather according to users location (supports MUCs"
+    "description": ("Gives weather according to users location (supports MUCs "
                     "and MUC DMs)"),
     "category": "info",
     "requires": ["_core", "rooms", "vcard"],
@@ -37,18 +37,19 @@ WEATHER_KEY = "WEATHER"
 
 async def get_display_name(bot, jid):
     store = bot.db.users.plugin("users")
+    display_name = "unknown"
     try:
         roomnicks = await store.get(jid, "roomnicks")
-        for room in roomnicks or []:
-            if room:
-                display_name = roomnicks[room][0]
-                break
+        if isinstance(roomnicks, dict):
+            for nick_values in roomnicks.values():
+                if nick_values:
+                    display_name = nick_values[0]
+                    break
     except Exception as e:
         log.warning(
             "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
             jid, e
         )
-        display_name = "unknown"
     log.info(
         "[PROFILE] 👤 Profile lookup for self: %s",
         display_name
@@ -140,7 +141,7 @@ async def _handle_weather_room(bot, msg, args, enabled_rooms):
 async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
     log.info(
         f"[WEATHER] Command invoked in room {msg['from'].bare} by "
-        f" {msg['from'].resource} with args: {args}"
+        f"{msg['from'].resource} with args: {args}"
     )
 
     muc_jid = msg["from"].bare

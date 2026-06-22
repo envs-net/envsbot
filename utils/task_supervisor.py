@@ -126,7 +126,7 @@ class TaskSupervisor:
         plugin = meta["plugin"]
         self._by_plugin.get(plugin, set()).discard(task)
         try:
-            if not task.cancelled():
+            if task.done() and not task.cancelled():
                 exc = task.exception()
                 if exc is not None:
                     meta["last_error"] = f"{type(exc).__name__}: {exc}"
@@ -174,7 +174,7 @@ class TaskSupervisor:
                     plugin_tasks.discard(task)
                     meta = self._tasks.get(task, {})
                     has_error = meta.get("last_error") is not None
-                    keep_for_diagnostics = has_error and task not in pending and not task.cancelled()
+                    keep_for_diagnostics = has_error and task.done() and not task.cancelled()
                     if not keep_for_diagnostics:
                         self._tasks.pop(task, None)
                 if not plugin_tasks:

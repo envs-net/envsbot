@@ -117,23 +117,36 @@ async def vcard_field(bot, msg, target_nick, field, is_room=False):
                      "ORG", "NOTE", "EMAIL", "LOCALITY", "CTRY"]:
         log.warning("[VCARD] 🔴  Invalid vCard field requested: %s", field)
         return None
+    if not is_room and not _core._is_muc_pm(msg):
+        jid = msg["from"].bare
+    else:
+        jid = _core.get_real_jid_from_occupant(bot, msg, target_nick)
+
+    if not jid:
+        log.warning(
+            "[VCARD] 🔴  Nick '%s' not found in room '%s' for field '%s' lookup",
+            target_nick,
+            msg["from"].bare,
+            field,
+        )
+        return None
+
     if field == "TIMEZONE":
-        if not is_room and not _core._is_muc_pm(msg):
-            jid = msg["from"].bare
-        else:
-            jid = _core.get_real_jid_from_occupant(bot, msg, target_nick)
-        if not jid:
-            log.warning(f"[VCARD] 🔴  Nick '{target_nick}' not found in room"
-                        f"'{msg['from'].bare}' for TIMEZONE lookup")
-            return None
         value = await _core._get_user_timezone(bot, str(jid))
         if jid == msg["from"].bare:
-            log.info(f"[VCARD] TIMEZONE lookup for sender's own JID '{
-                     jid}': {value}")
+            log.info(
+                "[VCARD] TIMEZONE lookup for sender's own JID '%s': %s",
+                jid,
+                value,
+            )
         else:
-            log.info(f"[VCARD] TIMEZONE lookup for nick '{target_nick}'"
-                     f" with JID '{jid}' in room"
-                     f"'{msg['from'].bare}': {value}")
+            log.info(
+                "[VCARD] TIMEZONE lookup for nick '%s' with JID '%s' in room '%s': %s",
+                target_nick,
+                jid,
+                msg["from"].bare,
+                value,
+            )
         if not value:
             return None
         return value
@@ -772,10 +785,6 @@ async def get_fullname(bot, sender_jid, nick, args, msg, is_room):
     """
     # Check, if command is allowed in this context (room or MUC PM)
     enabled_rooms = await _core._get_enabled_rooms(bot, VCARD_KEY, "vcard")
-    if msg["from"].bare not in enabled_rooms and (is_room or
-                                                  _core._is_muc_pm(msg)):
-        return
-
     if msg["from"].bare not in enabled_rooms and (is_room or
                                                   _core._is_muc_pm(msg)):
         return
