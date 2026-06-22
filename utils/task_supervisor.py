@@ -145,7 +145,8 @@ class TaskSupervisor:
                 for task in tasks:
                     plugin_tasks.discard(task)
                     meta = self._tasks.get(task, {})
-                    if task in pending or task.cancelled() or meta.get("last_error") is None:
+                    has_error = meta.get("last_error") is not None
+                    if task in pending or task.cancelled() or not has_error:
                         self._tasks.pop(task, None)
                 if not plugin_tasks:
                     self._by_plugin.pop(plugin, None)
@@ -166,7 +167,12 @@ class TaskSupervisor:
             if task.done():
                 if not include_done and meta.get("last_error") is None:
                     continue
-                status = "cancelled" if task.cancelled() else "failed" if meta.get("last_error") else "done"
+                if task.cancelled():
+                    status = "cancelled"
+                elif meta.get("last_error"):
+                    status = "failed"
+                else:
+                    status = "done"
             else:
                 status = "running"
             items.append(

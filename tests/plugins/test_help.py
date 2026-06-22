@@ -11,7 +11,7 @@ utils.config.config["prefix"] = ","
 # ----- Fixtures and Mocks -----
 
 class DummyBot:
-    def __init__(self, *, version="99.99-x", prefix=",", role=command_utils.Role.ADMIN,
+    def __init__(self, *, version="99.99-x", prefix=",", role=command_utils.Role.USER,
                  plugins=None):
         self.replies = []
         self.version = version
@@ -121,7 +121,7 @@ def flatten_lines(reply):
 async def test_general_help_lists_plugins_and_commands(
         basic_plugins_and_commands, monkeypatch):
     plugins, reg = basic_plugins_and_commands
-    bot = DummyBot(plugins=plugins)
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.ADMIN)
     msg = DummyMsg(body=",help")
     await help_plugin.cmd_help(bot, "user@host", "Bob", [], msg, True)
     assert bot.replies
@@ -286,7 +286,7 @@ async def test_muc_pm_help_uses_resolved_sender_jid_for_role(
 
     class RoleByJidBot(DummyBot):
         def __init__(self):
-            super().__init__(plugins=plugins, role=command_utils.Role.NONE)
+            super().__init__(plugins=plugins)
             self.role_checks = []
             self.presence = SimpleNamespace(
                 joined_rooms={"room@conf.test": "EnvsBot"}

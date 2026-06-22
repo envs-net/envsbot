@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import plugins._admin as _admin
 
-import pytest_asyncio  # <-- Add this
+import pytest_asyncio
 
 
 class Sender:
@@ -42,7 +42,7 @@ class DummyMsg:
         raise AttributeError(key)
 
 
-@pytest_asyncio.fixture   # <-- Use this for async fixtures
+@pytest_asyncio.fixture
 async def fake_bot(monkeypatch):
     """
     Creates a fake bot object with all needed attributes for _admin commands.
@@ -88,7 +88,7 @@ async def fake_bot(monkeypatch):
 
 
 async def _awaitable(val):
-    return None
+    return val
 
 
 def test_human_time():
