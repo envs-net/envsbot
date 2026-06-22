@@ -263,24 +263,49 @@ def _plugin_is_visible(bot, name: str, role: Role) -> bool:
 # ROLE RESOLUTION
 # --------------------------------------------------
 
+def _joined_room_from_private_message(bot, msg) -> str | None:
+    """Return the MUC room JID when a private message came from a MUC PM."""
+    if msg.get("type") == "groupchat":
+        return msg["from"].bare
+
+    try:
+        room = msg["from"].bare
+    except Exception:
+        return None
+
+    joined_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", {}) or {}
+    if room in joined_rooms:
+        return room
+
+    try:
+        from plugins.rooms import JOINED_ROOMS
+    except Exception:
+        return None
+
+    if room in JOINED_ROOMS:
+        return room
+    return None
+
+
 async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
-    """Resolve the role for help output without assuming a MUC context."""
-    room = None
-    jid = sender_jid
+    """Resolve the role for help output in rooms, MUC PMs and direct DMs."""
+    room = _joined_room_from_private_message(bot, msg)
+
+    try:
+        jid = str(slixmpp.JID(sender_jid).bare)
+    except Exception:
+        jid = str(sender_jid)
 
     try:
         if msg.get("type") == "groupchat":
-            room = msg["from"].bare
             nick = msg.get("mucnick") or msg["from"].resource
             muc = bot.plugin.get("xep_0045", None)
-            if muc:
+            if muc and room:
                 resolved = muc.get_jid_property(room, nick, "jid")
                 if resolved:
                     jid = str(slixmpp.JID(resolved).bare)
-        else:
-            jid = str(slixmpp.JID(msg["from"]).bare)
     except Exception:
-        jid = str(sender_jid)
+        log.debug("[HELP] Could not resolve MUC sender JID", exc_info=True)
 
     return await bot.get_user_role(jid, room), room
 

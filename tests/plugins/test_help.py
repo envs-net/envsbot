@@ -279,6 +279,38 @@ async def test_help_room_disabled(monkeypatch, basic_plugins_and_commands):
     assert "help is only available via private message" in reply.lower()
 
 
+@pytest.mark.asyncio
+async def test_muc_pm_help_uses_resolved_sender_jid_for_role(
+        basic_plugins_and_commands):
+    plugins, _reg = basic_plugins_and_commands
+
+    class RoleByJidBot(DummyBot):
+        def __init__(self):
+            super().__init__(plugins=plugins, role=command_utils.Role.NONE)
+            self.role_checks = []
+            self.presence = SimpleNamespace(
+                joined_rooms={"room@conf.test": "EnvsBot"}
+            )
+
+        async def get_user_role(self, jid, room=None):
+            self.role_checks.append((jid, room))
+            if jid == "admin@host":
+                return command_utils.Role.ADMIN
+            return command_utils.Role.NONE
+
+    bot = RoleByJidBot()
+    msg = DummyMsg(body=",help plugins", is_room=False,
+                   room_jid="room@conf.test", nick="Alice")
+
+    await help_plugin.cmd_help(
+        bot, "admin@host/resource", "Alice", ["plugins"], msg, False
+    )
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "bar" in reply
+    assert ("admin@host", "room@conf.test") in bot.role_checks
+
+
 # ----- Plugin meta -----
 def test_plugin_meta():
     meta = help_plugin.PLUGIN_META
