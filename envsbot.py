@@ -324,7 +324,8 @@ class Bot(slixmpp.ClientXMPP):
     # bot.reply() method and helpers
     # ------------------------------
 
-    def _build_reply_message(self, msg, text, mention, thread, ephemeral):
+    def _build_reply_message(self, msg, text, mention, thread, ephemeral,
+                             no_store=None):
         """
         Create the outbound message object for reply().
         """
@@ -358,7 +359,10 @@ class Bot(slixmpp.ClientXMPP):
                     if msg_type == "groupchat":
                         log.debug("[BOT] Setting thread failed!")
 
-        if ephemeral or msg_type != "groupchat":
+        if no_store is None:
+            no_store = ephemeral or msg_type != "groupchat"
+
+        if no_store:
             message.append(ET.Element("{urn:xmpp:hints}no-store"))
 
         return message, body
@@ -406,7 +410,7 @@ class Bot(slixmpp.ClientXMPP):
             log.debug("[AUDIT] Failed to write audit event", exc_info=True)
 
     def reply(self, msg, text, mention=True, thread=True, rate_limit=True,
-              ephemeral=False):
+              ephemeral=False, no_store=None):
         """
         Smart reply helper for plugins.
 
@@ -424,10 +428,15 @@ class Bot(slixmpp.ClientXMPP):
             thread: Thread reply if possible
             rate_limit: Apply anti-spam limit
             ephemeral: Mark as ephemeral (no-store)
+            no_store: Override XEP-0334 no-store hint handling. ``None`` keeps
+                the legacy default: private replies are no-store, groupchat
+                replies are stored unless ephemeral=True. ``False`` sends a
+                normal persistent reply, useful for explicit admin status
+                outputs in PM/DM.
         """
         try:
             message, body = self._build_reply_message(
-                msg, text, mention, thread, ephemeral
+                msg, text, mention, thread, ephemeral, no_store
             )
 
             # send reply safely
@@ -457,6 +466,40 @@ class Bot(slixmpp.ClientXMPP):
     # UNIFIED COMMAND HANDLER
     # -------------------------------------------------
 
+    def _joined_room_jids(self) -> set[str]:
+        """Return known joined room bare JIDs from runtime room state."""
+        rooms = set()
+        try:
+            rooms.update(str(room) for room in getattr(self.presence,
+                                                       "joined_rooms", {}))
+        except Exception:
+            log.debug("[MUC] Could not inspect presence joined rooms",
+                      exc_info=True)
+        try:
+            from plugins.rooms import JOINED_ROOMS
+
+            rooms.update(str(room) for room in JOINED_ROOMS)
+        except Exception:
+            log.debug("[MUC] Could not inspect plugin joined rooms",
+                      exc_info=True)
+        return rooms
+
+    def _is_muc_private_message(self, msg) -> bool:
+        """Return True for a private message sent via a MUC occupant JID."""
+        try:
+            msg_type = msg.get("type", "chat")
+            from_jid = msg["from"]
+            room = str(from_jid.bare)
+            nick = getattr(from_jid, "resource", None)
+        except Exception:
+            return False
+
+        return (
+            msg_type in ("chat", "normal")
+            and bool(nick)
+            and room in self._joined_room_jids()
+        )
+
     def _get_message_room_and_nick(self, msg):
         """
         Resolve room and nick from a message if possible.
@@ -464,11 +507,46 @@ class Bot(slixmpp.ClientXMPP):
         room = None
         nick = None
         try:
-            room = msg['from'].bare
+            from_jid = msg['from']
+            room = from_jid.bare
             nick = msg.get("mucnick") or msg["from"].resource
         except Exception as exc:
             log.debug("[MUC] Could not resolve message room/nick: %s", exc)
         return room, nick
+
+    def _lookup_muc_occupant_jid(self, room, nick):
+        """Resolve a MUC occupant's real JID from live MUC state."""
+        muc = self.plugin.get("xep_0045", None)
+
+        if muc:
+            try:
+                jid = muc.get_jid_property(room, nick, "jid")
+                if jid:
+                    return jid
+            except Exception:
+                log.debug("[BOT] Error getting JID from XEP-0045 state",
+                          exc_info=True)
+
+        try:
+            from plugins.rooms import JOINED_ROOMS
+
+            room_data = JOINED_ROOMS.get(room, {}) or {}
+            nick_data = (room_data.get("nicks", {}) or {}).get(nick, {}) or {}
+            jid = nick_data.get("jid")
+            if jid:
+                return jid
+        except Exception:
+            log.debug("[BOT] Error getting JID from joined room state",
+                      exc_info=True)
+
+        return None
+
+    def _bare_jid_value(self, jid_value):
+        """Return a best-effort bare JID string without leaking resources."""
+        bare = getattr(jid_value, "bare", None)
+        if bare:
+            return str(bare)
+        return str(jid_value).split("/", 1)[0]
 
     def _resolve_sender_jid(self, msg, sender_jid, nick):
         """
@@ -476,17 +554,20 @@ class Bot(slixmpp.ClientXMPP):
         """
         jid = None
         room = None
-        muc = self.plugin.get("xep_0045", None)
+        msg_type = msg.get("type", "chat")
+
+        if (msg_type in ("chat", "normal")
+                and not self._is_muc_private_message(msg)):
+            return self._bare_jid_value(sender_jid), None
 
         try:
-            if muc:
-                room, nick = self._get_message_room_and_nick(msg)
-                jid = muc.get_jid_property(room, nick, "jid")
-        except Exception as e:
-            log.debug("[BOT] Error getting JID from MUC: %s", e)
+            room, nick = self._get_message_room_and_nick(msg)
+            jid = self._lookup_muc_occupant_jid(room, nick)
+        except Exception:
+            log.debug("[BOT] Error getting JID from MUC context", exc_info=True)
 
         if jid is None:
-            return str(sender_jid), room
+            return self._bare_jid_value(sender_jid), room
 
         try:
             import slixmpp

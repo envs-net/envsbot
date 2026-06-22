@@ -215,6 +215,60 @@ async def test_handle_command_moderator_check(bot):
 
 
 @pytest.mark.asyncio
+async def test_admin_command_executes_in_direct_message(bot):
+    msg = {
+        "type": "chat",
+        "from": DummyFrom("admin@example.org", "desktop"),
+        "get": lambda k, d=None: None,
+    }
+    handler = AsyncMock()
+
+    class FakeCmd:
+        name = "admincmd"
+        role = envsbot.Role.ADMIN
+
+    FakeCmd.handler = handler
+
+    role_mock = AsyncMock(return_value=envsbot.Role.ADMIN)
+    with patch("envsbot.resolve_command", return_value=(FakeCmd, [])), \
+            patch("envsbot.check_permission", return_value=True), \
+            patch.object(bot, "get_user_role", role_mock):
+        await bot.handle_command(",admincmd", "admin@example.org/desktop",
+                                 None, msg, False)
+
+    handler.assert_awaited_once()
+    assert handler.await_args.args[1] == "admin@example.org"
+    role_mock.assert_awaited_once_with("admin@example.org", None)
+
+
+@pytest.mark.asyncio
+async def test_admin_command_executes_in_muc_private_message(bot):
+    bot.presence.joined_rooms = {"room@conf": "Bot"}
+    msg = {
+        "type": "chat",
+        "from": DummyFrom("room@conf", "alice"),
+        "get": lambda k, d=None: None,
+    }
+    handler = AsyncMock()
+
+    class FakeCmd:
+        name = "admincmd"
+        role = envsbot.Role.ADMIN
+
+    FakeCmd.handler = handler
+
+    role_mock = AsyncMock(return_value=envsbot.Role.ADMIN)
+    with patch("envsbot.resolve_command", return_value=(FakeCmd, [])), \
+            patch("envsbot.check_permission", return_value=True), \
+            patch.object(bot, "get_user_role", role_mock):
+        await bot.handle_command(",admincmd", "room@conf/alice", None, msg, False)
+
+    handler.assert_awaited_once()
+    assert handler.await_args.args[1] == "user@host"
+    role_mock.assert_awaited_once_with("user@host", "room@conf")
+
+
+@pytest.mark.asyncio
 async def test_handle_command_execution(bot):
     m = {
         "type": "chat",

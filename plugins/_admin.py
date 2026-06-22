@@ -522,7 +522,11 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
         if _invalid_status_args(args):
             _reply_status_usage(bot, msg)
             return
-        bot.reply(msg, await _build_status_lines(bot, full=_status_is_full(args)))
+        bot.reply(
+            msg,
+            await _build_status_lines(bot, full=_status_is_full(args)),
+            no_store=False,
+        )
     except Exception:
         log.exception("[ADMIN] Error getting bot status")
         if hasattr(bot, "reply_error"):

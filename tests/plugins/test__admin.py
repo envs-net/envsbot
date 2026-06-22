@@ -151,6 +151,17 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
 
 
 @pytest.mark.asyncio
+async def test_bot_status_uses_persistent_reply(fake_bot):
+    replies = []
+    fake_bot.reply = lambda msg, text, *a, **k: replies.append((text, k))
+
+    await _admin.bot_status(fake_bot, Sender(), "nick", [], DummyMsg(), False)
+
+    assert replies
+    assert replies[-1][1]["no_store"] is False
+
+
+@pytest.mark.asyncio
 async def test_bot_status_handles_db_missing_and_errors(monkeypatch, fake_bot):
     fake_bot.db.path = None
     fake_bot.bot_plugins.discover = lambda: (
