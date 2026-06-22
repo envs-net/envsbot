@@ -240,7 +240,7 @@ async def _process_weather_for_jid(bot, msg, jid, target_nick, muc_jid, is_dm):
         )
         return
 
-    log.info(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received.")
+    log.debug(f"[VCARD] vCard for '{target_nick}' ({muc_jid}) received.")
     await _reply_with_weather(bot, msg, display_name, locality,
                               region, country)
 

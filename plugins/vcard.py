@@ -429,11 +429,11 @@ async def get_vcard(bot, msg, jid=None):
                 f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
             result = None
         else:
-            log.info(f"[VCARD] ✅ vCard fetch for '{jid}' completed")
+            log.debug(f"[VCARD] vCard fetch for '{jid}' completed")
         if not result:
-            log.info(f"[VCARD] No vCard result for '{jid}'.")
+            log.debug(f"[VCARD] No vCard result for '{jid}'.")
             return None
-        log.info(f"[VCARD] ✅ vCard for '{jid}' received.")
+        log.debug(f"[VCARD] vCard for '{jid}' received.")
         return result["vcard_temp"]
     except Exception as e:
         log.error(f"[VCARD] Exception during vCard lookup for '{jid}': {e}")
