@@ -1,5 +1,22 @@
+"""Configuration loading and validation for EnvsBot.
+
+Runtime configuration is read from ``config.py`` in the repository root.  The
+file follows the same simple Python assignment style as muc_banbot: operators
+copy ``config_sample.py`` to ``config.py`` and edit uppercase settings such as
+``JID``, ``PASSWORD`` and ``COMMAND_PREFIX``.
+
+The rest of the bot still consumes a dictionary named ``config`` for backwards
+compatibility.  Loader aliases convert uppercase Python settings to the historic
+lowercase keys used by plugins.  A legacy ``config.json`` loader remains as a
+migration fallback when no ``config.py`` exists.
+"""
+
+from __future__ import annotations
+
+import importlib.util
 import json
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -10,14 +27,54 @@ import slixmpp
 
 # project root
 BASE_DIR = Path(__file__).resolve().parents[1]
+CONFIG_FILENAME = "config.py"
+LEGACY_CONFIG_FILENAME = "config.json"
 
 DEFAULT_CONFIG = {
     "prefix": ",",
     "loglevel": "INFO",
     "db": "bot.db",
+    "restart_notification_file": "/tmp/envsbot_restart_notification.json",
+    "http_timeout_seconds": 8,
+    "http_user_agent": "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)",
+    "xmpp_query_timeout_seconds": 8,
+    "vcard_fetch_timeout_seconds": 10,
+    "updatecheck_timeout_seconds": 15,
     "version_check_enabled": False,
     "version_check_interval": 3600,
     "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
+    "urlcheck_wait_seconds": 120,
+    "urlcheck_fetch_timeout_seconds": 8,
+    "urlcheck_max_redirects": 5,
+    "urlcheck_max_read_bytes": 65536,
+    "urlcheck_user_agent": "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)",
+    "rss_global_query_interval": 1200,
+    "max_new_feed_entries": 5,
+    "rss_max_backoff_time": 86400,
+    "rss_backoff_increment_multiplier": 60,
+    "rss_similarity_threshold": 0.8,
+    "rss_user_agent": "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)",
+    "birthday_cache_ttl_seconds": 43200,
+    "birthday_initial_scan_delay_seconds": 10,
+    "birthday_check_interval_seconds": 3600,
+    "sed_regex_timeout": 1.0,
+    "sed_max_pattern_length": 256,
+    "sed_max_replacement_length": 1000,
+    "sed_max_input_length": 5000,
+    "sed_max_output_length": 8000,
+    "sed_cache_size": 10,
+    "poll_max_options": 10,
+    "poll_max_question_len": 200,
+    "poll_max_option_len": 100,
+    "poll_max_history_per_room": 50,
+    "pin_page_size": 10,
+    "pin_recent_cache_size": 80,
+    "karma_delay_seconds": 60,
+    "tell_delivery_delay_seconds": 5,
+    "xkcd_check_interval": 3600,
+    "xkcd_index_start_delay_seconds": 30,
+    "xkcd_index_request_delay_seconds": 0.15,
+    "xkcd_http_timeout": 10,
 }
 
 REQUIRED_CONFIG_KEYS = {
@@ -31,6 +88,7 @@ OPTIONAL_CONFIG_TYPES = {
     "prefix": str,
     "loglevel": str,
     "db": str,
+    "restart_notification_file": str,
     "stop_cmd": list,
     "admins": list,
     "avatar": str,
@@ -38,24 +96,218 @@ OPTIONAL_CONFIG_TYPES = {
     "timezone": str,
     "host": str,
     "port": int,
+    "http_timeout_seconds": (int, float),
+    "http_user_agent": str,
+    "xmpp_query_timeout_seconds": (int, float),
+    "vcard_fetch_timeout_seconds": (int, float),
+    "updatecheck_timeout_seconds": (int, float),
     "rss_global_query_interval": int,
     "max_new_feed_entries": int,
+    "rss_max_backoff_time": int,
+    "rss_backoff_increment_multiplier": int,
+    "rss_similarity_threshold": (int, float),
+    "rss_user_agent": str,
+    "urlcheck_wait_seconds": int,
+    "urlcheck_fetch_timeout_seconds": (int, float),
+    "urlcheck_max_redirects": int,
+    "urlcheck_max_read_bytes": int,
+    "urlcheck_user_agent": str,
+    "birthday_cache_ttl_seconds": int,
+    "birthday_initial_scan_delay_seconds": int,
+    "birthday_check_interval_seconds": int,
+    "sed_regex_timeout": (int, float),
+    "sed_max_pattern_length": int,
+    "sed_max_replacement_length": int,
+    "sed_max_input_length": int,
+    "sed_max_output_length": int,
+    "sed_cache_size": int,
+    "poll_max_options": int,
+    "poll_max_question_len": int,
+    "poll_max_option_len": int,
+    "poll_max_history_per_room": int,
+    "pin_page_size": int,
+    "pin_recent_cache_size": int,
+    "karma_delay_seconds": int,
+    "tell_delivery_delay_seconds": int,
+    "xkcd_check_interval": int,
+    "xkcd_index_start_delay_seconds": int,
+    "xkcd_index_request_delay_seconds": (int, float),
+    "xkcd_http_timeout": (int, float),
+    "youtube_api_key": str,
+    "reminder_enabled": bool,
+    "reminder_max_age_days": int,
     "version_check_enabled": bool,
     "version_check_interval": int,
     "version_check_url": str,
     "version_check_notify_jid": str,
+    "ducks": dict,
+    "users": dict,
 }
+
+PYTHON_CONFIG_KEY_MAP = {
+    "JID": "jid",
+    "PASSWORD": "password",
+    "NICK": "nick",
+    "OWNER": "owner",
+    "ADMINS": "admins",
+    "COMMAND_PREFIX": "prefix",
+    "LOG_LEVEL": "loglevel",
+    "DB_FILE": "db",
+    "RESTART_NOTIFICATION_FILE": "restart_notification_file",
+    "STOP_CMD": "stop_cmd",
+    "AVATAR_PATH": "avatar",
+    "AVATAR_TYPE": "avatar_type",
+    "TIMEZONE": "timezone",
+    "CONNECT_HOST": "host",
+    "CONNECT_PORT": "port",
+    "HTTP_TIMEOUT_SECONDS": "http_timeout_seconds",
+    "HTTP_USER_AGENT": "http_user_agent",
+    "XMPP_QUERY_TIMEOUT_SECONDS": "xmpp_query_timeout_seconds",
+    "VCARD_FETCH_TIMEOUT_SECONDS": "vcard_fetch_timeout_seconds",
+    "UPDATECHECK_TIMEOUT_SECONDS": "updatecheck_timeout_seconds",
+    "YOUTUBE_API_KEY": "youtube_api_key",
+    "REMINDER_ENABLED": "reminder_enabled",
+    "REMINDER_MAX_AGE_DAYS": "reminder_max_age_days",
+    "RSS_GLOBAL_QUERY_INTERVAL": "rss_global_query_interval",
+    "MAX_NEW_FEED_ENTRIES": "max_new_feed_entries",
+    "RSS_MAX_BACKOFF_TIME": "rss_max_backoff_time",
+    "RSS_BACKOFF_INCREMENT_MULTIPLIER": "rss_backoff_increment_multiplier",
+    "RSS_SIMILARITY_THRESHOLD": "rss_similarity_threshold",
+    "RSS_USER_AGENT": "rss_user_agent",
+    "URLCHECK_WAIT_SECONDS": "urlcheck_wait_seconds",
+    "URLCHECK_FETCH_TIMEOUT_SECONDS": "urlcheck_fetch_timeout_seconds",
+    "URLCHECK_MAX_REDIRECTS": "urlcheck_max_redirects",
+    "URLCHECK_MAX_READ_BYTES": "urlcheck_max_read_bytes",
+    "URLCHECK_USER_AGENT": "urlcheck_user_agent",
+    "BIRTHDAY_CACHE_TTL_SECONDS": "birthday_cache_ttl_seconds",
+    "BIRTHDAY_INITIAL_SCAN_DELAY_SECONDS": "birthday_initial_scan_delay_seconds",
+    "BIRTHDAY_CHECK_INTERVAL_SECONDS": "birthday_check_interval_seconds",
+    "SED_REGEX_TIMEOUT": "sed_regex_timeout",
+    "SED_MAX_PATTERN_LENGTH": "sed_max_pattern_length",
+    "SED_MAX_REPLACEMENT_LENGTH": "sed_max_replacement_length",
+    "SED_MAX_INPUT_LENGTH": "sed_max_input_length",
+    "SED_MAX_OUTPUT_LENGTH": "sed_max_output_length",
+    "SED_CACHE_SIZE": "sed_cache_size",
+    "POLL_MAX_OPTIONS": "poll_max_options",
+    "POLL_MAX_QUESTION_LEN": "poll_max_question_len",
+    "POLL_MAX_OPTION_LEN": "poll_max_option_len",
+    "POLL_MAX_HISTORY_PER_ROOM": "poll_max_history_per_room",
+    "PIN_PAGE_SIZE": "pin_page_size",
+    "PIN_RECENT_CACHE_SIZE": "pin_recent_cache_size",
+    "KARMA_DELAY_SECONDS": "karma_delay_seconds",
+    "TELL_DELIVERY_DELAY_SECONDS": "tell_delivery_delay_seconds",
+    "XKCD_CHECK_INTERVAL": "xkcd_check_interval",
+    "XKCD_INDEX_START_DELAY_SECONDS": "xkcd_index_start_delay_seconds",
+    "XKCD_INDEX_REQUEST_DELAY_SECONDS": "xkcd_index_request_delay_seconds",
+    "XKCD_HTTP_TIMEOUT": "xkcd_http_timeout",
+    "VERSION_CHECK_ENABLED": "version_check_enabled",
+    "VERSION_CHECK_INTERVAL": "version_check_interval",
+    "VERSION_CHECK_URL": "version_check_url",
+    "VERSION_CHECK_NOTIFY_JID": "version_check_notify_jid",
+    "DUCKS": "ducks",
+    "USERS": "users",
+}
+
+CONFIG_KEYS = (
+    set(DEFAULT_CONFIG)
+    | set(REQUIRED_CONFIG_KEYS)
+    | set(OPTIONAL_CONFIG_TYPES)
+    | set(PYTHON_CONFIG_KEY_MAP.values())
+)
 
 
 class ConfigError(Exception):
-    """Raised when config.json is invalid or incomplete."""
+    """Raised when EnvsBot configuration is invalid or incomplete."""
 
 
-def _format_json_error(error: json.JSONDecodeError) -> str:
+def _config_path_from_env() -> Path | None:
+    configured = os.environ.get("ENVSBOT_CONFIG")
+    if not configured:
+        return None
+
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path
+
+
+def _default_config_path() -> Path:
+    return BASE_DIR / CONFIG_FILENAME
+
+
+def _legacy_config_path() -> Path:
+    return BASE_DIR / LEGACY_CONFIG_FILENAME
+
+
+def _format_json_error(error: json.JSONDecodeError, path: Path) -> str:
     return (
-        "Failed to parse config.json at "
+        f"Failed to parse {path.name} at "
         f"line {error.lineno}, column {error.colno}: {error.msg}"
     )
+
+
+def _format_python_error(error: SyntaxError, path: Path) -> str:
+    line = error.lineno or "?"
+    column = error.offset or "?"
+    return f"Failed to parse {path.name} at line {line}, column {column}: {error.msg}"
+
+
+def _load_python_config(path: Path) -> dict:
+    if not path.exists():
+        raise ConfigError(f"Missing config file: {path}")
+
+    module_name = "_envsbot_runtime_config"
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ConfigError(f"Failed to load {path.name}: no import loader available")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except SyntaxError as e:
+        raise ConfigError(_format_python_error(e, path)) from e
+    except ConfigError:
+        raise
+    except Exception as e:
+        raise ConfigError(f"Failed to load {path.name}: {e}") from e
+
+    loaded = {}
+    for name, value in vars(module).items():
+        if name.startswith("_"):
+            continue
+
+        if name in PYTHON_CONFIG_KEY_MAP:
+            loaded[PYTHON_CONFIG_KEY_MAP[name]] = value
+            continue
+
+        # Allow already-normalized lowercase keys for tests and small local
+        # overrides, but keep the documented operator format uppercase.
+        if name in CONFIG_KEYS:
+            loaded[name] = value
+            continue
+
+        if name.isupper():
+            loaded[name.lower()] = value
+
+    return loaded
+
+
+def _load_legacy_json_config(path: Path) -> dict:
+    if not path.exists():
+        raise ConfigError(f"Missing config file: {path}")
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            loaded = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ConfigError(_format_json_error(e, path)) from e
+    except Exception as e:
+        raise ConfigError(f"Failed to load {path.name}: {e}") from e
+
+    if not isinstance(loaded, dict):
+        raise ConfigError(f"{path.name} must contain a JSON object at top level")
+
+    return {k: v for k, v in loaded.items() if not str(k).startswith("_comment")}
 
 
 def _validate_string(value, key, errors, allow_empty=False):
@@ -100,10 +352,66 @@ def _validate_numeric_ranges(cfg, errors):
         if isinstance(value, int) and not (1 <= value <= 65535):
             errors.append("port: must be between 1 and 65535")
 
+    if "reminder_max_age_days" in cfg:
+        value = cfg["reminder_max_age_days"]
+        if isinstance(value, int) and value <= 0:
+            errors.append("reminder_max_age_days: must be greater than 0")
+
     if "version_check_interval" in cfg:
         value = cfg["version_check_interval"]
         if isinstance(value, int) and value < 60:
             errors.append("version_check_interval: must be at least 60")
+
+    positive_number_keys = {
+        "http_timeout_seconds",
+        "xmpp_query_timeout_seconds",
+        "vcard_fetch_timeout_seconds",
+        "updatecheck_timeout_seconds",
+        "urlcheck_fetch_timeout_seconds",
+        "rss_similarity_threshold",
+        "sed_regex_timeout",
+        "xkcd_index_request_delay_seconds",
+        "xkcd_http_timeout",
+    }
+    positive_int_keys = {
+        "urlcheck_wait_seconds",
+        "urlcheck_max_redirects",
+        "urlcheck_max_read_bytes",
+        "rss_max_backoff_time",
+        "rss_backoff_increment_multiplier",
+        "birthday_cache_ttl_seconds",
+        "birthday_initial_scan_delay_seconds",
+        "birthday_check_interval_seconds",
+        "sed_max_pattern_length",
+        "sed_max_replacement_length",
+        "sed_max_input_length",
+        "sed_max_output_length",
+        "sed_cache_size",
+        "poll_max_options",
+        "poll_max_question_len",
+        "poll_max_option_len",
+        "poll_max_history_per_room",
+        "pin_page_size",
+        "pin_recent_cache_size",
+        "karma_delay_seconds",
+        "tell_delivery_delay_seconds",
+        "xkcd_check_interval",
+        "xkcd_index_start_delay_seconds",
+    }
+
+    for key in positive_number_keys:
+        value = cfg.get(key)
+        if isinstance(value, (int, float)) and value <= 0:
+            errors.append(f"{key}: must be greater than 0")
+
+    for key in positive_int_keys:
+        value = cfg.get(key)
+        if isinstance(value, int) and value <= 0:
+            errors.append(f"{key}: must be greater than 0")
+
+    similarity = cfg.get("rss_similarity_threshold")
+    if isinstance(similarity, (int, float)) and not (0 < similarity <= 1):
+        errors.append("rss_similarity_threshold: must be greater than 0 and at most 1")
 
 
 def _validate_timezone(cfg, errors):
@@ -111,6 +419,8 @@ def _validate_timezone(cfg, errors):
         return
 
     timezone = cfg["timezone"]
+    if timezone is None:
+        return
     if not isinstance(timezone, str):
         return
 
@@ -181,6 +491,8 @@ def check_optional_keys(cfg):
             continue
 
         value = cfg[key]
+        if value is None:
+            continue
 
         if expected_type is str:
             _validate_string(
@@ -189,9 +501,15 @@ def check_optional_keys(cfg):
                 errors,
                 allow_empty=key == "version_check_notify_jid",
             )
-        elif not isinstance(value, expected_type):
+            continue
+
+        expected_types = (
+            expected_type if isinstance(expected_type, tuple) else (expected_type,)
+        )
+        if not isinstance(value, expected_types):
+            expected_names = " or ".join(t.__name__ for t in expected_types)
             errors.append(
-                f"{key}: expected {expected_type.__name__}, "
+                f"{key}: expected {expected_names}, "
                 f"got {type(value).__name__}"
             )
     return errors
@@ -216,11 +534,9 @@ def validate_config(cfg, require_required_keys=False):
         If the configuration is invalid.
     """
     errors = []
-    warnings = []
 
     if not isinstance(cfg, dict):
-        raise ConfigError(
-            "config.json must contain a JSON object at top level")
+        raise ConfigError("config must be a dictionary")
 
     if require_required_keys:
         errors = check_required_keys(cfg)
@@ -254,7 +570,7 @@ def validate_config(cfg, require_required_keys=False):
             _validate_jid(admin, f"admins[{idx}]", errors)
 
     _validate_timezone(cfg, errors)
-    _validate_avatar(cfg, errors, warnings)
+    _validate_avatar(cfg, errors, [])
     _validate_numeric_ranges(cfg, errors)
 
     if cfg.get("version_check_enabled") and not str(
@@ -267,40 +583,42 @@ def validate_config(cfg, require_required_keys=False):
 
     if errors:
         raise ConfigError(
-            "Invalid config.json:\n- " + "\n- ".join(errors)
+            "Invalid configuration:\n- " + "\n- ".join(errors)
         )
 
 
 def load_config(require_required_keys=False):
     """
-    Load config.json and validate it.
+    Load config.py and validate it.
 
-    Missing config.json keeps the historical default behavior so tests and
-    helper imports still work. A present but broken config.json is always
-    fatal because continuing with defaults can make the bot crash later in
-    confusing ways.
+    ``config.py`` is the primary format.  If ``ENVSBOT_CONFIG`` is set, that
+    exact file is used and may be either ``.py`` or legacy ``.json``.  If no
+    ``config.py`` exists, a legacy ``config.json`` is still accepted as a
+    migration fallback.
     """
     cfg = DEFAULT_CONFIG.copy()
-    config_path = BASE_DIR / "config.json"
 
-    if not config_path.exists():
-        if require_required_keys:
-            raise ConfigError(f"Missing config file: {config_path}")
+    configured_path = _config_path_from_env()
+    if configured_path is not None:
+        config_path = configured_path
+        loaded = (
+            _load_legacy_json_config(config_path)
+            if config_path.suffix.lower() == ".json"
+            else _load_python_config(config_path)
+        )
+    else:
+        config_path = _default_config_path()
+        if config_path.exists():
+            loaded = _load_python_config(config_path)
+        else:
+            legacy_path = _legacy_config_path()
+            if not legacy_path.exists():
+                if require_required_keys:
+                    raise ConfigError(f"Missing config file: {config_path}")
 
-        validate_config(cfg, require_required_keys=False)
-        return cfg
-
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            loaded = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ConfigError(_format_json_error(e)) from e
-    except Exception as e:
-        raise ConfigError(f"Failed to load config.json: {e}") from e
-
-    if not isinstance(loaded, dict):
-        raise ConfigError(
-            "config.json must contain a JSON object at top level")
+                validate_config(cfg, require_required_keys=False)
+                return cfg
+            loaded = _load_legacy_json_config(legacy_path)
 
     cfg.update(loaded)
     validate_config(cfg, require_required_keys=require_required_keys)
@@ -376,4 +694,4 @@ if __name__ == "__main__":
     except ConfigError as e:
         exit_on_config_error(e)
 
-    print("[CONFIG] config.json is valid")
+    print("[CONFIG] config.py is valid")

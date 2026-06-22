@@ -33,6 +33,7 @@ from plugins._core import (
 log = logging.getLogger(__name__)
 
 TELL_KEY = "TELL"
+TELL_DELIVERY_DELAY_SECONDS = int(config.get("tell_delivery_delay_seconds", 5) or 5)
 
 PLUGIN_META = {
     "name": "tell",
@@ -176,7 +177,7 @@ async def deliver_tell_messages(bot, msg):
             tzinfo
         )
         timestr = w.strftime("%a, %d %b %H:%M %Z")
-        await asyncio.sleep(5)  # slight delay to avoid flooding on join
+        await asyncio.sleep(TELL_DELIVERY_DELAY_SECONDS)
         bot.reply(
             {
                 "from": msg["from"],

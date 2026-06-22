@@ -3,7 +3,7 @@
 EnvsBot is a modular XMPP bot for rooms and direct chats, built with Python and slixmpp.
 It provides a plugin-based command framework, room-specific feature toggles, user/role management, SQLite persistence, generated command documentation, vCard/avatar publishing, and a growing set of utility, community and fun plugins.
 
-This repository is the **envs.net maintained fork** of the original EnvsBot project at [`redterminal-org/envsbot`](https://github.com/redterminal-org/envsbot).
+This repository is the **envs.net maintained fork** of the XMPPBot project at [`redterminal-org/XMPPBot`](https://github.com/redterminal-org/XMPPBot).
 It is developed independently from Dan's original bot and tailored for the envs.net XMPP/pubnix setup, while remaining useful for other small XMPP communities.
 
 The bot was originally developed for the **envs pubnix/tilde** community and follows the spirit of classic tilde bots: useful, extensible, friendly in shared rooms, and easy to run on a small server.
@@ -54,8 +54,8 @@ source venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-cp config_sample.json config.json
-$EDITOR config.json
+cp config_sample.py config.py
+$EDITOR config.py
 
 cp vcard_sample.py vcard.py
 $EDITOR vcard.py
@@ -67,24 +67,26 @@ python envsbot.py
 
 ## Minimal Configuration
 
-Copy `config_sample.json` to `config.json` and set at least:
+Copy `config_sample.py` to `config.py` and set at least:
 
-```json
-{
-  "jid": "envsbot@example.org",
-  "password": "secret",
-  "nick": "EnvsBot",
-  "timezone": "Europe/Berlin",
-  "owner": "admin@example.org",
-  "prefix": ",",
-  "db": "bot.db",
-  "stop_cmd": ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"],
-  "avatar": "avatar.jpg",
-  "avatar_type": "image/jpeg"
-}
+```python
+JID = "envsbot@example.org"
+PASSWORD = "secret"
+NICK = "EnvsBot"
+OWNER = "admin@example.org"
+
+COMMAND_PREFIX = ","
+TIMEZONE = "Europe/Berlin"
+DB_FILE = "bot.db"
+STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
+
+AVATAR_PATH = "avatar.jpg"
+AVATAR_TYPE = "image/jpeg"
 ```
 
-Optional `host` and `port` values can be used when the XMPP server address differs from the JID domain or default client port.
+Optional `CONNECT_HOST` and `CONNECT_PORT` values can be used when the XMPP server address differs from the JID domain or default client port.
+
+`config_sample.py` also contains operator tuning sections for network timeouts, URL checks, RSS backoff, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
 
 Runtime-safe configuration checks are available through:
 
@@ -98,16 +100,16 @@ Secrets such as passwords and API keys are redacted in bot output.
 
 Optional release update checks can be enabled with:
 
-```json
-{
-  "version_check_enabled": true,
-  "version_check_interval": 3600,
-  "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
-  "version_check_notify_jid": "admin@example.org"
-}
+```python
+VERSION_CHECK_ENABLED = True
+VERSION_CHECK_INTERVAL = 3600
+VERSION_CHECK_URL = "https://github.com/envs-net/envsbot/releases/latest"
+VERSION_CHECK_NOTIFY_JID = "admin@example.org"
 ```
 
-When `version_check_notify_jid` is empty, automatic update notifications are sent to the configured `owner` JID. Manual checks through `,checkupdate` work even when the periodic worker is disabled.
+When `VERSION_CHECK_NOTIFY_JID` is empty, automatic update notifications are sent to the configured `owner` JID. Manual checks through `,checkupdate` work even when the periodic worker is disabled.
+
+For migration, legacy `config.json` is still accepted when no `config.py` exists, but new installations should use the Python config file. The JSON sample is no longer maintained.
 
 ---
 
@@ -117,11 +119,9 @@ Copy `vcard_sample.py` to `vcard.py` and adjust the bot profile. EnvsBot can pub
 
 Avatar-related config keys:
 
-```json
-{
-  "avatar": "avatar.jpg",
-  "avatar_type": "image/jpeg"
-}
+```python
+AVATAR_PATH = "avatar.jpg"
+AVATAR_TYPE = "image/jpeg"
 ```
 
 Supported avatar MIME types are usually `image/jpeg` and `image/png`. The bot publishes the avatar hash in presence so MUC occupants can discover the avatar even if they do not have the bot in their roster.
@@ -142,7 +142,7 @@ Examples assume the default command prefix `,`.
 | `,bot version` / `,version` | Show the running bot version and latest checked release |
 | `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
 | `,config show [all/page/last]` | Show redacted runtime configuration |
-| `,config validate` | Validate `config.json` |
+| `,config validate` | Validate `config.py` |
 | `,config reload` | Reload runtime-safe configuration |
 | `,audit last [limit]` | Show recent administrative audit events |
 | `,audit user <jid>` | Show audit events for one actor |
@@ -313,7 +313,7 @@ python scripts/generate_commands_md.py
 
 ## Security Notes
 
-* Keep `config.json` private; it contains the bot password and optional API keys.
+* Keep `config.py` private; it contains the bot password and optional API keys.
 * Use a dedicated XMPP account for the bot.
 * Give Owner/Superadmin roles only to trusted administrators.
 * Runtime config output redacts known secret values, but logs and local files should still be protected.

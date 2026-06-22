@@ -24,30 +24,35 @@ def test_load_config_missing_file_strict_raises(tmp_path, monkeypatch):
     assert "Missing config file" in str(exc.value)
 
 
-def test_load_config_loads_json(tmp_path, monkeypatch):
-    data = {
-        "jid": "bot@example.org",
-        "password": "secret",
-        "owner": "owner@example.org",
-        "nick": "envsbot",
-        "prefix": ";",
-        "loglevel": "DEBUG",
-        "custom": "extra",
-    }
-    (tmp_path / "config.json").write_text(json.dumps(data))
+def test_load_config_loads_python(tmp_path, monkeypatch):
+    (tmp_path / "config.py").write_text(
+        "\n".join([
+            'JID = "bot@example.org"',
+            'PASSWORD = "secret"',
+            'OWNER = "owner@example.org"',
+            'NICK = "envsbot"',
+            'COMMAND_PREFIX = ";"',
+            'LOG_LEVEL = "DEBUG"',
+            'CUSTOM = "extra"',
+        ])
+    )
 
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config(require_required_keys=True)
 
-    for k, v in data.items():
-        assert result[k] == v
+    assert result["jid"] == "bot@example.org"
+    assert result["password"] == "secret"
+    assert result["owner"] == "owner@example.org"
+    assert result["nick"] == "envsbot"
+    assert result["prefix"] == ";"
+    assert result["loglevel"] == "DEBUG"
+    assert result["custom"] == "extra"
 
 
 def test_load_config_with_partial_override_when_not_strict(tmp_path,
                                                            monkeypatch):
-    data = {"prefix": ";"}
-    (tmp_path / "config.json").write_text(json.dumps(data))
+    (tmp_path / "config.py").write_text('COMMAND_PREFIX = ";"\n')
 
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
 
@@ -58,8 +63,8 @@ def test_load_config_with_partial_override_when_not_strict(tmp_path,
     assert result["db"] == "bot.db"
 
 
-def test_load_config_bad_json_raises(tmp_path, monkeypatch):
-    (tmp_path / "config.json").write_text("{this_is:not:json,]")
+def test_load_config_bad_python_raises(tmp_path, monkeypatch):
+    (tmp_path / "config.py").write_text("JID = \"broken\" +\n")
 
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
 
@@ -67,12 +72,12 @@ def test_load_config_bad_json_raises(tmp_path, monkeypatch):
         config_mod.load_config()
 
     msg = str(exc.value)
-    assert "Failed to parse config.json" in msg
+    assert "Failed to parse config.py" in msg
     assert "line" in msg
     assert "column" in msg
 
 
-def test_load_config_top_level_must_be_object(tmp_path, monkeypatch):
+def test_load_config_legacy_json_top_level_must_be_object(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps(["not", "an", "object"]))
 
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
@@ -82,6 +87,35 @@ def test_load_config_top_level_must_be_object(tmp_path, monkeypatch):
 
     assert "must contain a JSON object" in str(exc.value)
 
+
+
+
+def test_load_config_legacy_json_fallback(tmp_path, monkeypatch):
+    data = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+        "prefix": ";",
+    }
+    (tmp_path / "config.json").write_text(json.dumps(data))
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    result = config_mod.load_config(require_required_keys=True)
+
+    assert result["jid"] == "bot@example.org"
+    assert result["prefix"] == ";"
+
+
+def test_load_config_env_override_accepts_python_file(tmp_path, monkeypatch):
+    custom_path = tmp_path / "custom_config.py"
+    custom_path.write_text('COMMAND_PREFIX = "?"\n')
+    monkeypatch.setenv("ENVSBOT_CONFIG", str(custom_path))
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    result = config_mod.load_config()
+
+    assert result["prefix"] == "?"
 
 def test_validate_startup_config_requires_runtime_keys():
     cfg = {
@@ -475,3 +509,68 @@ def test_validate_config_accepts_empty_version_check_notify_jid():
 def test_validate_config_rejects_too_short_version_check_interval():
     with pytest.raises(config_mod.ConfigError, match="version_check_interval"):
         config_mod.validate_config({"version_check_interval": 30})
+
+
+def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
+    (tmp_path / "config.py").write_text(
+        "\n".join([
+            'JID = "bot@example.org"',
+            'PASSWORD = "secret"',
+            'OWNER = "owner@example.org"',
+            'NICK = "envsbot"',
+            'HTTP_TIMEOUT_SECONDS = 12',
+            'XMPP_QUERY_TIMEOUT_SECONDS = 9',
+            'URLCHECK_WAIT_SECONDS = 30',
+            'RSS_SIMILARITY_THRESHOLD = 0.75',
+            'BIRTHDAY_CACHE_TTL_SECONDS = 3600',
+            'SED_CACHE_SIZE = 25',
+            'POLL_MAX_OPTIONS = 7',
+            'PIN_RECENT_CACHE_SIZE = 40',
+            'KARMA_DELAY_SECONDS = 10',
+            'TELL_DELIVERY_DELAY_SECONDS = 2',
+            'XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.2',
+        ])
+    )
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    result = config_mod.load_config(require_required_keys=True)
+
+    assert result["http_timeout_seconds"] == 12
+    assert result["xmpp_query_timeout_seconds"] == 9
+    assert result["urlcheck_wait_seconds"] == 30
+    assert result["rss_similarity_threshold"] == 0.75
+    assert result["birthday_cache_ttl_seconds"] == 3600
+    assert result["sed_cache_size"] == 25
+    assert result["poll_max_options"] == 7
+    assert result["pin_recent_cache_size"] == 40
+    assert result["karma_delay_seconds"] == 10
+    assert result["tell_delivery_delay_seconds"] == 2
+    assert result["xkcd_index_request_delay_seconds"] == 0.2
+
+
+def test_validate_config_rejects_invalid_plugin_tuning_values():
+    cfg = {
+        "http_timeout_seconds": 0,
+        "urlcheck_max_redirects": 0,
+        "rss_similarity_threshold": 1.5,
+        "sed_cache_size": 0,
+        "poll_max_options": 0,
+        "pin_recent_cache_size": 0,
+        "karma_delay_seconds": 0,
+        "tell_delivery_delay_seconds": 0,
+        "xkcd_index_request_delay_seconds": 0,
+    }
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(cfg)
+
+    msg = str(exc.value)
+    assert "http_timeout_seconds: must be greater than 0" in msg
+    assert "urlcheck_max_redirects: must be greater than 0" in msg
+    assert "rss_similarity_threshold: must be greater than 0 and at most 1" in msg
+    assert "sed_cache_size: must be greater than 0" in msg
+    assert "poll_max_options: must be greater than 0" in msg
+    assert "pin_recent_cache_size: must be greater than 0" in msg
+    assert "karma_delay_seconds: must be greater than 0" in msg
+    assert "tell_delivery_delay_seconds: must be greater than 0" in msg
+    assert "xkcd_index_request_delay_seconds: must be greater than 0" in msg

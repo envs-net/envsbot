@@ -33,6 +33,7 @@ PLUGIN_META = {
 }
 
 WEATHER_KEY = "WEATHER"
+WEATHER_HTTP_TIMEOUT = float(config.get("http_timeout_seconds", 8) or 8)
 
 
 async def get_display_name(bot, jid):
@@ -261,7 +262,7 @@ async def _reply_with_weather(bot, msg, display_name, locality,
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=8) as resp:
+            async with session.get(url, timeout=WEATHER_HTTP_TIMEOUT) as resp:
                 if resp.status != 200:
                     bot.reply(msg, f"🌦️ Failed to fetch weather for"
                                    f" {display_name}.")

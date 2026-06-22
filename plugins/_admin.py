@@ -7,7 +7,7 @@ like restart, shutdown, and status monitoring.
 The bot restart command simply stops the bot, which is then restarted by
 the system's service functions.
 
-The bot shutdown command is built from the "stop_cmd" key in the config.json
+The bot shutdown command is built from the "stop_cmd" key in the config.py
 like this:
 "stop_cmd": ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
 (This may be different for your setup and used init system)
@@ -44,7 +44,7 @@ PLUGIN_META = {
 }
 
 # Use a temp file to store restart notification data
-RESTART_NOTIFICATION_FILE = "/tmp/bot_restart_notification.json"
+RESTART_NOTIFICATION_FILE = str(config.get("restart_notification_file", "/tmp/envsbot_restart_notification.json") or "/tmp/envsbot_restart_notification.json")
 
 # Track bot start time
 BOT_START_TIME = None

@@ -22,6 +22,7 @@ import time
 from functools import partial
 
 from utils.command import command, Role
+from utils.config import config
 from plugins._core import (
     _is_muc_pm,
     JOINED_ROOMS,
@@ -45,7 +46,7 @@ PLUGIN_META = {
 KARMA_ENABLED_KEY = "KARMA"
 KARMA_SCORES_KEY = "scores"
 
-KARMA_DELAY_SECONDS = 60
+KARMA_DELAY_SECONDS = int(config.get("karma_delay_seconds", 60) or 60)
 LAST_KARMA_ACTIONS = {}  # room:actor -> {target_lower: timestamp}
 
 OP_RE = re.compile(r"(\+\+|--)")

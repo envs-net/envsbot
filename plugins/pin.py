@@ -58,7 +58,8 @@ PIN_ENABLED_KEY = "PIN"
 PIN_DATA_KEY = "PIN_DATA"
 
 PINS_FIELD = "pins"
-PAGE_SIZE = 10
+PAGE_SIZE = int(config.get("pin_page_size", 10) or 10)
+PIN_RECENT_CACHE_SIZE = int(config.get("pin_recent_cache_size", 80) or 80)
 CACHE_NAMESPACE = "pin"
 
 
@@ -490,7 +491,7 @@ async def _on_groupchat_message(bot, msg):
             actor_nick,
             body,
             stanza_id,
-            maxlen=80,
+            maxlen=PIN_RECENT_CACHE_SIZE,
             extra={"ts": int(time.time())},
         )
 

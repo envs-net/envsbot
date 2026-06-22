@@ -43,15 +43,16 @@ PLUGIN_META = {
 
 SED_KEY = "SED"
 CACHE_NAMESPACE = "sed"
+SED_CACHE_SIZE = int(config.get("sed_cache_size", 10) or 10)
 
 # Hard timeout for regex substitution.
-REGEX_TIMEOUT = 1.0
+REGEX_TIMEOUT = float(config.get("sed_regex_timeout", 1.0) or 1.0)
 
 # Practical limits to reduce abuse.
-MAX_PATTERN_LENGTH = 256
-MAX_REPLACEMENT_LENGTH = 1000
-MAX_INPUT_LENGTH = 5000
-MAX_OUTPUT_LENGTH = 8000
+MAX_PATTERN_LENGTH = int(config.get("sed_max_pattern_length", 256) or 256)
+MAX_REPLACEMENT_LENGTH = int(config.get("sed_max_replacement_length", 1000) or 1000)
+MAX_INPUT_LENGTH = int(config.get("sed_max_input_length", 5000) or 5000)
+MAX_OUTPUT_LENGTH = int(config.get("sed_max_output_length", 8000) or 8000)
 
 
 def get_last_message(room: str):
@@ -573,7 +574,7 @@ async def on_message(bot, msg):
             nick,
             body,
             stanza_id,
-            maxlen=10,
+            maxlen=SED_CACHE_SIZE,
         )
 
     except Exception as exc:

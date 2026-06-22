@@ -41,6 +41,8 @@ from plugins._core import (
 log = logging.getLogger(__name__)
 
 INFO_KEY = "INFORMATION"
+INFO_HTTP_TIMEOUT = float(config.get("http_timeout_seconds", 8) or 8)
+INFO_HTTP_USER_AGENT = str(config.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)")
 
 PLUGIN_META = {
     "name": "info",
@@ -105,7 +107,7 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=8) as resp:
+            async with session.get(url, timeout=INFO_HTTP_TIMEOUT) as resp:
                 if resp.status != 200:
                     log.warning("[FEDIVERSE] 🔴  User not found on instance.")
                     bot.reply(msg, "🔴  User not found on this instance.")
@@ -120,7 +122,7 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
                 f"https://{instance}/api/v1/accounts/{user_id}/statuses"
                 "?limit=1&exclude_replies=false&exclude_reblogs=false"
             )
-            async with session.get(timeline_url, timeout=8) as resp:
+            async with session.get(timeline_url, timeout=INFO_HTTP_TIMEOUT) as resp:
                 if resp.status != 200:
                     log.warning(
                         "[FEDIVERSE] 🔴  Could not fetch user timeline."
@@ -186,7 +188,7 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=8) as resp:
+            async with session.get(url, timeout=INFO_HTTP_TIMEOUT) as resp:
                 if resp.status != 200:
                     log.warning("[UDICT] 🔴  Failed to fetch definition.")
                     bot.reply(msg, "🔴  Failed to fetch definition.")
@@ -232,7 +234,7 @@ def fetch_wikipedia_summary(term):
     Query the Wikipedia REST API and return extracted data, or None on error.
     """
     url = WIKIPEDIA_API_URL.format(requests.utils.quote(term))
-    resp = requests.get(url, headers={"User-Agent": "envsbot/1.0"})
+    resp = requests.get(url, headers={"User-Agent": INFO_HTTP_USER_AGENT}, timeout=INFO_HTTP_TIMEOUT)
     if resp.status_code == 200:
         data = resp.json()
         title = data.get("title")

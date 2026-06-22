@@ -46,7 +46,11 @@ def github_api_url_from_release_url(release_url: str) -> str | None:
 
 
 def _user_agent() -> str:
-    return f"envsbot/{normalized_version()}"
+    return str(config.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)")
+
+
+def _timeout() -> float:
+    return float(config.get("updatecheck_timeout_seconds", 15) or 15)
 
 
 def fetch_latest_release_version_via_github_api_sync(release_url: str) -> str:
@@ -62,7 +66,7 @@ def fetch_latest_release_version_via_github_api_sync(release_url: str) -> str:
             "User-Agent": _user_agent(),
         },
     )
-    with urllib.request.urlopen(req, timeout=15) as response:
+    with urllib.request.urlopen(req, timeout=_timeout()) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
     tag = str(payload.get("tag_name", "")).strip()
@@ -80,7 +84,7 @@ def fetch_latest_release_version_via_redirect_sync(release_url: str) -> str:
         release_url,
         headers={"User-Agent": _user_agent()},
     )
-    with urllib.request.urlopen(req, timeout=15) as response:
+    with urllib.request.urlopen(req, timeout=_timeout()) as response:
         final_url = response.geturl()
 
     marker = "/releases/tag/"

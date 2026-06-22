@@ -23,7 +23,7 @@ VCARD = """<vCard xmlns=\"vcard-temp\">
   <NOTE>You can add as many NICKNAMEs, ORGs, EMAILs and URLs as you want. But
   the bot itself only uses the first ADR field and only LOCALITY, REGION and
   CTRY when displaying vCards. You also have to set the "timezone" field in the
-  config.json file. The TZ field in your vCard file won't be recognized,
+  config.py file. The TZ field in your vCard file won't be recognized,
   although you can set it.</NOTE>
   <NOTE>You can also add other fields, which can be expected in a XMPP vCard,
 but the bot won't show them.</NOTE>

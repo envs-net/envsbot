@@ -62,7 +62,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `urlcheck` | `info` | URL title and YouTube info fetcher for groupchats |
 | `users` | `core` | User management with caching, nick lookup and logging |
 | `vcard` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only |
-| `weather` | `info` | Gives weather according to users location (supports MUCsand MUC DMs) |
+| `weather` | `info` | Gives weather according to users location (supports MUCs and MUC DMs) |
 | `xkcd` | `fun` | XKCD comic fetcher and broadcaster with full indexing |
 | `xmpp` | `tools` | XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.) |
 
@@ -78,9 +78,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
 | `,bot status` | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
-| `,config reload` | `admin` | `private chat / MUC PM` | Reload config.json into the running bot where possible. |
+| `,config reload` | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config with secrets redacted. |
-| `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.json file. |
+| `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
 | `,db status` | `admin` | `private chat / MUC PM` | Show SQLite database path, size and integrity status. |
 
 ### Core
@@ -358,7 +358,7 @@ Safe config inspection, validation and reload commands.
 
 #### `,config reload`
 
-Reload config.json into the running bot where possible.
+Reload config.py into the running bot where possible.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  
@@ -387,7 +387,7 @@ Examples:
 
 #### `,config validate`
 
-Validate the current config.json file.
+Validate the current config.py file.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  
@@ -1538,7 +1538,7 @@ Examples:
 
 Category: `info`
 
-Gives weather according to users location (supports MUCsand MUC DMs)
+Gives weather according to users location (supports MUCs and MUC DMs)
 
 #### `,weather`
 

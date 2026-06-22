@@ -45,11 +45,18 @@ log = logging.getLogger(__name__)
 RSS_KEY = "RSS"
 CHECK_TASKS = {}
 
-# Configuration constants
-DEFAULT_POLL_INTERVAL = 1200  # 20 minutes
-BACKOFF_INCREMENT_MULTIPLIER = 60  # seconds per error
-MAX_BACKOFF_TIME = 86400  # 24 hours
-SIMILARITY_THRESHOLD = 0.8  # 80% similarity = duplicate
+# Operator-tunable configuration constants.
+DEFAULT_POLL_INTERVAL = int(config.get("rss_global_query_interval", 1200) or 1200)
+BACKOFF_INCREMENT_MULTIPLIER = int(
+    config.get("rss_backoff_increment_multiplier", 60) or 60
+)
+MAX_BACKOFF_TIME = int(config.get("rss_max_backoff_time", 86400) or 86400)
+SIMILARITY_THRESHOLD = float(config.get("rss_similarity_threshold", 0.8) or 0.8)
+RSS_USER_AGENT = str(
+    config.get("rss_user_agent")
+    or config.get("http_user_agent")
+    or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
+)
 
 
 def entry_get(entry, key, default=None):
@@ -284,7 +291,7 @@ def _get_feed_headers() -> dict[str, str]:
     """Get HTTP headers for feed requests."""
     accept = "application/rss+xml, application/atom+xml, application/json, */*"
     return {
-        "User-Agent": "envsbot/1.0 +https://github.com/envs/envsbot",
+        "User-Agent": RSS_USER_AGENT,
         "Accept": accept,
     }
 

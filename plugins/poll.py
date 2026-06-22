@@ -33,6 +33,7 @@ import logging
 import time
 
 from utils.command import command, Role
+from utils.config import config
 from plugins import _core
 
 from utils.task_supervisor import create_plugin_task
@@ -49,10 +50,10 @@ PLUGIN_META = {
 POLL_ENABLED_KEY = "POLL"
 POLL_DATA_KEY = "POLL_DATA"
 
-MAX_OPTIONS = 10
-MAX_QUESTION_LEN = 200
-MAX_OPTION_LEN = 100
-MAX_HISTORY_PER_ROOM = 50
+MAX_OPTIONS = int(config.get("poll_max_options", 10) or 10)
+MAX_QUESTION_LEN = int(config.get("poll_max_question_len", 200) or 200)
+MAX_OPTION_LEN = int(config.get("poll_max_option_len", 100) or 100)
+MAX_HISTORY_PER_ROOM = int(config.get("poll_max_history_per_room", 50) or 50)
 
 AUTO_CLOSE_TASKS = {}  # (room_jid, poll_id) -> asyncio.Task
 

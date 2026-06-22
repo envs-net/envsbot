@@ -68,7 +68,7 @@ PLUGIN_META = {
 ACTIVE_REMINDERS: dict[int, asyncio.Task] = {}
 
 # Runtime switch for the reminder plugin. Defaults to enabled.
-# Optional config.json override: "reminder_enabled": false
+# Optional config.py override: "reminder_enabled": false
 REMINDER_ENABLED: bool = bool(config.get("reminder_enabled", True))
 REMINDER_KEY = "REMINDER"
 

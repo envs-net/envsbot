@@ -322,7 +322,7 @@ async def _can_change_role(bot, actor: str, target: str, target_role: Role, new_
     if _is_config_owner(target):
         return False, "⛔ The configured owner cannot be changed from the bot."
     if new_role == Role.OWNER:
-        return False, "⛔ Owner can only be configured in config.json."
+        return False, "⛔ Owner can only be configured in config.py."
     if target == actor and new_role.value > actor_role.value:
         return False, "⛔ You cannot lower your own privileges."
     if target == actor and new_role.value < actor_role.value:
@@ -579,7 +579,7 @@ async def users_roles(bot, sender, nick, args, msg, is_room):
     lines += [
         "",
         "Protection rules:",
-        "• owner comes only from config.json",
+        "• owner comes only from config.py",
         "• only owner can assign superadmin",
         "• users cannot promote themselves",
         "• users cannot modify/delete equal or higher roles",

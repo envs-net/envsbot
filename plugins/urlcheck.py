@@ -72,8 +72,24 @@ YOUTUBE_RE = re.compile(
 # the same URL multiple times in a short period
 # formant _url_timestamp[room][url] = timestamp
 _url_timestamps = {}
+# Operator-tunable fetch and suppression settings.
+URLCHECK_WAIT_SECONDS = int(config.get("urlcheck_wait_seconds", 120) or 120)
+URLCHECK_FETCH_TIMEOUT_SECONDS = float(
+    config.get("urlcheck_fetch_timeout_seconds", config.get("http_timeout_seconds", 8)) or 8
+)
+URLCHECK_MAX_REDIRECTS = max(1, int(config.get("urlcheck_max_redirects", 5) or 5))
+URLCHECK_MAX_READ_BYTES = max(
+    1024,
+    int(config.get("urlcheck_max_read_bytes", 65536) or 65536),
+)
+URLCHECK_USER_AGENT = str(
+    config.get("urlcheck_user_agent")
+    or config.get("http_user_agent")
+    or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
+)
+
 # seconds to wait until next URL output
-_wait_secs_url = 120
+_wait_secs_url = URLCHECK_WAIT_SECONDS
 
 
 async def get_urlcheck_store(bot):
@@ -383,7 +399,7 @@ def has_xep_0392_link_metadata(msg):
     )
 
 
-def fetch_url_title(url, max_redirects=5):
+def fetch_url_title(url, max_redirects=None):
     """
     Fetch the final URL after redirects, status code, content type, title
     and description.
@@ -393,13 +409,10 @@ def fetch_url_title(url, max_redirects=5):
     """
     parsed_orig = urlparse(url)
     orig_fragment = parsed_orig.fragment
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-    }
+    if max_redirects is None:
+        max_redirects = URLCHECK_MAX_REDIRECTS
+
+    headers = {"User-Agent": URLCHECK_USER_AGENT}
 
     session = requests.Session()
     session.headers.update(headers)
@@ -407,7 +420,7 @@ def fetch_url_title(url, max_redirects=5):
 
     try:
         for _ in range(max_redirects):
-            resp = session.get(url, allow_redirects=False, timeout=8,
+            resp = session.get(url, allow_redirects=False, timeout=URLCHECK_FETCH_TIMEOUT_SECONDS,
                                stream=True)
             status = resp.status_code
             ctype = resp.headers.get("Content-Type", "")
@@ -437,6 +450,9 @@ def fetch_url_title(url, max_redirects=5):
                     if desc_found is None:
                         _, desc_found = extract_html_title_desc(buffer)
                     if title_found and desc_found:
+                        break
+                    if len(buffer) >= URLCHECK_MAX_READ_BYTES:
+                        buffer = buffer[:URLCHECK_MAX_READ_BYTES]
                         break
                 final_url = resp.url
                 if orig_fragment:
@@ -522,7 +538,7 @@ async def fetch_youtube_info(url):
         f"contentDetails&key={api_key}"
     )
     async with aiohttp.ClientSession() as session:
-        async with session.get(api_url, timeout=8) as resp:
+        async with session.get(api_url, timeout=URLCHECK_FETCH_TIMEOUT_SECONDS) as resp:
             if resp.status != 200:
                 return None
             data = await resp.json()

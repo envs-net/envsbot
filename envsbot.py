@@ -103,7 +103,7 @@ class Bot(slixmpp.ClientXMPP):
         import json
         import os
 
-        restart_file = "/tmp/bot_restart_notification.json"
+        restart_file = str(config.get("restart_notification_file", "/tmp/envsbot_restart_notification.json") or "/tmp/envsbot_restart_notification.json")
 
         if not os.path.exists(restart_file):
             return

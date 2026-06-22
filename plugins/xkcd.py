@@ -47,9 +47,10 @@ XKCD_API_URL = "https://xkcd.com/{}/info.0.json"
 XKCD_LATEST_URL = "https://xkcd.com/info.0.json"
 XKCD_COMIC_URL = "https://xkcd.com/{}"
 
-CHECK_INTERVAL = 3600
-INDEX_START_DELAY_SECONDS = 30
-INDEX_REQUEST_DELAY_SECONDS = 0.15
+CHECK_INTERVAL = int(config.get("xkcd_check_interval", 3600) or 3600)
+INDEX_START_DELAY_SECONDS = int(config.get("xkcd_index_start_delay_seconds", 30) or 30)
+INDEX_REQUEST_DELAY_SECONDS = float(config.get("xkcd_index_request_delay_seconds", 0.15) or 0.15)
+XKCD_HTTP_TIMEOUT = float(config.get("xkcd_http_timeout", config.get("http_timeout_seconds", 10)) or 10)
 
 CHECK_TASK: asyncio.Task | None = None
 INDEX_TASK: asyncio.Task | None = None
@@ -68,7 +69,7 @@ async def fetch_xkcd(url: str, session: aiohttp.ClientSession | None = None):
     """Fetch XKCD comic info from API."""
     try:
         if session is not None:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(url, timeout=XKCD_HTTP_TIMEOUT) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 log.debug("[XKCD] Non-200 response for %s: %s",
@@ -76,7 +77,7 @@ async def fetch_xkcd(url: str, session: aiohttp.ClientSession | None = None):
                 return None
 
         async with aiohttp.ClientSession() as own_session:
-            async with own_session.get(url, timeout=10) as resp:
+            async with own_session.get(url, timeout=XKCD_HTTP_TIMEOUT) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 log.debug("[XKCD] Non-200 response for %s: %s",

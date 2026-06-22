@@ -304,7 +304,12 @@ async def test_handle_command_execution(bot):
 async def test_send_restart_notification_room_and_private(bot, monkeypatch,
                                                           tmp_path):
     import json
-    notif_path = "/tmp/bot_restart_notification.json"
+    notif_path = str(tmp_path / "restart_notification.json")
+    monkeypatch.setitem(
+        envsbot.config,
+        "restart_notification_file",
+        notif_path,
+    )
     notif = {
         "room": "room@conf",
         "nick": "yo",

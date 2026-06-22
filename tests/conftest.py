@@ -23,30 +23,24 @@ def tmp_db_path(tmp_path):
 
 @pytest.fixture
 def clean_config(monkeypatch, tmp_path):
-    # Set up env vars or config as needed before tests run
-    cfg_path = tmp_path / "config.json"
-    cfg_path.write_text('''
-{
-  "jid": "testbot@example.tld",
-  "password": "Passw0rd",
-  "nick": "testbot",
-  "timezone": "US/Alaska",
-  "owner": "owner@example.tld",
-
-  "youtube_api_key": "ToP53cRetPassw0rd",
-
-  "prefix": "+",
-  "db": "bot_test.db",
-  "loglevel": "INFO",
-  "users": {
-    "max_room_nicks": 5
-  },
-
-  "avatar": "avatar.jpg",
-  "avatar_type": "image/jpeg",
-
-  "reminder_max_age_days": 365
-}
-''')
+    # Set up env vars or config as needed before tests run.
+    cfg_path = tmp_path / "config.py"
+    cfg_path.write_text(
+        "\n".join([
+            'JID = "testbot@example.tld"',
+            'PASSWORD = "Passw0rd"',
+            'NICK = "testbot"',
+            'TIMEZONE = "US/Alaska"',
+            'OWNER = "owner@example.tld"',
+            'YOUTUBE_API_KEY = "ToP53cRetPassw0rd"',
+            'COMMAND_PREFIX = "+"',
+            'DB_FILE = "bot_test.db"',
+            'LOG_LEVEL = "INFO"',
+            'USERS = {"max_room_nicks": 5}',
+            'AVATAR_PATH = "avatar.jpg"',
+            'AVATAR_TYPE = "image/jpeg"',
+            'REMINDER_MAX_AGE_DAYS = 365',
+        ])
+    )
     monkeypatch.setenv("ENVSBOT_CONFIG", str(cfg_path))
     yield cfg_path

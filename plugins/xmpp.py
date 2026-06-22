@@ -36,6 +36,8 @@ from plugins._core import (
 )
 
 XMPP_KEY = "XMPP"
+XMPP_QUERY_TIMEOUT_SECONDS = float(config.get("xmpp_query_timeout_seconds", 8) or 8)
+XMPP_HTTP_TIMEOUT_SECONDS = float(config.get("http_timeout_seconds", 8) or 8)
 
 PLUGIN_META = {
     "name": "xmpp",
@@ -227,7 +229,7 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         result = await bot.plugin["xep_0092"].get_version(jid=target,
-                                                          timeout=8)
+                                                          timeout=XMPP_QUERY_TIMEOUT_SECONDS)
         name, version, os_info = _extract_xmpp_version_info(result)
 
         if name and version:
@@ -329,7 +331,7 @@ async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         result = await bot.plugin["xep_0012"].get_last_activity(jid=target,
-                                                                timeout=8)
+                                                                timeout=XMPP_QUERY_TIMEOUT_SECONDS)
         seconds = result['last_activity']['seconds']
         days = seconds // 86400
         hours = (seconds % 86400) // 3600
@@ -380,7 +382,7 @@ async def cmd_xmpp_items(bot, sender_jid, nick, args, msg, is_room):
         return
     target = inform_if_jid(msg, target, bot, "items")
     try:
-        items = await bot.plugin["xep_0030"].get_items(jid=target, timeout=8)
+        items = await bot.plugin["xep_0030"].get_items(jid=target, timeout=XMPP_QUERY_TIMEOUT_SECONDS)
         disco_items = items.get('disco_items', {})
         items_list = disco_items.get('items', [])
         if not items_list:
@@ -437,7 +439,7 @@ async def cmd_xmpp_contact(bot, sender_jid, nick, args, msg, is_room):
     _reply_xmpp_contact_domain_note(bot, msg, args[0], target)
 
     try:
-        info = await bot.plugin["xep_0030"].get_info(jid=target, timeout=8)
+        info = await bot.plugin["xep_0030"].get_info(jid=target, timeout=XMPP_QUERY_TIMEOUT_SECONDS)
         contact_info = _extract_xmpp_contact_info(info.get("disco_info", {}))
         _reply_xmpp_contact_result(bot, msg, target, contact_info)
     except slixmpp.exceptions.IqTimeout:
@@ -613,7 +615,7 @@ async def cmd_xmpp_info(bot, sender_jid, nick, args, msg, is_room):
     target = inform_if_jid(msg, target, bot, "info")
 
     try:
-        info = await bot.plugin["xep_0030"].get_info(jid=target, timeout=8)
+        info = await bot.plugin["xep_0030"].get_info(jid=target, timeout=XMPP_QUERY_TIMEOUT_SECONDS)
         disco_info = info.get('disco_info', {})
         identities, features = _extract_xmpp_info_lines(disco_info)
         result = _build_xmpp_info_result(target, identities, features)
@@ -643,7 +645,7 @@ async def cmd_xmpp_ping(bot, sender_jid, nick, args, msg, is_room):
         return
     try:
         start = time.monotonic()
-        await bot.plugin["xep_0199"].ping(jid=target, timeout=8)
+        await bot.plugin["xep_0199"].ping(jid=target, timeout=XMPP_QUERY_TIMEOUT_SECONDS)
         rtt = (time.monotonic() - start) * 1000
         bot.reply(msg, f"🏓 Pong from {target} in {rtt:.1f} ms")
     except slixmpp.exceptions.IqTimeout:
@@ -845,7 +847,7 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
             url = f"https://compliance.conversations.im/server/{domain}/"
             async with (
                     session.get(url,
-                                timeout=aiohttp.ClientTimeout(total=8))
+                                timeout=aiohttp.ClientTimeout(total=XMPP_HTTP_TIMEOUT_SECONDS))
                     as resp):
                 if resp.status == 200:
                     from bs4 import BeautifulSoup

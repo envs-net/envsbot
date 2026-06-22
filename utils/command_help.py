@@ -69,14 +69,14 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "admin",
     },
     "config validate": {
-        "short": "Validate the current config.json file.",
+        "short": "Validate the current config.py file.",
         "usage": "{prefix}config validate",
         "examples": ["{prefix}config validate"],
         "context": "private chat / MUC PM",
         "category": "admin",
     },
     "config reload": {
-        "short": "Reload config.json into the running bot where possible.",
+        "short": "Reload config.py into the running bot where possible.",
         "usage": "{prefix}config reload",
         "examples": ["{prefix}config reload"],
         "context": "private chat / MUC PM",

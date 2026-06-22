@@ -60,18 +60,18 @@ async def config_show(bot, sender, nick, args, msg, is_room):
 
 @command("config validate", role=Role.ADMIN)
 async def config_validate(bot, sender, nick, args, msg, is_room):
-    """Validate config.json."""
+    """Validate config.py."""
     try:
         validate_config(load_config(require_required_keys=True), require_required_keys=True)
     except ConfigError as exc:
-        bot.reply_error(msg, f"Invalid config.json:\n{exc}")
+        bot.reply_error(msg, f"Invalid config.py:\n{exc}")
         return
-    bot.reply_ok(msg, "config.json is valid.")
+    bot.reply_ok(msg, "config.py is valid.")
 
 
 @command("config reload", role=Role.ADMIN)
 async def config_reload(bot, sender, nick, args, msg, is_room):
-    """Reload config.json into the running process where possible."""
+    """Reload config.py into the running process where possible."""
     try:
         new_config = load_config(require_required_keys=True)
     except ConfigError as exc:
@@ -85,7 +85,7 @@ async def config_reload(bot, sender, nick, args, msg, is_room):
     bot.prefix = config.get("prefix", bot.prefix)
     bot.nick = config.get("nick", bot.nick)
 
-    notes = ["config.json reloaded."]
+    notes = ["config.py reloaded."]
     if bot.prefix != old_prefix:
         notes.append(f"Prefix changed from {old_prefix!r} to {bot.prefix!r}.")
     notes.append("Connection credentials and DB path require a bot restart to fully apply.")

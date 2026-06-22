@@ -436,7 +436,7 @@ async def get_vcard(bot, msg, jid=None):
                 "vCard support (xep_0054) is not enabled in this bot.")
         try:
             result = await vcard_plugin.get_vcard(jid=str(jid), cached=False,
-                                                  timeout=10)
+                                                  timeout=float(config.get("vcard_fetch_timeout_seconds", 10) or 10))
         except (IqError, Exception) as e:
             log.info(
                 f"[VCARD] Exception while fetching vCard for '{jid}': {e}")

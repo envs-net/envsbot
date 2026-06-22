@@ -66,14 +66,14 @@ _BIRTHDAY_CHECK_TASK: asyncio.Task | None = None
 # How long cached BDAY lookup results are trusted before refreshing from live
 # vCard. This caches both positive results and explicit "no BDAY found"#
 # results.
-BDAY_CACHE_TTL_SECONDS = 12 * 60 * 60
+BDAY_CACHE_TTL_SECONDS = int(config.get("birthday_cache_ttl_seconds", 12 * 60 * 60) or (12 * 60 * 60))
 
 # Delay the first full scan so plugin startup does not block the bot.
-INITIAL_SCAN_DELAY_SECONDS = 10
+INITIAL_SCAN_DELAY_SECONDS = int(config.get("birthday_initial_scan_delay_seconds", 10) or 10)
 
 # Check whether a new day has started. The full room scan only runs once per
 # day.
-CHECK_LOOP_INTERVAL_SECONDS = 60 * 60
+CHECK_LOOP_INTERVAL_SECONDS = int(config.get("birthday_check_interval_seconds", 60 * 60) or (60 * 60))
 
 
 def _today() -> datetime.date:
