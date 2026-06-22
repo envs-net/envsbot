@@ -82,6 +82,9 @@ async def fake_bot(monkeypatch):
     bot.connection_start_time = datetime.now() - timedelta(hours=1,
                                                            minutes=3,
                                                            seconds=2)
+    bot.version = "1.3.0"
+    bot.last_version_check_result = None
+    bot.last_update_notified_version = None
     bot.presence = types.SimpleNamespace(status={"show": "chat", "status": "ready"})
     bot.avatar_hash = "abc123"
     return bot
@@ -148,6 +151,73 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     assert "Database:" in reply
     assert "Avatar: published" in reply
     assert "Integrity: ok" in reply
+
+
+@pytest.mark.asyncio
+async def test_bot_version_shows_current_and_latest(fake_bot):
+    replies = []
+    fake_bot.reply = lambda msg, text, *a, **k: replies.append((text, k))
+    fake_bot.last_version_check_result = "1.4.0"
+
+    await _admin.bot_version(fake_bot, Sender(), "nick", [], DummyMsg(), False)
+
+    text, kwargs = replies[-1]
+    reply = "\n".join(text)
+    assert "🏷️ EnvsBot Version" in reply
+    assert "Current: v1.3.0" in reply
+    assert "Latest release: v1.4.0" in reply
+    assert kwargs["no_store"] is False
+
+
+@pytest.mark.asyncio
+async def test_bot_checkupdate_reports_new_version(monkeypatch, fake_bot):
+    replies = []
+    fake_bot.reply = lambda msg, text, *a, **k: replies.append((text, k))
+
+    async def fake_check(bot, *, announce=True, require_enabled=True):
+        return True, "1.4.0", None
+
+    monkeypatch.setattr(_admin, "check_for_updates_once", fake_check)
+
+    await _admin.bot_checkupdate(fake_bot, Sender(), "nick", [], DummyMsg(), False)
+
+    text, kwargs = replies[-1]
+    reply = "\n".join(text)
+    assert "New EnvsBot version available: v1.4.0" in reply
+    assert "Current version: v1.3.0" in reply
+    assert kwargs["no_store"] is False
+
+
+@pytest.mark.asyncio
+async def test_bot_checkupdate_reports_current(monkeypatch, fake_bot):
+    replies = []
+    fake_bot.reply = lambda msg, text, *a, **k: replies.append((text, k))
+    fake_bot.reply_ok = lambda msg, text, **k: fake_bot.reply(msg, f"✅ {text}", **k)
+
+    async def fake_check(bot, *, announce=True, require_enabled=True):
+        return False, "1.3.0", None
+
+    monkeypatch.setattr(_admin, "check_for_updates_once", fake_check)
+
+    await _admin.bot_checkupdate(fake_bot, Sender(), "nick", [], DummyMsg(), False)
+
+    assert "up to date" in replies[-1][0]
+    assert replies[-1][1]["no_store"] is False
+
+
+@pytest.mark.asyncio
+async def test_bot_checkupdate_reports_error(monkeypatch, fake_bot):
+    replies = []
+    fake_bot.reply_warn = lambda msg, text, **k: replies.append((text, k))
+
+    async def fake_check(bot, *, announce=True, require_enabled=True):
+        return False, None, "network down"
+
+    monkeypatch.setattr(_admin, "check_for_updates_once", fake_check)
+
+    await _admin.bot_checkupdate(fake_bot, Sender(), "nick", [], DummyMsg(), False)
+
+    assert "Update check failed: network down" in replies[-1][0]
 
 
 @pytest.mark.asyncio

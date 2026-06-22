@@ -9,7 +9,7 @@ The only exception is the "timezone", which has to be set explicitly with the
 
 You can get your own timezone from the list at:
 https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-Use the "TZ identiier" from the list.
+Use the "TZ identifier" from the list.
 
 The weather plugin now uses the "LOCATION" and/or "CTRY" (country) fields from
 your vCard to determine the location for weather reports, if set. If you have
@@ -113,7 +113,7 @@ async def vcard_field(bot, msg, target_nick, field, is_room=False):
     "NOTE", "EMAIL".
     Returns "None" if field is not present.
     """
-    if field not in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "NICKNAME",
+    if field not in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL",
                      "ORG", "NOTE", "EMAIL", "LOCALITY", "CTRY"]:
         log.warning("[VCARD] 🔴  Invalid vCard field requested: %s", field)
         return None
@@ -149,7 +149,7 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
 
     Check your timezone at:
     https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-    Use the "TZ identiier" from the list.
+    Use the "TZ identifier" from the list.
 
     Usage:
         {prefix}timezone set <timezone>
@@ -269,7 +269,7 @@ def _vcard_value_is_empty(value):
 
 
 def _vcard_should_format_field(field):
-    return field in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL", "NICKNAME",
+    return field in ["FN", "NICKNAME", "BDAY", "TIMEZONE", "URL",
                      "ORG", "NOTE", "EMAIL"]
 
 

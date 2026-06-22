@@ -19,6 +19,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * Room management with persistent autojoin rooms and per-room plugin toggles
 * User registration, hardened role management, last-seen tracking and nickname lookup
 * Safe runtime config inspection, validation and reload commands
+* Built-in version command and optional GitHub release update checks
 * SQLite-backed persistence with online status checks, audit log and documented offline maintenance
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
 * RSS/Atom feed watcher for room announcements
@@ -95,6 +96,19 @@ Runtime-safe configuration checks are available through:
 
 Secrets such as passwords and API keys are redacted in bot output.
 
+Optional release update checks can be enabled with:
+
+```json
+{
+  "version_check_enabled": true,
+  "version_check_interval": 3600,
+  "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
+  "version_check_notify_jid": "admin@example.org"
+}
+```
+
+When `version_check_notify_jid` is empty, automatic update notifications are sent to the configured `owner` JID. Manual checks through `,checkupdate` work even when the periodic worker is disabled.
+
 ---
 
 ## vCard and Avatar
@@ -125,6 +139,8 @@ Examples assume the default command prefix `,`.
 | `,help <plugin>` | Show focused help for one plugin |
 | `,help <command>` | Show focused help for one command |
 | `,bot status [full]` / `,status [full]` | Show compact or detailed bot, runtime, XMPP, plugin and database status |
+| `,bot version` / `,version` | Show the running bot version and latest checked release |
+| `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
 | `,config show [all/page/last]` | Show redacted runtime configuration |
 | `,config validate` | Validate `config.json` |
 | `,config reload` | Reload runtime-safe configuration |

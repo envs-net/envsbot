@@ -35,5 +35,11 @@
   "reminder_max_age_days": 365,
   "_comment102": "rss feeds config",
   "rss_global_query_interval": 1200,
-  "max_new_feed_entries": 5
+  "max_new_feed_entries": 5,
+
+  "_comment103": "Release update check. When enabled, the bot periodically checks the latest GitHub release and can notify version_check_notify_jid or owner.",
+  "version_check_enabled": false,
+  "version_check_interval": 3600,
+  "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
+  "version_check_notify_jid": ""
 }

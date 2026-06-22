@@ -11,6 +11,8 @@ This directory contains the operator and command documentation for EnvsBot.
 Operational notes:
 
 - `,status full` includes supervised background-task state.
+- `,version` shows the running EnvsBot version and the latest checked release.
+- `,checkupdate` / `,updatecheck` performs a manual GitHub release check.
 - `,audit last` shows recent administrative changes such as role updates, room changes, plugin reloads and config reloads.
 - Role changes are guarded so the configured owner and superadmins cannot be modified by lower roles.
 

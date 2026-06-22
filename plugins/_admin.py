@@ -29,6 +29,9 @@ from plugins._core import JOINED_ROOMS
 from utils.command import COMMANDS, Role, command
 from utils.config import config
 from utils.audit import audit_event
+from utils.task_supervisor import create_plugin_task
+from utils.updatecheck import check_for_updates_once, version_check_worker
+from utils.version import __version__, display_version
 
 log = logging.getLogger(__name__)
 
@@ -182,14 +185,19 @@ def _room_occupant_count(room_data: dict) -> int:
 # ------------------------------------------------
 def _core_status_lines(bot) -> list[str]:
     """Return core bot status lines."""
-    return [
-        f"Version: {getattr(bot, 'version', 'unknown')}",
+    lines = [
+        f"Version: {display_version(getattr(bot, 'version', __version__))}",
         f"JID: {getattr(bot, 'boundjid', 'unknown')}",
         f"Prefix: {_safe_config_value('prefix', getattr(bot, 'prefix', ','))}",
         _bot_uptime_line(),
         _connection_line(bot),
         f"Presence: {_format_presence(bot)}",
     ]
+
+    latest = getattr(bot, "last_version_check_result", None)
+    if latest:
+        lines.append(f"Latest release: {display_version(latest)}")
+    return lines
 
 
 def _runtime_status_lines() -> list[str]:
@@ -505,6 +513,72 @@ async def bot_shutdown(bot, sender, nick, args, msg, is_room):
     subprocess.run(stop_cmd)
 
 
+@command("bot version", role=Role.USER, aliases=["version"])
+async def bot_version(bot, sender, nick, args, msg, is_room):
+    """Show local and latest release version information.
+
+    Usage:
+        {prefix}bot version
+        {prefix}version
+    """
+    latest = getattr(bot, "last_version_check_result", None)
+    enabled = bool(config.get("version_check_enabled", False))
+    release_url = config.get(
+        "version_check_url",
+        "https://github.com/envs-net/envsbot/releases/latest",
+    )
+
+    lines = [
+        "🏷️ EnvsBot Version",
+        "",
+        f"Current: {display_version(getattr(bot, 'version', __version__))}",
+        f"Latest release: {display_version(latest) if latest else 'unknown'}",
+        f"Update check: {'enabled' if enabled else 'disabled'}",
+        f"Release page: {release_url}",
+    ]
+    bot.reply(msg, lines, no_store=False)
+
+
+@command(
+    "bot checkupdate",
+    role=Role.ADMIN,
+    aliases=["checkupdate", "updatecheck", "bot updatecheck"],
+)
+async def bot_checkupdate(bot, sender, nick, args, msg, is_room):
+    """Check whether a newer EnvsBot release is available.
+
+    Usage:
+        {prefix}bot checkupdate
+        {prefix}checkupdate
+        {prefix}updatecheck
+    """
+    available, remote_version, error = await check_for_updates_once(
+        bot, announce=False, require_enabled=False
+    )
+    if error:
+        bot.reply_warn(msg, f"Update check failed: {error}")
+        return
+
+    current = display_version(getattr(bot, "version", __version__))
+    remote = display_version(remote_version)
+    release_url = config.get(
+        "version_check_url",
+        "https://github.com/envs-net/envsbot/releases/latest",
+    )
+    if available:
+        bot.reply(msg, [
+            f"⬆️ New EnvsBot version available: {remote}",
+            f"Current version: {current}",
+            f"Release page: {release_url}",
+        ], no_store=False)
+    else:
+        bot.reply_ok(
+            msg,
+            f"EnvsBot is up to date ({current}; latest: {remote}).",
+            no_store=False,
+        )
+
+
 @command("bot status", role=Role.ADMIN, aliases=["bot info", "status"])
 async def bot_status(bot, sender, nick, args, msg, is_room):
     """
@@ -539,3 +613,19 @@ async def on_load(bot):
     """Initialize admin plugin."""
     set_bot_start_time(bot)
     log.info("[ADMIN] Admin plugin loaded")
+
+
+async def on_ready(bot):
+    """Start optional admin background workers."""
+    if not config.get("version_check_enabled", False):
+        return
+    existing = getattr(bot, "version_check_task", None)
+    if existing is not None and not existing.done():
+        return
+    bot.version_check_task = create_plugin_task(
+        bot,
+        "_admin",
+        version_check_worker(bot),
+        name="version-check",
+    )
+    log.info("[ADMIN] Version check worker started")

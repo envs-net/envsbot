@@ -13,6 +13,7 @@ from utils.presence_manager import PresenceManager
 from utils.plugin_manager import PluginManager
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.task_supervisor import TaskSupervisor
+from utils.version import __version__
 from utils.config import (
     ConfigError,
     config,
@@ -47,7 +48,9 @@ class Bot(slixmpp.ClientXMPP):
         self.nick = config.get("nick", "bot")
         self.admins = []
         self.prefix = config.get("prefix", ",")
-        self.version = get_latest_git_tag() or "unknown"
+        self.version = __version__
+        self.last_version_check_result = None
+        self.last_update_notified_version = None
         self.connection_start_time = None
         self.tasks = TaskSupervisor()
 

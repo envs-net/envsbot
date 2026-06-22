@@ -15,6 +15,9 @@ DEFAULT_CONFIG = {
     "prefix": ",",
     "loglevel": "INFO",
     "db": "bot.db",
+    "version_check_enabled": False,
+    "version_check_interval": 3600,
+    "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
 }
 
 REQUIRED_CONFIG_KEYS = {
@@ -37,6 +40,10 @@ OPTIONAL_CONFIG_TYPES = {
     "port": int,
     "rss_global_query_interval": int,
     "max_new_feed_entries": int,
+    "version_check_enabled": bool,
+    "version_check_interval": int,
+    "version_check_url": str,
+    "version_check_notify_jid": str,
 }
 
 
@@ -92,6 +99,11 @@ def _validate_numeric_ranges(cfg, errors):
         value = cfg["port"]
         if isinstance(value, int) and not (1 <= value <= 65535):
             errors.append("port: must be between 1 and 65535")
+
+    if "version_check_interval" in cfg:
+        value = cfg["version_check_interval"]
+        if isinstance(value, int) and value < 60:
+            errors.append("version_check_interval: must be at least 60")
 
 
 def _validate_timezone(cfg, errors):
@@ -171,7 +183,12 @@ def check_optional_keys(cfg):
         value = cfg[key]
 
         if expected_type is str:
-            _validate_string(value, key, errors)
+            _validate_string(
+                value,
+                key,
+                errors,
+                allow_empty=key == "version_check_notify_jid",
+            )
         elif not isinstance(value, expected_type):
             errors.append(
                 f"{key}: expected {expected_type.__name__}, "
@@ -239,6 +256,14 @@ def validate_config(cfg, require_required_keys=False):
     _validate_timezone(cfg, errors)
     _validate_avatar(cfg, errors, warnings)
     _validate_numeric_ranges(cfg, errors)
+
+    if cfg.get("version_check_enabled") and not str(
+        cfg.get("version_check_url", "")
+    ).strip():
+        errors.append(
+            "version_check_url: must not be empty "
+            "when version_check_enabled is true"
+        )
 
     if errors:
         raise ConfigError(

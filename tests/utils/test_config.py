@@ -466,3 +466,12 @@ def test_validate_startup_config_prints_avatar_warnings(tmp_path, monkeypatch,
 
     captured = capsys.readouterr()
     assert "[CONFIG] Warning: avatar: file does not exist" in captured.err
+
+
+def test_validate_config_accepts_empty_version_check_notify_jid():
+    config_mod.validate_config({"version_check_notify_jid": ""})
+
+
+def test_validate_config_rejects_too_short_version_check_interval():
+    with pytest.raises(config_mod.ConfigError, match="version_check_interval"):
+        config_mod.validate_config({"version_check_interval": 30})

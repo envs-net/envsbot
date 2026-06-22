@@ -74,6 +74,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | --- | --- | --- | --- |
 | `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
 | `,audit user` | `admin` | `private recommended` | Show recent audit events for one actor JID. |
+| `,bot checkupdate` | `admin` | `private chat / MUC PM` | Check whether a newer EnvsBot release is available. |
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
 | `,bot status` | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
@@ -86,6 +87,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
+| `,bot version` | `user` | `any` | Show the running EnvsBot version and latest checked release. |
 | `,help` | `none` | `any` | Show help for plugins and commands. |
 | `,help inroom` | `user` | `room or MUC PM` | Enable, disable or show room help availability. |
 | `,plugin info` | `admin` | `private chat / MUC PM` | Show metadata for one plugin. |
@@ -212,6 +214,23 @@ Category: `core`
 
 Bot administration commands
 
+#### `,bot checkupdate`
+
+Check whether a newer EnvsBot release is available.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,bot checkupdate`
+
+Aliases: `,bot updatecheck`, `,checkupdate`, `,updatecheck`
+
+Examples:
+
+- `,bot checkupdate`
+- `,checkupdate`
+- `,updatecheck`
+
 #### `,bot restart`
 
 Restart the bot process gracefully.
@@ -258,6 +277,22 @@ Examples:
 - `,bot status`
 - `,status`
 - `,bot status full`
+
+#### `,bot version`
+
+Show the running EnvsBot version and latest checked release.
+
+Role: `user`  
+Context: `any`  
+Category: `core`  
+Usage: `,bot version`
+
+Aliases: `,version`
+
+Examples:
+
+- `,bot version`
+- `,version`
 
 ### audit
 

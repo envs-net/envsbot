@@ -48,6 +48,19 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "context": "private chat / MUC PM",
         "category": "admin",
     },
+    "bot version": {
+        "short": "Show the running EnvsBot version and latest checked release.",
+        "usage": "{prefix}bot version",
+        "examples": ["{prefix}bot version", "{prefix}version"],
+        "category": "core",
+    },
+    "bot checkupdate": {
+        "short": "Check whether a newer EnvsBot release is available.",
+        "usage": "{prefix}bot checkupdate",
+        "examples": ["{prefix}bot checkupdate", "{prefix}checkupdate", "{prefix}updatecheck"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
     "config show": {
         "short": "Show the effective config with secrets redacted.",
         "usage": "{prefix}config show [all|page|last]",
