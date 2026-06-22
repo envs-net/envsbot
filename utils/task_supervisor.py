@@ -196,15 +196,21 @@ class TaskSupervisor:
         items = []
         for task, meta in tuple(self._tasks.items()):
             if task.done():
-                if not include_done and meta.get("last_error") is None:
+                cancelled = task.cancelled()
+                last_error = meta.get("last_error")
+
+                if not include_done and not cancelled and last_error is None:
                     continue
-                if task.cancelled():
+
+                if cancelled:
                     status = "cancelled"
-                elif meta.get("last_error"):
+                elif last_error:
                     status = "failed"
                 else:
                     status = "done"
             else:
+                cancelled = False
+                last_error = meta.get("last_error")
                 status = "running"
             items.append(
                 TaskInfo(
@@ -213,8 +219,8 @@ class TaskSupervisor:
                     status=status,
                     created_at=meta["created_at"],
                     done_at=meta.get("done_at"),
-                    cancelled=task.cancelled(),
-                    last_error=meta.get("last_error"),
+                    cancelled=cancelled,
+                    last_error=last_error,
                 )
             )
         return sorted(items, key=lambda item: (item.plugin, item.name))

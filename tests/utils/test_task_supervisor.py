@@ -76,3 +76,33 @@ async def test_snapshot_includes_completed_tasks_by_default():
     items = supervisor.snapshot()
     assert len(items) == 1
     assert items[0].status == "done"
+
+@pytest.mark.asyncio
+async def test_snapshot_without_done_keeps_cancelled_and_failed_tasks():
+    supervisor = TaskSupervisor()
+
+    async def quick_success():
+        return "ok"
+
+    async def quick_failure():
+        raise RuntimeError("boom")
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    success_task = supervisor.create("example", quick_success(), name="success")
+    failure_task = supervisor.create("example", quick_failure(), name="failure")
+    cancelled_task = supervisor.create("example", sleeper(), name="cancelled")
+
+    assert await success_task == "ok"
+    with pytest.raises(RuntimeError):
+        await failure_task
+    cancelled_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled_task
+
+    items = supervisor.snapshot(include_done=False)
+    statuses = {item.name: item.status for item in items}
+
+    assert statuses == {"cancelled": "cancelled", "failure": "failed"}
