@@ -629,3 +629,32 @@ def test_config_display_sections_put_unknown_values_in_other():
     sections = config_mod.get_config_display_sections(cfg)
 
     assert sections[-1] == ("Other", [("CUSTOM_FEATURE", True)])
+
+
+def test_get_config_diff_sections_groups_differences_by_sample_sections():
+    current = config_mod.DEFAULT_CONFIG.copy()
+    current.update({
+        "jid": "bot@example.org",
+        "prefix": "!",
+        "ducks": {"spawn_chance": 10, "max_messages": 500},
+    })
+    defaults = config_mod.DEFAULT_CONFIG.copy()
+    defaults.update({
+        "jid": "envsbot@domain.tld",
+        "prefix": ",",
+        "ducks": {"spawn_chance": 20, "max_messages": 500},
+    })
+
+    sections = config_mod.get_config_diff_sections(current, defaults)
+
+    by_title = {title: entries for title, entries in sections}
+    assert ("JID", "bot@example.org", "envsbot@domain.tld") in by_title["XMPP Account"]
+    assert ("COMMAND_PREFIX", "!", ",") in by_title["Bot Runtime"]
+    assert ("DUCKS.spawn_chance", 10, 20) in by_title["Duck Game"]
+    assert all(entry[0] != "DUCKS.max_messages" for entry in by_title["Duck Game"])
+
+
+def test_get_config_diff_sections_returns_empty_for_matching_defaults():
+    cfg = config_mod.DEFAULT_CONFIG.copy()
+
+    assert config_mod.get_config_diff_sections(cfg, cfg.copy()) == []

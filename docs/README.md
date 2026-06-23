@@ -13,6 +13,7 @@ Operational notes:
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
 - Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.
+- `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status full` includes supervised background-task state.
 - `,version` shows the running EnvsBot version and the latest checked release.
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.

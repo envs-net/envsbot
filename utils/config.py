@@ -379,6 +379,86 @@ def get_config_display_sections(cfg: dict) -> list[tuple[str, list[tuple[str, ob
     return sections
 
 
+def _sample_config_path() -> Path:
+    return BASE_DIR / "config_sample.py"
+
+
+def load_default_config_for_diff() -> dict:
+    """Return documented defaults used by ``config diff``.
+
+    ``config_sample.py`` is the operator-facing source of truth for defaults.
+    We merge it onto ``DEFAULT_CONFIG`` so legacy/internal fallback keys still
+    have stable comparison values, then validate only optional types because
+    sample credentials are placeholders by design.
+    """
+    defaults = DEFAULT_CONFIG.copy()
+    sample_path = _sample_config_path()
+    if sample_path.exists():
+        defaults.update(_load_python_config(sample_path))
+    validate_config(defaults, require_required_keys=False)
+    return defaults
+
+
+def _flatten_config_value(name: str, value: object) -> list[tuple[str, object]]:
+    if not isinstance(value, dict):
+        return [(name, value)]
+
+    flattened = []
+    for key in sorted(value):
+        flattened.append((f"{name}.{key}", value[key]))
+    return flattened
+
+
+def get_config_diff_sections(
+    current_cfg: dict | None = None,
+    default_cfg: dict | None = None,
+) -> list[tuple[str, list[tuple[str, object, object]]]]:
+    """Return config values that differ from documented defaults.
+
+    The result mirrors ``get_config_display_sections`` but entries are
+    ``(display_name, current_value, default_value)`` tuples. Nested dictionaries
+    are compared one level deep as dotted keys such as ``DUCKS.spawn_chance``.
+    """
+    current = config if current_cfg is None else current_cfg
+    defaults = load_default_config_for_diff() if default_cfg is None else default_cfg
+    sections = []
+    seen = set()
+
+    for title, python_keys in CONFIG_DISPLAY_SECTIONS:
+        entries = []
+        for python_key in python_keys:
+            normalized_key = PYTHON_CONFIG_KEY_MAP[python_key]
+            if normalized_key not in current:
+                continue
+
+            current_value = current.get(normalized_key)
+            default_value = defaults.get(normalized_key)
+            seen.add(normalized_key)
+
+            current_items = dict(_flatten_config_value(python_key, current_value))
+            default_items = dict(_flatten_config_value(python_key, default_value))
+            for display_name in sorted(set(current_items) | set(default_items)):
+                current_item = current_items.get(display_name)
+                default_item = default_items.get(display_name)
+                if current_item != default_item:
+                    entries.append((display_name, current_item, default_item))
+
+        if entries:
+            sections.append((title, entries))
+
+    extra_entries = []
+    for key in sorted(k for k in current if k not in seen):
+        display_key = _LOWER_TO_PYTHON_CONFIG_KEY.get(key, key.upper())
+        current_value = current.get(key)
+        default_value = defaults.get(key)
+        if current_value != default_value:
+            extra_entries.append((display_key, current_value, default_value))
+    if extra_entries:
+        sections.append(("Other", extra_entries))
+
+    return sections
+
+
 class ConfigError(Exception):
     """Raised when EnvsBot configuration is invalid or incomplete."""
 

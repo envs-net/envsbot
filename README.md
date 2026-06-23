@@ -92,6 +92,7 @@ Runtime-safe configuration checks are available through:
 
 ```text
 ,config show
+,config diff
 ,config validate
 ,config reload
 ```
@@ -142,6 +143,7 @@ Examples assume the default command prefix `,`.
 | `,bot version` / `,version` | Show the running bot version and latest checked release |
 | `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
 | `,config show [all/page/last]` | Show redacted runtime configuration |
+| `,config diff [all/page/last]` | Show values that differ from `config_sample.py` defaults |
 | `,config validate` | Validate `config.py` |
 | `,config reload` | Reload runtime-safe configuration |
 | `,backup` / `,backup create [reason]` | Create a managed ZIP backup |

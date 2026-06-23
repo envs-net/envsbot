@@ -11,6 +11,7 @@ from utils.config import (
     load_config,
     validate_config,
     get_config_display_sections,
+    get_config_diff_sections,
 )
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
@@ -39,6 +40,12 @@ def _redact(value):
     if isinstance(value, list):
         return [_redact(v) for v in value]
     return value
+
+
+def _redact_named(name: str, value):
+    if _is_secret_key(name):
+        return "<redacted>"
+    return _redact(value)
 
 
 def _render_value(value) -> str:
@@ -78,6 +85,26 @@ def _format_config_lines(cfg: dict) -> list[str]:
     return lines
 
 
+def _format_diff_lines(cfg: dict) -> list[str]:
+    sections = get_config_diff_sections(cfg)
+    if not sections:
+        return ["No config differences from config_sample.py defaults."]
+
+    lines = []
+    for section_title, entries in sections:
+        if lines:
+            lines.append("")
+        lines.append(f"{section_title}:")
+        for name, current_value, default_value in entries:
+            current_display = _render_value(_redact_named(name, current_value))
+            default_display = _render_value(_redact_named(name, default_value))
+            lines.append(
+                f"• {name} = {current_display} "
+                f"(default: {default_display})"
+            )
+    return lines
+
+
 @command("config show", role=Role.ADMIN, aliases=["config"])
 async def config_show(bot, sender, nick, args, msg, is_room):
     """Show the effective config with secrets redacted."""
@@ -90,6 +117,22 @@ async def config_show(bot, sender, nick, args, msg, is_room):
             page_request=page,
             page_size=24,
             command_hint=f"{bot.prefix}config show",
+        ),
+    )
+
+
+@command("config diff", role=Role.ADMIN)
+async def config_diff(bot, sender, nick, args, msg, is_room):
+    """Show config values that differ from config_sample.py defaults."""
+    page = parse_page_args(args)
+    bot.reply(
+        msg,
+        format_page(
+            "⚙️ Config differences",
+            _format_diff_lines(config),
+            page_request=page,
+            page_size=24,
+            command_hint=f"{bot.prefix}config diff",
         ),
     )
 

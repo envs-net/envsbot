@@ -82,6 +82,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
 | `,bot status` | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
+| `,config diff` | `admin` | `private chat / MUC PM` | Show config values that differ from config_sample.py defaults. |
 | `,config reload` | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
@@ -426,6 +427,20 @@ Examples:
 Category: `core`
 
 Safe config inspection, validation and reload commands.
+
+#### `,config diff`
+
+Show config values that differ from config_sample.py defaults.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,config diff [all|page|last]`
+
+Examples:
+
+- `,config diff`
+- `,config diff all`
 
 #### `,config reload`
 

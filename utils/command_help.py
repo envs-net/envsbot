@@ -97,6 +97,13 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "context": "private chat / MUC PM",
         "category": "admin",
     },
+    "config diff": {
+        "short": "Show config values that differ from config_sample.py defaults.",
+        "usage": "{prefix}config diff [all|page|last]",
+        "examples": ["{prefix}config diff", "{prefix}config diff all"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
     "config validate": {
         "short": "Validate the current config.py file.",
         "usage": "{prefix}config validate",
