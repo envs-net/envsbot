@@ -574,3 +574,39 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     assert "karma_delay_seconds: must be greater than 0" in msg
     assert "tell_delivery_delay_seconds: must be greater than 0" in msg
     assert "xkcd_index_request_delay_seconds: must be greater than 0" in msg
+
+
+def test_config_display_sections_follow_sample_order_and_names():
+    cfg = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "nick": "EnvsBot",
+        "owner": "owner@example.org",
+        "prefix": ",",
+        "db": "bot.db",
+        "urlcheck_wait_seconds": 120,
+        "ducks": {"spawn_chance": 20},
+    }
+
+    sections = config_mod.get_config_display_sections(cfg)
+
+    assert sections[0] == (
+        "XMPP Account",
+        [
+            ("JID", "bot@example.org"),
+            ("PASSWORD", "secret"),
+            ("NICK", "EnvsBot"),
+            ("OWNER", "owner@example.org"),
+        ],
+    )
+    assert ("Bot Runtime", [("COMMAND_PREFIX", ","), ("DB_FILE", "bot.db")]) in sections
+    assert ("URL Check", [("URLCHECK_WAIT_SECONDS", 120)]) in sections
+    assert ("Duck Game", [("DUCKS", {"spawn_chance": 20})]) in sections
+
+
+def test_config_display_sections_put_unknown_values_in_other():
+    cfg = {"prefix": ",", "custom_feature": True}
+
+    sections = config_mod.get_config_display_sections(cfg)
+
+    assert sections[-1] == ("Other", [("CUSTOM_FEATURE", True)])

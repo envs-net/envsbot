@@ -215,6 +215,156 @@ CONFIG_KEYS = (
     | set(PYTHON_CONFIG_KEY_MAP.values())
 )
 
+CONFIG_DISPLAY_SECTIONS = (
+    (
+        "XMPP Account",
+        ("JID", "PASSWORD", "NICK", "OWNER", "ADMINS"),
+    ),
+    (
+        "Connection",
+        ("CONNECT_HOST", "CONNECT_PORT", "XMPP_QUERY_TIMEOUT_SECONDS"),
+    ),
+    (
+        "Bot Runtime",
+        (
+            "LOG_LEVEL",
+            "COMMAND_PREFIX",
+            "TIMEZONE",
+            "DB_FILE",
+            "RESTART_NOTIFICATION_FILE",
+            "STOP_CMD",
+        ),
+    ),
+    (
+        "HTTP Defaults",
+        ("HTTP_TIMEOUT_SECONDS", "HTTP_USER_AGENT"),
+    ),
+    (
+        "vCard / Avatar",
+        ("AVATAR_PATH", "AVATAR_TYPE", "VCARD_FETCH_TIMEOUT_SECONDS"),
+    ),
+    (
+        "Release Update Check",
+        (
+            "VERSION_CHECK_ENABLED",
+            "VERSION_CHECK_INTERVAL",
+            "VERSION_CHECK_URL",
+            "VERSION_CHECK_NOTIFY_JID",
+            "UPDATECHECK_TIMEOUT_SECONDS",
+        ),
+    ),
+    (
+        "URL Check",
+        (
+            "URLCHECK_WAIT_SECONDS",
+            "URLCHECK_FETCH_TIMEOUT_SECONDS",
+            "URLCHECK_MAX_REDIRECTS",
+            "URLCHECK_MAX_READ_BYTES",
+            "URLCHECK_USER_AGENT",
+            "YOUTUBE_API_KEY",
+        ),
+    ),
+    (
+        "RSS / Atom",
+        (
+            "RSS_GLOBAL_QUERY_INTERVAL",
+            "MAX_NEW_FEED_ENTRIES",
+            "RSS_MAX_BACKOFF_TIME",
+            "RSS_BACKOFF_INCREMENT_MULTIPLIER",
+            "RSS_SIMILARITY_THRESHOLD",
+            "RSS_USER_AGENT",
+        ),
+    ),
+    (
+        "Birthday Notify",
+        (
+            "BIRTHDAY_CACHE_TTL_SECONDS",
+            "BIRTHDAY_INITIAL_SCAN_DELAY_SECONDS",
+            "BIRTHDAY_CHECK_INTERVAL_SECONDS",
+        ),
+    ),
+    (
+        "Reminders",
+        ("REMINDER_ENABLED", "REMINDER_MAX_AGE_DAYS"),
+    ),
+    (
+        "Duck Game",
+        ("DUCKS",),
+    ),
+    (
+        "User Tracking",
+        ("USERS",),
+    ),
+    (
+        "Sed Corrections",
+        (
+            "SED_REGEX_TIMEOUT",
+            "SED_MAX_PATTERN_LENGTH",
+            "SED_MAX_REPLACEMENT_LENGTH",
+            "SED_MAX_INPUT_LENGTH",
+            "SED_MAX_OUTPUT_LENGTH",
+            "SED_CACHE_SIZE",
+        ),
+    ),
+    (
+        "Polls",
+        (
+            "POLL_MAX_OPTIONS",
+            "POLL_MAX_QUESTION_LEN",
+            "POLL_MAX_OPTION_LEN",
+            "POLL_MAX_HISTORY_PER_ROOM",
+        ),
+    ),
+    (
+        "Pins",
+        ("PIN_PAGE_SIZE", "PIN_RECENT_CACHE_SIZE"),
+    ),
+    (
+        "Karma / Tell",
+        ("KARMA_DELAY_SECONDS", "TELL_DELIVERY_DELAY_SECONDS"),
+    ),
+    (
+        "XKCD",
+        (
+            "XKCD_CHECK_INTERVAL",
+            "XKCD_INDEX_START_DELAY_SECONDS",
+            "XKCD_INDEX_REQUEST_DELAY_SECONDS",
+            "XKCD_HTTP_TIMEOUT",
+        ),
+    ),
+)
+
+_LOWER_TO_PYTHON_CONFIG_KEY = {
+    normalized_key: python_key
+    for python_key, normalized_key in PYTHON_CONFIG_KEY_MAP.items()
+}
+
+
+def get_config_display_sections(cfg: dict) -> list[tuple[str, list[tuple[str, object]]]]:
+    """Return config items grouped like config_sample.py for bot output."""
+    seen = set()
+    sections = []
+
+    for title, python_keys in CONFIG_DISPLAY_SECTIONS:
+        entries = []
+        for python_key in python_keys:
+            normalized_key = PYTHON_CONFIG_KEY_MAP[python_key]
+            if normalized_key not in cfg:
+                continue
+            entries.append((python_key, cfg[normalized_key]))
+            seen.add(normalized_key)
+        if entries:
+            sections.append((title, entries))
+
+    extra_entries = []
+    for key in sorted(k for k in cfg if k not in seen):
+        display_key = _LOWER_TO_PYTHON_CONFIG_KEY.get(key, key.upper())
+        extra_entries.append((display_key, cfg[key]))
+    if extra_entries:
+        sections.append(("Other", extra_entries))
+
+    return sections
+
 
 class ConfigError(Exception):
     """Raised when EnvsBot configuration is invalid or incomplete."""

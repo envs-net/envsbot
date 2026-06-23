@@ -62,7 +62,7 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "admin",
     },
     "config show": {
-        "short": "Show the effective config with secrets redacted.",
+        "short": "Show the effective config grouped like config_sample.py, with secrets redacted.",
         "usage": "{prefix}config show [all|page|last]",
         "examples": ["{prefix}config show", "{prefix}config show all"],
         "context": "private chat / MUC PM",
