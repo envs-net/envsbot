@@ -260,7 +260,7 @@ Adjust paths, user and group for your installation.
 
 ## Backups and Restore
 
-Managed backups are ZIP archives stored below `data/backups` by default. They include:
+Managed backups are ZIP archives stored below `data/backups` by default. When `BACKUP_ON_START = True`, the bot creates one startup backup per process start; this also covers service restarts. Archives include:
 
 * `bot.db`
 * `config.py`

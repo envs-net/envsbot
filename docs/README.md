@@ -11,7 +11,7 @@ This directory contains the operator and command documentation for EnvsBot.
 Operational notes:
 
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
-- Managed backups live in `data/backups` by default; see `README.md` and `maintenance.md`.
+- Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
 - Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.
 - `,status full` includes supervised background-task state.
 - `,version` shows the running EnvsBot version and the latest checked release.

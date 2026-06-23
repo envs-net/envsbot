@@ -63,6 +63,10 @@ BACKUP_DIR = "data/backups"
 # Keep this many managed backup archives after creating a new one.
 BACKUP_KEEP = 15
 
+# Create a managed backup once during each bot process start. This also covers
+# service restarts, because a restart starts a fresh bot process.
+BACKUP_ON_START = True
+
 
 # ================= HTTP DEFAULTS =================
 

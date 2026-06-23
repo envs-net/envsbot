@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
     "restart_notification_file": "/tmp/envsbot_restart_notification.json",
     "backup_dir": "data/backups",
     "backup_keep": 15,
+    "backup_on_start": True,
     "http_timeout_seconds": 8,
     "http_user_agent": "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)",
     "xmpp_query_timeout_seconds": 8,
@@ -93,6 +94,7 @@ OPTIONAL_CONFIG_TYPES = {
     "restart_notification_file": str,
     "backup_dir": str,
     "backup_keep": int,
+    "backup_on_start": bool,
     "stop_cmd": list,
     "admins": list,
     "avatar": str,
@@ -160,6 +162,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "RESTART_NOTIFICATION_FILE": "restart_notification_file",
     "BACKUP_DIR": "backup_dir",
     "BACKUP_KEEP": "backup_keep",
+    "BACKUP_ON_START": "backup_on_start",
     "STOP_CMD": "stop_cmd",
     "AVATAR_PATH": "avatar",
     "AVATAR_TYPE": "avatar_type",
@@ -243,7 +246,7 @@ CONFIG_DISPLAY_SECTIONS = (
     ),
     (
         "Backups",
-        ("BACKUP_DIR", "BACKUP_KEEP"),
+        ("BACKUP_DIR", "BACKUP_KEEP", "BACKUP_ON_START"),
     ),
     (
         "HTTP Defaults",

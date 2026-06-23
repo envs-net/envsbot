@@ -391,3 +391,35 @@ def test_main_copy_behavior(monkeypatch, tmp_path):
             " Skipping copy.")
 
     assert called.get("info") or called.get("warning") or called.get("error")
+
+
+@pytest.mark.asyncio
+async def test_startup_backup_created_once(monkeypatch, bot):
+    from pathlib import Path
+    import utils.audit as audit_mod
+    import utils.backups as backups_mod
+
+    create_backup = AsyncMock(return_value=Path("envsbot-backup-startup.zip"))
+    audit_event = AsyncMock()
+    monkeypatch.setattr(backups_mod, "create_backup", create_backup)
+    monkeypatch.setattr(audit_mod, "audit_event", audit_event)
+    monkeypatch.setitem(envsbot.config, "backup_on_start", True)
+
+    await bot._create_startup_backup()
+    await bot._create_startup_backup()
+
+    create_backup.assert_awaited_once_with(bot, reason="startup")
+    audit_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_startup_backup_can_be_disabled(monkeypatch, bot):
+    import utils.backups as backups_mod
+
+    create_backup = AsyncMock()
+    monkeypatch.setattr(backups_mod, "create_backup", create_backup)
+    monkeypatch.setitem(envsbot.config, "backup_on_start", False)
+
+    await bot._create_startup_backup()
+
+    create_backup.assert_not_called()

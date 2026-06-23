@@ -39,8 +39,10 @@ Use the built-in backup commands for normal operational snapshots:
 ```
 
 Managed archives are written to `BACKUP_DIR`, which defaults to `data/backups`.
-Each archive contains `bot.db`, `config.py`, `vcard.py`, `chat_slang.csv` and a
-`manifest.json` when those files exist. Restore is owner-only and creates a
+When `BACKUP_ON_START = True`, envsbot creates one startup backup per process
+start; this also covers service restarts. Each archive contains `bot.db`,
+`config.py`, `vcard.py`, `chat_slang.csv` and a `manifest.json` when those
+files exist. Restore is owner-only and creates a
 safety backup before overwriting files. Restart envsbot after restoring
 `config.py` or `vcard.py` changes.
 

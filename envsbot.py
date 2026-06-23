@@ -53,6 +53,7 @@ class Bot(slixmpp.ClientXMPP):
         self.last_update_notified_version = None
         self.connection_start_time = None
         self.tasks = TaskSupervisor()
+        self._startup_backup_done = False
 
         # Rate limiter (in-memory, per process)
         # capacity=4, refill 1 token every 0.5s
@@ -142,6 +143,36 @@ class Bot(slixmpp.ClientXMPP):
         except Exception as e:
             log.error("[ADMIN] Failed to process restart notification: %s", e)
 
+
+    async def _create_startup_backup(self):
+        """Create one optional managed backup during this bot process start."""
+        if self._startup_backup_done:
+            return
+        self._startup_backup_done = True
+
+        if not config.get("backup_on_start", True):
+            log.info("[BACKUP] Startup backup disabled by config")
+            return
+
+        try:
+            from utils.audit import audit_event
+            from utils.backups import create_backup
+
+            archive = await create_backup(self, reason="startup")
+            log.info("[BACKUP] Startup backup created: %s", archive.name)
+            await audit_event(
+                self,
+                "backup_created",
+                actor="system",
+                target=archive.name,
+                details={"reason": "startup", "automatic": True},
+            )
+        except Exception:
+            # Backups are important, but a failed backup must not prevent the bot
+            # from joining rooms after a service restart. Operators still get a
+            # clear log entry at ERROR level.
+            log.exception("[BACKUP] Startup backup failed")
+
     async def _safe_send_message(self, message):
         """
         Safely send a message with proper error handling.
@@ -183,6 +214,9 @@ class Bot(slixmpp.ClientXMPP):
 
         # === CALL on_ready() HOOKS (after DB is ready) ===
         await self.bot_plugins.call_on_ready()
+
+        # Create an optional startup backup after DB/plugins are ready.
+        await self._create_startup_backup()
 
         # Check for restart notification (after everything is initialized)
         await self._send_restart_notification()

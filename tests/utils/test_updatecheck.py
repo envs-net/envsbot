@@ -121,7 +121,7 @@ async def test_check_for_updates_once_manual_bypasses_disabled(monkeypatch):
     monkeypatch.setattr(
         updatecheck,
         "fetch_latest_release_version_sync",
-        lambda url: "1.3.0",
+        lambda url: updatecheck.normalized_version(),
     )
 
     available, remote, error = await updatecheck.check_for_updates_once(
@@ -129,5 +129,5 @@ async def test_check_for_updates_once_manual_bypasses_disabled(monkeypatch):
     )
 
     assert available is False
-    assert remote == "1.3.0"
+    assert remote == updatecheck.normalized_version()
     assert error is None
