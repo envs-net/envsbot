@@ -584,7 +584,7 @@ def _validate_string(value, key, errors, allow_empty=False):
 
 
 def _validate_jid(value, key, errors):
-    """Validate a config value as a user JID with localpart and domain."""
+    """Validate a config value as a user JID with username and domain."""
     if not isinstance(value, str) or not value.strip():
         errors.append(f"{key}: must be a non-empty JID string")
         return
@@ -597,7 +597,7 @@ def _validate_jid(value, key, errors):
 
     if not jid.user or not jid.domain:
         errors.append(
-            f"{key}: must include localpart and domain, e.g. user@example.org")
+            f"{key}: must include username and domain, e.g. user@example.org")
 
 
 def _validate_numeric_ranges(cfg, errors):

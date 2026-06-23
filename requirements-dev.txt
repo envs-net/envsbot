@@ -21,3 +21,6 @@ slixmpp>=1.8
 
 # ---- For plugin/plugin_manager module development (optional) ----
 importlib-metadata>=6.0 ; python_version<"3.8"
+
+# ---- Mutation testing ----
+mutmut>=3.0

@@ -78,6 +78,15 @@ def create_plugin_task(bot, plugin: str, coro: Awaitable, *, name: str | None = 
 
     The fallback keeps unit-test doubles and small plugin tests simple while
     production bots still get supervised lifecycle handling.
+
+    Args:
+        bot: Bot-like object that may expose ``bot_plugins.create_task``.
+        plugin: Plugin identifier used for task supervision.
+        coro: Awaitable to schedule as an asyncio task.
+        name: Optional task name forwarded to the task creator when supported.
+
+    Returns:
+        The created asyncio task.
     """
     manager = getattr(bot, "bot_plugins", None)
     creator = getattr(manager, "create_task", None)
@@ -121,12 +130,14 @@ class TaskSupervisor:
     def _on_task_done(self, task: asyncio.Task) -> None:
         meta = self._tasks.get(task)
         if not meta:
+            log.debug(
+                "[TASKS] Done callback for untracked task; metadata missing: %r",
+                task,
+            )
             return
         meta["done_at"] = _now()
         plugin = meta["plugin"]
         self._by_plugin.get(plugin, set()).discard(task)
-        if not task.done():
-            return
         if task.cancelled():
             return
 

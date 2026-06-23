@@ -47,9 +47,25 @@ def _coerce_feature_flag(value: Any, fallback: bool = False) -> bool:
         return fallback
     return bool(value)
 
-def available_features() -> list[str]:
+
+def _plugin_store_config() -> dict[str, dict[str, Any]]:
     rooms = _rooms_module()
-    return sorted(rooms.PLUGIN_STORE_CONFIG)
+    config = getattr(rooms, "PLUGIN_STORE_CONFIG", None)
+    if not isinstance(config, dict):
+        return {}
+    return config
+
+
+def _plugin_defaults() -> dict[str, bool]:
+    rooms = _rooms_module()
+    defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
+    if not isinstance(defaults, dict):
+        return {}
+    return defaults
+
+
+def available_features() -> list[str]:
+    return sorted(_plugin_store_config())
 
 
 def is_known_feature(plugin: str) -> bool:
@@ -57,9 +73,11 @@ def is_known_feature(plugin: str) -> bool:
 
 
 async def _state_for(bot: Any, room_jid: str, plugin: str) -> RoomFeatureState:
-    rooms = _rooms_module()
     plugin = _normalize_plugin_name(plugin)
-    conf = rooms.PLUGIN_STORE_CONFIG[plugin]
+    config = _plugin_store_config()
+    if plugin not in config:
+        raise KeyError(f"Unknown plugin feature: {plugin}")
+    conf = config[plugin]
     typ = conf["type"]
     if typ != "dict":
         raise ValueError(f"Unsupported room feature storage type: {typ}")
@@ -69,7 +87,7 @@ async def _state_for(bot: Any, room_jid: str, plugin: str) -> RoomFeatureState:
     if not isinstance(state, dict):
         state = {}
 
-    default = bool(rooms.PLUGIN_DEFAULTS.get(plugin, False))
+    default = bool(_plugin_defaults().get(plugin, False))
     enabled = _coerce_feature_flag(state.get(room_jid), fallback=default)
     return RoomFeatureState(
         name=plugin,
@@ -87,12 +105,12 @@ async def get_room_feature(bot: Any, room_jid: str, plugin: str) -> RoomFeatureS
 
 
 async def set_room_feature(bot: Any, room_jid: str, plugin: str, enabled: bool) -> RoomFeatureState:
-    rooms = _rooms_module()
     plugin = _normalize_plugin_name(plugin)
-    if plugin not in rooms.PLUGIN_STORE_CONFIG:
-        raise KeyError(plugin)
+    config = _plugin_store_config()
+    if plugin not in config:
+        raise KeyError(f"Unknown plugin feature: {plugin}")
 
-    conf = rooms.PLUGIN_STORE_CONFIG[plugin]
+    conf = config[plugin]
     if conf["type"] != "dict":
         raise ValueError(f"Unsupported room feature storage type: {conf['type']}")
 

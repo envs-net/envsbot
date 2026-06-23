@@ -47,7 +47,7 @@ classifiers = [
 dev = []
 
 [tool.setuptools]
-packages = ["plugins", "database", "utils"]
+packages = ["core_plugins", "plugins", "database", "utils"]
 
 [tool.setuptools.package-dir]
 "" = "."
