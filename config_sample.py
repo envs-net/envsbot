@@ -77,7 +77,7 @@ HTTP_USER_AGENT = "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-ne
 
 # Bot avatar. Set AVATAR_PATH = None to disable avatar publishing.
 # Put your own avatar below data/ and do not overwrite the default repo avatar.
-AVATAR_PATH = "data/avatar.jpg"
+AVATAR_PATH = "avatar.jpg"
 AVATAR_TYPE = "image/jpeg"  # image/jpeg or image/png
 
 # Timeout for vCard fetches made by vcard, weather and birthday helpers.
