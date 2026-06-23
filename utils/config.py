@@ -35,6 +35,8 @@ DEFAULT_CONFIG = {
     "loglevel": "INFO",
     "db": "bot.db",
     "restart_notification_file": "/tmp/envsbot_restart_notification.json",
+    "backup_dir": "data/backups",
+    "backup_keep": 15,
     "http_timeout_seconds": 8,
     "http_user_agent": "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)",
     "xmpp_query_timeout_seconds": 8,
@@ -89,6 +91,8 @@ OPTIONAL_CONFIG_TYPES = {
     "loglevel": str,
     "db": str,
     "restart_notification_file": str,
+    "backup_dir": str,
+    "backup_keep": int,
     "stop_cmd": list,
     "admins": list,
     "avatar": str,
@@ -154,6 +158,8 @@ PYTHON_CONFIG_KEY_MAP = {
     "LOG_LEVEL": "loglevel",
     "DB_FILE": "db",
     "RESTART_NOTIFICATION_FILE": "restart_notification_file",
+    "BACKUP_DIR": "backup_dir",
+    "BACKUP_KEEP": "backup_keep",
     "STOP_CMD": "stop_cmd",
     "AVATAR_PATH": "avatar",
     "AVATAR_TYPE": "avatar_type",
@@ -234,6 +240,10 @@ CONFIG_DISPLAY_SECTIONS = (
             "RESTART_NOTIFICATION_FILE",
             "STOP_CMD",
         ),
+    ),
+    (
+        "Backups",
+        ("BACKUP_DIR", "BACKUP_KEEP"),
     ),
     (
         "HTTP Defaults",
@@ -387,6 +397,27 @@ def _default_config_path() -> Path:
 
 def _legacy_config_path() -> Path:
     return BASE_DIR / LEGACY_CONFIG_FILENAME
+
+
+def get_runtime_config_path() -> Path:
+    """Return the config file path currently used by envsbot.
+
+    ``config.py`` is preferred.  A custom ``ENVSBOT_CONFIG`` path is returned
+    when set.  The legacy JSON path is returned only as a migration fallback.
+    """
+    configured_path = _config_path_from_env()
+    if configured_path is not None:
+        return configured_path
+
+    config_path = _default_config_path()
+    if config_path.exists():
+        return config_path
+
+    legacy_path = _legacy_config_path()
+    if legacy_path.exists():
+        return legacy_path
+
+    return config_path
 
 
 def _format_json_error(error: json.JSONDecodeError, path: Path) -> str:
@@ -547,6 +578,7 @@ def _validate_numeric_ranges(cfg, errors):
         "tell_delivery_delay_seconds",
         "xkcd_check_interval",
         "xkcd_index_start_delay_seconds",
+        "backup_keep",
     }
 
     for key in positive_number_keys:

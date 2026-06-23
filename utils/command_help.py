@@ -61,6 +61,35 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "context": "private chat / MUC PM",
         "category": "admin",
     },
+
+    "backup create": {
+        "short": "Create a managed ZIP backup archive.",
+        "usage": "{prefix}backup [reason]",
+        "examples": ["{prefix}backup", "{prefix}backup before config change"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "backup list": {
+        "short": "List managed backup archives.",
+        "usage": "{prefix}backup list [all|page|last]",
+        "examples": ["{prefix}backup list", "{prefix}backup list all"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "backup show": {
+        "short": "Show manifest details for one managed backup archive.",
+        "usage": "{prefix}backup show <archive|last>",
+        "examples": ["{prefix}backup show last"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "restore": {
+        "short": "Restore a managed backup after explicit confirmation.",
+        "usage": "{prefix}restore <archive|last> confirm",
+        "examples": ["{prefix}restore last confirm"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
     "config show": {
         "short": "Show the effective config grouped like config_sample.py, with secrets redacted.",
         "usage": "{prefix}config show [all|page|last]",

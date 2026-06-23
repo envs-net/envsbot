@@ -54,6 +54,16 @@ RESTART_NOTIFICATION_FILE = "/tmp/envsbot_restart_notification.json"
 STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
 
 
+# ================= BACKUPS =================
+
+# Managed ZIP backups are written here. The default is ignored by git.
+# Archives include bot.db, config.py, vcard.py and chat_slang.csv when present.
+BACKUP_DIR = "data/backups"
+
+# Keep this many managed backup archives after creating a new one.
+BACKUP_KEEP = 15
+
+
 # ================= HTTP DEFAULTS =================
 
 # Generic HTTP timeout and User-Agent used by plugins unless a plugin-specific
@@ -66,7 +76,8 @@ HTTP_USER_AGENT = "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-ne
 # ================= vCARD / AVATAR =================
 
 # Bot avatar. Set AVATAR_PATH = None to disable avatar publishing.
-AVATAR_PATH = "avatar.jpg"
+# Put your own avatar below data/ and do not overwrite the default repo avatar.
+AVATAR_PATH = "data/avatar.jpg"
 AVATAR_TYPE = "image/jpeg"  # image/jpeg or image/png
 
 # Timeout for vCard fetches made by vcard, weather and birthday helpers.

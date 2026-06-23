@@ -20,7 +20,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * User registration, hardened role management, last-seen tracking and nickname lookup
 * Safe runtime config inspection, validation and reload commands
 * Built-in version command and optional GitHub release update checks
-* SQLite-backed persistence with online status checks, audit log and documented offline maintenance
+* SQLite-backed persistence with online status checks, audit log, managed ZIP backups and documented offline maintenance
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
 * RSS/Atom feed watcher for room announcements
 * URL metadata checks for links, files and YouTube videos
@@ -80,7 +80,7 @@ TIMEZONE = "Europe/Berlin"
 DB_FILE = "bot.db"
 STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
 
-AVATAR_PATH = "avatar.jpg"
+AVATAR_PATH = "data/avatar.jpg"
 AVATAR_TYPE = "image/jpeg"
 ```
 
@@ -120,7 +120,7 @@ Copy `vcard_sample.py` to `vcard.py` and adjust the bot profile. EnvsBot can pub
 Avatar-related config keys:
 
 ```python
-AVATAR_PATH = "avatar.jpg"
+AVATAR_PATH = "data/avatar.jpg"
 AVATAR_TYPE = "image/jpeg"
 ```
 
@@ -144,6 +144,10 @@ Examples assume the default command prefix `,`.
 | `,config show [all/page/last]` | Show redacted runtime configuration |
 | `,config validate` | Validate `config.py` |
 | `,config reload` | Reload runtime-safe configuration |
+| `,backup` / `,backup create [reason]` | Create a managed ZIP backup |
+| `,backup list [all/page/last]` | List managed backup archives |
+| `,backup show <archive|last>` | Show backup manifest details |
+| `,restore <archive|last> confirm` | Restore a managed backup after explicit confirmation |
 | `,audit last [limit]` | Show recent administrative audit events |
 | `,audit user <jid>` | Show audit events for one actor |
 | `,db status` | Show SQLite path, size and integrity status |
@@ -178,6 +182,7 @@ Core and administration:
 * `rooms` - room persistence, joining and per-room feature toggles
 * `users` - user registration, roles, admin listings and last-seen tracking
 * `config_cmd` - safe config inspection, validation and reload
+* `backups` - managed ZIP backups and restore commands
 * `audit` - admin audit log viewer
 * `db` - SQLite online status checks
 * `presence` - bot presence/status controls
@@ -252,6 +257,27 @@ journalctl -u envsbot.service -f
 Adjust paths, user and group for your installation.
 
 ---
+
+## Backups and Restore
+
+Managed backups are ZIP archives stored below `data/backups` by default. They include:
+
+* `bot.db`
+* `config.py`
+* `vcard.py`
+* `chat_slang.csv`
+* `manifest.json`
+
+Commands:
+
+```text
+,backup
+,backup list
+,backup show last
+,restore last confirm
+```
+
+Restore is owner-only and creates a safety backup before overwriting files. Restart the bot after restoring `config.py` or `vcard.py` changes. Backup archives contain secrets and should be protected like `config.py`.
 
 ## SQLite Maintenance
 

@@ -25,3 +25,24 @@ For a quick online status check from the bot, use:
 ```text
 ,db status
 ```
+
+
+## Managed ZIP backups
+
+Use the built-in backup commands for normal operational snapshots:
+
+```text
+,backup
+,backup list
+,backup show last
+,restore last confirm
+```
+
+Managed archives are written to `BACKUP_DIR`, which defaults to `data/backups`.
+Each archive contains `bot.db`, `config.py`, `vcard.py`, `chat_slang.csv` and a
+`manifest.json` when those files exist. Restore is owner-only and creates a
+safety backup before overwriting files. Restart envsbot after restoring
+`config.py` or `vcard.py` changes.
+
+Backup archives contain secrets such as the bot password and optional API keys.
+Keep them private and include them in your normal server backup policy.

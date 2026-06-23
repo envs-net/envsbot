@@ -529,6 +529,8 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'KARMA_DELAY_SECONDS = 10',
             'TELL_DELIVERY_DELAY_SECONDS = 2',
             'XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.2',
+            'BACKUP_DIR = "data/backups"',
+            'BACKUP_KEEP = 8',
         ])
     )
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
@@ -546,6 +548,8 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["karma_delay_seconds"] == 10
     assert result["tell_delivery_delay_seconds"] == 2
     assert result["xkcd_index_request_delay_seconds"] == 0.2
+    assert result["backup_dir"] == "data/backups"
+    assert result["backup_keep"] == 8
 
 
 def test_validate_config_rejects_invalid_plugin_tuning_values():
@@ -559,6 +563,7 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
         "karma_delay_seconds": 0,
         "tell_delivery_delay_seconds": 0,
         "xkcd_index_request_delay_seconds": 0,
+        "backup_keep": 0,
     }
 
     with pytest.raises(config_mod.ConfigError) as exc:
@@ -574,6 +579,7 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     assert "karma_delay_seconds: must be greater than 0" in msg
     assert "tell_delivery_delay_seconds: must be greater than 0" in msg
     assert "xkcd_index_request_delay_seconds: must be greater than 0" in msg
+    assert "backup_keep: must be greater than 0" in msg
 
 
 def test_config_display_sections_follow_sample_order_and_names():
@@ -585,6 +591,8 @@ def test_config_display_sections_follow_sample_order_and_names():
         "prefix": ",",
         "db": "bot.db",
         "urlcheck_wait_seconds": 120,
+        "backup_dir": "data/backups",
+        "backup_keep": 15,
         "ducks": {"spawn_chance": 20},
     }
 
@@ -600,6 +608,7 @@ def test_config_display_sections_follow_sample_order_and_names():
         ],
     )
     assert ("Bot Runtime", [("COMMAND_PREFIX", ","), ("DB_FILE", "bot.db")]) in sections
+    assert ("Backups", [("BACKUP_DIR", "data/backups"), ("BACKUP_KEEP", 15)]) in sections
     assert ("URL Check", [("URLCHECK_WAIT_SECONDS", 120)]) in sections
     assert ("Duck Game", [("DUCKS", {"spawn_chance": 20})]) in sections
 

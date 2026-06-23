@@ -41,6 +41,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | --- | --- | --- |
 | `_admin` | `core` | Bot administration commands |
 | `audit` | `core` | Admin audit log viewer |
+| `backups` | `core` | Managed ZIP backups and restore helpers. |
 | `birthday_notify` | `fun` | Automatic birthday notifications in rooms (opt-in per room) |
 | `config_cmd` | `core` | Safe config inspection, validation and reload commands. |
 | `db` | `core` | SQLite status and integrity inspection helpers. |
@@ -74,6 +75,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | --- | --- | --- | --- |
 | `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
 | `,audit user` | `admin` | `private recommended` | Show recent audit events for one actor JID. |
+| `,backup create` | `admin` | `private chat / MUC PM` | Create a managed ZIP backup archive. |
+| `,backup list` | `admin` | `private chat / MUC PM` | List managed backup archives. |
+| `,backup show` | `admin` | `private chat / MUC PM` | Show manifest details for one managed backup archive. |
 | `,bot checkupdate` | `admin` | `private chat / MUC PM` | Check whether a newer EnvsBot release is available. |
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
@@ -82,6 +86,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
 | `,db status` | `admin` | `private chat / MUC PM` | Show SQLite database path, size and integrity status. |
+| `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
 
 ### Core
 
@@ -330,6 +335,72 @@ Aliases: `,audits user`
 Examples:
 
 - `,audit user admin@example.org`
+
+### backups
+
+Category: `core`
+
+Managed ZIP backups and restore helpers.
+
+#### `,backup create`
+
+Create a managed ZIP backup archive.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,backup [reason]`
+
+Aliases: `,backup`
+
+Examples:
+
+- `,backup`
+- `,backup before config change`
+
+#### `,backup list`
+
+List managed backup archives.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,backup list [all|page|last]`
+
+Aliases: `,backup ls`, `,backups`
+
+Examples:
+
+- `,backup list`
+- `,backup list all`
+
+#### `,backup show`
+
+Show manifest details for one managed backup archive.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,backup show <archive|last>`
+
+Examples:
+
+- `,backup show last`
+
+#### `,restore`
+
+Restore a managed backup after explicit confirmation.
+
+Role: `owner`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,restore <archive|last> confirm`
+
+Aliases: `,backup restore`
+
+Examples:
+
+- `,restore last confirm`
 
 ### birthday_notify
 
