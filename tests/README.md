@@ -24,3 +24,15 @@ pytest
 - Use fixtures from `conftest.py` as needed.
 - Place test config (test DB path, temp files) under `tests/`.
 - Async tests: use `async def` with the `pytest.mark.asyncio` marker.
+
+## Mutation testing
+
+Install development requirements and run:
+
+```bash
+PYTHONPATH="$PWD" mutmut run
+mutmut results
+mutmut browse
+```
+
+Mutmut source paths are configured in `pyproject.toml` because the repository uses a flat module plus package-directory layout.

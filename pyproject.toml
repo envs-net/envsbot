@@ -53,6 +53,25 @@ packages = ["core_plugins", "plugins", "database", "utils"]
 "" = "."
 
 
+
+[tool.mutmut]
+# The project uses a flat layout plus package directories, so mutmut cannot
+# reliably auto-detect the code paths. Keep this explicit.
+source_paths = [
+    "envsbot.py",
+    "core_plugins/",
+    "plugins/",
+    "database/",
+    "utils/",
+]
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = ["--no-cov", "-q"]
+also_copy = [
+    "config_sample.py",
+    "vcard_sample.py",
+    "init_chat_slang.csv",
+]
+
 [tool.pytest.ini_options]
 # asyncio_mode = "auto"
 testpaths = ["tests"]

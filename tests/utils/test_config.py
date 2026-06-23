@@ -261,7 +261,6 @@ def test_exit_on_config_error_exits(capsys):
 
 
 def test_setup_logging_creates_log_dir_and_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config_mod, "config", {"loglevel": "WARNING"})
 
     log_dir = tmp_path / "logs"
@@ -272,7 +271,7 @@ def test_setup_logging_creates_log_dir_and_file(tmp_path, monkeypatch):
             f.unlink()
         log_dir.rmdir()
 
-    config_mod.setup_logging()
+    config_mod.setup_logging(log_dir=log_dir)
 
     assert log_dir.is_dir()
     assert log_file.exists()

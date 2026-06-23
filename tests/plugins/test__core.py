@@ -1,7 +1,9 @@
 import pytest
 import asyncio
 import pytz
+from collections import deque
 from types import SimpleNamespace
+from uuid import uuid4
 from core_plugins import _core
 
 
@@ -119,9 +121,23 @@ Not quoted"""
 
 
 def test_remember_stanza_and_eviction():
-    ns = "namespace"
-    assert _core.remember_stanza(ns, "msgid")
-    assert not _core.remember_stanza(ns, "msgid")
+    ns = f"test-remember-{uuid4()}"
+
+    _core._SHARED_PROCESSED_STANZAS.pop(ns, None)
+    _core._SHARED_PROCESSED_STANZA_ORDER[ns] = deque(maxlen=2)
+
+    try:
+        assert _core.remember_stanza(ns, "msgid")
+        assert not _core.remember_stanza(ns, "msgid")
+
+        assert _core.remember_stanza(ns, "msgid-2")
+        assert _core.remember_stanza(ns, "msgid-3")
+
+        # msgid was evicted when msgid-3 was remembered.
+        assert _core.remember_stanza(ns, "msgid")
+    finally:
+        _core._SHARED_PROCESSED_STANZAS.pop(ns, None)
+        _core._SHARED_PROCESSED_STANZA_ORDER.pop(ns, None)
 
 
 def test_format_status_helpers():

@@ -331,6 +331,16 @@ Run without coverage when you only want a quick local check:
 pytest --no-cov -q
 ```
 
+Run mutation tests with mutmut:
+
+```bash
+mutmut run
+mutmut results
+mutmut browse
+```
+
+The mutmut configuration in `pyproject.toml` explicitly lists the flat-layout source paths and disables coverage during mutant test runs.
+
 Drone CI is configured in `.drone.yml`.
 
 ---

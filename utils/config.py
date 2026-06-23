@@ -916,14 +916,17 @@ except ConfigError as e:
     exit_on_config_error(e)
 
 
-def setup_logging():
+def setup_logging(log_dir: Path | str = "logs"):
     """
     Initialize the logging system.
+
+    ``log_dir`` is injectable for tests so mutation tools can keep a stable
+    project working directory while still verifying log-file creation.
     """
     log_level = getattr(logging, config.get(
         "loglevel", "INFO").upper(), logging.INFO)
 
-    log_dir = Path("logs")
+    log_dir = Path(log_dir)
     log_dir.mkdir(exist_ok=True)
 
     log_file = log_dir / "envsbot.log"
