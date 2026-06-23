@@ -28,11 +28,11 @@ import datetime
 import urllib
 from slixmpp.exceptions import IqError
 
-from plugins import _core
+from core_plugins import _core
 
 from utils.command import command, Role
 from utils.config import config
-from plugins.rooms import JOINED_ROOMS
+from core_plugins.rooms import JOINED_ROOMS
 
 VCARD_KEY = "VCARD"
 

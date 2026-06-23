@@ -29,7 +29,7 @@ import aiohttp
 import asyncio
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
         handle_room_toggle_command,
         _is_muc_pm,
         JOINED_ROOMS,

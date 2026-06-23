@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 import plugins.rss as rss
-import plugins.rooms
+import core_plugins.rooms
 
 
 # Patch rss.config for all tests to support both subscript and get
@@ -331,7 +331,7 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
     }
 
     # Key step for your plugin: JOINED_ROOMS is a dict, not set
-    plugins.rooms.JOINED_ROOMS[room] = True
+    core_plugins.rooms.JOINED_ROOMS[room] = True
 
     class Entry(dict):
         def __init__(self, **kwargs):
@@ -391,7 +391,7 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
         # assert bot.flush_count >= 1
     finally:
         # Clean up global to avoid leaking state between tests
-        plugins.rooms.JOINED_ROOMS.pop(room, None)
+        core_plugins.rooms.JOINED_ROOMS.pop(room, None)
 
 
 @pytest.mark.asyncio
@@ -414,7 +414,7 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
         }
     }
 
-    plugins.rooms.JOINED_ROOMS[room] = True
+    core_plugins.rooms.JOINED_ROOMS[room] = True
 
     class Entry(dict):
         def __init__(self, **kwargs):
@@ -481,7 +481,7 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
         assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a2"
         # assert bot.flush_count >= 1
     finally:
-        plugins.rooms.JOINED_ROOMS.pop(room, None)
+        core_plugins.rooms.JOINED_ROOMS.pop(room, None)
 
 
 @pytest.mark.asyncio

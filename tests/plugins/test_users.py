@@ -3,7 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import types
 
-import plugins.users as users_mod  # Always import the tested module
+import core_plugins.users as users_mod  # Always import the tested module
 
 
 @pytest.fixture
@@ -64,8 +64,8 @@ async def test_on_muc_presence_adds_and_tracks_nick(mock_bot, mock_msg):
                 MagicMock(bare="john@foo.bar")},
         "from": MagicMock(),
     }
-    with patch("plugins.users.track_room_nick", new=AsyncMock()) as track, \
-            patch("plugins.users.update_last_seen",
+    with patch("core_plugins.users.track_room_nick", new=AsyncMock()) as track, \
+            patch("core_plugins.users.update_last_seen",
                   new=AsyncMock()) as last_seen:
         await users_mod.on_muc_presence(mock_bot, pres)
         track.assert_awaited()
@@ -80,7 +80,7 @@ async def test_on_groupchat_message_updates_last_seen(mock_bot, mock_msg):
     mock_msg['muc'] = {"room": "room-A", "nick": "Nick"}
     mock_bot.plugin = {"xep_0045": MagicMock(
         get_jid_property=lambda r, n, s: "realjid@x")}
-    with patch("plugins.users.update_last_seen",
+    with patch("core_plugins.users.update_last_seen",
                new=AsyncMock()) as update_last_seen:
         await users_mod.on_groupchat_message(mock_bot, mock_msg)
         update_last_seen.assert_awaited()
@@ -116,7 +116,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
         mock_bot.db.users.get = AsyncMock(
             return_value={"jid": "user1@example.com",
                           "nickname": "N", "role": 4})
-        with patch("plugins.users._send_user_info", new=AsyncMock()) as s_ui:
+        with patch("core_plugins.users._send_user_info", new=AsyncMock()) as s_ui:
             await users_mod.users_info(mock_bot, "sender", "n",
                                        ["user1@example.com"], mock_msg, False)
             s_ui.assert_awaited()
@@ -124,14 +124,14 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
         mock_bot.db.users.get = AsyncMock(
             side_effect=[None, {"jid": "user2@example.com",
                                 "nickname": "M", "role": 4}])
-        with patch("plugins.users.find_users_by_nick_safe",
+        with patch("core_plugins.users.find_users_by_nick_safe",
                    new=AsyncMock(return_value=["user2@example.com"])), \
-                patch("plugins.users._send_user_info",
+                patch("core_plugins.users._send_user_info",
                       new=AsyncMock()) as s_ui:
             await users_mod.users_info(mock_bot, "sender", "n", ["M"],
                                        mock_msg, False)
         # 3. Multiple users match by nick
-        with patch("plugins.users.find_users_by_nick_safe",
+        with patch("core_plugins.users.find_users_by_nick_safe",
                    new=AsyncMock(return_value=["a@e", "b@e"])), \
                 patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n", ["foo"],
@@ -207,7 +207,7 @@ async def test_users_list_shows_users(mock_bot, mock_msg):
 async def test_users_role_permission_logic(mock_bot, mock_msg):
     with patch.object(users_mod, "prefix", ","), \
             patch(
-            "plugins.users.JID",
+            "core_plugins.users.JID",
             new=lambda x:
             types.SimpleNamespace(bare=x if isinstance(x, str) else str(x))):
         mock_bot.db.users.get = AsyncMock(

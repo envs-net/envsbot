@@ -37,7 +37,7 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     _is_muc_pm,
     _is_enabled_for_room,
     handle_room_toggle_command,

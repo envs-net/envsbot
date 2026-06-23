@@ -1,4 +1,4 @@
-# plugins/core.py
+# core_plugins/_core.py
 
 """
 Core utility and shared helpers for all envsbot plugins.
@@ -19,7 +19,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from utils.command import Role
 
-from plugins.rooms import JOINED_ROOMS
+from core_plugins.rooms import JOINED_ROOMS
 
 PLUGIN_META = {
     "name": "_core",

@@ -215,7 +215,7 @@ async def test_seen_command_found(bot, simple_msg, enabled_rooms,
         return ["testuser@example.org"]
     async_mock = AsyncMock(side_effect=_ret_list)
     monkeypatch.setattr(tools, "get_jids_from_nick_index", async_mock)
-    monkeypatch.setattr("plugins._core.get_jids_from_nick_index", async_mock)
+    monkeypatch.setattr("core_plugins._core.get_jids_from_nick_index", async_mock)
     monkeypatch.setattr("plugins.tools.get_jids_from_nick_index", async_mock)
     monkeypatch.setattr(tools, "JOINED_ROOMS", joined_rooms)
     monkeypatch.setattr(tools, "_get_enabled_rooms",
@@ -244,7 +244,7 @@ async def test_seen_command_not_found(bot, simple_msg, enabled_rooms,
         return []
     async_mock = AsyncMock(side_effect=_ret_list)
     monkeypatch.setattr(tools, "get_jids_from_nick_index", async_mock)
-    monkeypatch.setattr("plugins._core.get_jids_from_nick_index", async_mock)
+    monkeypatch.setattr("core_plugins._core.get_jids_from_nick_index", async_mock)
     monkeypatch.setattr("plugins.tools.get_jids_from_nick_index", async_mock)
     monkeypatch.setattr(tools, "JOINED_ROOMS", joined_rooms)
     monkeypatch.setattr(tools, "_get_enabled_rooms",

@@ -300,7 +300,7 @@ class Bot(slixmpp.ClientXMPP):
         """
         Elevate role to MODERATOR when the user is an admin/owner in the room.
         """
-        from plugins.rooms import JOINED_ROOMS
+        from core_plugins.rooms import JOINED_ROOMS
 
         if not room:
             return db_role
@@ -513,7 +513,7 @@ class Bot(slixmpp.ClientXMPP):
             log.debug("[MUC] Could not inspect presence joined rooms",
                       exc_info=True)
         try:
-            from plugins.rooms import JOINED_ROOMS
+            from core_plugins.rooms import JOINED_ROOMS
 
             rooms.update(str(room) for room in JOINED_ROOMS)
         except Exception:
@@ -565,7 +565,7 @@ class Bot(slixmpp.ClientXMPP):
                           exc_info=True)
 
         try:
-            from plugins.rooms import JOINED_ROOMS
+            from core_plugins.rooms import JOINED_ROOMS
 
             room_data = JOINED_ROOMS.get(room, {}) or {}
             nick_data = (room_data.get("nicks", {}) or {}).get(nick, {}) or {}

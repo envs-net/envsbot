@@ -1,4 +1,4 @@
-import plugins.rooms as rooms
+import core_plugins.rooms as rooms
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import types
@@ -7,7 +7,7 @@ from tests.helpers import PresenceStub
 
 # Patch the logging to avoid noisy output
 import logging
-logging.getLogger("plugins.rooms").setLevel(logging.CRITICAL)
+logging.getLogger("core_plugins.rooms").setLevel(logging.CRITICAL)
 
 # Import the module under test
 
@@ -179,7 +179,7 @@ async def test_room_status_helpers(fake_bot):
 
 @pytest.mark.asyncio
 async def test_is_valid_room_jid_success(fake_bot, fake_msg):
-    with patch("plugins.rooms.is_valid_muc_domain",
+    with patch("core_plugins.rooms.is_valid_muc_domain",
                AsyncMock(return_value=True)):
         jid = "room@conference.domain"
         assert await rooms.is_valid_room_jid(fake_bot, jid, fake_msg) is True
@@ -187,7 +187,7 @@ async def test_is_valid_room_jid_success(fake_bot, fake_msg):
 
 @pytest.mark.asyncio
 async def test_is_valid_room_jid_failures(fake_bot, fake_msg):
-    with patch("plugins.rooms.is_valid_muc_domain",
+    with patch("core_plugins.rooms.is_valid_muc_domain",
                AsyncMock(return_value=False)):
         assert await rooms.is_valid_room_jid(fake_bot,
                                              "room/conference",
@@ -236,11 +236,11 @@ async def test_cmd_room_setdefaults(fake_bot, fake_msg):
     rooms.JOINED_ROOMS[room_jid] = {}
     fake_bot.db.rooms.get = AsyncMock(
         return_value=(room_jid, "BotNick", True, None))
-    with patch("plugins.rooms.set_room_control_defaults", AsyncMock()):
+    with patch("core_plugins.rooms.set_room_control_defaults", AsyncMock()):
         await rooms.cmd_room_setdefaults(fake_bot, "jid", "nick", [],
                                          fake_msg, False)
         # Error case: trigger inside the try/except block!
-        with patch("plugins.rooms.set_room_control_defaults",
+        with patch("core_plugins.rooms.set_room_control_defaults",
                    AsyncMock(side_effect=Exception("fail-setdefaults"))):
             await rooms.cmd_room_setdefaults(fake_bot, "jid", "nick", [],
                                              fake_msg, False)
@@ -263,8 +263,8 @@ async def test_cmd_room_plugins(fake_bot, fake_msg):
 async def test_rooms_add(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.db.rooms.add = AsyncMock()
-    with patch("plugins.rooms.set_room_control_defaults", AsyncMock()):
-        with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.set_room_control_defaults", AsyncMock()):
+        with patch("core_plugins.rooms.is_valid_room_jid",
                    AsyncMock(return_value=True)):
             msg = dict(fake_msg)
             msg["from"].bare = "room@conference.domain"
@@ -276,7 +276,7 @@ async def test_rooms_add(fake_bot, fake_msg):
 @pytest.mark.asyncio
 async def test_rooms_add_already_exists(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=(1, 2, 3, 4))
-    with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_add(fake_bot, "s", "s",
                               ["room@conference.domain", "BotNick"],
@@ -286,7 +286,7 @@ async def test_rooms_add_already_exists(fake_bot, fake_msg):
 @pytest.mark.asyncio
 async def test_rooms_update(fake_bot, fake_msg):
     fake_bot.db.rooms.update = AsyncMock()
-    with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_update(fake_bot, "jid", "nick",
                                  ["room@conference.domain", "nick",
@@ -303,7 +303,7 @@ async def test_rooms_update(fake_bot, fake_msg):
 async def test_rooms_delete(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=(1, 2, 3, 4))
     fake_bot.db.rooms.delete = AsyncMock()
-    with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.is_valid_room_jid",
                AsyncMock(return_value=True)):
         # room joined
         room_jid = "room@conference.domain"
@@ -344,7 +344,7 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     fake_bot.db.rooms.add = AsyncMock()
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
     fake_bot.presence.joined_rooms = {}
-    with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_join(fake_bot, "jid", "nick",
                                ["room@conf", "BotNick"], fake_msg, False)
@@ -356,7 +356,7 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick"}
     fake_bot.presence.joined_rooms[room_jid] = "BotNick"
     fake_bot.plugin["xep_0045"].leave_muc = MagicMock()
-    with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_leave(fake_bot, "jid", "nick", [room_jid],
                                 fake_msg, False)
@@ -368,7 +368,7 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     ])
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
     rooms.JOINED_ROOMS["room@c1"] = {"nick": "Bot"}
-    with patch("plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_sync(fake_bot, "jid", "nick", [], fake_msg, False)
 

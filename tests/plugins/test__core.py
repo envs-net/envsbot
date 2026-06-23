@@ -2,7 +2,7 @@ import pytest
 import asyncio
 import pytz
 from types import SimpleNamespace
-from plugins import _core
+from core_plugins import _core
 
 
 @pytest.fixture

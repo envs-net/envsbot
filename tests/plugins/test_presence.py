@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, Mock, MagicMock
 
-import plugins.presence as presence
+import core_plugins.presence as presence
 
 
 @pytest.fixture

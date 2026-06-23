@@ -34,7 +34,7 @@ import time
 
 from utils.command import command, Role
 from utils.config import config
-from plugins import _core
+from core_plugins import _core
 
 from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)

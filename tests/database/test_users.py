@@ -8,7 +8,7 @@ pytestmark = pytest.mark.asyncio
 
 
 # Patch logging to silence noisy logs
-logging.getLogger("plugins.users").setLevel(logging.CRITICAL)
+logging.getLogger("core_plugins.users").setLevel(logging.CRITICAL)
 
 # --------------------------
 # Mock database and helpers

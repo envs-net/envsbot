@@ -3,7 +3,7 @@ import types
 import os
 from datetime import datetime, timedelta
 
-import plugins._admin as _admin
+import core_plugins._admin as _admin
 
 import pytest_asyncio
 

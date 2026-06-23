@@ -29,7 +29,7 @@ from typing import Any
 
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     JOINED_ROOMS,
     is_room_moderator_or_admin,
     _is_enabled_for_room,

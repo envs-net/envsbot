@@ -59,14 +59,24 @@ def _plugin_meta(module, name):
 
 
 def _discover_plugins():
-    import plugins
-
-    names = sorted(m.name for m in pkgutil.iter_modules(plugins.__path__))
-    for name in names:
+    sources = [("core_plugins", "core"), ("plugins", "plugins")]
+    seen = set()
+    for package_name, source in sources:
         try:
-            yield name, importlib.import_module(f"plugins.{name}")
+            package = importlib.import_module(package_name)
         except Exception as exc:
-            print(f"warning: could not import plugins.{name}: {exc}", file=sys.stderr)
+            print(f"warning: could not import {package_name}: {exc}", file=sys.stderr)
+            continue
+
+        for module_info in sorted(pkgutil.iter_modules(package.__path__), key=lambda item: item.name):
+            name = module_info.name
+            if name in seen:
+                continue
+            seen.add(name)
+            try:
+                yield name, importlib.import_module(f"{package_name}.{name}"), source
+            except Exception as exc:
+                print(f"warning: could not import {package_name}.{name}: {exc}", file=sys.stderr)
 
 
 def _commands_from_module(module):
@@ -90,8 +100,9 @@ def _category_title(category: str) -> str:
 def _collect():
     plugins = []
     commands = []
-    for name, module in _discover_plugins():
+    for name, module, source in _discover_plugins():
         meta = _plugin_meta(module, name)
+        meta["source"] = source
         if meta["hidden"]:
             continue
         plugin_commands = _commands_from_module(module)
@@ -145,12 +156,12 @@ def generate() -> str:
         "",
         "## Plugin overview",
         "",
-        "| Plugin | Category | Description |",
-        "| --- | --- | --- |",
+        "| Plugin | Source | Category | Description |",
+        "| --- | --- | --- | --- |",
     ]
 
     for name, meta, _plugin_commands in plugins:
-        lines.append(f"| `{name}` | `{meta['category']}` | {meta['description']} |")
+        lines.append(f"| `{name}` | `{meta['source']}` | `{meta['category']}` | {meta['description']} |")
 
     by_category: dict[str, list[tuple[str, object, dict]]] = {}
     for _plugin_name, _meta, cmd, data in commands:
@@ -171,6 +182,7 @@ def generate() -> str:
         lines += [
             f"### {meta['name']}",
             "",
+            f"Source: `{meta.get('source', 'plugins')}`",
             f"Category: `{meta['category']}`",
             "",
             str(meta["description"]),

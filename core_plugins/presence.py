@@ -21,7 +21,7 @@ Available <show> statuses for setting the status:
 """
 import logging
 from utils.command import command, Role
-from plugins._core import (
+from core_plugins._core import (
     handle_room_toggle_command,
     _is_muc_pm,
     _get_enabled_rooms

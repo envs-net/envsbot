@@ -31,10 +31,15 @@ async def plugin_list(bot, sender, nick, args, msg, is_room):
     categories = await bot.bot_plugins.list_detailed()
     page = parse_page_args(args)
 
+    labels = {"core": "Core plugins", "plugins": "Optional plugins"}
+    order = ["core", "plugins"] + sorted(k for k in categories if k not in {"core", "plugins"})
+
     entries = []
-    for category in sorted(categories):
+    for category in order:
+        if category not in categories:
+            continue
         block = categories[category]
-        entries.append(f"[{category.upper()}]")
+        entries.append(f"[{labels.get(category, category.title())}]")
         for name in sorted(block["loaded"]):
             entries.append(f"[loaded] {name}")
         for name in sorted(block["available"]):
@@ -78,6 +83,7 @@ async def plugin_info(bot, sender, nick, args, msg, is_room):
     lines = [
         f"Plugin: {meta.get('name', name)}",
         f"Version: {meta.get('version', 'unknown')}",
+        f"Source: {meta.get('source', 'plugins')}",
         f"Category: {meta.get('category', 'other')}",
         f"Description: {meta.get('description', 'no description')}",
     ]
@@ -132,10 +138,6 @@ async def plugin_unload(bot, sender, nick, args, msg, is_room):
 
     name = args[0].lower()
     force = len(args) > 1 and args[1].lower() == "force"
-
-    if name == "plugins":
-        bot.reply(msg, "Cannot unload plugin manager.")
-        return
 
     success, message = await bot.bot_plugins.unload(name, force=force)
     if success:

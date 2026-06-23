@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-import plugins.plugins as plugins_module
+import core_plugins.plugins as plugins_module
 
 
 @pytest.fixture
@@ -17,11 +17,11 @@ def bot():
     m.bot_plugins.list_detailed = AsyncMock(return_value={
         "core": {
             "loaded": ["plugins", "rooms"],
-            "available": ["info"]
-        },
-        "fun": {
-            "loaded": ["ducks"],
             "available": []
+        },
+        "plugins": {
+            "loaded": ["ducks"],
+            "available": ["info"]
         }
     })
     m.bot_plugins.plugins = {
@@ -34,6 +34,7 @@ def bot():
             "plugins": {
                 "name": "plugins",
                 "version": "0.2.0",
+                "source": "core",
                 "category": "core",
                 "description": "Runtime plugin management",
                 "requires": [],
@@ -67,8 +68,8 @@ async def test_plugin_list(bot, msg):
                                      msg, False)
     out = bot.reply.call_args[0][1]
     # Should mention all loaded and available plugins grouped by category
-    assert "[CORE]" in out
-    assert "[FUN]" in out
+    assert "[Core plugins]" in out
+    assert "[Optional plugins]" in out
     assert "[loaded] plugins" in out
     assert "[not loaded] info" in out
     assert "[loaded] ducks" in out
@@ -81,6 +82,7 @@ async def test_plugin_info_existing(bot, msg):
     out = bot.reply.call_args[0][1]
     assert "Plugin: plugins" in out
     assert "Runtime plugin management" in out
+    assert "Source: core" in out
 
 
 @pytest.mark.asyncio
@@ -148,10 +150,14 @@ async def test_plugin_unload_force(bot, msg):
 
 
 @pytest.mark.asyncio
-async def test_plugin_unload_no_plugins(bot, msg):
+async def test_plugin_unload_core_plugin_blocked(bot, msg):
+    bot.bot_plugins.unload = AsyncMock(
+        return_value=(False, "Plugin plugins is a core plugin and cannot be unloaded")
+    )
     await plugins_module.plugin_unload(bot, "adminjid", "AdminNick",
                                        ["plugins"], msg, False)
-    assert "Cannot unload plugin manager" in bot.reply.call_args[0][1]
+    bot.bot_plugins.unload.assert_awaited_with("plugins", force=False)
+    assert "core plugin" in bot.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import plugins.tasks as tasks_plugin
+import core_plugins.tasks as tasks_plugin
 from utils.task_supervisor import TaskInfo
 
 

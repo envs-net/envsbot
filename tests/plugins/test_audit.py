@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import plugins.audit as audit_mod
+import core_plugins.audit as audit_mod
 
 
 @pytest.fixture

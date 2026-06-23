@@ -24,6 +24,26 @@ from utils.command import COMMANDS, Role
 log = logging.getLogger(__name__)
 
 
+DEFAULT_OPTIONAL_PLUGIN_PACKAGE = "plugins"
+DEFAULT_CORE_PLUGIN_PACKAGE = "core_plugins"
+
+CORE_PLUGIN_NAMES = {
+    "_admin",
+    "_core",
+    "_reg_profile",
+    "audit",
+    "backups",
+    "config_cmd",
+    "db",
+    "help",
+    "plugins",
+    "presence",
+    "rooms",
+    "tasks",
+    "users",
+}
+
+
 class PluginManager:
     """
     Manages plugin lifecycle and integration with the bot.
@@ -41,13 +61,42 @@ class PluginManager:
         _dependents (dict): Cache of plugins that depend on each plugin.
     """
 
-    def __init__(self, bot, package="plugins"):
-        """Initialize the plugin manager."""
+    def __init__(
+        self,
+        bot,
+        package=DEFAULT_OPTIONAL_PLUGIN_PACKAGE,
+        *,
+        core_package=DEFAULT_CORE_PLUGIN_PACKAGE,
+        core_plugins=None,
+    ):
+        """Initialize the plugin manager.
+
+        The default runtime layout has two sources:
+
+        * ``core_plugins`` for built-in bot/admin plugins
+        * ``plugins`` for optional feature plugins
+
+        Plugin names stay stable (for example ``help`` or ``rooms``), even when
+        their Python modules live in ``core_plugins``.  Tests and custom callers
+        can still pass a custom ``package`` to manage a single package.
+        """
         self.bot = bot
         self.package = package
+        self.core_package = core_package
+        self.core_plugins = set(core_plugins or CORE_PLUGIN_NAMES)
+
+        self._multi_source = (
+            package == DEFAULT_OPTIONAL_PLUGIN_PACKAGE
+            and core_package is not None
+        )
+        if self._multi_source:
+            self.sources = [(core_package, True), (package, False)]
+        else:
+            self.sources = [(package, False)]
 
         self.plugins = {}
         self.meta = {}
+        self.plugin_sources = {}
         self._event_handlers = {}
         self._dependents = {}  # Cache: plugin -> plugins that depend on it
 
@@ -151,7 +200,7 @@ class PluginManager:
         # Try to load metadata if not already loaded
         if name not in self.meta:
             try:
-                module = importlib.import_module(f"{self.package}.{name}")
+                module = importlib.import_module(self._module_path(name))
                 meta = getattr(module, "PLUGIN_META", {})
             except Exception as e:
                 return False, f"Cannot load {name}: {e}"
@@ -172,6 +221,59 @@ class PluginManager:
                 return False, msg
 
         return True, ""
+
+    # --------------------------------------------------
+    # SOURCE HELPERS
+    # --------------------------------------------------
+
+    def _discover_sources(self):
+        """Return plugin source metadata keyed by stable plugin name."""
+        result = {}
+        for package_name, is_core in self.sources:
+            try:
+                package = importlib.import_module(package_name)
+            except Exception:
+                log.debug("[PLUGIN] source package unavailable: %s", package_name)
+                continue
+
+            package_path = getattr(package, "__path__", None)
+            if package_path is None:
+                log.debug("[PLUGIN] source is not a package: %s", package_name)
+                continue
+
+            for module_info in pkgutil.iter_modules(package_path):
+                name = module_info.name
+                # Core plugins win over optional plugins if a duplicate exists.
+                if name in result and not is_core:
+                    continue
+                result[name] = {"package": package_name, "core": is_core}
+
+        return result
+
+    def _source_info(self, name: str) -> dict:
+        """Return source info for a plugin name."""
+        if name in self.plugin_sources:
+            return self.plugin_sources[name]
+
+        discovered = self._discover_sources()
+        if name in discovered:
+            self.plugin_sources[name] = discovered[name]
+            return discovered[name]
+
+        # Fallback keeps tests with monkeypatched imports working.
+        is_core = self._multi_source and name in self.core_plugins
+        package = self.core_package if is_core else self.package
+        info = {"package": package, "core": is_core}
+        self.plugin_sources[name] = info
+        return info
+
+    def _module_path(self, name: str) -> str:
+        """Return full Python module path for a stable plugin name."""
+        return f"{self._source_info(name)['package']}.{name}"
+
+    def is_core_plugin(self, name: str) -> bool:
+        """Return whether a plugin is provided by the core plugin package."""
+        return bool(self._source_info(name).get("core"))
 
     # --------------------------------------------------
     # EVENTS
@@ -219,13 +321,18 @@ class PluginManager:
 
     def discover(self):
         """
-        Discover available plugins in the configured package.
+        Discover available plugins from all configured sources.
 
         Returns:
-            list[str]: Sorted list of plugin module names.
+            list[str]: Sorted list of stable plugin names. Core plugins are
+            ordered before optional plugins for deterministic startup.
         """
-        package = importlib.import_module(self.package)
-        return sorted([m.name for m in pkgutil.iter_modules(package.__path__)])
+        discovered = self._discover_sources()
+        self.plugin_sources.update(discovered)
+        return sorted(
+            discovered,
+            key=lambda name: (not discovered[name]["core"], name),
+        )
 
     def list(self):
         """
@@ -261,7 +368,7 @@ class PluginManager:
             # Get metadata
             try:
                 if plugin not in self.meta:
-                    module = await self._import(f"{self.package}.{plugin}")
+                    module = await self._import(self._module_path(plugin))
                     meta = getattr(module, "PLUGIN_META", {})
                 else:
                     meta = self.meta[plugin]
@@ -382,7 +489,7 @@ class PluginManager:
         try:
             log.info("[PLUGIN] loading: %s", name)
 
-            module = await self._import(f"{self.package}.{name}")
+            module = await self._import(self._module_path(name))
             meta = getattr(module, "PLUGIN_META", {})
 
             # Load dependencies first
@@ -422,7 +529,7 @@ class PluginManager:
             # no-op: kept for symmetry / future hooks
             pass
 
-    async def unload(self, name, force=False):
+    async def unload(self, name, force=False, *, allow_core=False):
         """
         Unload a plugin and clean up all associated resources.
 
@@ -433,6 +540,9 @@ class PluginManager:
         Returns:
             tuple: (bool, str) - (success, message)
         """
+        if self.is_core_plugin(name) and not allow_core:
+            return False, f"Plugin {name} is a core plugin and cannot be unloaded"
+
         # Check for dependent plugins
         if not force:
             has_conflict, msg = self._check_dependency_conflict(name)
@@ -484,6 +594,7 @@ class PluginManager:
 
                 # Cleanup metadata
                 self.meta.pop(name, None)
+                self.plugin_sources.pop(name, None)
 
                 # Deterministically detach from import system (no GC reliance)
                 self._detach_module(module, name)
@@ -541,7 +652,7 @@ class PluginManager:
                 for dep_name in u_order:
                     try:
                         log.debug("[PLUGIN] unloading dependent: %s", dep_name)
-                        await self.unload(dep_name)
+                        await self.unload(dep_name, allow_core=True)
                     except Exception as e:
                         u_errors.append(f"{dep_name}: {e}")
                         log.exception("[PLUGIN] failed to unload dependent %s",
@@ -555,7 +666,7 @@ class PluginManager:
 
             # Unload and reload target
             log.debug("[PLUGIN] unloading target: %s", name)
-            await self.unload(name)
+            await self.unload(name, allow_core=True)
 
             log.debug("[PLUGIN] loading target: %s", name)
             await self.load(name)
@@ -697,36 +808,39 @@ class PluginManager:
             dict | None: Plugin metadata or None if not found.
         """
         if name in self.meta:
-            return self.meta[name]
+            meta = dict(self.meta[name])
+            meta["source"] = "core" if self.is_core_plugin(name) else "plugins"
+            return meta
 
         try:
-            module = await self._import(f"{self.package}.{name}")
-            return getattr(module, "PLUGIN_META", {})
+            module = await self._import(self._module_path(name))
+            meta = dict(getattr(module, "PLUGIN_META", {}) or {})
+            meta["source"] = "core" if self.is_core_plugin(name) else "plugins"
+            return meta
         except Exception:
             return None
 
     async def list_detailed(self):
         """
-        Get categorized plugin status.
+        Get plugin status grouped by source.
 
         Returns:
-            dict: {category: {"loaded": [...], "available": [...]}}
+            dict: {group: {"loaded": [...], "available": [...]}}
         """
         loaded = set(self.plugins.keys())
         available = set(self.discover()) - loaded
 
-        result = {}
+        result = {
+            "core": {"loaded": [], "available": []},
+            "plugins": {"loaded": [], "available": []},
+        }
 
         for name in loaded:
-            meta = self.meta.get(name, {})
-            cat = meta.get("category", "other")
-            result.setdefault(cat, {"loaded": [], "available": []})
-            result[cat]["loaded"].append(name)
+            group = "core" if self.is_core_plugin(name) else "plugins"
+            result[group]["loaded"].append(name)
 
         for name in available:
-            meta = await self.get_plugin_info(name) or {}
-            cat = meta.get("category", "other")
-            result.setdefault(cat, {"loaded": [], "available": []})
-            result[cat]["available"].append(name)
+            group = "core" if self.is_core_plugin(name) else "plugins"
+            result[group]["available"].append(name)
 
         return result

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import psutil
 
-from plugins._core import JOINED_ROOMS
+from core_plugins._core import JOINED_ROOMS
 from utils.command import COMMANDS, Role, command
 from utils.config import config
 from utils.audit import audit_event

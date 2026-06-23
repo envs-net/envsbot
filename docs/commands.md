@@ -37,36 +37,36 @@ Lower role values have more privileges. A command is visible when your role is s
 
 ## Plugin overview
 
-| Plugin | Category | Description |
-| --- | --- | --- |
-| `_admin` | `core` | Bot administration commands |
-| `audit` | `core` | Admin audit log viewer |
-| `backups` | `core` | Managed ZIP backups and restore helpers. |
-| `birthday_notify` | `fun` | Automatic birthday notifications in rooms (opt-in per room) |
-| `config_cmd` | `core` | Safe config inspection, validation and reload commands. |
-| `db` | `core` | SQLite status and integrity inspection helpers. |
-| `dice` | `games` | Roll dice with optional modifiers and success conditions. |
-| `ducks` | `fun` | Duck game for MUCs with room toggles and leaderboards |
-| `help` | `core` | Dynamic help for plugins and commands. |
-| `info` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. |
-| `karma` | `fun` | Room-local karma tracking with nick++ / nick-- |
-| `pin` | `utility` | Pin room messages with paging and non-reply fallback. |
-| `plugins` | `core` | Runtime plugin management |
-| `poll` | `utility` | Room polls with voting, history and auto-close |
-| `presence` | `info` | Bot presence and status management |
-| `reminder` | `utility` | Schedule and manage reminders |
-| `rooms` | `core` | Database-backed room management |
-| `rss` | `info` | RSS/Atom feed watcher and poster |
-| `sed` | `tools` | Message correction using sed-like syntax |
-| `tasks` | `core` | Inspect supervised background tasks. |
-| `tell` | `utility` | Store and deliver messages for users when they join a room again. |
-| `tools` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion |
-| `urlcheck` | `info` | URL title and YouTube info fetcher for groupchats |
-| `users` | `core` | User management with caching, nick lookup and logging |
-| `vcard` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only |
-| `weather` | `info` | Gives weather according to users location (supports MUCs and MUC DMs) |
-| `xkcd` | `fun` | XKCD comic fetcher and broadcaster with full indexing |
-| `xmpp` | `tools` | XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.) |
+| Plugin | Source | Category | Description |
+| --- | --- | --- | --- |
+| `_admin` | `core` | `core` | Bot administration commands |
+| `audit` | `core` | `core` | Admin audit log viewer |
+| `backups` | `core` | `core` | Managed ZIP backups and restore helpers. |
+| `config_cmd` | `core` | `core` | Safe config inspection, validation and reload commands. |
+| `db` | `core` | `core` | SQLite status and integrity inspection helpers. |
+| `help` | `core` | `core` | Dynamic help for plugins and commands. |
+| `plugins` | `core` | `core` | Runtime plugin management |
+| `presence` | `core` | `info` | Bot presence and status management |
+| `rooms` | `core` | `core` | Database-backed room management |
+| `tasks` | `core` | `core` | Inspect supervised background tasks. |
+| `users` | `core` | `core` | User management with caching, nick lookup and logging |
+| `birthday_notify` | `plugins` | `fun` | Automatic birthday notifications in rooms (opt-in per room) |
+| `dice` | `plugins` | `games` | Roll dice with optional modifiers and success conditions. |
+| `ducks` | `plugins` | `fun` | Duck game for MUCs with room toggles and leaderboards |
+| `info` | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. |
+| `karma` | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- |
+| `pin` | `plugins` | `utility` | Pin room messages with paging and non-reply fallback. |
+| `poll` | `plugins` | `utility` | Room polls with voting, history and auto-close |
+| `reminder` | `plugins` | `utility` | Schedule and manage reminders |
+| `rss` | `plugins` | `info` | RSS/Atom feed watcher and poster |
+| `sed` | `plugins` | `tools` | Message correction using sed-like syntax |
+| `tell` | `plugins` | `utility` | Store and deliver messages for users when they join a room again. |
+| `tools` | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion |
+| `urlcheck` | `plugins` | `info` | URL title and YouTube info fetcher for groupchats |
+| `vcard` | `plugins` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only |
+| `weather` | `plugins` | `info` | Gives weather according to users location (supports MUCs and MUC DMs) |
+| `xkcd` | `plugins` | `fun` | XKCD comic fetcher and broadcaster with full indexing |
+| `xmpp` | `plugins` | `tools` | XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.) |
 
 ## Commands by category
 
@@ -98,11 +98,11 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,bot version` | `user` | `any` | Show the running EnvsBot version and latest checked release. |
 | `,help` | `none` | `any` | Show help for plugins and commands. |
 | `,help inroom` | `user` | `room or MUC PM` | Enable, disable or show room help availability. |
-| `,plugin info` | `admin` | `private chat / MUC PM` | Show metadata for one plugin. |
-| `,plugin list` | `admin` | `private chat / MUC PM` | List loaded and available plugins by category. |
+| `,plugin info` | `admin` | `private chat / MUC PM` | Show metadata and source information for one plugin. |
+| `,plugin list` | `admin` | `private chat / MUC PM` | List loaded and available core/optional plugins. |
 | `,plugin load` | `admin` | `private chat / MUC PM` | Load one plugin or all plugins. |
 | `,plugin reload` | `admin` | `private chat / MUC PM` | Reload one plugin or all plugins. |
-| `,plugin unload` | `admin` | `private chat / MUC PM` | Unload one plugin, optionally forced. |
+| `,plugin unload` | `admin` | `private chat / MUC PM` | Unload one optional plugin; core plugins are protected. |
 
 ### Fun
 
@@ -218,6 +218,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 ### admin
 
+Source: `core`
 Category: `core`
 
 Bot administration commands
@@ -304,6 +305,7 @@ Examples:
 
 ### audit
 
+Source: `core`
 Category: `core`
 
 Admin audit log viewer
@@ -341,6 +343,7 @@ Examples:
 
 ### backups
 
+Source: `core`
 Category: `core`
 
 Managed ZIP backups and restore helpers.
@@ -405,27 +408,9 @@ Examples:
 
 - `,restore last confirm`
 
-### birthday_notify
-
-Category: `fun`
-
-Automatic birthday notifications in rooms (opt-in per room)
-
-#### `,birthday_notify`
-
-Enable, disable or show birthday notifications for a room.
-
-Role: `user`  
-Context: `room or MUC PM`  
-Category: `rooms`  
-Usage: `,birthday_notify <on|off|status>`
-
-Examples:
-
-- `,birthday_notify status`
-
 ### config_cmd
 
+Source: `core`
 Category: `core`
 
 Safe config inspection, validation and reload commands.
@@ -488,6 +473,7 @@ Examples:
 
 ### db
 
+Source: `core`
 Category: `core`
 
 SQLite status and integrity inspection helpers.
@@ -507,88 +493,9 @@ Examples:
 
 - `,db status`
 
-### dice
-
-Category: `games`
-
-Roll dice with optional modifiers and success conditions.
-
-#### `,dice`
-
-Roll dice using common dice notation.
-
-Role: `user`  
-Context: `any`  
-Category: `fun`  
-Usage: `,dice [NdM]`
-
-Aliases: `,r`, `,roll`
-
-Examples:
-
-- `,dice`
-- `,dice 2d6`
-
-### ducks
-
-Category: `fun`
-
-Duck game for MUCs with room toggles and leaderboards
-
-#### `,bef`
-
-Befriend the current duck.
-
-Role: `user`  
-Context: `any`  
-Category: `fun`  
-Usage: `,bef`
-
-Examples:
-
-- `,bef`
-
-#### `,duck`
-
-Start or interact with the duck game.
-
-Role: `user`  
-Context: `any`  
-Category: `fun`  
-Usage: `,duck`
-
-Examples:
-
-- `,duck`
-
-#### `,duckstats`
-
-Show duck game stats.
-
-Role: `user`  
-Context: `any`  
-Category: `fun`  
-Usage: `,duckstats [nick]`
-
-Examples:
-
-- `,duckstats`
-
-#### `,trap`
-
-Set a trap in the duck game.
-
-Role: `user`  
-Context: `any`  
-Category: `fun`  
-Usage: `,trap`
-
-Examples:
-
-- `,trap`
-
 ### help
 
+Source: `core`
 Category: `core`
 
 Dynamic help for plugins and commands.
@@ -628,208 +535,16 @@ Examples:
 - `,help inroom on`
 - `,help inroom status`
 
-### info
-
-Category: `info`
-
-Wikipedia, Fediverse, Urban Dictionary and acronym lookup.
-
-#### `,acronyms`
-
-Look up stored acronym definitions.
-
-Role: `user`  
-Context: `any`  
-Category: `info`  
-Usage: `,acronyms <term>`
-
-Aliases: `,acro`, `,acronym`
-
-Examples:
-
-- `,acro XMPP`
-
-#### `,acronyms add`
-
-Add a definition to an acronym.
-
-Role: `user`  
-Context: `any`  
-Category: `info`  
-Usage: `,acronyms add <term> <definition>`
-
-Aliases: `,acro add`, `,acronym add`
-
-Examples:
-
-- `,acro add XMPP Extensible Messaging and Presence Protocol`
-
-#### `,acronyms delete`
-
-Delete an acronym completely.
-
-Role: `admin`  
-Context: `any`  
-Category: `info`  
-Usage: `,acronyms delete <term>`
-
-Aliases: `,acro delete`, `,acronym delete`
-
-Examples:
-
-- `,acro delete XMPP`
-
-#### `,acronyms list`
-
-List known acronyms.
-
-Role: `admin`  
-Context: `any`  
-Category: `info`  
-Usage: `,acronyms list [all|page|last]`
-
-Aliases: `,acro list`, `,acronym list`
-
-Examples:
-
-- `,acro list`
-
-#### `,acronyms merge`
-
-Merge one acronym into another.
-
-Role: `admin`  
-Context: `any`  
-Category: `info`  
-Usage: `,acronyms merge <source> <target>`
-
-Aliases: `,acro merge`, `,acronym merge`
-
-Examples:
-
-- `,acro merge xmpp XMPP`
-
-#### `,acronyms remove`
-
-Remove one acronym definition.
-
-Role: `user`  
-Context: `any`  
-Category: `info`  
-Usage: `,acronyms remove <term> <number>`
-
-Aliases: `,acro remove`, `,acronym remove`
-
-Examples:
-
-- `,acro remove XMPP 1`
-
-#### `,fediverse`
-
-Look up Fediverse account or instance information.
-
-Role: `user`  
-Context: `any`  
-Category: `info`  
-Usage: `,fediverse <account|instance>`
-
-Aliases: `,fedi`
-
-Examples:
-
-- `,fedi @user@example.org`
-
-#### `,info`
-
-Enable, disable or show room access to information commands.
-
-Role: `moderator`  
-Context: `room or MUC PM`  
-Category: `info`  
-Usage: `,info <on|off|status>`
-
-Examples:
-
-- `,info status`
-
-#### `,udict`
-
-Search Urban Dictionary.
-
-Role: `user`  
-Context: `any`  
-Category: `info`  
-Usage: `,udict <term>`
-
-Aliases: `,ud`
-
-Examples:
-
-- `,ud xmpp`
-
-#### `,wikipedia`
-
-Search Wikipedia.
-
-Role: `user`  
-Context: `any`  
-Category: `info`  
-Usage: `,wikipedia <term>`
-
-Aliases: `,wiki`
-
-Examples:
-
-- `,wiki XMPP`
-
-### karma
-
-Category: `fun`
-
-Room-local karma tracking with nick++ / nick--
-
-#### `,karma`
-
-Show or update karma for a term.
-
-Role: `user`  
-Context: `any`  
-Category: `fun`  
-Usage: `,karma [term|term++|term--]`
-
-Examples:
-
-- `,karma xmpp++`
-- `,karma xmpp`
-
-### pin
-
-Category: `utility`
-
-Pin room messages with paging and non-reply fallback.
-
-#### `,pin`
-
-Pin, list or delete room pins.
-
-Role: `user`  
-Context: `any`  
-Category: `rooms`  
-Usage: `,pin <add|list|delete|on|off|status> ...`
-
-Examples:
-
-- `,pin list`
-
 ### plugins
 
+Source: `core`
 Category: `core`
 
 Runtime plugin management
 
 #### `,plugin info`
 
-Show metadata for one plugin.
+Show metadata and source information for one plugin.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  
@@ -844,7 +559,7 @@ Examples:
 
 #### `,plugin list`
 
-List loaded and available plugins by category.
+List loaded and available core/optional plugins.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  
@@ -891,7 +606,7 @@ Examples:
 
 #### `,plugin unload`
 
-Unload one plugin, optionally forced.
+Unload one optional plugin; core plugins are protected.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  
@@ -904,27 +619,9 @@ Examples:
 
 - `,plugin unload weather`
 
-### poll
-
-Category: `utility`
-
-Room polls with voting, history and auto-close
-
-#### `,poll`
-
-Create and manage polls.
-
-Role: `user`  
-Context: `any`  
-Category: `rooms`  
-Usage: `,poll <new|vote|list|close|on|off|status> ...`
-
-Examples:
-
-- `,poll list`
-
 ### presence
 
+Source: `core`
 Category: `info`
 
 Bot presence and status management
@@ -956,59 +653,9 @@ Examples:
 
 - `,presence set away maintenance`
 
-### reminder
-
-Category: `utility`
-
-Schedule and manage reminders
-
-#### `,remind`
-
-Create a reminder.
-
-Role: `user`  
-Context: `any`  
-Category: `utility`  
-Usage: `,remind <when> <text>`
-
-Aliases: `,rem`, `,reminder`
-
-Examples:
-
-- `,remind 10m check logs`
-
-#### `,remind delete`
-
-Delete one reminder.
-
-Role: `user`  
-Context: `any`  
-Category: `utility`  
-Usage: `,remind delete <id>`
-
-Aliases: `,remind cancel`, `,remind rm`
-
-Examples:
-
-- `,remind delete 12`
-
-#### `,reminders`
-
-List your reminders.
-
-Role: `user`  
-Context: `any`  
-Category: `utility`  
-Usage: `,reminders [all|page|last]`
-
-Aliases: `,remind list`, `,rems`
-
-Examples:
-
-- `,reminders`
-
 ### rooms
 
+Source: `core`
 Category: `core`
 
 Database-backed room management
@@ -1180,46 +827,9 @@ Examples:
 
 - `,rooms update test@conference.example.org autojoin true`
 
-### rss
-
-Category: `info`
-
-RSS/Atom feed watcher and poster
-
-#### `,rss`
-
-Manage RSS feed subscriptions for a room.
-
-Role: `moderator`  
-Context: `any`  
-Category: `rooms`  
-Usage: `,rss <add|list|delete|on|off|status> ...`
-
-Examples:
-
-- `,rss list`
-
-### sed
-
-Category: `tools`
-
-Message correction using sed-like syntax
-
-#### `,sed`
-
-Apply sed-style corrections to recent messages.
-
-Role: `user`  
-Context: `any`  
-Category: `utility`  
-Usage: `,s/old/new/`
-
-Examples:
-
-- `,s/teh/the/`
-
 ### tasks
 
+Source: `core`
 Category: `core`
 
 Inspect supervised background tasks.
@@ -1242,8 +852,516 @@ Examples:
 - `,tasks plugin rss`
 - `,tasks failed`
 
+### users
+
+Source: `core`
+Category: `core`
+
+User management with caching, nick lookup and logging
+
+#### `,users admins`
+
+List users with admin-level roles.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `users`  
+Usage: `,users admins [all|page|last]`
+
+Aliases: `,user admin`, `,user admins`, `,users admin`
+
+Examples:
+
+- `,users admins`
+
+#### `,users delete`
+
+Delete one user record and its runtime data.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `users`  
+Usage: `,users delete <jid>`
+
+Aliases: `,user delete`
+
+Examples:
+
+- `,users delete alice@example.org`
+
+#### `,users info`
+
+Show user info by JID or known nickname.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `users`  
+Usage: `,users info <jid|nick>`
+
+Aliases: `,user info`
+
+Examples:
+
+- `,users info alice@example.org`
+
+#### `,users list`
+
+List users currently known in one joined room.
+
+Role: `admin`  
+Context: `private chat only`  
+Category: `users`  
+Usage: `,users list [room_jid]`
+
+Aliases: `,user list`
+
+Examples:
+
+- `,users list test@conference.example.org`
+
+#### `,users role`
+
+Change a user's global bot role.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `users`  
+Usage: `,users role <jid> <role>`
+
+Aliases: `,user role`
+
+Examples:
+
+- `,users role alice@example.org trusted`
+
+#### `,users roles`
+
+Show available roles and their ordering.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `users`  
+Usage: `,users roles`
+
+Aliases: `,user roles`
+
+Examples:
+
+- `,users roles`
+
+### birthday_notify
+
+Source: `plugins`
+Category: `fun`
+
+Automatic birthday notifications in rooms (opt-in per room)
+
+#### `,birthday_notify`
+
+Enable, disable or show birthday notifications for a room.
+
+Role: `user`  
+Context: `room or MUC PM`  
+Category: `rooms`  
+Usage: `,birthday_notify <on|off|status>`
+
+Examples:
+
+- `,birthday_notify status`
+
+### dice
+
+Source: `plugins`
+Category: `games`
+
+Roll dice with optional modifiers and success conditions.
+
+#### `,dice`
+
+Roll dice using common dice notation.
+
+Role: `user`  
+Context: `any`  
+Category: `fun`  
+Usage: `,dice [NdM]`
+
+Aliases: `,r`, `,roll`
+
+Examples:
+
+- `,dice`
+- `,dice 2d6`
+
+### ducks
+
+Source: `plugins`
+Category: `fun`
+
+Duck game for MUCs with room toggles and leaderboards
+
+#### `,bef`
+
+Befriend the current duck.
+
+Role: `user`  
+Context: `any`  
+Category: `fun`  
+Usage: `,bef`
+
+Examples:
+
+- `,bef`
+
+#### `,duck`
+
+Start or interact with the duck game.
+
+Role: `user`  
+Context: `any`  
+Category: `fun`  
+Usage: `,duck`
+
+Examples:
+
+- `,duck`
+
+#### `,duckstats`
+
+Show duck game stats.
+
+Role: `user`  
+Context: `any`  
+Category: `fun`  
+Usage: `,duckstats [nick]`
+
+Examples:
+
+- `,duckstats`
+
+#### `,trap`
+
+Set a trap in the duck game.
+
+Role: `user`  
+Context: `any`  
+Category: `fun`  
+Usage: `,trap`
+
+Examples:
+
+- `,trap`
+
+### info
+
+Source: `plugins`
+Category: `info`
+
+Wikipedia, Fediverse, Urban Dictionary and acronym lookup.
+
+#### `,acronyms`
+
+Look up stored acronym definitions.
+
+Role: `user`  
+Context: `any`  
+Category: `info`  
+Usage: `,acronyms <term>`
+
+Aliases: `,acro`, `,acronym`
+
+Examples:
+
+- `,acro XMPP`
+
+#### `,acronyms add`
+
+Add a definition to an acronym.
+
+Role: `user`  
+Context: `any`  
+Category: `info`  
+Usage: `,acronyms add <term> <definition>`
+
+Aliases: `,acro add`, `,acronym add`
+
+Examples:
+
+- `,acro add XMPP Extensible Messaging and Presence Protocol`
+
+#### `,acronyms delete`
+
+Delete an acronym completely.
+
+Role: `admin`  
+Context: `any`  
+Category: `info`  
+Usage: `,acronyms delete <term>`
+
+Aliases: `,acro delete`, `,acronym delete`
+
+Examples:
+
+- `,acro delete XMPP`
+
+#### `,acronyms list`
+
+List known acronyms.
+
+Role: `admin`  
+Context: `any`  
+Category: `info`  
+Usage: `,acronyms list [all|page|last]`
+
+Aliases: `,acro list`, `,acronym list`
+
+Examples:
+
+- `,acro list`
+
+#### `,acronyms merge`
+
+Merge one acronym into another.
+
+Role: `admin`  
+Context: `any`  
+Category: `info`  
+Usage: `,acronyms merge <source> <target>`
+
+Aliases: `,acro merge`, `,acronym merge`
+
+Examples:
+
+- `,acro merge xmpp XMPP`
+
+#### `,acronyms remove`
+
+Remove one acronym definition.
+
+Role: `user`  
+Context: `any`  
+Category: `info`  
+Usage: `,acronyms remove <term> <number>`
+
+Aliases: `,acro remove`, `,acronym remove`
+
+Examples:
+
+- `,acro remove XMPP 1`
+
+#### `,fediverse`
+
+Look up Fediverse account or instance information.
+
+Role: `user`  
+Context: `any`  
+Category: `info`  
+Usage: `,fediverse <account|instance>`
+
+Aliases: `,fedi`
+
+Examples:
+
+- `,fedi @user@example.org`
+
+#### `,info`
+
+Enable, disable or show room access to information commands.
+
+Role: `moderator`  
+Context: `room or MUC PM`  
+Category: `info`  
+Usage: `,info <on|off|status>`
+
+Examples:
+
+- `,info status`
+
+#### `,udict`
+
+Search Urban Dictionary.
+
+Role: `user`  
+Context: `any`  
+Category: `info`  
+Usage: `,udict <term>`
+
+Aliases: `,ud`
+
+Examples:
+
+- `,ud xmpp`
+
+#### `,wikipedia`
+
+Search Wikipedia.
+
+Role: `user`  
+Context: `any`  
+Category: `info`  
+Usage: `,wikipedia <term>`
+
+Aliases: `,wiki`
+
+Examples:
+
+- `,wiki XMPP`
+
+### karma
+
+Source: `plugins`
+Category: `fun`
+
+Room-local karma tracking with nick++ / nick--
+
+#### `,karma`
+
+Show or update karma for a term.
+
+Role: `user`  
+Context: `any`  
+Category: `fun`  
+Usage: `,karma [term|term++|term--]`
+
+Examples:
+
+- `,karma xmpp++`
+- `,karma xmpp`
+
+### pin
+
+Source: `plugins`
+Category: `utility`
+
+Pin room messages with paging and non-reply fallback.
+
+#### `,pin`
+
+Pin, list or delete room pins.
+
+Role: `user`  
+Context: `any`  
+Category: `rooms`  
+Usage: `,pin <add|list|delete|on|off|status> ...`
+
+Examples:
+
+- `,pin list`
+
+### poll
+
+Source: `plugins`
+Category: `utility`
+
+Room polls with voting, history and auto-close
+
+#### `,poll`
+
+Create and manage polls.
+
+Role: `user`  
+Context: `any`  
+Category: `rooms`  
+Usage: `,poll <new|vote|list|close|on|off|status> ...`
+
+Examples:
+
+- `,poll list`
+
+### reminder
+
+Source: `plugins`
+Category: `utility`
+
+Schedule and manage reminders
+
+#### `,remind`
+
+Create a reminder.
+
+Role: `user`  
+Context: `any`  
+Category: `utility`  
+Usage: `,remind <when> <text>`
+
+Aliases: `,rem`, `,reminder`
+
+Examples:
+
+- `,remind 10m check logs`
+
+#### `,remind delete`
+
+Delete one reminder.
+
+Role: `user`  
+Context: `any`  
+Category: `utility`  
+Usage: `,remind delete <id>`
+
+Aliases: `,remind cancel`, `,remind rm`
+
+Examples:
+
+- `,remind delete 12`
+
+#### `,reminders`
+
+List your reminders.
+
+Role: `user`  
+Context: `any`  
+Category: `utility`  
+Usage: `,reminders [all|page|last]`
+
+Aliases: `,remind list`, `,rems`
+
+Examples:
+
+- `,reminders`
+
+### rss
+
+Source: `plugins`
+Category: `info`
+
+RSS/Atom feed watcher and poster
+
+#### `,rss`
+
+Manage RSS feed subscriptions for a room.
+
+Role: `moderator`  
+Context: `any`  
+Category: `rooms`  
+Usage: `,rss <add|list|delete|on|off|status> ...`
+
+Examples:
+
+- `,rss list`
+
+### sed
+
+Source: `plugins`
+Category: `tools`
+
+Message correction using sed-like syntax
+
+#### `,sed`
+
+Apply sed-style corrections to recent messages.
+
+Role: `user`  
+Context: `any`  
+Category: `utility`  
+Usage: `,s/old/new/`
+
+Examples:
+
+- `,s/teh/the/`
+
 ### tell
 
+Source: `plugins`
 Category: `utility`
 
 Store and deliver messages for users when they join a room again.
@@ -1263,6 +1381,7 @@ Examples:
 
 ### tools
 
+Source: `plugins`
 Category: `utility`
 
 Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion
@@ -1379,6 +1498,7 @@ Examples:
 
 ### urlcheck
 
+Source: `plugins`
 Category: `info`
 
 URL title and YouTube info fetcher for groupchats
@@ -1396,104 +1516,9 @@ Examples:
 
 - `,urlcheck https://envs.net`
 
-### users
-
-Category: `core`
-
-User management with caching, nick lookup and logging
-
-#### `,users admins`
-
-List users with admin-level roles.
-
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
-Usage: `,users admins [all|page|last]`
-
-Aliases: `,user admin`, `,user admins`, `,users admin`
-
-Examples:
-
-- `,users admins`
-
-#### `,users delete`
-
-Delete one user record and its runtime data.
-
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
-Usage: `,users delete <jid>`
-
-Aliases: `,user delete`
-
-Examples:
-
-- `,users delete alice@example.org`
-
-#### `,users info`
-
-Show user info by JID or known nickname.
-
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
-Usage: `,users info <jid|nick>`
-
-Aliases: `,user info`
-
-Examples:
-
-- `,users info alice@example.org`
-
-#### `,users list`
-
-List users currently known in one joined room.
-
-Role: `admin`  
-Context: `private chat only`  
-Category: `users`  
-Usage: `,users list [room_jid]`
-
-Aliases: `,user list`
-
-Examples:
-
-- `,users list test@conference.example.org`
-
-#### `,users role`
-
-Change a user's global bot role.
-
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
-Usage: `,users role <jid> <role>`
-
-Aliases: `,user role`
-
-Examples:
-
-- `,users role alice@example.org trusted`
-
-#### `,users roles`
-
-Show available roles and their ordering.
-
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
-Usage: `,users roles`
-
-Aliases: `,user roles`
-
-Examples:
-
-- `,users roles`
-
 ### vcard
 
+Source: `plugins`
 Category: `info`
 
 Lookup and display vCard of a MUC occupant by MUC JID only
@@ -1648,6 +1673,7 @@ Examples:
 
 ### weather
 
+Source: `plugins`
 Category: `info`
 
 Gives weather according to users location (supports MUCs and MUC DMs)
@@ -1669,6 +1695,7 @@ Examples:
 
 ### xkcd
 
+Source: `plugins`
 Category: `fun`
 
 XKCD comic fetcher and broadcaster with full indexing
@@ -1688,6 +1715,7 @@ Examples:
 
 ### xmpp
 
+Source: `plugins`
 Category: `tools`
 
 XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)

@@ -3,7 +3,7 @@ import io
 import types
 import builtins
 
-import plugins._reg_profile as _reg_profile
+import core_plugins._reg_profile as _reg_profile
 
 
 # --- HASH HELPERS ---

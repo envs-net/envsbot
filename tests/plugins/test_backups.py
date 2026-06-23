@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import plugins.backups as backups_plugin
+import core_plugins.backups as backups_plugin
 
 
 @pytest.fixture

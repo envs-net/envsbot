@@ -38,8 +38,8 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from plugins.rooms import JOINED_ROOMS
-from plugins._core import handle_room_toggle_command
+from core_plugins.rooms import JOINED_ROOMS
+from core_plugins._core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)
 

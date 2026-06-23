@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import plugins.config_cmd as config_cmd
+import core_plugins.config_cmd as config_cmd
 
 
 def test_format_diff_lines_reports_grouped_changes_and_redacts(monkeypatch):

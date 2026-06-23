@@ -23,8 +23,8 @@ from typing import Any
 
 import aiohttp
 
-from plugins import _core
-from plugins.rooms import JOINED_ROOMS
+from core_plugins import _core
+from core_plugins.rooms import JOINED_ROOMS
 from utils.command import Role, command
 from utils.config import config
 

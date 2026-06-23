@@ -44,7 +44,7 @@ import pytz
 
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     handle_room_toggle_command,
     get_user_tzinfo,
     JOINED_ROOMS,
@@ -253,7 +253,7 @@ def _room_jid_from_context(msg, is_room: bool) -> str | None:
 async def _get_room_reminder_state(bot, room_jid: str) -> bool:
     """Return whether reminders are enabled for a room.
 
-    This intentionally matches plugins/rooms.py dict semantics:
+    This intentionally matches core_plugins/rooms.py dict semantics:
     {room_jid: True} means enabled. Missing keys are disabled, even if the
     configured default is on, because rooms.py writes defaults explicitly.
     """

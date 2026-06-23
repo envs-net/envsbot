@@ -23,7 +23,7 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     handle_room_toggle_command,
     get_jids_from_nick_index,
     _is_muc_pm,

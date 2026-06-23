@@ -1,7 +1,7 @@
 import pytest
 from types import SimpleNamespace
 
-import plugins.help as help_plugin
+import core_plugins.help as help_plugin
 import utils.command as command_utils
 
 import utils.config

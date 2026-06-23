@@ -134,14 +134,14 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "admin",
     },
     "plugin list": {
-        "short": "List loaded and available plugins by category.",
+        "short": "List loaded and available core/optional plugins.",
         "usage": "{prefix}plugins list [all|page|last]",
         "examples": ["{prefix}plugins list", "{prefix}plugins list all"],
         "context": "private chat / MUC PM",
         "category": "core",
     },
     "plugin info": {
-        "short": "Show metadata for one plugin.",
+        "short": "Show metadata and source information for one plugin.",
         "usage": "{prefix}plugin info <plugin>",
         "examples": ["{prefix}plugin info rooms"],
         "context": "private chat / MUC PM",
@@ -155,7 +155,7 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "core",
     },
     "plugin unload": {
-        "short": "Unload one plugin, optionally forced.",
+        "short": "Unload one optional plugin; core plugins are protected.",
         "usage": "{prefix}plugin unload <plugin> [force]",
         "examples": ["{prefix}plugin unload weather"],
         "context": "private chat / MUC PM",

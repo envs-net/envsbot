@@ -107,7 +107,7 @@ async def test_tell_cmd_user_not_found(monkeypatch):
     monkeypatch.setattr(tell, "get_jids_from_nick_index",
                         AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        "plugins._core.get_jids_from_nick_index", AsyncMock(return_value=[]))
+        "core_plugins._core.get_jids_from_nick_index", AsyncMock(return_value=[]))
     await tell.tell_cmd(bot, "jid", "sender", ["someone:", "test"], msg, True)
     bot.reply.assert_called()
     assert "Could not find user 'someone'" in bot.reply.call_args[0][1]
@@ -131,7 +131,7 @@ async def test_tell_cmd_store(monkeypatch):
                         lambda v: ("other", "test-m"))
     monkeypatch.setattr(tell, "get_jids_from_nick_index",
                         AsyncMock(side_effect=[["jidB"], ["jidA"]]))
-    monkeypatch.setattr("plugins._core.get_jids_from_nick_index",
+    monkeypatch.setattr("core_plugins._core.get_jids_from_nick_index",
                         AsyncMock(side_effect=[["jidB"], ["jidA"]]))
     monkeypatch.setattr(tell, "tell_store", AsyncMock())
     await tell.tell_cmd(bot, "jidA", "A", ["other:", "test-m"], msg, True)
@@ -146,7 +146,7 @@ async def test_deliver_tell_messages_single(monkeypatch):
     bot.db.users.plugin.return_value = store
     monkeypatch.setattr(tell, "get_jids_from_nick_index",
                         AsyncMock(return_value=["jid1"]))
-    monkeypatch.setattr("plugins._core.get_jids_from_nick_index",
+    monkeypatch.setattr("core_plugins._core.get_jids_from_nick_index",
                         AsyncMock(return_value=["jid1"]))
     payload = {
         "recv_jid": "jid1",
@@ -178,7 +178,7 @@ async def test_deliver_tell_messages_no_jid(monkeypatch):
     monkeypatch.setattr(tell, "get_jids_from_nick_index",
                         AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        "plugins._core.get_jids_from_nick_index", AsyncMock(return_value=[]))
+        "core_plugins._core.get_jids_from_nick_index", AsyncMock(return_value=[]))
     msg = {
         "from": MagicMock(bare="room@r"),
         "muc": {"nick": "nobody"},
@@ -193,7 +193,7 @@ async def test_deliver_tell_messages_no_messages(monkeypatch):
     bot = MagicMock()
     monkeypatch.setattr(tell, "get_jids_from_nick_index",
                         AsyncMock(return_value=["jid"]))
-    monkeypatch.setattr("plugins._core.get_jids_from_nick_index",
+    monkeypatch.setattr("core_plugins._core.get_jids_from_nick_index",
                         AsyncMock(return_value=["jid"]))
     monkeypatch.setattr(tell, "tell_fetch", AsyncMock(return_value=[]))
     msg = {

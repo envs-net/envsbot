@@ -154,9 +154,9 @@ Examples assume the default command prefix `,`.
 | `,audit last [limit]` | Show recent administrative audit events |
 | `,audit user <jid>` | Show audit events for one actor |
 | `,db status` | Show SQLite path, size and integrity status |
-| `,plugins list [all/page/last]` | List loaded plugins |
+| `,plugins list [all/page/last]` | List core and optional plugins |
 | `,plugins load <name>` | Load a plugin at runtime |
-| `,plugins unload <name>` | Unload a plugin at runtime |
+| `,plugins unload <name>` | Unload an optional plugin at runtime |
 | `,plugins reload <name>` | Reload a plugin at runtime |
 | `,rooms list [all/page/last]` | List known rooms |
 | `,rooms add <room_jid> <nick> [autojoin]` | Add a room to the database |
@@ -175,7 +175,16 @@ For paginated commands, `all` disables paging and prints the full result set. Fu
 
 ## Plugins
 
-Core and administration:
+EnvsBot now separates built-in bot functionality from optional room/community
+features:
+
+* `core_plugins/` contains bot/admin building blocks. These plugins keep their
+  public names such as `help`, `rooms`, `users` and `backups`, but they are
+  protected from runtime unloads. Reloading them is still supported.
+* `plugins/` contains optional room, utility and community features that can be
+  loaded, unloaded and reloaded at runtime.
+
+Core plugins:
 
 * `_admin` - restart, shutdown and runtime status/statistics
 * `_core` - shared helpers for plugins
@@ -191,7 +200,7 @@ Core and administration:
 * `db` - SQLite online status checks
 * `presence` - bot presence/status controls
 
-Room, utility and community plugins:
+Optional plugins:
 
 * `birthday_notify` - birthday announcements for opted-in rooms
 * `dice` - dice rolling with common notation

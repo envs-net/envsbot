@@ -122,3 +122,35 @@ async def test_unload_with_dependents(monkeypatch):
     pm.meta.pop("Y")
     await pm.unload("X")
     assert "X" not in pm.plugins
+
+@pytest.mark.asyncio
+async def test_core_plugin_cannot_be_unloaded_publicly(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot)
+    pm.plugins["help"] = make_fake_plugin(meta={"name": "help"})
+    pm.meta["help"] = {"name": "help"}
+    pm.plugin_sources["help"] = {"package": "core_plugins", "core": True}
+
+    success, message = await pm.unload("help", force=True)
+
+    assert success is False
+    assert "core plugin" in message
+    assert "help" in pm.plugins
+
+
+@pytest.mark.asyncio
+async def test_core_plugin_reload_uses_internal_unload(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot)
+    old_mod = make_fake_plugin(meta={"name": "help"})
+    new_mod = make_fake_plugin(meta={"name": "help"})
+    pm.plugins["help"] = old_mod
+    pm.meta["help"] = {"name": "help"}
+    pm.plugin_sources["help"] = {"package": "core_plugins", "core": True}
+    monkeypatch.setattr("utils.plugin_manager.importlib.import_module", lambda name: new_mod)
+
+    success, message = await pm.reload("help")
+
+    assert success is True
+    assert "help" in pm.plugins
+    assert "reloaded" in message

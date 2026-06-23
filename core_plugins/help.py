@@ -43,7 +43,7 @@ from utils.command import (
 )
 from utils.config import config
 
-from plugins._core import handle_room_toggle_command, _get_enabled_rooms
+from core_plugins._core import handle_room_toggle_command, _get_enabled_rooms
 
 log = logging.getLogger(__name__)
 
@@ -278,7 +278,7 @@ def _joined_room_from_private_message(bot, msg) -> str | None:
         return room
 
     try:
-        from plugins.rooms import JOINED_ROOMS
+        from core_plugins.rooms import JOINED_ROOMS
     except Exception:
         return None
 

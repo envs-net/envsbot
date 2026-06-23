@@ -18,7 +18,7 @@ class RoomFeatureState:
 
 def _rooms_module():
     # Imported lazily to avoid circular imports during plugin discovery.
-    from plugins import rooms
+    from core_plugins import rooms
     return rooms
 
 

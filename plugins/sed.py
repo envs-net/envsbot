@@ -29,7 +29,7 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from plugins import _core
+from core_plugins import _core
 
 log = logging.getLogger(__name__)
 

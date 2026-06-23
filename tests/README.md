@@ -6,7 +6,7 @@ This directory contains tests for the envsbot project.
 
 - `bot/` — tests for bot core and event handlers
 - `database/` — tests for database managers and caching
-- `plugins/` — plugin integration and plugin-specific logic
+- `plugins/` and `core_plugins/` — plugin integration and plugin-specific logic
 - `utils/` — utilities, helpers, rate limiting, etc.
 
 ## Running Tests

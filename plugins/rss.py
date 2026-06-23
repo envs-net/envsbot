@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
-from plugins.rooms import JOINED_ROOMS
+from core_plugins.rooms import JOINED_ROOMS
 
 try:
     import feedparser

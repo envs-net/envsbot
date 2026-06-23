@@ -20,7 +20,7 @@ import re
 import random
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     _is_muc_pm,
     handle_room_toggle_command,
     _get_enabled_rooms,

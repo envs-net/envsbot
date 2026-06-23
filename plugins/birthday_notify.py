@@ -33,14 +33,14 @@ from typing import Any
 
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     handle_room_toggle_command,
     JOINED_ROOMS,
     _ensure_user_exists,
     _is_enabled_for_room,
 )
 # --------------------------------------------------------------------------
-# !!!Switched from plugins._core.get_profile to plugins.vcard.get_user_vcard
+# !!!Switched from core_plugins._core.get_profile to plugins.vcard.get_user_vcard
 # due to circular import!!!
 # --------------------------------------------------------------------------
 from plugins.vcard import get_user_vcard as get_profile

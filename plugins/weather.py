@@ -15,11 +15,11 @@ Commands:
 import aiohttp
 import logging
 import urllib
-from plugins import _core
+from core_plugins import _core
 from plugins import vcard
 from utils.command import command, Role
 from utils.config import config  # intentionally exposed for tests and runtime settings
-from plugins.rooms import JOINED_ROOMS
+from core_plugins.rooms import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
 

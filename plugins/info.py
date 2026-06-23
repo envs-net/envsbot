@@ -32,7 +32,7 @@ from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
-from plugins._core import (
+from core_plugins._core import (
     handle_room_toggle_command,
     _is_muc_pm,
     _get_enabled_rooms
