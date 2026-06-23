@@ -125,7 +125,9 @@ class TaskSupervisor:
         meta["done_at"] = _now()
         plugin = meta["plugin"]
         self._by_plugin.get(plugin, set()).discard(task)
-        if not task.done() or task.cancelled():
+        if not task.done():
+            return
+        if task.cancelled():
             return
 
         exc = task.exception()

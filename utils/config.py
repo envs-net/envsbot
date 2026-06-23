@@ -810,16 +810,13 @@ def load_config(require_required_keys=False):
     return cfg
 
 
-def validate_startup_config(cfg=None):
+def validate_startup_config(cfg):
     """
     Validate the effective runtime config before starting the bot.
 
     This should be called by envsbot.py before Bot() is constructed so
     configuration mistakes produce a clear error instead of a restart loop.
     """
-    if cfg is None:
-        cfg = config
-
     validate_config(cfg, require_required_keys=True)
 
     for warning in collect_config_warnings(cfg):
@@ -875,7 +872,7 @@ def setup_logging():
 
 if __name__ == "__main__":
     try:
-        validate_startup_config()
+        validate_startup_config(config)
     except ConfigError as e:
         exit_on_config_error(e)
 

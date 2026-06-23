@@ -70,7 +70,7 @@ YOUTUBE_RE = re.compile(
 )
 # Dict of URLs which have been requested with timestamp to avoid fetching
 # the same URL multiple times in a short period
-# formant _url_timestamp[room][url] = timestamp
+# format: _url_timestamp[room][url] = timestamp
 _url_timestamps = {}
 # Operator-tunable fetch and suppression settings.
 URLCHECK_WAIT_SECONDS = int(config.get("urlcheck_wait_seconds", 120) or 120)
@@ -155,7 +155,7 @@ async def on_groupchat_message(bot, msg):
 
     text = msg.get("body", "")
     thread_id = msg.get("thread") or msg.get("id")
-    has_xep_0511 = msg.xml.find("{urn:xmpp:ssn}x") is not None
+    has_xep_0511 = msg.xml.find("{urn:xmpp:sn:0}x") is not None
 
     urls = _extract_urls_from_message_text(text)
     if not urls:
@@ -315,7 +315,7 @@ async def _send_youtube_urlcheck_reply(
             )
 
     if has_xep_0511 or has_xep_0392_link_metadata(msg):
-        for x in list(message.xml.findall("{urn:xmpp:ssn}x")):
+        for x in list(message.xml.findall("{urn:xmpp:sn:0}x")):
             message.xml.remove(x)
 
     message.send()
@@ -354,28 +354,28 @@ async def _send_html_urlcheck_reply(
         except Exception as exc:
             log.debug("[URLCHECK] Could not attach thread id to HTML reply: %s", exc)
 
-        if not has_xep_0511 and not has_xep_0392_link_metadata(msg):
-            try:
-                if title is not None:
-                    message["link_metadata"]["title"] = html.unescape(title)
-                message["link_metadata"]["url"] = final_url
-                message["link_metadata"]["about"] = (
-                    f"Status: {status} - Content-Type: {ctype}"
-                    f" - Size: {content_size}"
+    if not has_xep_0511 and not has_xep_0392_link_metadata(msg):
+        try:
+            if title is not None:
+                message["link_metadata"]["title"] = html.unescape(title)
+            message["link_metadata"]["url"] = final_url
+            message["link_metadata"]["about"] = (
+                f"Status: {status} - Content-Type: {ctype}"
+                f" - Size: {content_size}"
+            )
+            if mdesc is not None:
+                message["link_metadata"]["description"] = (
+                    html.unescape(mdesc) or ""
                 )
-                if mdesc is not None:
-                    message["link_metadata"]["description"] = (
-                            html.unescape(mdesc) or ""
-                    )
-            except Exception as e:
-                log.warning(
-                    "[URLCHECK] Failed to set link metadata for "
-                    f"URL '{final_url}': {e}"
-                )
+        except Exception as e:
+            log.warning(
+                "[URLCHECK] Failed to set link metadata for "
+                f"URL '{final_url}': {e}"
+            )
 
-        if has_xep_0511 or has_xep_0392_link_metadata(msg):
-            for x in list(message.xml.findall("{urn:xmpp:ssn}x")):
-                message.xml.remove(x)
+    if has_xep_0511 or has_xep_0392_link_metadata(msg):
+        for x in list(message.xml.findall("{urn:xmpp:sn:0}x")):
+            message.xml.remove(x)
 
     message.send()
 
