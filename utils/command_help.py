@@ -62,6 +62,14 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "admin",
     },
 
+
+    "tasks": {
+        "short": "Show supervised background task status.",
+        "usage": "{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]",
+        "examples": ["{prefix}tasks", "{prefix}tasks full", "{prefix}tasks plugin rss", "{prefix}tasks failed"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
     "backup create": {
         "short": "Create a managed ZIP backup archive.",
         "usage": "{prefix}backup [reason]",

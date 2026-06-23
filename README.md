@@ -140,6 +140,7 @@ Examples assume the default command prefix `,`.
 | `,help <plugin>` | Show focused help for one plugin |
 | `,help <command>` | Show focused help for one command |
 | `,bot status [full]` / `,status [full]` | Show compact or detailed bot, runtime, XMPP, plugin and database status |
+| `,tasks [full] [plugin <name>] [status]` | Show supervised background task status |
 | `,bot version` / `,version` | Show the running bot version and latest checked release |
 | `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
 | `,config show [all/page/last]` | Show redacted runtime configuration |
@@ -181,6 +182,7 @@ Core and administration:
 * `_reg_profile` - startup profile, vCard and avatar publishing
 * `help` - dynamic command and plugin help
 * `plugins` - runtime plugin management
+* `tasks` - background task inspection
 * `rooms` - room persistence, joining and per-room feature toggles
 * `users` - user registration, roles, admin listings and last-seen tracking
 * `config_cmd` - safe config inspection, validation and reload

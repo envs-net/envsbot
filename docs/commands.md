@@ -58,6 +58,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `rooms` | `core` | Database-backed room management |
 | `rss` | `info` | RSS/Atom feed watcher and poster |
 | `sed` | `tools` | Message correction using sed-like syntax |
+| `tasks` | `core` | Inspect supervised background tasks. |
 | `tell` | `utility` | Store and deliver messages for users when they join a room again. |
 | `tools` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion |
 | `urlcheck` | `info` | URL title and YouTube info fetcher for groupchats |
@@ -88,6 +89,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
 | `,db status` | `admin` | `private chat / MUC PM` | Show SQLite database path, size and integrity status. |
 | `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
+| `,tasks` | `admin` | `private chat / MUC PM` | Show supervised background task status. |
 
 ### Core
 
@@ -1215,6 +1217,30 @@ Usage: `,s/old/new/`
 Examples:
 
 - `,s/teh/the/`
+
+### tasks
+
+Category: `core`
+
+Inspect supervised background tasks.
+
+#### `,tasks`
+
+Show supervised background task status.
+
+Role: `admin`  
+Context: `private chat / MUC PM`  
+Category: `admin`  
+Usage: `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]`
+
+Aliases: `,bot tasks`
+
+Examples:
+
+- `,tasks`
+- `,tasks full`
+- `,tasks plugin rss`
+- `,tasks failed`
 
 ### tell
 

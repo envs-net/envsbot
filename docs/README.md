@@ -15,6 +15,7 @@ Operational notes:
 - Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status full` includes supervised background-task state.
+- `,tasks` shows supervised background tasks without the rest of the status output.
 - `,version` shows the running EnvsBot version and the latest checked release.
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.
 - `,audit last` shows recent administrative changes such as role updates, room changes, plugin reloads and config reloads.
