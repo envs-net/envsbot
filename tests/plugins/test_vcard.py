@@ -1,5 +1,7 @@
 import pytest
 from types import SimpleNamespace
+from xml.etree import ElementTree as ET
+from unittest.mock import AsyncMock
 from plugins import vcard
 
 
@@ -139,3 +141,89 @@ async def test_field_cmds(fake_bot, monkeypatch, cmd, args, label, expect):
     warning_found = any("not found in this room" in x[0].lower(
     ) for x in getattr(fake_bot, "_replies", []))
     assert expected_found or warning_found
+
+
+class RichDummyVcard:
+    def __init__(self):
+        self._values = {
+            "FN": "Alice Example",
+            "BDAY": "2001-02-03",
+            "ADR": {"LOCALITY": "Berlin", "REGION": "Berlin", "CTRY": "DE"},
+        }
+        self.xml = [
+            ET.Element("NICKNAME"),
+            ET.Element("URL"),
+            ET.Element("NOTE"),
+            ET.Element("ORG"),
+            ET.Element("EMAIL"),
+        ]
+        self.xml[0].text = "Ali"
+        self.xml[1].text = "https%3A//example.org/profile"
+        self.xml[2].text = "first line\nsecond line"
+        org_name = ET.SubElement(self.xml[3], "ORGNAME")
+        org_name.text = "Example Org"
+        user_id = ET.SubElement(self.xml[4], "USERID")
+        user_id.text = "alice@example.org"
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+    def __getitem__(self, key):
+        return self._values.get(key)
+
+
+@pytest.mark.asyncio
+async def test_vcard_field_direct_message_fetches_sender_field(fake_bot, monkeypatch):
+    async def rich_get_vcard(bot, msg, jid=None):
+        assert jid == "alice@example.org"
+        return RichDummyVcard()
+
+    monkeypatch.setattr(vcard, "get_vcard", rich_get_vcard)
+    monkeypatch.setattr(vcard._core, "_is_muc_pm", lambda msg: False)
+    m = msg(from_jid="alice@example.org/resource", type_="chat")
+
+    assert await vcard.vcard_field(fake_bot, m, "ignored", "FN") == "Alice Example"
+    assert await vcard.vcard_field(fake_bot, m, "ignored", "LOCALITY") == "Berlin"
+    assert await vcard.vcard_field(fake_bot, m, "ignored", "CTRY") == "DE"
+
+
+@pytest.mark.asyncio
+async def test_vcard_field_room_lookup_and_timezone_branches(fake_bot, monkeypatch):
+    monkeypatch.setattr(
+        vcard._core,
+        "get_real_jid_from_occupant",
+        lambda bot, msg, target_nick: "alice@example.org",
+    )
+    monkeypatch.setattr(
+        vcard._core,
+        "_get_user_timezone",
+        AsyncMock(return_value="Europe/Berlin"),
+    )
+    m = msg(from_jid="room@x/Alice", type_="groupchat")
+
+    value = await vcard.vcard_field(fake_bot, m, "Alice", "TIMEZONE", is_room=True)
+
+    assert value == "Europe/Berlin"
+    vcard._core._get_user_timezone.assert_awaited_once_with(fake_bot, "alice@example.org")
+
+
+@pytest.mark.asyncio
+async def test_vcard_field_returns_none_for_invalid_missing_and_empty_timezone(fake_bot, monkeypatch):
+    m = msg(from_jid="room@x/Alice", type_="groupchat")
+
+    assert await vcard.vcard_field(fake_bot, m, "Alice", "UNKNOWN", is_room=True) is None
+
+    monkeypatch.setattr(
+        vcard._core,
+        "get_real_jid_from_occupant",
+        lambda bot, msg, target_nick: None,
+    )
+    assert await vcard.vcard_field(fake_bot, m, "Missing", "FN", is_room=True) is None
+
+    monkeypatch.setattr(
+        vcard._core,
+        "get_real_jid_from_occupant",
+        lambda bot, msg, target_nick: "alice@example.org",
+    )
+    monkeypatch.setattr(vcard._core, "_get_user_timezone", AsyncMock(return_value=None))
+    assert await vcard.vcard_field(fake_bot, m, "Alice", "TIMEZONE", is_room=True) is None

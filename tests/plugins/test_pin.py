@@ -249,3 +249,121 @@ def test_body_without_quote():
 
 def test__trim_handles_none():
     assert pin._trim(None, 5) == ""
+
+
+@pytest.mark.asyncio
+async def test_create_pin_entry_rejects_missing_and_generated_text(bot, make_msg, monkeypatch, room_jid):
+    msg = make_msg(body=",pin add", resource="alice")
+    save = AsyncMock()
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value={}))
+    monkeypatch.setattr(pin, "_save_pin_data", save)
+
+    assert await pin._create_pin_entry(
+        bot, msg, room_jid, "alice@example.org", "Alice", "", "bob",
+        None, None, None, ",pin add", "quote"
+    ) is True
+    assert "Could not resolve" in bot.reply.call_args[0][1]
+    save.assert_not_called()
+
+    bot.reply.reset_mock()
+    assert await pin._create_pin_entry(
+        bot, msg, room_jid, "alice@example.org", "Alice",
+        "📌 Pinned message as #1", "bot", None, None, None,
+        ",pin add", "quote"
+    ) is True
+    assert "cannot be pinned" in bot.reply.call_args[0][1]
+    save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_pin_entry_persists_full_entry(bot, make_msg, monkeypatch, room_jid):
+    msg = make_msg(body=",pin add last", resource="alice")
+    state = {}
+    saved = AsyncMock()
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+    monkeypatch.setattr(pin, "_save_pin_data", saved)
+    monkeypatch.setattr(pin.time, "time", lambda: 1234567890)
+
+    assert await pin._create_pin_entry(
+        bot=bot,
+        msg=msg,
+        room=room_jid,
+        sender_jid="alice@example.org/resource",
+        nick="Alice",
+        target_text="hello&nbsp;world\nsecond line",
+        target_nick="Bob",
+        target_stanza_id="stanza-1",
+        reply_id="reply-1",
+        quote_text="hello world",
+        cmd_body=",pin add last",
+        source="last-1",
+    ) is True
+
+    saved.assert_awaited_once_with(bot, state)
+    entry = state[room_jid][pin.PINS_FIELD][0]
+    assert entry["id"] == 1
+    assert entry["room"] == room_jid
+    assert entry["created_at"] == 1234567890
+    assert entry["actor_nick"] == "alice"
+    assert entry["actor_jid"] == room_jid
+    assert entry["reply_id"] == "reply-1"
+    assert entry["target_stanza_id"] == "stanza-1"
+    assert entry["target_nick"] == "Bob"
+    assert entry["source"] == "last-1"
+    assert entry["client_quote_available"] is True
+    reply_lines = bot.reply.call_args[0][1]
+    assert "📌 Pinned message as #1." in reply_lines
+    assert "Preview: hello\xa0world" in reply_lines[-1]
+
+
+@pytest.mark.asyncio
+async def test_on_groupchat_message_caches_only_suitable_room_messages(bot, make_msg, monkeypatch, room_jid):
+    cached = []
+    monkeypatch.setattr(pin, "_handle_reply_pin_add", AsyncMock(return_value=False))
+    monkeypatch.setattr(pin, "get_stanza_id", lambda msg: "stanza-1")
+    monkeypatch.setattr(pin, "remember_stanza", lambda namespace, stanza_id: True)
+    monkeypatch.setattr(pin, "cache_message", lambda *args, **kwargs: cached.append((args, kwargs)))
+    monkeypatch.setitem(pin.JOINED_ROOMS, room_jid, {"nicks": {"alice": {}}})
+
+    try:
+        await pin._on_groupchat_message(bot, make_msg(body="hello", resource="alice"))
+        assert cached
+        args, kwargs = cached[0]
+        assert args[:5] == (pin.CACHE_NAMESPACE, room_jid, "alice", "hello", "stanza-1")
+        assert kwargs["maxlen"] == pin.PIN_RECENT_CACHE_SIZE
+
+        cached.clear()
+        await pin._on_groupchat_message(bot, make_msg(body=",pin list", resource="alice"))
+        assert cached == []
+
+        monkeypatch.setattr(pin, "remember_stanza", lambda namespace, stanza_id: False)
+        await pin._on_groupchat_message(bot, make_msg(body="new text", resource="alice"))
+        assert cached == []
+    finally:
+        pin.JOINED_ROOMS.pop(room_jid, None)
+
+
+@pytest.mark.asyncio
+async def test_on_groupchat_message_stops_after_reply_pin_add(bot, make_msg, monkeypatch):
+    cache = Mock()
+    monkeypatch.setattr(pin, "_handle_reply_pin_add", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "cache_message", cache)
+    await pin._on_groupchat_message(bot, make_msg(body=">old\n,pin add"))
+    cache.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pin_on_load_registers_groupchat_handler(bot):
+    registered = []
+    bot.bot_plugins = types.SimpleNamespace(
+        register_event=lambda *args, **kwargs: registered.append((args, kwargs))
+    )
+
+    await pin.on_load(bot)
+
+    assert registered
+    args, kwargs = registered[0]
+    assert args[0] == "pin"
+    assert args[1] == "groupchat_message"
+    assert callable(args[2])
+    assert kwargs == {}

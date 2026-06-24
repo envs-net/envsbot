@@ -384,3 +384,101 @@ async def test_is_valid_muc_domain_true_false(fake_bot):
     assert await rooms.is_valid_muc_domain(fake_bot, "conference.domain")
     xmpp_plugin.get_info = AsyncMock(side_effect=Exception("fail"))
     assert not await rooms.is_valid_muc_domain(fake_bot, "conference.domain")
+
+
+@pytest.mark.asyncio
+async def test_on_load_restores_reload_rooms_and_registers_presence_handler(fake_bot):
+    fake_bot._reload_rooms = {
+        "room1@conf": {"nick": "RuntimeNick", "autojoin": None, "status": None},
+        "room2@conf": {"autojoin": False, "status": "away"},
+    }
+    fake_bot.db.rooms.get = AsyncMock(side_effect=[
+        ("room1@conf", "DbNick", True, "chat"),
+        ("room2@conf", "DbNick2", True, "xa"),
+    ])
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+
+    await rooms.on_load(fake_bot)
+
+    assert not hasattr(fake_bot, "_reload_rooms")
+    fake_bot.bot_plugins.register_event.assert_called_once()
+    assert rooms.JOINED_ROOMS["room1@conf"] == {
+        "nick": "RuntimeNick",
+        "autojoin": True,
+        "status": "chat",
+        "affiliation": "unknown",
+        "role": "unknown",
+        "nicks": {},
+    }
+    assert rooms.JOINED_ROOMS["room2@conf"]["nick"] == "DbNick2"
+    assert rooms.JOINED_ROOMS["room2@conf"]["autojoin"] is False
+    assert rooms.JOINED_ROOMS["room2@conf"]["status"] == "away"
+    assert fake_bot.presence.joined_rooms == {
+        "room1@conf": "RuntimeNick",
+        "room2@conf": "DbNick2",
+    }
+    fake_bot.plugin["xep_0045"].join_muc.assert_any_await(
+        "room1@conf", "RuntimeNick", pshow="chat", pstatus="online"
+    )
+
+
+@pytest.mark.asyncio
+async def test_on_load_missing_dependencies_and_normal_startup(fake_bot):
+    fake_bot.plugin["xep_0045"] = None
+    await rooms.on_load(fake_bot)
+    fake_bot.bot_plugins.register_event.assert_called_once()
+
+    fake_bot.bot_plugins.register_event.reset_mock()
+    fake_bot.plugin["xep_0045"] = MagicMock()
+    fake_bot.db.rooms = None
+    await rooms.on_load(fake_bot)
+    fake_bot.bot_plugins.register_event.assert_called_once()
+
+    fake_bot.db.rooms = MagicMock()
+    fake_bot._reload_rooms = None
+    with patch("core_plugins.rooms.autojoin_rooms", AsyncMock()) as autojoin:
+        await rooms.on_load(fake_bot)
+        autojoin.assert_awaited_once_with(fake_bot)
+
+
+@pytest.mark.asyncio
+async def test_room_feature_toggle_branches(fake_bot, fake_msg, monkeypatch):
+    fake_bot.reply_error = MagicMock()
+    fake_bot.reply_usage = MagicMock()
+    fake_bot.reply_warn = MagicMock()
+    fake_bot.reply_info = MagicMock()
+    fake_bot.reply_ok = MagicMock()
+    fake_bot.prefix = ","
+
+    await rooms._handle_room_feature_toggle(fake_bot, fake_msg, True, ["pin"], enabled=True)
+    fake_bot.reply_error.assert_called_with(
+        fake_msg, "This command can only be used in MUC PMs to the bot."
+    )
+
+    await rooms._handle_room_feature_toggle(fake_bot, fake_msg, False, [], enabled=True)
+    fake_bot.reply_usage.assert_called_with(fake_msg, ",rooms enable <plugin>")
+
+    fake_msg["from"].bare = "missing@conf"
+    await rooms._handle_room_feature_toggle(fake_bot, fake_msg, False, ["pin"], enabled=True)
+    fake_bot.reply_error.assert_called_with(fake_msg, "Room 'missing@conf' is not currently joined.")
+
+    fake_msg["from"].bare = "room@conference.test"
+    rooms.JOINED_ROOMS[fake_msg["from"].bare] = {"nick": "BotNick"}
+    monkeypatch.setattr(rooms, "get_room_feature", AsyncMock(side_effect=KeyError))
+    await rooms._handle_room_feature_toggle(fake_bot, fake_msg, False, ["unknown"], enabled=True)
+    assert "Unknown room plugin" in fake_bot.reply_warn.call_args.args[1]
+
+    previous = types.SimpleNamespace(name="pin", enabled=True)
+    state = types.SimpleNamespace(name="pin", enabled=True)
+    monkeypatch.setattr(rooms, "get_room_feature", AsyncMock(return_value=previous))
+    monkeypatch.setattr(rooms, "set_room_feature", AsyncMock(return_value=state))
+    monkeypatch.setattr(rooms, "format_room_feature_line", lambda state: "pin: enabled")
+    await rooms._handle_room_feature_toggle(fake_bot, fake_msg, False, ["pin"], enabled=True)
+    assert "already enabled" in fake_bot.reply_info.call_args.args[1]
+
+    state = types.SimpleNamespace(name="pin", enabled=False)
+    monkeypatch.setattr(rooms, "set_room_feature", AsyncMock(return_value=state))
+    monkeypatch.setattr(rooms, "audit_event", AsyncMock())
+    await rooms._handle_room_feature_toggle(fake_bot, fake_msg, False, ["pin"], enabled=False)
+    rooms.audit_event.assert_awaited_once()
+    assert "pin is now disabled" in fake_bot.reply_ok.call_args.args[1]

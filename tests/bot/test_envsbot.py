@@ -1,6 +1,7 @@
 import pytest
 import asyncio
 import slixmpp
+import types
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import envsbot
@@ -423,3 +424,320 @@ async def test_startup_backup_can_be_disabled(monkeypatch, bot):
     await bot._create_startup_backup()
 
     create_backup.assert_not_called()
+
+
+def test_bot_init_wires_core_runtime_objects(monkeypatch):
+    registered_plugins = []
+    event_handlers = []
+    client_init_args = {}
+    limiter_kwargs = {}
+
+    class FakePresenceManager:
+        def __init__(self, owner):
+            self.owner = owner
+
+    class FakeTaskSupervisor:
+        pass
+
+    class FakeLimiter:
+        def __init__(self, **kwargs):
+            limiter_kwargs.update(kwargs)
+
+    class FakeDB:
+        def __init__(self, path):
+            self.path = path
+
+    class FakePluginManager:
+        def __init__(self, owner):
+            self.owner = owner
+
+    def fake_client_init(self, jid, password):
+        client_init_args["jid"] = jid
+        client_init_args["password"] = password
+
+    def fake_register_plugin(self, plugin_name, *args, **kwargs):
+        registered_plugins.append(plugin_name)
+
+    def fake_add_event_handler(self, event_name, handler):
+        event_handlers.append((event_name, handler.__name__))
+
+    monkeypatch.setattr(envsbot, "PresenceManager", FakePresenceManager)
+    monkeypatch.setattr(envsbot, "TaskSupervisor", FakeTaskSupervisor)
+    monkeypatch.setattr(envsbot, "TokenBucketRateLimiter", FakeLimiter)
+    monkeypatch.setattr(envsbot, "DatabaseManager", FakeDB)
+    monkeypatch.setattr(envsbot, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(envsbot, "config", {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "nick": "EnvBot",
+        "prefix": "!",
+        "db": "envsbot.sqlite3",
+    })
+    monkeypatch.setattr(envsbot.slixmpp.ClientXMPP, "__init__", fake_client_init)
+    monkeypatch.setattr(envsbot.slixmpp.ClientXMPP, "register_plugin", fake_register_plugin)
+    monkeypatch.setattr(envsbot.slixmpp.ClientXMPP, "add_event_handler", fake_add_event_handler)
+
+    bot = envsbot.Bot()
+
+    assert client_init_args == {"jid": "bot@example.org", "password": "secret"}
+    assert bot.nick == "EnvBot"
+    assert bot.prefix == "!"
+    assert bot.admins == []
+    assert bot.version == envsbot.__version__
+    assert bot.last_version_check_result is None
+    assert bot.last_update_notified_version is None
+    assert bot.connection_start_time is None
+    assert bot._startup_backup_done is False
+    assert bot.db.path == "envsbot.sqlite3"
+    assert bot.presence.owner is bot
+    assert bot.bot_plugins.owner is bot
+    assert limiter_kwargs == {
+        "capacity": 4,
+        "refill_amount": 1,
+        "refill_interval": 0.5,
+        "deny_window": 10.0,
+        "deny_threshold": 6,
+        "base_block_seconds": 30.0,
+        "backoff_multiplier": 2.0,
+        "max_block_seconds": 3600.0,
+        "notify_cooldown": 10.0,
+    }
+    assert registered_plugins == [
+        "xep_0012", "xep_0030", "xep_0045", "xep_0054",
+        "xep_0084", "xep_0092", "xep_0153", "xep_0163",
+        "xep_0199", "xep_0359", "xep_0461", "xep_0511",
+    ]
+    assert event_handlers == [
+        ("session_start", "on_start"),
+        ("groupchat_message", "on_muc_message"),
+        ("message", "on_private_message"),
+    ]
+
+
+def test_build_reply_message_formats_groupchat_private_and_hints(bot):
+    group_msg_obj = MagicMock()
+    bot.make_message.return_value = group_msg_obj
+    group_msg = {
+        "type": "groupchat",
+        "from": DummyFrom("room@conference.example.org", "alice"),
+        "body": "!cmd",
+        "id": "fallback-thread",
+        "get": lambda key, default=None: {
+            "type": "groupchat",
+            "mucnick": "Alice",
+            "id": "fallback-thread",
+        }.get(key, default),
+    }
+
+    message, body = bot._build_reply_message(
+        group_msg,
+        ["line one", "line two"],
+        mention=True,
+        thread=True,
+        ephemeral=True,
+        no_store=None,
+    )
+
+    assert message is group_msg_obj
+    assert body == "alice: line one\nline two"
+    bot.make_message.assert_called_with(
+        mto="room@conference.example.org",
+        mbody="alice: line one\nline two",
+        mtype="groupchat",
+    )
+    group_msg_obj.__setitem__.assert_called_with("thread", "fallback-thread")
+    group_msg_obj.append.assert_called_once()
+
+    private_msg_obj = MagicMock()
+    bot.make_message.return_value = private_msg_obj
+    private_msg = {
+        "type": "chat",
+        "from": "bob@example.org/resource",
+        "thread": "thread-1",
+        "get": lambda key, default=None: {
+            "type": "chat",
+            "thread": "thread-1",
+        }.get(key, default),
+    }
+
+    message, body = bot._build_reply_message(
+        private_msg,
+        "hello",
+        mention=True,
+        thread=True,
+        ephemeral=False,
+        no_store=False,
+    )
+
+    assert message is private_msg_obj
+    assert body == "hello"
+    bot.make_message.assert_called_with(
+        mto="bob@example.org/resource",
+        mbody="hello",
+        mtype="chat",
+    )
+    private_msg_obj.__setitem__.assert_called_with("thread", "thread-1")
+    private_msg_obj.append.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_muc_and_private_message_handlers_route_expected_messages(bot):
+    bot.handle_command = AsyncMock()
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+
+    own_msg = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "EnvBot"),
+        "mucnick": "EnvBot",
+        "get": lambda key, default=None: "EnvBot" if key == "mucnick" else default,
+    }
+    await bot.on_muc_message(own_msg)
+    bot.handle_command.assert_not_called()
+
+    room_msg = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    await bot.on_muc_message(room_msg)
+    bot.handle_command.assert_awaited_with(
+        ",help", room_msg["from"], "Alice", room_msg, True
+    )
+
+    bot.handle_command.reset_mock()
+    private_msg = {
+        "type": "chat",
+        "body": ",status",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+    await bot.on_private_message(private_msg)
+    bot.handle_command.assert_awaited_with(
+        ",status", private_msg["from"], None, private_msg, False
+    )
+
+    bot.handle_command.reset_mock()
+    await bot.on_private_message({"type": "headline", "get": lambda key, default=None: default})
+    bot.handle_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_room_role_from_presence_elevates_only_room_admins(monkeypatch, bot):
+    import core_plugins.rooms as rooms_mod
+
+    monkeypatch.setattr(rooms_mod, "JOINED_ROOMS", {
+        "room@conf": {
+            "nicks": {
+                "alice": {"jid": "alice@example.org", "affiliation": "admin"},
+                "bob": {"jid": "bob@example.org", "affiliation": "member"},
+                "broken": object(),
+            }
+        }
+    })
+
+    assert await bot._get_room_role_from_presence(
+        "alice@example.org", "room@conf", envsbot.Role.USER
+    ) == envsbot.Role.MODERATOR
+    assert await bot._get_room_role_from_presence(
+        "bob@example.org", "room@conf", envsbot.Role.USER
+    ) == envsbot.Role.USER
+    assert await bot._get_room_role_from_presence(
+        "alice@example.org", None, envsbot.Role.USER
+    ) == envsbot.Role.USER
+    assert await bot._get_room_role_from_presence(
+        "alice@example.org", "missing@conf", envsbot.Role.USER
+    ) == envsbot.Role.USER
+
+
+@pytest.mark.asyncio
+async def test_audit_writes_when_available_and_ignores_missing_or_failed(bot):
+    append = AsyncMock()
+    bot.db = types.SimpleNamespace(audit=types.SimpleNamespace(append=append))
+
+    await bot.audit("event", actor=123, target="target", details={"x": 1})
+    append.assert_awaited_once_with(
+        "event",
+        actor="123",
+        target="target",
+        details={"x": 1},
+    )
+
+    bot.db = types.SimpleNamespace(audit=None)
+    await bot.audit("ignored")
+
+    append = AsyncMock(side_effect=RuntimeError("boom"))
+    bot.db = types.SimpleNamespace(audit=types.SimpleNamespace(append=append))
+    await bot.audit("broken")
+    append.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_sender_jid_direct_and_muc_private(bot):
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+    direct_msg = {
+        "type": "chat",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: "chat" if key == "type" else default,
+    }
+    assert bot._resolve_sender_jid(direct_msg, "alice@example.org/desktop", None) == (
+        "alice@example.org",
+        None,
+    )
+
+    muc_pm_msg = {
+        "type": "chat",
+        "from": DummyFrom("room@conference.example.org", "alice"),
+        "get": lambda key, default=None: "chat" if key == "type" else default,
+    }
+    assert bot._is_muc_private_message(muc_pm_msg) is True
+    assert bot._resolve_sender_jid(muc_pm_msg, "room@conference.example.org/alice", None) == (
+        "user@host",
+        "room@conference.example.org",
+    )
+
+
+def test_real_reply_schedules_send_and_records_test_reply(monkeypatch, bot):
+    message = MagicMock()
+    build = MagicMock(return_value=(message, "body"))
+    monkeypatch.setattr(bot, "_build_reply_message", build)
+    scheduled = []
+
+    def fake_create_task(coro):
+        scheduled.append(coro)
+        coro.close()
+        return MagicMock()
+
+    monkeypatch.setattr(envsbot.asyncio, "create_task", fake_create_task)
+    msg = types.SimpleNamespace(replies=[])
+
+    envsbot.Bot.reply(
+        bot,
+        msg,
+        ["hello", "world"],
+        mention=False,
+        thread=False,
+        rate_limit=False,
+        ephemeral=True,
+        no_store=True,
+    )
+
+    build.assert_called_once_with(msg, ["hello", "world"], False, False, True, True)
+    assert scheduled
+    assert msg.replies == ["hello\nworld"]
+
+
+def test_real_reply_logs_creation_errors(monkeypatch, bot):
+    monkeypatch.setattr(bot, "_build_reply_message", MagicMock(side_effect=RuntimeError("boom")))
+    logged = []
+    monkeypatch.setattr(envsbot.log, "exception", lambda *args, **kwargs: logged.append(args))
+    group_msg = {"type": "groupchat", "get": lambda key, default=None: "groupchat" if key == "type" else default}
+    private_msg = {"type": "chat", "get": lambda key, default=None: "chat" if key == "type" else default}
+
+    envsbot.Bot.reply(bot, group_msg, "x")
+    envsbot.Bot.reply(bot, private_msg, "x")
+
+    assert "groupchat reply" in logged[0][0]
+    assert "private reply" in logged[1][0]

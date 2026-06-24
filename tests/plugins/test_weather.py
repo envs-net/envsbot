@@ -257,3 +257,124 @@ async def test_weather_unicode_location(fake_bot, fake_msg, patch_plugins,
         output = output_of_reply(fake_bot.reply)
         assert "münchen" in output.lower(
         ) or "hauptbahnhof" in output.lower() or "snow" in output.lower()
+
+
+@pytest.mark.asyncio
+async def test_weather_command_direct_message_success(fake_bot, patch_aiohttp, monkeypatch):
+    monkeypatch.setattr(weather.vcard, "get_user_vcard", AsyncMock(
+        return_value={"LOCALITY": "Berlin", "REGION": None, "CTRY": None}
+    ))
+    msg = {
+        "from": Mock(bare="alice@example.org", resource="laptop"),
+        "body": ",weather",
+        "type": "chat",
+    }
+
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", [], msg, False)
+
+    fake_bot.reply.assert_called()
+    out = output_of_reply(fake_bot.reply)
+    assert "Weather for alice@example.org" in out
+    assert "Berlin" in out
+
+
+@pytest.mark.asyncio
+async def test_weather_command_direct_message_rejects_target_args(fake_bot):
+    msg = {
+        "from": Mock(bare="alice@example.org", resource="laptop"),
+        "body": ",weather Bob",
+        "type": "chat",
+    }
+
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", ["Bob"], msg, False)
+
+    fake_bot.reply.assert_called_once()
+    assert "cannot specify a different nick" in output_of_reply(fake_bot.reply)
+
+
+@pytest.mark.asyncio
+async def test_weather_command_direct_message_vcard_failure(fake_bot, monkeypatch):
+    monkeypatch.setattr(weather.vcard, "get_user_vcard", AsyncMock(side_effect=RuntimeError("boom")))
+    msg = {
+        "from": Mock(bare="alice@example.org", resource="laptop"),
+        "body": ",weather",
+        "type": "chat",
+    }
+
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", [], msg, False)
+
+    fake_bot.reply.assert_called_once()
+    assert "Failed to retrieve your vCard" in output_of_reply(fake_bot.reply)
+
+
+@pytest.mark.asyncio
+async def test_weather_command_muc_pm_success(fake_bot, patch_aiohttp, monkeypatch):
+    monkeypatch.setattr(weather._core, "_is_muc_pm", lambda msg: True)
+    monkeypatch.setattr(weather.vcard, "get_user_vcard", AsyncMock(
+        return_value={"LOCALITY": None, "REGION": "Saxony", "CTRY": "DE"}
+    ))
+    msg = {
+        "from": Mock(bare="testroom@conference.example.com", resource="Alice"),
+        "body": ",weather",
+        "type": "chat",
+    }
+
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", [], msg, False)
+
+    fake_bot.reply.assert_called()
+    out = output_of_reply(fake_bot.reply)
+    assert "Weather for Alice" in out
+    assert "Saxony" in out
+
+
+@pytest.mark.asyncio
+async def test_weather_command_muc_pm_disabled_or_unknown_nick(fake_bot, monkeypatch):
+    monkeypatch.setattr(weather._core, "_is_muc_pm", lambda msg: True)
+    msg = {
+        "from": Mock(bare="testroom@conference.example.com", resource="Alice"),
+        "body": ",weather",
+        "type": "chat",
+    }
+
+    monkeypatch.setattr(weather._core, "_get_enabled_rooms", AsyncMock(return_value={}))
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", [], msg, False)
+    fake_bot.reply.assert_not_called()
+
+    monkeypatch.setattr(
+        weather._core,
+        "_get_enabled_rooms",
+        AsyncMock(return_value={"testroom@conference.example.com": True}),
+    )
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", ["Missing"], msg, False)
+    fake_bot.reply.assert_called_once()
+    assert "not found in this room" in output_of_reply(fake_bot.reply)
+
+
+@pytest.mark.asyncio
+async def test_weather_command_muc_pm_missing_resource(fake_bot, monkeypatch):
+    monkeypatch.setattr(weather._core, "_is_muc_pm", lambda msg: True)
+    msg = {
+        "from": Mock(bare="testroom@conference.example.com", resource=""),
+        "body": ",weather",
+        "type": "chat",
+    }
+
+    await weather.weather_command(fake_bot, "alice@example.org", "Alice", [], msg, False)
+
+    fake_bot.reply.assert_called_once()
+    assert "determine your nickname" in output_of_reply(fake_bot.reply)
+
+
+def test_weather_target_and_location_helpers():
+    bare, nick = weather.get_pm_target(Mock(bare="alice@example.org"), "Alice")
+    assert (bare, nick) == ("alice@example.org", "Alice")
+    assert weather.get_pm_target("bob@example.org/device", "Bob") == ("bob@example.org", "Bob")
+    assert weather._extract_location_fields({"LOCALITY": "City", "REGION": "State", "CTRY": "DE"}) == (
+        "City",
+        "State",
+        "DE",
+    )
+    assert weather._select_location(None, None, "DE") == "DE"
+    assert weather._select_location(None, "Berlin", "DE") == "Berlin"
+    assert weather._select_location("Kreuzberg", "Berlin", "DE") == "Kreuzberg"
+    assert weather._select_location(None, None, None) == ""

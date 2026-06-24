@@ -256,3 +256,117 @@ async def test_seen_command_not_found(bot, simple_msg, enabled_rooms,
     out = bot.reply.call_args[0][1].lower()
     assert "no data found" in out or "not found" in out
     await async_mock(bot, "UnknownNick")
+
+
+class SeenFrom:
+    def __init__(self, bare, resource=""):
+        self.bare = bare
+        self.resource = resource
+
+    def __str__(self):
+        return f"{self.bare}/{self.resource}" if self.resource else self.bare
+
+
+@pytest.mark.asyncio
+async def test_seen_resolve_room_context_uses_live_room_and_presence(bot, monkeypatch):
+    joined = {
+        "room@conf.org": {
+            "nicks": {
+                "Alice": {"jid": "alice@example.org"},
+                "Bob": {"jid": "bob@example.org"},
+            }
+        },
+        "other@conf.org": {
+            "nicks": {
+                "Bob": {"jid": "bob@example.org"},
+            }
+        },
+    }
+    monkeypatch.setattr(tools, "JOINED_ROOMS", joined)
+    nick_lookup = AsyncMock(return_value=[])
+    monkeypatch.setattr(tools, "get_jids_from_nick_index", nick_lookup)
+    bot.plugin["xep_0045"].get_roster.return_value = ["Bob"]
+    bot.plugin["xep_0045"].get_jid_property.side_effect = ["away", "busy"]
+    bot.presence.emoji.return_value = "🟡"
+    msg = {"from": SeenFrom("room@conf.org", "Alice")}
+
+    context = await tools._seen_resolve_room_context(
+        bot, "room@conf.org/Alice", "Alice", ["Bob"], msg
+    )
+
+    assert context == {
+        "room_jid": "room@conf.org",
+        "display_nick": "Bob",
+        "target_jid": "bob@example.org",
+        "caller_jid": "alice@example.org",
+        "present_in_room": True,
+        "rooms_with_nick": ["room@conf.org", "other@conf.org"],
+        "target_show": "away",
+        "target_status": "busy",
+        "target_emoji": "🟡",
+    }
+    nick_lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_seen_resolve_room_context_falls_back_to_nick_index(bot, monkeypatch):
+    monkeypatch.setattr(tools, "JOINED_ROOMS", {
+        "room@conf.org": {"nicks": {}}
+    })
+    nick_lookup = AsyncMock(side_effect=[
+        ["target@example.org"],
+        ["caller@example.org"],
+    ])
+    monkeypatch.setattr(tools, "get_jids_from_nick_index", nick_lookup)
+    msg = {"from": SeenFrom("room@conf.org", "Alice")}
+
+    context = await tools._seen_resolve_room_context(
+        bot, "room@conf.org/Alice", "Alice", ["Missing"], msg
+    )
+
+    assert context["target_jid"] == "target@example.org"
+    assert context["caller_jid"] == "caller@example.org"
+    assert context["present_in_room"] is False
+    assert context["target_show"] == "unknown"
+    assert nick_lookup.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_seen_resolve_dm_context_allows_self_and_denies_others(bot, monkeypatch):
+    monkeypatch.setattr(tools, "get_jids_from_nick_index", AsyncMock(return_value=[
+        "alice@example.org"
+    ]))
+    msg = {"from": SeenFrom("alice@example.org", "desktop")}
+
+    context = await tools._seen_resolve_dm_context(
+        bot, "alice@example.org/desktop", "Alice", [], msg
+    )
+    assert context["display_nick"] == "Alice"
+    assert context["target_jid"] == "alice@example.org"
+    assert context["caller_jid"] == "alice@example.org"
+    assert context["present_in_room"] is False
+    assert context["target_show"] == "online"
+    assert context["target_emoji"] == "😀"
+
+    assert await tools._seen_resolve_dm_context(
+        bot, "alice@example.org/desktop", "Alice", ["Bob"], msg
+    ) is None
+    assert "only look up yourself" in bot.reply.call_args[0][1].lower()
+
+
+@pytest.mark.asyncio
+async def test_seen_timezone_and_formatting_helpers(monkeypatch, bot):
+    monkeypatch.setattr(tools, "get_user_tzinfo", AsyncMock(return_value=tools.pytz.timezone("Europe/Berlin")))
+    tzinfo = await tools._seen_get_timezone(bot, "alice@example.org")
+    assert str(tzinfo) == "Europe/Berlin"
+
+    good = await tools._seen_format_last_seen(
+        "2024-01-01T10:00:00+00:00",
+        tools.pytz.timezone("Europe/Berlin"),
+        "Alice",
+    )
+    assert "2024-01-01" in good
+    assert "CET" in good
+
+    assert await tools._seen_format_last_seen(None, None, "Alice") == "never"
+    assert await tools._seen_format_last_seen("not-a-date", None, "Alice") == "not-a-date"
