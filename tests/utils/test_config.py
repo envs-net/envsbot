@@ -31,6 +31,7 @@ def test_load_config_loads_python(tmp_path, monkeypatch):
             'PASSWORD = "secret"',
             'OWNER = "owner@example.org"',
             'NICK = "envsbot"',
+            'RESOURCE = "service"',
             'COMMAND_PREFIX = ";"',
             'LOG_LEVEL = "DEBUG"',
             'CUSTOM = "extra"',
@@ -45,6 +46,7 @@ def test_load_config_loads_python(tmp_path, monkeypatch):
     assert result["password"] == "secret"
     assert result["owner"] == "owner@example.org"
     assert result["nick"] == "envsbot"
+    assert result["resource"] == "service"
     assert result["prefix"] == ";"
     assert result["loglevel"] == "DEBUG"
     assert result["custom"] == "extra"
@@ -326,17 +328,62 @@ def test_validate_config_rejects_invalid_admin_jid():
     assert "admins[1]:" in str(exc.value)
 
 
-def test_validate_config_accepts_host_and_port():
+def test_validate_config_accepts_connection_options():
     cfg = {
         "jid": "bot@example.org",
         "password": "secret",
         "owner": "owner@example.org",
         "nick": "envsbot",
+        "resource": "service",
         "host": "xmpp.example.org",
-        "port": 5222,
+        "port": 5223,
+        "direct_tls": True,
     }
 
     config_mod.validate_config(cfg, require_required_keys=True)
+
+
+
+
+def test_load_config_maps_resource_and_direct_tls(tmp_path, monkeypatch):
+    (tmp_path / "config.py").write_text(
+        "\n".join([
+            'JID = "bot@example.org"',
+            'PASSWORD = "secret"',
+            'OWNER = "owner@example.org"',
+            'NICK = "envsbot"',
+            'RESOURCE = "service"',
+            'CONNECT_HOST = "xmpp.example.org"',
+            'CONNECT_PORT = 5223',
+            'CONNECT_DIRECT_TLS = True',
+        ])
+    )
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    result = config_mod.load_config(require_required_keys=True)
+
+    assert result["resource"] == "service"
+    assert result["host"] == "xmpp.example.org"
+    assert result["port"] == 5223
+    assert result["direct_tls"] is True
+
+
+def test_validate_config_rejects_invalid_resource_and_direct_tls_types():
+    cfg = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+        "resource": 123,
+        "direct_tls": "yes",
+    }
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(cfg, require_required_keys=True)
+
+    msg = str(exc.value)
+    assert "resource: expected string" in msg
+    assert "direct_tls: expected bool" in msg
 
 
 def test_validate_config_rejects_invalid_host_type():

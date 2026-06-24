@@ -73,6 +73,7 @@ Copy `config_sample.py` to `config.py` and set at least:
 JID = "envsbot@example.org"
 PASSWORD = "secret"
 NICK = "EnvsBot"
+RESOURCE = "service"  # optional; set None to let server choose
 OWNER = "admin@example.org"
 
 COMMAND_PREFIX = ","
@@ -84,7 +85,14 @@ AVATAR_PATH = "data/avatar.jpg"
 AVATAR_TYPE = "image/jpeg"
 ```
 
-Optional `CONNECT_HOST` and `CONNECT_PORT` values can be used when the XMPP server address differs from the JID domain or default client port.
+Optional `CONNECT_HOST`, `CONNECT_PORT` and `CONNECT_DIRECT_TLS` values can be
+used when the XMPP server address differs from the JID domain, default client
+port or STARTTLS mode. For direct TLS, set:
+
+```python
+CONNECT_DIRECT_TLS = True
+CONNECT_PORT = 5223
+```
 
 `config_sample.py` also contains operator tuning sections for network timeouts, URL checks, RSS backoff, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
 

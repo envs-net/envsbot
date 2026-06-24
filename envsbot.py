@@ -35,6 +35,110 @@ log = logging.getLogger(__name__)
 
 
 # -------------------------------------------------
+# XMPP CONNECTION HELPERS
+# -------------------------------------------------
+
+
+def _get_configured_resource():
+    """Return the optional configured XMPP resource."""
+    resource = config.get("resource")
+    if resource is None:
+        return None
+
+    resource = str(resource).strip()
+    return resource or None
+
+
+def _build_client_jid(jid, resource=None):
+    """Build the login JID, optionally replacing/adding a resource."""
+    jid = str(jid)
+    if not resource:
+        return jid
+
+    bare_jid = jid.split("/", 1)[0]
+    return f"{bare_jid}/{resource}"
+
+
+def _configured_jid_domain():
+    """Return the domain part of the configured bot JID if available."""
+    jid = str(config.get("jid", ""))
+    if "@" not in jid:
+        return None
+    domain = jid.split("@", 1)[1].split("/", 1)[0].strip()
+    return domain or None
+
+
+def _boundjid_domain(xmpp):
+    """Return a best-effort domain from Slixmpp's bound JID object."""
+    boundjid = getattr(xmpp, "boundjid", None)
+    if boundjid is None:
+        return None
+
+    for attribute in ("domain", "host"):
+        value = getattr(boundjid, attribute, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _connect_signature_parameters(connect_method):
+    """Return inspectable connect() parameters, or an empty mapping."""
+    try:
+        return inspect.signature(connect_method).parameters
+    except (TypeError, ValueError):
+        return {}
+
+
+def _connect_kwargs(xmpp):
+    """Build kwargs for xmpp.connect() without passing unsupported names."""
+    host = config.get("host") or _configured_jid_domain() or _boundjid_domain(xmpp)
+    port = config.get("port")
+    direct_tls = bool(config.get("direct_tls", False))
+
+    parameters = _connect_signature_parameters(xmpp.connect)
+    kwargs = {}
+
+    if "address" in parameters and host and port is not None:
+        kwargs["address"] = (host, int(port))
+    else:
+        if "host" in parameters and host:
+            kwargs["host"] = host
+        if "port" in parameters and port is not None:
+            kwargs["port"] = int(port)
+
+    if "use_ssl" in parameters:
+        kwargs["use_ssl"] = direct_tls
+    if direct_tls and "force_starttls" in parameters:
+        kwargs["force_starttls"] = False
+
+    return kwargs
+
+
+async def connect_xmpp(xmpp):
+    """Connect using optional host, port and direct-TLS config."""
+    kwargs = _connect_kwargs(xmpp)
+    host = (
+        kwargs.get("host")
+        or (kwargs.get("address") or (None, None))[0]
+        or _configured_jid_domain()
+        or "auto"
+    )
+    port = (
+        kwargs.get("port")
+        or (kwargs.get("address") or (None, None))[1]
+        or "auto"
+    )
+    mode = "direct TLS" if config.get("direct_tls", False) else "STARTTLS"
+
+    log.info("[XMPP] Connecting to %s:%s (%s)", host, port, mode)
+
+    result = xmpp.connect(**kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+# -------------------------------------------------
 # BOT CLASS
 # -------------------------------------------------
 
@@ -42,7 +146,8 @@ class Bot(slixmpp.ClientXMPP):
 
     def __init__(self):
         # run __init__() from ClientXMPP
-        super().__init__(config["jid"],
+        super().__init__(_build_client_jid(config["jid"],
+                                           _get_configured_resource()),
                          config["password"])
 
         self.nick = config.get("nick", "bot")
@@ -766,14 +871,7 @@ async def main():
     xmpp = Bot()
 
     # startup bot
-    host = config.get("host", None)
-    port = config.get("port", None)
-
-    if host or port:
-        await xmpp.connect(host=host or xmpp.boundjid.domain,
-                           port=port or 5222)
-    else:
-        await xmpp.connect()
+    await connect_xmpp(xmpp)
 
     log.info("[XMPP] ✅ Connected successfully. Starting event loop...")
 

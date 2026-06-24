@@ -11,6 +11,9 @@ JID = "envsbot@domain.tld"
 PASSWORD = "yourpassword"
 NICK = "EnvsBot"
 
+# Optional XMPP resource. Set to None to let Slixmpp/server choose one.
+RESOURCE = "service"
+
 # Bare JID of the bot owner. The owner has the highest runtime role.
 OWNER = "owner@domain.tld"
 
@@ -28,6 +31,10 @@ CONNECT_HOST = None
 # 5222 = normal C2S with STARTTLS
 # 5223 = direct TLS / legacy SSL when your server requires it
 CONNECT_PORT = 5222
+
+# False = regular STARTTLS on port 5222.
+# True = direct TLS / legacy SSL, commonly on port 5223.
+CONNECT_DIRECT_TLS = False
 
 # XMPP query timeout used by diagnostic/info commands.
 XMPP_QUERY_TIMEOUT_SECONDS = 8

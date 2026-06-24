@@ -469,6 +469,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     monkeypatch.setattr(envsbot, "config", {
         "jid": "bot@example.org",
         "password": "secret",
+        "resource": "service",
         "nick": "EnvBot",
         "prefix": "!",
         "db": "envsbot.sqlite3",
@@ -479,7 +480,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
 
     bot = envsbot.Bot()
 
-    assert client_init_args == {"jid": "bot@example.org", "password": "secret"}
+    assert client_init_args == {"jid": "bot@example.org/service", "password": "secret"}
     assert bot.nick == "EnvBot"
     assert bot.prefix == "!"
     assert bot.admins == []
@@ -741,3 +742,107 @@ def test_real_reply_logs_creation_errors(monkeypatch, bot):
 
     assert "groupchat reply" in logged[0][0]
     assert "private reply" in logged[1][0]
+
+
+def test_build_client_jid_handles_optional_resource():
+    assert envsbot._build_client_jid(
+        "bot@example.org", None
+    ) == "bot@example.org"
+    assert envsbot._build_client_jid(
+        "bot@example.org", "service"
+    ) == "bot@example.org/service"
+    assert envsbot._build_client_jid(
+        "bot@example.org/old", "service"
+    ) == "bot@example.org/service"
+
+
+def test_get_configured_resource_strips_empty_values(monkeypatch):
+    monkeypatch.setattr(envsbot, "config", {"resource": "  service  "})
+    assert envsbot._get_configured_resource() == "service"
+
+    monkeypatch.setattr(envsbot, "config", {"resource": "  "})
+    assert envsbot._get_configured_resource() is None
+
+
+def test_connect_kwargs_supports_host_port_direct_tls(monkeypatch):
+    class FakeXMPP:
+        def connect(
+            self,
+            host=None,
+            port=None,
+            use_ssl=False,
+            force_starttls=True,
+        ):
+            return True
+
+    monkeypatch.setattr(envsbot, "config", {
+        "jid": "bot@example.org",
+        "host": "xmpp.example.org",
+        "port": 5223,
+        "direct_tls": True,
+    })
+
+    assert envsbot._connect_kwargs(FakeXMPP()) == {
+        "host": "xmpp.example.org",
+        "port": 5223,
+        "use_ssl": True,
+        "force_starttls": False,
+    }
+
+
+def test_connect_kwargs_uses_configured_jid_domain_and_starttls(monkeypatch):
+    class FakeXMPP:
+        def connect(self, host=None, port=None, use_ssl=False):
+            return True
+
+    monkeypatch.setattr(envsbot, "config", {
+        "jid": "bot@example.org/service",
+        "host": None,
+        "port": 5222,
+        "direct_tls": False,
+    })
+
+    assert envsbot._connect_kwargs(FakeXMPP()) == {
+        "host": "example.org",
+        "port": 5222,
+        "use_ssl": False,
+    }
+
+
+def test_connect_kwargs_uses_address_only_when_supported(monkeypatch):
+    class FakeXMPP:
+        def connect(self, address=None, use_ssl=False, force_starttls=True):
+            return True
+
+    monkeypatch.setattr(envsbot, "config", {
+        "jid": "bot@example.org",
+        "host": None,
+        "port": 5223,
+        "direct_tls": True,
+    })
+
+    assert envsbot._connect_kwargs(FakeXMPP()) == {
+        "address": ("example.org", 5223),
+        "use_ssl": True,
+        "force_starttls": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_connect_xmpp_awaits_async_connect(monkeypatch):
+    calls = []
+
+    class FakeXMPP:
+        async def connect(self, host=None, port=None, use_ssl=False):
+            calls.append({"host": host, "port": port, "use_ssl": use_ssl})
+            return "connected"
+
+    monkeypatch.setattr(envsbot, "config", {
+        "jid": "bot@example.org",
+        "host": "xmpp.example.org",
+        "port": 5222,
+        "direct_tls": False,
+    })
+
+    assert await envsbot.connect_xmpp(FakeXMPP()) == "connected"
+    assert calls == [{"host": "xmpp.example.org", "port": 5222, "use_ssl": False}]
