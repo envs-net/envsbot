@@ -354,6 +354,25 @@ def _role_label(role: Role) -> str:
     return role.name.lower()
 
 
+async def _write_user_audit(bot, event: str, *, actor=None, target=None, details=None) -> None:
+    """Write a users audit event without letting audit failures break commands."""
+    try:
+        await audit_event(
+            bot,
+            event,
+            actor=actor,
+            target=target,
+            details={"plugin": "users", **(details or {})},
+        )
+    except Exception:
+        log.debug("[USERS] Failed to write audit event", exc_info=True)
+
+
+def _audit_reason(reason: str) -> str:
+    """Return a compact reason string for audit details."""
+    return str(reason).replace("⛔", "").replace("🟡️", "").strip()
+
+
 def _available_role_names() -> str:
     """Return role names that may be assigned through the users command."""
     return ", ".join(ROLE_NAMES)
@@ -573,11 +592,25 @@ async def users_update(bot, sender, nick, args, msg, is_room):
         actor = _parse_user_jid(sender)
         target = _parse_user_jid(args[0])
         if not actor or not target:
+            await _write_user_audit(
+                bot,
+                "user_role_change_denied",
+                actor=actor or str(sender),
+                target=target or str(args[0]),
+                details={"reason": "invalid_user_jid", "requested_role": str(args[1])},
+            )
             bot.reply(msg, "🟡️ Invalid user JID.")
             return
 
         role_name = args[1].lower()
         if role_name not in ROLE_NAMES:
+            await _write_user_audit(
+                bot,
+                "user_role_change_denied",
+                actor=actor,
+                target=target,
+                details={"reason": "invalid_role", "requested_role": role_name},
+            )
             bot.reply(msg, f"🟡️ Invalid role. Available: {_available_role_names()}")
             return
 
@@ -585,21 +618,47 @@ async def users_update(bot, sender, nick, args, msg, is_room):
         um = bot.db.users
         target_user = await um.get(target)
         if not target_user:
+            await _write_user_audit(
+                bot,
+                "user_role_change_denied",
+                actor=actor,
+                target=target,
+                details={"reason": "user_not_found", "requested_role": _role_label(new_role)},
+            )
             bot.reply(msg, f"🟡️ User not found: {target}")
             return
 
         old_role = _role_from_user(target_user)
         allowed, reason = await _can_change_role(bot, actor, target, old_role, new_role)
         if not allowed:
+            await _write_user_audit(
+                bot,
+                "user_role_change_denied",
+                actor=actor,
+                target=target,
+                details={
+                    "reason": _audit_reason(reason),
+                    "old_role": _role_label(old_role),
+                    "requested_role": _role_label(new_role),
+                },
+            )
             bot.reply(msg, reason)
             return
 
         if old_role == new_role:
+            await _write_user_audit(
+                bot,
+                "user_role_change_noop",
+                actor=actor,
+                target=target,
+                details={"role": _role_label(new_role)},
+            )
             bot.reply(msg, f"ℹ️ {target} already has role {_role_label(new_role)}.")
             return
 
         await um.set(target, "role", new_role.value)
-        await audit_event(bot, 
+        await _write_user_audit(
+            bot,
             "user_role_changed",
             actor=actor,
             target=target,
@@ -681,10 +740,29 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
             bot.reply(msg, f"🟡️ Usage: {prefix}users delete <jid>")
             return
 
+        actor = _parse_user_jid(sender)
         jid = _parse_user_jid(args[0])
         if not jid:
             log.warning("[USERS] 🟡️ Invalid JID for delete: %s", args[0])
+            await _write_user_audit(
+                bot,
+                "user_delete_denied",
+                actor=actor or str(sender),
+                target=str(args[0]),
+                details={"reason": "invalid_user_jid"},
+            )
             bot.reply(msg, "🟡️ Invalid user JID.")
+            return
+
+        if not actor:
+            await _write_user_audit(
+                bot,
+                "user_delete_denied",
+                actor=str(sender),
+                target=jid,
+                details={"reason": "invalid_sender_jid"},
+            )
+            bot.reply(msg, "🟡️ Invalid sender JID.")
             return
 
         um = bot.db.users
@@ -692,22 +770,32 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
 
         if not user:
             log.warning(f"[USERS] 🟡️ Delete failed, user not found: {jid}")
+            await _write_user_audit(
+                bot,
+                "user_delete_denied",
+                actor=actor,
+                target=jid,
+                details={"reason": "user_not_found"},
+            )
             bot.reply(msg, f"🟡️ User not found: {jid}")
-            return
-
-        actor = _parse_user_jid(sender)
-        if not actor:
-            bot.reply(msg, "🟡️ Invalid sender JID.")
             return
 
         target_role = _role_from_user(user)
         allowed, reason = await _can_delete_user(bot, actor, jid, target_role)
         if not allowed:
+            await _write_user_audit(
+                bot,
+                "user_delete_denied",
+                actor=actor,
+                target=jid,
+                details={"reason": _audit_reason(reason), "role": _role_label(target_role)},
+            )
             bot.reply(msg, reason)
             return
 
         await um.delete(jid)
-        await audit_event(bot, 
+        await _write_user_audit(
+            bot,
             "user_deleted",
             actor=actor,
             target=jid,

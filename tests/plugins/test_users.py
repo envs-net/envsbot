@@ -499,3 +499,140 @@ async def test_users_roles_and_admins_output(mock_bot, mock_msg, monkeypatch):
     assert "super@example.org" in admins_text
     assert "legacy-owner@example.org" not in admins_text
     assert "user@example.org" not in admins_text
+
+
+@pytest.mark.asyncio
+async def test_users_role_audit_events(mock_bot, mock_msg):
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+    mock_bot.db.users.set = AsyncMock()
+
+    mock_bot.db.users.get = AsyncMock(
+        return_value={"jid": "target@example.org", "role": users_mod.Role.USER.value}
+    )
+    await users_mod.users_update(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["target@example.org", "trusted"],
+        mock_msg,
+        False,
+    )
+    mock_bot.audit.assert_awaited_with(
+        "user_role_changed",
+        actor="admin@example.org",
+        target="target@example.org",
+        details={"plugin": "users", "old_role": "user", "new_role": "trusted"},
+    )
+
+    mock_bot.audit.reset_mock()
+    mock_bot.db.users.get = AsyncMock(
+        return_value={"jid": "target@example.org", "role": users_mod.Role.ADMIN.value}
+    )
+    await users_mod.users_update(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["target@example.org", "user"],
+        mock_msg,
+        False,
+    )
+    event, kwargs = mock_bot.audit.await_args.args[0], mock_bot.audit.await_args.kwargs
+    assert event == "user_role_change_denied"
+    assert kwargs["actor"] == "admin@example.org"
+    assert kwargs["target"] == "target@example.org"
+    assert kwargs["details"]["old_role"] == "admin"
+    assert kwargs["details"]["requested_role"] == "user"
+    assert "equal or higher" in kwargs["details"]["reason"]
+
+    mock_bot.audit.reset_mock()
+    mock_bot.db.users.get = AsyncMock(
+        return_value={"jid": "target@example.org", "role": users_mod.Role.USER.value}
+    )
+    await users_mod.users_update(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["target@example.org", "user"],
+        mock_msg,
+        False,
+    )
+    mock_bot.audit.assert_awaited_with(
+        "user_role_change_noop",
+        actor="admin@example.org",
+        target="target@example.org",
+        details={"plugin": "users", "role": "user"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_users_delete_audit_events(mock_bot, mock_msg):
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+    mock_bot.db.users.delete = AsyncMock()
+
+    mock_bot.db.users.get = AsyncMock(
+        return_value={"jid": "target@example.org", "role": users_mod.Role.USER.value}
+    )
+    await users_mod.users_delete(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["target@example.org"],
+        mock_msg,
+        False,
+    )
+    mock_bot.audit.assert_awaited_with(
+        "user_deleted",
+        actor="admin@example.org",
+        target="target@example.org",
+        details={"plugin": "users", "role": "user"},
+    )
+
+    mock_bot.audit.reset_mock()
+    mock_bot.db.users.get = AsyncMock(
+        return_value={"jid": "target@example.org", "role": users_mod.Role.ADMIN.value}
+    )
+    await users_mod.users_delete(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["target@example.org"],
+        mock_msg,
+        False,
+    )
+    event, kwargs = mock_bot.audit.await_args.args[0], mock_bot.audit.await_args.kwargs
+    assert event == "user_delete_denied"
+    assert kwargs["actor"] == "admin@example.org"
+    assert kwargs["target"] == "target@example.org"
+    assert kwargs["details"]["role"] == "admin"
+    assert "equal or higher" in kwargs["details"]["reason"]
+
+    mock_bot.audit.reset_mock()
+    await users_mod.users_delete(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["not-a-jid"],
+        mock_msg,
+        False,
+    )
+    mock_bot.audit.assert_awaited_with(
+        "user_delete_denied",
+        actor="admin@example.org",
+        target="not-a-jid",
+        details={"plugin": "users", "reason": "invalid_user_jid"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_audit_helper_is_best_effort(monkeypatch, mock_bot):
+    async def broken_audit_event(*args, **kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(users_mod, "audit_event", broken_audit_event)
+    await users_mod._write_user_audit(
+        mock_bot,
+        "user_role_change_denied",
+        actor="admin@example.org",
+        target="target@example.org",
+        details={"reason": "test"},
+    )
