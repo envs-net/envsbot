@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest an improvement or new EnvsBot feature
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What problem would this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should EnvsBot do?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Commands / help output
+        - Plugins / plugin manager
+        - Users / roles / permissions
+        - Rooms / room feature toggles
+        - XMPP messaging / direct messages / MUC PM
+        - Database
+        - Audit log
+        - Backups / restore
+        - Config / reload
+        - vCard / avatar
+        - RSS / URL checks
+        - Tests / CI
+        - Documentation
+        - Other
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Are there simpler ways to solve this?
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add examples, command syntax ideas, logs, or screenshots if useful.
