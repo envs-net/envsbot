@@ -61,3 +61,21 @@ async def test_database_manager_close_flushes(tmp_db_path):
         result = await row.fetchone()
         assert result is not None
         assert result["nickname"] == "test2"
+
+
+@pytest.mark.asyncio
+async def test_database_manager_list_migrations():
+    class Conn:
+        async def execute(self, sql):
+            assert "schema_migrations" in sql
+
+            class Cursor:
+                async def fetchall(self):
+                    return [("0001", "now")]
+
+            return Cursor()
+
+    db = DatabaseManager(":memory:")
+    db.conn = Conn()
+
+    assert await db.list_migrations() == [("0001", "now")]

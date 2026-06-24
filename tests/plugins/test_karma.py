@@ -239,3 +239,85 @@ def test_canonical_nick_preference():
         assert ret == "Bob" or ret == "bob"
     finally:
         pass
+
+
+@pytest.mark.asyncio
+async def test_room_score_store_sanitizes_and_sets(fake_bot):
+    store = AsyncMock()
+    store.get_global = AsyncMock(return_value={
+        "room@conf.xmpp.tld": {"Alice": "5", "Bob": "bad"},
+        "broken@conf.xmpp.tld": ["not", "dict"],
+    })
+    store.set_global = AsyncMock()
+    fake_bot.db.users.plugin.return_value = store
+
+    assert await karma._get_room_scores(fake_bot, "room@conf.xmpp.tld") == {"Alice": 5, "Bob": 0}
+    assert await karma._get_room_scores(fake_bot, "broken@conf.xmpp.tld") == {}
+
+    await karma._set_room_scores(fake_bot, "room@conf.xmpp.tld", {"Carol": 3})
+    store.set_global.assert_awaited_once_with(
+        karma.KARMA_SCORES_KEY,
+        {
+            "room@conf.xmpp.tld": {"Carol": 3},
+            "broken@conf.xmpp.tld": ["not", "dict"],
+        },
+    )
+
+    store.get_global = AsyncMock(return_value="not-a-dict")
+    store.set_global.reset_mock()
+    await karma._set_room_scores(fake_bot, "room@conf.xmpp.tld", {"Dave": 4})
+    store.set_global.assert_awaited_once_with(
+        karma.KARMA_SCORES_KEY,
+        {"room@conf.xmpp.tld": {"Dave": 4}},
+    )
+
+
+def test_known_nicks_bot_nick_boundaries_and_matching(monkeypatch):
+    room = "room@conf.xmpp.tld"
+    karma.JOINED_ROOMS[room] = {
+        "nick": "BotNick",
+        "nicks": {"Al": {}, "Alice": {}, "": {}, "bob": {}},
+    }
+    try:
+        assert karma._get_bot_nick(room) == "BotNick"
+        assert karma._get_bot_nick("missing") is None
+        assert karma._known_room_nicks(room) == ["Alice", "bob", "Al"]
+        assert karma._left_boundary_ok("hello Alice", 6) is True
+        assert karma._left_boundary_ok("helloAlice", 5) is False
+        assert karma._match_known_nick_before_operator("hello Alice++", 11, room) == "Alice"
+        assert karma._match_known_nick_before_operator("helloAlice++", 10, room) is None
+        assert karma._normalize_lookup({"Alice": "7"}, "alice") == ("Alice", 7)
+        assert karma._normalize_lookup({}, "nobody") == (None, 0)
+    finally:
+        karma.JOINED_ROOMS.pop(room, None)
+
+
+@pytest.mark.asyncio
+async def test_throttle_key_check_set_and_unload(fake_bot, fake_groupchat_msg, monkeypatch):
+    karma.LAST_KARMA_ACTIONS.clear()
+    monkeypatch.setattr(karma, "get_real_jid", AsyncMock(return_value=("Actor@Example.ORG/Res", None, None)))
+    assert await karma._actor_throttle_key(fake_bot, fake_groupchat_msg) == "room@conf.xmpp.tld:actor@example.org/res"
+
+    monkeypatch.setattr(karma, "get_real_jid", AsyncMock(return_value=(None, None, None)))
+    fake_groupchat_msg["mucnick"] = "Alice"
+    key = await karma._actor_throttle_key(fake_bot, fake_groupchat_msg)
+    assert key == "room@conf.xmpp.tld:nick:alice"
+
+    assert await karma._check_throttle(fake_bot, fake_groupchat_msg, "Bob") is True
+    await karma._set_throttle(fake_bot, fake_groupchat_msg, "Bob")
+    assert await karma._check_throttle(fake_bot, fake_groupchat_msg, "Bob") is False
+
+    karma.LAST_KARMA_ACTIONS[key]["bob"] = 0
+    monkeypatch.setattr(karma.time, "time", lambda: karma.KARMA_DELAY_SECONDS + 1.0)
+    assert await karma._check_throttle(fake_bot, fake_groupchat_msg, "Bob") is True
+
+    await karma.on_unload(fake_bot)
+    assert karma.LAST_KARMA_ACTIONS == {}
+
+
+@pytest.mark.asyncio
+async def test_on_load_registers_groupchat_event(fake_bot):
+    await karma.on_load(fake_bot)
+    fake_bot.bot_plugins.register_event.assert_called_once()
+    assert fake_bot.bot_plugins.register_event.call_args.args[0] == "karma"
+    assert fake_bot.bot_plugins.register_event.call_args.args[1] == "groupchat_message"

@@ -370,3 +370,11 @@ async def test_seen_timezone_and_formatting_helpers(monkeypatch, bot):
 
     assert await tools._seen_format_last_seen(None, None, "Alice") == "never"
     assert await tools._seen_format_last_seen("not-a-date", None, "Alice") == "not-a-date"
+
+@pytest.mark.asyncio
+async def test_tools_store_getter_uses_plugin_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await tools.get_tools_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("tools")

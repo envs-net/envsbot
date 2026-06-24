@@ -223,3 +223,66 @@ async def test_permission_denied(bot, msg):
         bot.reply.reset_mock()
         await func(bot, "jid", "nick", ["example.com"], msg, True)
         bot.reply.assert_not_called()
+
+
+def test_xmpp_direct_error_reply_helpers(monkeypatch, bot, msg):
+    class FakeTimeout(Exception):
+        pass
+
+    class FakeIqError(Exception):
+        def __init__(self, condition="unknown"):
+            super().__init__(condition)
+            self.iq = {"error": {"condition": condition}}
+
+    monkeypatch.setattr(
+        xmpp.slixmpp.exceptions, "IqTimeout", FakeTimeout, raising=False
+    )
+    monkeypatch.setattr(
+        xmpp.slixmpp.exceptions, "IqError", FakeIqError, raising=False
+    )
+
+    xmpp._reply_xmpp_info_error(bot, msg, "example.org", FakeTimeout())
+    assert "timed out" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_info_error(
+        bot, msg, "example.org", FakeIqError("service-unavailable")
+    )
+    assert "does not support" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_info_error(bot, msg, "example.org", FakeIqError("gone"))
+    assert "gone" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_info_error(bot, msg, "example.org", RuntimeError("boom"))
+    assert "boom" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_contact_iq_error(
+        bot, msg, "example.org", FakeIqError("service-unavailable")
+    )
+    assert "does not support" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_contact_iq_error(
+        bot, msg, "example.org", FakeIqError("gone")
+    )
+    assert "gone" in bot.reply.call_args[0][1]
+
+
+def test_xmpp_srv_reply_helpers(bot, msg):
+    xmpp._reply_xmpp_srv_missing_domain(bot, msg)
+    assert "Missing domain" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_srv_invalid_domain(bot, msg, "bad label")
+    assert "bad label" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_srv_jid_notice(bot, msg, "example.org", "user@example.org")
+    assert "Using 'example.org'" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    xmpp._reply_xmpp_srv_dns_missing(bot, msg)
+    assert "DNS library not installed" in bot.reply.call_args[0][1]

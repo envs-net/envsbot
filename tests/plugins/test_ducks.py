@@ -1,5 +1,7 @@
 import pytest
 import types
+from unittest.mock import AsyncMock
+
 import plugins.ducks as ducks
 
 
@@ -51,10 +53,11 @@ class DummyStore:
 class DummyBot:
     def __init__(self, user_stats=None, global_index=None):
         self._replies = []
+        self.ducks_store = DummyStore(user_stats, global_index)
         self.db = types.SimpleNamespace(users=types.SimpleNamespace(
-            plugin=lambda name: DummyStore(user_stats, global_index)))
+            plugin=lambda name: self.ducks_store))
         self.reply = lambda msg, text, * \
-            a, **k: self._replies.append((text, msg))
+            a, **k: self._replies.append((text, msg, k))
         self.presence = types.SimpleNamespace(joined_rooms={})
         self.bot_plugins = types.SimpleNamespace(
             register_event=lambda *a, **k: None)
@@ -375,3 +378,168 @@ async def test_on_load_and_unload(monkeypatch):
     await ducks.on_unload(bot)
     assert not ducks.ACTIVE_DUCKS and not ducks.PENDING_DUCKS
     assert obj1.cancelled and obj2.cancelled
+
+
+@pytest.mark.asyncio
+async def test_duck_cycle_state_helpers_persist_and_sanitize(monkeypatch):
+    bot = DummyBot()
+    room = "room@conf"
+    bot.ducks_store._globals[ducks.DUCKS_STATE_KEY] = {
+        room: {"message_count": "-1", "next_threshold": "bad"}
+    }
+    monkeypatch.setattr(ducks, "_get_random_threshold", lambda: 7)
+
+    await ducks._load_room_cycle(bot, room)
+    assert ducks.MESSAGE_COUNTS[room] == 0
+    assert ducks.NEXT_DUCK_THRESHOLDS[room] == 7
+
+    ducks.MESSAGE_COUNTS[room] = -5
+    await ducks._save_room_cycle(bot, room)
+    saved = bot.ducks_store._globals[ducks.DUCKS_STATE_KEY][room]
+    assert saved["message_count"] == 0
+    assert saved["next_threshold"] == 7
+
+
+@pytest.mark.asyncio
+async def test_daily_duck_count_and_increment_reset_by_date(monkeypatch):
+    bot = DummyBot()
+    room = "room@conf"
+    monkeypatch.setattr(ducks, "_today_str", lambda: "2026-06-24")
+    bot.ducks_store._globals[ducks.DUCKS_DAILY_KEY] = {
+        room: {"date": "2026-06-23", "count": 99}
+    }
+
+    assert await ducks._get_daily_duck_count(bot, room) == 0
+    assert await ducks._increment_daily_duck_count(bot, room) == 1
+    assert await ducks._increment_daily_duck_count(bot, room) == 2
+    assert bot.ducks_store._globals[ducks.DUCKS_DAILY_KEY][room] == {
+        "date": "2026-06-24",
+        "count": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_maybe_schedule_duck_skips_active_pending_daily_limit_and_scheduled(monkeypatch):
+    bot = DummyBot()
+    room = "room@conf"
+    calls = []
+
+    async def fake_load(bot_arg, room_arg):
+        calls.append(("load", room_arg))
+        ducks.MESSAGE_COUNTS[room_arg] = 0
+        ducks.NEXT_DUCK_THRESHOLDS[room_arg] = 3
+
+    monkeypatch.setattr(ducks, "_load_room_cycle", fake_load)
+    monkeypatch.setattr(ducks, "_get_daily_duck_count", AsyncMock(return_value=ducks.MAX_DUCKS_PER_DAY))
+
+    ducks.ACTIVE_DUCKS[room] = 1
+    await ducks._maybe_schedule_duck(bot, room)
+    assert calls == []
+
+    ducks.ACTIVE_DUCKS.clear()
+    ducks.PENDING_DUCKS.add(room)
+    await ducks._maybe_schedule_duck(bot, room)
+    assert calls == []
+
+    ducks.PENDING_DUCKS.clear()
+    await ducks._maybe_schedule_duck(bot, room)
+    assert calls == [("load", room)]
+    assert room not in ducks.PENDING_DUCKS
+
+    ducks.MESSAGE_COUNTS[room] = -1
+    monkeypatch.setattr(ducks, "_get_daily_duck_count", AsyncMock(return_value=0))
+    await ducks._maybe_schedule_duck(bot, room)
+    assert ducks.MESSAGE_COUNTS[room] == -1
+
+
+@pytest.mark.asyncio
+async def test_maybe_schedule_duck_counts_saves_and_schedules(monkeypatch):
+    bot = DummyBot()
+    room = "room@conf"
+    saved_counts = []
+    created = []
+
+    async def fake_save(bot_arg, room_arg):
+        saved_counts.append(ducks.MESSAGE_COUNTS[room_arg])
+
+    def fake_create_task(bot_arg, plugin_name, coro, name=None):
+        created.append((plugin_name, name))
+        coro.close()
+        return types.SimpleNamespace(cancel=lambda: None, done=lambda: False)
+
+    monkeypatch.setattr(ducks, "DUCK_STATE_SAVE_EVERY", 2)
+    monkeypatch.setattr(ducks, "DUCK_SPAWN_CHANCE", 1)
+    monkeypatch.setattr(ducks, "_get_daily_duck_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(ducks, "_save_room_cycle", fake_save)
+    monkeypatch.setattr(ducks.random, "randint", lambda low, high: 1 if high == 1 else 9)
+    monkeypatch.setattr(ducks, "create_plugin_task", fake_create_task)
+
+    ducks.MESSAGE_COUNTS[room] = 0
+    ducks.NEXT_DUCK_THRESHOLDS[room] = 2
+
+    await ducks._maybe_schedule_duck(bot, room)
+    assert ducks.MESSAGE_COUNTS[room] == 1
+    assert saved_counts == []
+    assert room not in ducks.PENDING_DUCKS
+
+    await ducks._maybe_schedule_duck(bot, room)
+    assert saved_counts == [2, -1]
+    assert ducks.MESSAGE_COUNTS[room] == -1
+    assert room in ducks.PENDING_DUCKS
+    assert ducks.SPAWN_TASKS[room]
+    assert created == [("ducks", f"duck-spawn-{room}")]
+
+
+@pytest.mark.asyncio
+async def test_spawn_duck_after_delay_limit_success_and_cleanup(monkeypatch):
+    bot = DummyBot()
+    room = "room@conf"
+    reset_calls = []
+    increment_calls = []
+    created = []
+    old_expire = types.SimpleNamespace(cancelled=False)
+    old_expire.cancel = lambda: setattr(old_expire, "cancelled", True)
+
+    async def fake_reset(bot_arg, room_arg):
+        reset_calls.append(room_arg)
+
+    async def fake_increment(bot_arg, room_arg):
+        increment_calls.append(room_arg)
+        return 1
+
+    def fake_create_task(bot_arg, plugin_name, coro, name=None):
+        created.append((plugin_name, name))
+        coro.close()
+        return types.SimpleNamespace(cancel=lambda: None, done=lambda: False)
+
+    monkeypatch.setattr(ducks.asyncio, "sleep", AsyncMock())
+    monkeypatch.setattr(ducks, "_reset_room_cycle", fake_reset)
+    monkeypatch.setattr(ducks, "_increment_daily_duck_count", fake_increment)
+    monkeypatch.setattr(ducks, "DUCK_TIMEOUT", 10)
+    monkeypatch.setattr(ducks, "create_plugin_task", fake_create_task)
+    monkeypatch.setattr(ducks.random, "choice", lambda seq: seq[0])
+
+    monkeypatch.setattr(ducks, "_get_daily_duck_count", AsyncMock(return_value=ducks.MAX_DUCKS_PER_DAY))
+    ducks.PENDING_DUCKS.add(room)
+    ducks.SPAWN_TASKS[room] = object()
+    await ducks._spawn_duck_after_delay(bot, room, 0)
+    assert reset_calls == [room]
+    assert room not in ducks.ACTIVE_DUCKS
+    assert room not in ducks.PENDING_DUCKS
+    assert room not in ducks.SPAWN_TASKS
+
+    reset_calls.clear()
+    monkeypatch.setattr(ducks, "_get_daily_duck_count", AsyncMock(return_value=0))
+    ducks.PENDING_DUCKS.add(room)
+    ducks.SPAWN_TASKS[room] = object()
+    ducks.EXPIRE_TASKS[room] = old_expire
+    await ducks._spawn_duck_after_delay(bot, room, 0)
+
+    assert room in ducks.ACTIVE_DUCKS
+    assert reset_calls == [room]
+    assert increment_calls == [room]
+    assert old_expire.cancelled is True
+    assert created == [("ducks", f"duck-expire-{room}")]
+    assert bot._replies[-1][0] == ducks.SPAWN_MESSAGES[0]
+    assert room not in ducks.PENDING_DUCKS
+    assert room not in ducks.SPAWN_TASKS

@@ -1,5 +1,6 @@
 import pytest
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import core_plugins.help as help_plugin
 import utils.command as command_utils
@@ -317,3 +318,140 @@ def test_plugin_meta():
     assert isinstance(meta, dict)
     for field in ("name", "description", "version"):
         assert field in meta
+
+
+def test_docstring_and_formatting_helpers():
+    def documented():
+        """
+        First line.
+
+        Usage
+        -----
+          {prefix}demo <arg>
+
+        Examples
+        --------
+          {prefix}demo value
+        """
+
+    cmd = command_utils.Command(
+        name="demo",
+        handler=documented,
+        role=command_utils.Role.MODERATOR,
+        aliases=["demo", "d"],
+        category="room_tools",
+    )
+    assert help_plugin._clean_doc(None, ",") == ""
+    assert help_plugin._first_line("\n\n  hello\n  world") == "hello"
+    assert help_plugin._command_usage(cmd, ",") == ["  ,demo <arg>"]
+    assert help_plugin._command_examples(cmd, ",") == ["  ,demo value"]
+    assert help_plugin._context_label(cmd) == "private chat / MUC PM"
+    assert help_plugin._category_name(cmd) == "room_tools"
+    assert help_plugin._category_title("room_tools") == "Room Tools"
+    line = help_plugin._format_command_line(cmd, ",")
+    assert ",demo" in line
+    assert ",d" in line
+    details = "\n".join(help_plugin._format_command_detail(cmd, ","))
+    assert "Context: private chat / MUC PM" in details
+    assert "Examples:" in details
+
+    structured = command_utils.Command(
+        name="structured",
+        handler=lambda: None,
+        role=command_utils.Role.USER,
+        short="Short {prefix}text",
+        usage="{prefix}structured [x]",
+        examples=["{prefix}structured 1"],
+        context="private",
+    )
+    assert help_plugin._command_short(structured, ",") == "Short ,text"
+    assert help_plugin._command_usage(structured, ",") == [",structured [x]"]
+    assert help_plugin._command_examples(structured, ",") == [",structured 1"]
+    assert help_plugin._context_label(structured) == "private"
+
+
+@pytest.mark.asyncio
+async def test_help_categories_plugins_and_all_empty_or_grouped(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    bot = DummyBot(plugins={})
+    assert "No commands" in "\n".join(await help_plugin._commands(bot, command_utils.Role.USER))
+    assert "No commands" in "\n".join(await help_plugin._categories(bot, command_utils.Role.USER))
+    assert "Unknown help category" in "\n".join(await help_plugin._category(bot, command_utils.Role.USER, "missing"))
+
+    def public_handler():
+        """Public command."""
+
+    public_cmd = command_utils.Command(
+        name="foo now",
+        handler=public_handler,
+        role=command_utils.Role.USER,
+        category="misc-tools",
+    )
+    registry.register("foo now", public_cmd, "foo")
+    bot.bot_plugins.plugins = {"foo": SimpleNamespace(__doc__="Doc", PLUGIN_META={"category": "misc"})}
+
+    categories = "\n".join(await help_plugin._categories(bot, command_utils.Role.USER))
+    assert "misc-tools" in categories
+    category = "\n".join(await help_plugin._category(bot, command_utils.Role.USER, "misc-tools"))
+    assert ",foo now" in category
+    all_text = "\n".join(await help_plugin._all(bot, command_utils.Role.USER))
+    assert "Loaded plugins" in all_text
+    assert "Commands by category" in all_text
+    plugins_text = "\n".join(await help_plugin._plugins(bot, command_utils.Role.USER))
+    assert "misc:" in plugins_text
+
+
+@pytest.mark.asyncio
+async def test_sender_role_room_resolution_fallbacks(monkeypatch, basic_plugins_and_commands):
+    plugins, _reg = basic_plugins_and_commands
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.ADMIN)
+    bot.presence = SimpleNamespace(joined_rooms={"pmroom@conf.test": "botnick"})
+
+    direct_msg = DummyMsg(body=",help", is_room=False, room_jid="pmroom@conf.test", nick="Nick")
+    role, room = await help_plugin._sender_role(bot, "user@example.org/resource", direct_msg)
+    assert role == command_utils.Role.ADMIN
+    assert room == "pmroom@conf.test"
+
+    group_msg = DummyMsg(body=",help", is_room=True, room_jid="room@conf.test", nick="RoomNick")
+    bot.plugin = {"xep_0045": SimpleNamespace(get_jid_property=lambda *a: "real@example.org/res")}
+    seen = []
+
+    async def fake_role(jid, room=None):
+        seen.append((jid, room))
+        return command_utils.Role.USER
+
+    bot.get_user_role = fake_role
+    role, room = await help_plugin._sender_role(bot, "fallback@example.org", group_msg)
+    assert role == command_utils.Role.USER
+    assert ("real@example.org", "room@conf.test") in seen
+
+    bot.plugin = {"xep_0045": SimpleNamespace(get_jid_property=lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))}
+    role, room = await help_plugin._sender_role(bot, "fallback@example.org/res", group_msg)
+    assert role == command_utils.Role.USER
+
+
+@pytest.mark.asyncio
+async def test_cmd_help_dispatches_special_queries(basic_plugins_and_commands):
+    plugins, _reg = basic_plugins_and_commands
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.ADMIN)
+
+    for args, expected in [
+        (["all"], "Commands by category"),
+        (["commands"], "Commands by category"),
+        (["plugins"], "Loaded plugins"),
+        (["roles"], "Roles"),
+        (["categories"], "Help categories"),
+        (["category", "other"], "Other commands"),
+    ]:
+        bot.replies.clear()
+        await help_plugin.cmd_help(bot, "user@host", "Nick", args, DummyMsg(",help"), True)
+        assert expected in flatten_lines(bot.replies[-1])
+
+@pytest.mark.asyncio
+async def test_help_store_getter_uses_help_plugin_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await help_plugin.get_help_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("help")

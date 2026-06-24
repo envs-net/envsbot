@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -443,3 +445,142 @@ async def test_xkcd_on_load_and_unload_manage_tasks(monkeypatch):
     await xkcd.on_unload(bot)
     assert xkcd.INDEX_TASK is None
     assert xkcd.CHECK_TASK is None
+
+
+class DummyAiohttpSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_build_full_index_handles_missing_up_to_date_and_indexes(monkeypatch):
+    monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock())
+    monkeypatch.setattr(xkcd.aiohttp, "ClientSession", lambda: DummyAiohttpSession())
+
+    store = DummyXkcdStore()
+    bot = xkcd_bot_with_store(store)
+
+    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value=None))
+    await xkcd.build_full_index(bot)
+    assert xkcd.XKCD_INDEX_KEY not in store._globals
+
+    store._globals[xkcd.XKCD_INDEX_KEY] = {"1": {}, "2": {}, "3": {}}
+    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value={"num": 3}))
+    index_mock = AsyncMock()
+    monkeypatch.setattr(xkcd, "_index_single_xkcd_comic", index_mock)
+    await xkcd.build_full_index(bot)
+    index_mock.assert_not_awaited()
+
+    store._globals[xkcd.XKCD_INDEX_KEY] = {"1": {"title": "one", "alt": ""}}
+    calls = []
+
+    async def fake_index_single(comic_id, session, store_arg, search_index, indexed, failed):
+        calls.append(comic_id)
+        search_index[str(comic_id)] = {"title": str(comic_id), "alt": ""}
+        return indexed + 1, failed
+
+    monkeypatch.setattr(xkcd, "_index_single_xkcd_comic", fake_index_single)
+    await xkcd.build_full_index(bot)
+    assert calls == [2, 3]
+    assert store._globals[xkcd.XKCD_INDEX_KEY]["2"] == {"title": "2", "alt": ""}
+    assert store._globals[xkcd.XKCD_INDEX_KEY]["3"] == {"title": "3", "alt": ""}
+
+
+@pytest.mark.asyncio
+async def test_catch_up_missing_comics_skips_missing_fetches_and_persists(monkeypatch):
+    bot = xkcd_bot_with_store(DummyXkcdStore())
+    fetched = []
+    indexed = []
+    broadcasted = []
+    saved = []
+
+    monkeypatch.setattr(xkcd.aiohttp, "ClientSession", lambda: DummyAiohttpSession())
+
+    async def fake_get_xkcd(comic_id, session=None):
+        fetched.append(comic_id)
+        if comic_id == 406:
+            return None
+        return {"num": comic_id, "title": str(comic_id), "img": "/comic.png"}
+
+    async def fake_add(bot_arg, comic):
+        indexed.append(comic["num"])
+
+    async def fake_broadcast(bot_arg, comic):
+        broadcasted.append(comic["num"])
+
+    async def fake_save(bot_arg, comic_id):
+        saved.append(comic_id)
+
+    monkeypatch.setattr(xkcd, "get_xkcd", fake_get_xkcd)
+    monkeypatch.setattr(xkcd, "add_comic_to_index", fake_add)
+    monkeypatch.setattr(xkcd, "broadcast_comic_to_subscribed_rooms", fake_broadcast)
+    monkeypatch.setattr(xkcd, "save_last_comic_id", fake_save)
+
+    await xkcd.catch_up_missing_comics(bot, 404, 406)
+    assert fetched == [405, 406]
+    assert indexed == [405]
+    assert broadcasted == [405]
+    assert saved == [404, 405]
+    assert xkcd.LAST_COMIC_ID == 405
+
+    await xkcd.catch_up_missing_comics(bot, 10, 9)
+    assert fetched == [405, 406]
+
+
+@pytest.mark.asyncio
+async def test_xkcd_check_loop_initializes_catches_up_and_cancels(monkeypatch):
+    bot = xkcd_bot_with_store(DummyXkcdStore())
+    saved = []
+    caught_up = []
+
+    async def fake_save(_bot, comic_id):
+        saved.append(comic_id)
+
+    async def fake_catch_up(_bot, start_id, end_id):
+        caught_up.append((start_id, end_id))
+
+    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value={"num": 10}))
+    monkeypatch.setattr(xkcd, "get_last_comic_id", AsyncMock(return_value=0))
+    monkeypatch.setattr(xkcd, "save_last_comic_id", fake_save)
+    monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+
+    with pytest.raises(asyncio.CancelledError):
+        await xkcd.xkcd_check_loop(bot)
+    assert saved == [10]
+    assert xkcd.LAST_COMIC_ID == 10
+
+    monkeypatch.setattr(xkcd, "get_last_comic_id", AsyncMock(return_value=7))
+    monkeypatch.setattr(xkcd, "catch_up_missing_comics", fake_catch_up)
+    with pytest.raises(asyncio.CancelledError):
+        await xkcd.xkcd_check_loop(bot)
+    assert caught_up == [(8, 10)]
+
+    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value=None))
+    assert await xkcd.xkcd_check_loop(bot) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_none_done_cancelled_and_error(caplog):
+    await xkcd._cancel_task(None, "none")
+
+    done_task = asyncio.create_task(asyncio.sleep(0))
+    await done_task
+    await xkcd._cancel_task(done_task, "done")
+
+    pending_task = asyncio.create_task(asyncio.sleep(60))
+    await xkcd._cancel_task(pending_task, "pending")
+    assert pending_task.cancelled()
+
+    async def failing_on_cancel():
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError as exc:
+            raise RuntimeError("boom") from exc
+
+    error_task = asyncio.create_task(failing_on_cancel())
+    await asyncio.sleep(0)
+    await xkcd._cancel_task(error_task, "error")
+    assert "Error while cancelling error task" in caplog.text

@@ -108,3 +108,63 @@ async def test_snapshot_without_done_keeps_cancelled_and_failed_tasks():
     statuses = {item.name: item.status for item in items}
 
     assert statuses == {"cancelled": "cancelled", "failure": "failed"}
+
+
+@pytest.mark.asyncio
+async def test_task_supervisor_failure_summary_and_cancel_all():
+    supervisor = TaskSupervisor()
+
+    async def failing():
+        raise RuntimeError("boom")
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    failed_task = supervisor.create("alpha", failing(), name="boom-task")
+    beta_task = supervisor.create("beta", sleeper(), name="sleep-task")
+
+    result = await asyncio.gather(failed_task, return_exceptions=True)
+    assert isinstance(result[0], RuntimeError)
+
+    snapshot = supervisor.snapshot(include_done=True)
+    failed = [item for item in snapshot if item.name == "boom-task"][0]
+    assert failed.status == "failed"
+    assert failed.last_error == "RuntimeError: boom"
+    assert supervisor.summary()[1] == 1
+
+    cancelled = await supervisor.cancel_all(timeout=1.0)
+    assert cancelled == 1
+    assert beta_task.cancelled()
+    remaining = supervisor.snapshot(include_done=False)
+    assert [item.name for item in remaining] == ["boom-task"]
+
+
+@pytest.mark.asyncio
+async def test_task_supervisor_ignores_untracked_done_task_and_creator_shapes(caplog):
+    from utils import task_supervisor as ts
+
+    caplog.set_level("DEBUG", logger="utils.task_supervisor")
+
+    async def marker():
+        return "ok"
+
+    task = asyncio.create_task(marker(), name="orphan")
+    assert await task == "ok"
+    supervisor = TaskSupervisor()
+    supervisor._on_task_done(task)
+    assert "untracked task" in caplog.text
+
+    def no_name(plugin, coro):
+        return coro
+
+    assert ts._is_plugin_task_creator(no_name) is False
+    assert ts._is_plugin_task_creator(object()) is False
+
+    class CallableNoSignature:
+        __signature__ = "broken"
+
+        def __call__(self, *args, **kwargs):
+            return None
+
+    assert ts._is_plugin_task_creator(CallableNoSignature()) is False

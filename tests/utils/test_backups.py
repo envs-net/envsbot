@@ -100,3 +100,80 @@ async def test_restore_backup_restores_files_and_reconnects_database(backup_env)
 def test_resolve_backup_rejects_path_traversal(backup_env):
     with pytest.raises(backups.BackupError):
         backups.resolve_backup("../secret.zip")
+
+
+def test_backup_helpers_invalid_keep_and_path_resolution(tmp_path, monkeypatch):
+    monkeypatch.setattr(backups, "BASE_DIR", tmp_path)
+    monkeypatch.setitem(backups.config, "backup_keep", "bad")
+    assert backups.backup_keep() == 15
+    monkeypatch.setitem(backups.config, "backup_dir", "relative/backups")
+    assert backups.backup_dir() == tmp_path / "relative" / "backups"
+    assert backups._safe_reason(" manual backup! with spaces ") == "manual-backup-with-spaces"
+    assert backups._safe_reason("!@#") == "manual"
+
+
+def test_list_resolve_prune_and_manifest_error_paths(backup_env):
+    backup_env.backup_dir.mkdir(parents=True)
+    empty = backup_env.backup_dir / "envsbot-backup-20260101-000000-bad.zip"
+    with zipfile.ZipFile(empty, "w") as zf:
+        zf.writestr("not-manifest.txt", "x")
+
+    listed = backups.list_backups(directory=backup_env.backup_dir)
+    assert len(listed) == 1
+    assert listed[0].reason == "unreadable"
+    assert listed[0].files == []
+
+    with pytest.raises(backups.BackupError, match="no manifest"):
+        backups.backup_details(empty)
+
+    with pytest.raises(backups.BackupError, match="Missing"):
+        backups.resolve_backup("")
+
+    empty.unlink()
+    with pytest.raises(backups.BackupError, match="No backups found"):
+        backups.resolve_backup("last")
+
+
+def test_backup_resolve_details_prune_and_safe_members(backup_env, monkeypatch):
+    backup_env.backup_dir.mkdir(parents=True)
+    archives = []
+    for idx in range(3):
+        path = backup_env.backup_dir / f"envsbot-backup-20260101-00000{idx}-manual.zip"
+        manifest = {
+            "app": "envsbot",
+            "created_at": f"2026-01-01T00:00:0{idx}+00:00",
+            "reason": f"manual-{idx}",
+            "files": [{"name": "bot.db"}],
+        }
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("manifest.json", json.dumps(manifest))
+        archives.append(path)
+
+    assert backups.resolve_backup("last").name == archives[-1].name
+    assert backups.resolve_backup(archives[1].name).name == archives[1].name
+    assert backups.resolve_backup(archives[0].stem).name == archives[0].name
+    details = backups.backup_details(archives[2])
+    assert details["manifest"]["reason"] == "manual-2"
+
+    removed = backups.prune_old_backups(directory=backup_env.backup_dir, keep=1)
+    assert {path.name for path in removed} == {archives[1].name, archives[0].name}
+
+    unsafe = backup_env.backup_dir / "envsbot-backup-20260101-unsafe.zip"
+    with zipfile.ZipFile(unsafe, "w") as zf:
+        zf.writestr("../evil", "x")
+    with zipfile.ZipFile(unsafe) as zf:
+        with pytest.raises(backups.BackupError, match="Unsafe"):
+            backups._safe_members(zf)
+
+
+@pytest.mark.asyncio
+async def test_backup_restore_reconnects_after_restore_error(backup_env, monkeypatch):
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(bot, reason="restore failure")
+    monkeypatch.setattr(backups, "_restore_entry", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("copy failed")))
+
+    with pytest.raises(RuntimeError, match="copy failed"):
+        await backups.restore_backup(bot, archive)
+
+    assert bot.db.closed is True
+    assert bot.db.connected is True

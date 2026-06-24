@@ -269,3 +269,35 @@ async def test_on_load_register_events(monkeypatch):
     bot.bot_plugins.register_event = MagicMock()
     await sed.on_load(bot)
     assert bot.bot_plugins.register_event.call_count == 2
+
+
+def test_regex_worker_direct_paths(monkeypatch):
+    class Queue:
+        def __init__(self):
+            self.items = []
+        def put(self, item):
+            self.items.append(item)
+
+    q = Queue()
+    sed._regex_worker(q, "Foo foo", "foo", "bar", "ig")
+    assert q.items == [("ok", "bar bar", 2)]
+
+    q = Queue()
+    sed._regex_worker(q, "abc", "(", "x", "")
+    assert q.items[0][0] == "regex_error"
+
+    def broken_subn(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    q = Queue()
+    monkeypatch.setattr(sed.re, "subn", broken_subn)
+    sed._regex_worker(q, "abc", "a", "b", "")
+    assert q.items == [("error", "boom", 0)]
+
+@pytest.mark.asyncio
+async def test_sed_store_getter_uses_plugin_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await sed.get_sed_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("sed")

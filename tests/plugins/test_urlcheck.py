@@ -294,3 +294,33 @@ async def test_on_groupchat_message_codeblock_and_quote_suppression(
     )
     await urlcheck.on_groupchat_message(fake_bot, msg)
     assert fake_bot._replies == []
+
+
+def test_urlcheck_small_helpers_and_on_load(fake_bot):
+    assert urlcheck.strip_html_tags("<b>Hello</b> <i>World</i>") == "Hello World"
+    assert urlcheck.strip_html_tags(None) == ""
+    assert urlcheck.is_youtube_url("https://youtube.com/watch?v=abcdefghijk")
+    assert urlcheck.is_youtube_url("https://youtu.be/abcdefghijk")
+    assert not urlcheck.is_youtube_url("https://example.org/watch?v=abcdefghijk")
+
+    class Xml:
+        def __init__(self, found):
+            self.found = found
+
+        def find(self, pattern):
+            assert "rdf-syntax-ns" in pattern
+            return object() if self.found else None
+
+    assert urlcheck.has_xep_0392_link_metadata(types.SimpleNamespace(xml=Xml(True)))
+    assert not urlcheck.has_xep_0392_link_metadata(types.SimpleNamespace(xml=Xml(False)))
+
+    registered = []
+    fake_bot.bot_plugins = MagicMock()
+    fake_bot.bot_plugins.register_event.side_effect = lambda *args: registered.append(args)
+
+    async def run():
+        await urlcheck.on_load(fake_bot)
+
+    import asyncio
+    asyncio.run(run())
+    assert registered and registered[0][0:2] == ("urlcheck", "groupchat_message")

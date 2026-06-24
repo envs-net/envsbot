@@ -7,6 +7,7 @@ import pytest
 import plugins.birthday_notify as birthday_notify
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 # --- Mock helpers
 
@@ -411,3 +412,89 @@ async def test_load_and_mark_announced(bot):
             == d)
     # Should also cache in ANNOUNCED_TODAY
     assert birthday_notify.ANNOUNCED_TODAY[("roomA", "jidA")] == d
+
+
+@pytest.mark.asyncio
+async def test_on_muc_presence_branches(monkeypatch, bot):
+    class FakeFrom:
+        bare = "room@conference.example.org"
+        resource = "Alice"
+
+    class FakeMuc:
+        def __init__(self, jid=None):
+            self._jid = jid
+        def get(self, key, default=None):
+            return self._jid if key == "jid" else default
+
+    class FakeJid:
+        bare = "alice@example.org"
+
+    def presence(type_="available", muc=None):
+        return {"type": type_, "from": FakeFrom(), "muc": muc or FakeMuc(FakeJid())}
+
+    checked = []
+    monkeypatch.setattr(
+        birthday_notify,
+        "_check_user_birthday",
+        AsyncMock(side_effect=lambda bot, jid, nick, room: checked.append((jid, nick, room))),
+    )
+
+    await birthday_notify.on_muc_presence(bot, presence("unavailable"))
+    await birthday_notify.on_muc_presence(bot, presence(muc=FakeMuc(None)))
+    assert checked == []
+
+    monkeypatch.setattr(
+        birthday_notify,
+        "_is_enabled_for_room",
+        AsyncMock(return_value=False),
+    )
+    await birthday_notify.on_muc_presence(bot, presence())
+    assert checked == []
+
+    monkeypatch.setattr(
+        birthday_notify,
+        "_is_enabled_for_room",
+        AsyncMock(return_value=True),
+    )
+    await birthday_notify.on_muc_presence(bot, presence())
+    assert checked == [("alice@example.org", "Alice", FakeFrom.bare)]
+
+    monkeypatch.setattr(
+        birthday_notify,
+        "_is_enabled_for_room",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    await birthday_notify.on_muc_presence(bot, presence())
+
+
+@pytest.mark.asyncio
+async def test_birthday_check_loop_cancelled_and_error(monkeypatch, caplog):
+    async def cancelled_sleep(delay):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(birthday_notify.asyncio, "sleep", cancelled_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await birthday_notify._birthday_check_loop(MagicMock(), check_interval=1)
+
+    calls = []
+
+    async def failing_second_sleep(delay):
+        calls.append(delay)
+        if len(calls) > 1:
+            raise RuntimeError("sleep boom")
+
+    monkeypatch.setattr(birthday_notify.asyncio, "sleep", failing_second_sleep)
+    monkeypatch.setattr(birthday_notify, "_check_and_announce_birthdays", AsyncMock())
+    monkeypatch.setattr(birthday_notify, "_today", lambda: datetime.date(2026, 6, 24))
+
+    await birthday_notify._birthday_check_loop(MagicMock(), check_interval=1)
+    assert "Error in check loop" in caplog.text
+
+@pytest.mark.asyncio
+async def test_birthday_store_getter_uses_plugin_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await birthday_notify._get_birthday_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("birthday_notify")

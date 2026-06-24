@@ -704,3 +704,23 @@ def test_get_config_diff_sections_returns_empty_for_matching_defaults():
     cfg = config_mod.DEFAULT_CONFIG.copy()
 
     assert config_mod.get_config_diff_sections(cfg, cfg.copy()) == []
+
+
+def test_sample_config_path_and_load_default_config_for_diff(tmp_path, monkeypatch):
+    sample = tmp_path / "config_sample.py"
+    sample.write_text('COMMAND_PREFIX = "!"\nURLCHECK_WAIT_SECONDS = 7\n')
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    assert config_mod._sample_config_path() == sample
+    defaults = config_mod.load_default_config_for_diff()
+
+    assert defaults["prefix"] == "!"
+    assert defaults["urlcheck_wait_seconds"] == 7
+
+
+def test_load_default_config_for_diff_without_sample(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    defaults = config_mod.load_default_config_for_diff()
+
+    assert defaults["prefix"] == config_mod.DEFAULT_CONFIG["prefix"]

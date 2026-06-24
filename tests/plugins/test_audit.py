@@ -55,3 +55,58 @@ async def test_audit_last_numeric_argument_is_limit(bot, msg, monkeypatch):
     reply_lines = bot.reply.call_args.args[1]
     assert reply_lines[0] == "🧾 Audit log"
     assert "No audit events found." in reply_lines
+
+
+def test_format_details_and_row_variants():
+    assert audit_mod._format_details('{"b": 2, "a": 1}') == "a=1, b=2"
+    assert audit_mod._format_details("") == "{}"
+    assert audit_mod._format_details("not json") == "{}"
+
+    mapping_row = {
+        "id": 7,
+        "created_at": "2026-06-24 12:00:00",
+        "event": "config_reloaded",
+        "actor": None,
+        "target": "config",
+        "details": '{"prefix": ","}',
+    }
+    assert audit_mod._format_row(mapping_row) == (
+        "#7 2026-06-24 12:00:00 | config_reloaded | actor=— | "
+        "target=config | prefix=,"
+    )
+
+    tuple_row = (8, "now", "backup_created", "admin@example.org", None, "{}")
+    assert audit_mod._format_row(tuple_row) == (
+        "#8 now | backup_created | actor=admin@example.org | target=None"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_events_handles_missing_audit_log(bot):
+    bot.db = MagicMock()
+    bot.db.audit = None
+
+    assert await audit_mod._list_events(bot, limit=5) == []
+
+
+@pytest.mark.asyncio
+async def test_audit_user_usage_invalid_jid_empty_and_rows(bot, msg, monkeypatch):
+    bot.reply_usage = MagicMock()
+    bot.reply_error = MagicMock()
+
+    await audit_mod.audit_user(bot, "admin@example.org", "admin", [], msg, False)
+    bot.reply_usage.assert_called_once()
+
+    await audit_mod.audit_user(bot, "admin@example.org", "admin", ["not a jid"], msg, False)
+    bot.reply_error.assert_called_once_with(msg, "Invalid JID.")
+
+    list_events = AsyncMock(return_value=[])
+    monkeypatch.setattr(audit_mod, "_list_events", list_events)
+    await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org/resource"], msg, False)
+    list_events.assert_awaited_once_with(bot, limit=50, actor="admin@example.org")
+    assert "No audit events found for admin@example.org." in bot.reply.call_args.args[1]
+
+    list_events = AsyncMock(return_value=[(1, "now", "event", "Admin@example.org", "target", '{}')])
+    monkeypatch.setattr(audit_mod, "_list_events", list_events)
+    await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org"], msg, False)
+    assert "#1 now | event" in bot.reply.call_args.args[1]

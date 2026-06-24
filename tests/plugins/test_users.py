@@ -275,3 +275,203 @@ async def test__send_user_info_display_full(mock_bot, mock_msg):
 
 # ...add additional tests for track_room_nick, find_users_by_nick_safe, error
 # and edge branches...
+
+@pytest.mark.asyncio
+async def test_presence_and_message_skip_branches(mock_bot, mock_msg):
+    await users_mod.on_muc_presence(mock_bot, {"type": "subscribe", "muc": {}})
+    await users_mod.on_muc_presence(mock_bot, {"type": "available"})
+
+    pres = {
+        "type": "available",
+        "muc": {"room": "room", "nick": "nick", "jid": None},
+    }
+    await users_mod.on_muc_presence(mock_bot, pres)
+
+    mock_bot.boundjid.bare = "self@example.org"
+    own = {
+        "type": "available",
+        "muc": {
+            "room": "room",
+            "nick": "self",
+            "jid": types.SimpleNamespace(bare="self@example.org"),
+        },
+    }
+    await users_mod.on_muc_presence(mock_bot, own)
+
+    leaving = {
+        "type": "unavailable",
+        "muc": {
+            "room": "room",
+            "nick": "nick",
+            "jid": types.SimpleNamespace(bare="other@example.org"),
+        },
+    }
+    with patch("core_plugins.users.update_last_seen", new=AsyncMock()) as last_seen:
+        await users_mod.on_muc_presence(mock_bot, leaving)
+        last_seen.assert_awaited_once_with(mock_bot, "other@example.org")
+
+    await users_mod.on_groupchat_message(mock_bot, mock_msg)
+    mock_bot.bot_plugins.plugins = {"rooms": types.SimpleNamespace(bot_has_privilege=lambda room: False)}
+    await users_mod.on_groupchat_message(mock_bot, mock_msg)
+    mock_bot.bot_plugins.plugins = {"rooms": types.SimpleNamespace(bot_has_privilege=lambda room: True)}
+    mock_bot.plugin = {"xep_0045": types.SimpleNamespace(get_jid_property=lambda *a: None)}
+    await users_mod.on_groupchat_message(mock_bot, mock_msg)
+    mock_bot.plugin = {"xep_0045": types.SimpleNamespace(get_jid_property=lambda *a: "self@example.org")}
+    await users_mod.on_groupchat_message(mock_bot, mock_msg)
+
+
+@pytest.mark.asyncio
+async def test_on_load_initializes_or_skips(mock_bot):
+    mock_bot.db = None
+    await users_mod.on_load(mock_bot)
+
+    store = AsyncMock()
+    store.get_global = AsyncMock(return_value=None)
+    mock_bot.db = types.SimpleNamespace(
+        users=types.SimpleNamespace(plugin=MagicMock(return_value=store))
+    )
+    await users_mod.on_load(mock_bot)
+    assert mock_bot.db.users._nick_index == {}
+    assert mock_bot.bot_plugins.register_event.call_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
+    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    assert users_mod._is_config_owner("owner@example.org/resource") is True
+    assert users_mod._is_config_owner("someone@example.org") is False
+    assert users_mod._role_from_user(None) == users_mod.Role.USER
+    assert users_mod._role_from_user({"role": "not-an-int"}) == users_mod.Role.USER
+    assert users_mod._role_label(users_mod.Role.ADMIN) == "admin"
+
+    mock_bot.get_user_role = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await users_mod._actor_role(mock_bot, "actor@example.org") == users_mod.Role.NONE
+
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+    denied_cases = [
+        ("actor@example.org", "owner@example.org", users_mod.Role.USER, users_mod.Role.USER, "owner"),
+        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.OWNER, "Owner"),
+        ("actor@example.org", "actor@example.org", users_mod.Role.ADMIN, users_mod.Role.USER, "lower"),
+        ("actor@example.org", "actor@example.org", users_mod.Role.ADMIN, users_mod.Role.SUPERADMIN, "raise"),
+        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.SUPERADMIN, "superadmin"),
+        ("actor@example.org", "target@example.org", users_mod.Role.SUPERADMIN, users_mod.Role.ADMIN, "superadmin"),
+        ("actor@example.org", "target@example.org", users_mod.Role.ADMIN, users_mod.Role.USER, "equal"),
+        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.SUPERADMIN, "superadmin"),
+    ]
+    for actor, target, old_role, new_role, fragment in denied_cases:
+        allowed, reason = await users_mod._can_change_role(mock_bot, actor, target, old_role, new_role)
+        assert allowed is False
+        assert fragment.lower() in reason.lower()
+
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.OWNER)
+    allowed, reason = await users_mod._can_change_role(
+        mock_bot,
+        "owner@example.org",
+        "target@example.org",
+        users_mod.Role.USER,
+        users_mod.Role.SUPERADMIN,
+    )
+    assert allowed is True
+    assert reason == ""
+
+
+@pytest.mark.asyncio
+async def test_delete_permission_guard_branches(mock_bot, monkeypatch):
+    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+
+    denied_cases = [
+        ("actor@example.org", "owner@example.org", users_mod.Role.USER, "owner"),
+        ("actor@example.org", "actor@example.org", users_mod.Role.USER, "own"),
+        ("actor@example.org", "target@example.org", users_mod.Role.SUPERADMIN, "superadmin"),
+        ("actor@example.org", "target@example.org", users_mod.Role.ADMIN, "equal"),
+    ]
+    for actor, target, role, fragment in denied_cases:
+        allowed, reason = await users_mod._can_delete_user(mock_bot, actor, target, role)
+        assert allowed is False
+        assert fragment.lower() in reason.lower()
+
+    allowed, reason = await users_mod._can_delete_user(
+        mock_bot, "actor@example.org", "target@example.org", users_mod.Role.USER
+    )
+    assert allowed is True
+    assert reason == ""
+
+
+@pytest.mark.asyncio
+async def test_users_list_error_branches(mock_bot, mock_msg):
+    await users_mod.users_list(mock_bot, "sender", "nick", [], mock_msg, False)
+    assert "Rooms plugin" in mock_bot.reply.call_args.args[1]
+
+    rooms = types.SimpleNamespace(JOINED_ROOMS={"room@example.org": {"nicks": {}}})
+    mock_bot.bot_plugins.plugins = {"rooms": rooms}
+    await users_mod.users_list(mock_bot, "sender", "nick", [], mock_msg, True)
+    assert "private chat" in mock_bot.reply.call_args.args[1]
+
+    mock_msg["from"].bare = "missing@example.org"
+    await users_mod.users_list(mock_bot, "sender", "nick", [], mock_msg, False)
+    assert "Not joined" in mock_bot.reply.call_args.args[1]
+
+    await users_mod.users_list(mock_bot, "sender", "nick", ["missing@example.org"], mock_msg, False)
+    assert "Not joined" in mock_bot.reply.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_users_update_and_delete_command_edge_branches(mock_bot, mock_msg, monkeypatch):
+    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    mock_bot.reply_usage = MagicMock()
+
+    await users_mod.users_update(mock_bot, "admin@example.org", "nick", [], mock_msg, False)
+    mock_bot.reply_usage.assert_called_once()
+
+    await users_mod.users_update(
+        mock_bot, "admin@example.org", "nick", ["target@example.org", "notarole"], mock_msg, False
+    )
+    assert "Invalid role" in mock_bot.reply.call_args.args[1]
+
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    await users_mod.users_update(
+        mock_bot, "admin@example.org", "nick", ["missing@example.org", "user"], mock_msg, False
+    )
+    assert "User not found" in mock_bot.reply.call_args.args[1]
+
+    mock_bot.db.users.get = AsyncMock(return_value={"jid": "target@example.org", "role": users_mod.Role.USER.value})
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+    await users_mod.users_update(
+        mock_bot, "admin@example.org", "nick", ["target@example.org", "user"], mock_msg, False
+    )
+    assert "already has role" in mock_bot.reply.call_args.args[1]
+
+    await users_mod.users_update(
+        mock_bot, "admin@example.org", "nick", ["owner@example.org", "user"], mock_msg, False
+    )
+    assert "owner" in mock_bot.reply.call_args.args[1].lower()
+
+    mock_bot.db.users.get = AsyncMock(return_value={"jid": "target@example.org", "role": users_mod.Role.ADMIN.value})
+    await users_mod.users_delete(
+        mock_bot, "admin@example.org", "nick", ["target@example.org"], mock_msg, False
+    )
+    assert "equal or higher" in mock_bot.reply.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_users_roles_and_admins_output(mock_bot, mock_msg, monkeypatch):
+    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    mock_bot.prefix = ","
+
+    await users_mod.users_roles(mock_bot, "sender", "nick", [], mock_msg, False)
+    roles_text = "\n".join(mock_bot.reply.call_args.args[1])
+    assert "owner" in roles_text
+    assert "superadmin" in roles_text
+
+    mock_bot.db.users.list = AsyncMock(return_value=[
+        {"jid": "admin@example.org", "role": users_mod.Role.ADMIN.value},
+        {"jid": "user@example.org", "role": users_mod.Role.USER.value},
+        {"jid": "super@example.org", "role": users_mod.Role.SUPERADMIN.value},
+    ])
+    await users_mod.users_admins(mock_bot, "sender", "nick", ["all"], mock_msg, False)
+    admins_text = "\n".join(mock_bot.reply.call_args.args[1])
+    assert "owner@example.org" in admins_text
+    assert "admin@example.org" in admins_text
+    assert "super@example.org" in admins_text
+    assert "user@example.org" not in admins_text

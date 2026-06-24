@@ -328,3 +328,120 @@ async def test_reminder_lifecycle(dummy_bot):
     with patch("plugins.reminder._cancel_all_active_tasks",
                new=AsyncMock(return_value=2)):
         await reminder.on_unload(dummy_bot)
+
+
+def test_timezone_lookup_jid_direct_muc_plugin_joined_and_fallback(dummy_bot, monkeypatch):
+    msg = MagicMock()
+    from_jid = MagicMock(bare="user@example.org", resource="Nick")
+    msg.__getitem__.side_effect = lambda key: {"from": from_jid, "type": "chat"}[key]
+
+    assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, False) == "user@example.org"
+
+    muc = MagicMock()
+    muc.get_jid_property.return_value = "real@example.org/resource"
+    dummy_bot.plugin = {"xep_0045": muc}
+    from_jid.bare = "room@conf"
+    from_jid.resource = "Nick"
+    assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, True) == "real@example.org"
+    muc.get_jid_property.assert_called_once_with("room@conf", "Nick", "jid")
+
+    muc.get_jid_property.side_effect = RuntimeError("lookup failed")
+    reminder.JOINED_ROOMS["room@conf"] = {
+        "nicks": {"Nick": {"jid": "joined@example.org/resource"}}
+    }
+    try:
+        assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, True) == "joined@example.org"
+    finally:
+        reminder.JOINED_ROOMS.pop("room@conf", None)
+
+    dummy_bot.plugin = {}
+    assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, True) == "sender@example.org"
+
+    monkeypatch.setattr(reminder, "_is_muc_pm", lambda _msg, _is_room: False)
+    msg.__getitem__.side_effect = KeyError("from")
+    assert reminder._timezone_lookup_jid(dummy_bot, "fallback@example.org/res", msg, False) == "fallback@example.org"
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_tasks_for_room_only_cancels_matching_pending(dummy_bot):
+    class CancelledTask:
+        def __init__(self, done=False):
+            self.cancelled = False
+            self._done = done
+
+        def done(self):
+            return self._done
+
+        def cancel(self):
+            self.cancelled = True
+
+        def __await__(self):
+            async def _wait():
+                raise asyncio.CancelledError
+            return _wait().__await__()
+
+    matching = CancelledTask()
+    done_task = CancelledTask(done=True)
+    other_room = CancelledTask()
+    reminder.ACTIVE_REMINDERS.clear()
+    reminder.ACTIVE_REMINDERS.update({1: matching, 2: done_task, 3: other_room})
+    dummy_bot.db.fetch_all = AsyncMock(return_value=[
+        {"id": 1, "room_jid": "room@conf"},
+        {"id": 2, "room_jid": "room@conf"},
+        {"id": 3, "room_jid": "other@conf"},
+    ])
+
+    cancelled = await reminder._cancel_active_tasks_for_room(dummy_bot, "room@conf")
+    assert cancelled == 1
+    assert matching.cancelled is True
+    assert done_task.cancelled is False
+    assert other_room.cancelled is False
+    assert 1 not in reminder.ACTIVE_REMINDERS
+    assert 2 not in reminder.ACTIVE_REMINDERS
+    assert 3 in reminder.ACTIVE_REMINDERS
+    reminder.ACTIVE_REMINDERS.clear()
+
+
+@pytest.mark.asyncio
+async def test_room_reminder_state_and_send_message(monkeypatch):
+    class Store:
+        def __init__(self, state):
+            self.state = state
+
+        async def get_global(self, key, default=None):
+            assert key == reminder.REMINDER_KEY
+            return self.state
+
+    bot = MagicMock()
+    monkeypatch.setattr(reminder, "get_reminder_store", AsyncMock(return_value=Store({"room@conf": True})))
+    assert await reminder._get_room_reminder_state(bot, "room@conf") is True
+    assert await reminder._get_room_reminder_state(bot, "other@conf") is False
+
+    monkeypatch.setattr(reminder, "get_reminder_store", AsyncMock(return_value=Store(["bad"])))
+    assert await reminder._get_room_reminder_state(bot, "room@conf") is False
+
+    monkeypatch.setattr(reminder, "get_reminder_store", AsyncMock(side_effect=RuntimeError("db")))
+    assert await reminder._get_room_reminder_state(bot, "room@conf") is False
+
+    sent = []
+
+    class Message:
+        def send(self):
+            sent.append("fallback")
+
+    bot.make_message.return_value = Message()
+    bot._safe_send_message = AsyncMock(side_effect=lambda msg: sent.append("safe"))
+    await reminder._send_reminder_message(bot, "user@example.org", "body", "chat")
+    assert sent == ["safe"]
+
+    delattr(bot, "_safe_send_message")
+    await reminder._send_reminder_message(bot, "room@conf", "body", "groupchat")
+    assert sent[-1] == "fallback"
+
+@pytest.mark.asyncio
+async def test_reminder_store_getter_uses_plugin_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await reminder.get_reminder_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("reminder")

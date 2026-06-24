@@ -75,3 +75,95 @@ def test_registry_remove_nonexistent_does_nothing():
     # Should do nothing
     reg.remove(("notareal",))
     assert ("abc",) in reg.index
+
+from utils import command as command_mod
+
+
+def test_registry_debug_dump_and_remove_by_handler_plugin():
+    reg = CommandRegistry()
+    cmd = command_mod.Command(
+        name="demo",
+        handler=fake_handler1,
+        role=Role.ADMIN,
+        aliases=["d"],
+        short="Short text",
+        usage=",demo",
+        examples=[",demo now"],
+        category="misc",
+        context="private",
+    )
+    reg.register("demo", cmd, "pluginA")
+
+    dump = reg.debug_dump()
+    assert dump["demo"] == {
+        "handler": "fake_handler1",
+        "role": "admin",
+        "aliases": ["d"],
+        "short": "Short text",
+        "usage": ",demo",
+        "examples": [",demo now"],
+        "category": "misc",
+        "context": "private",
+    }
+
+    reg.remove_by_handler(fake_handler1)
+    assert reg.index == {}
+    assert reg.by_handler == {}
+    assert reg.by_plugin == {}
+
+    reg.register("demo", cmd, "pluginA")
+    reg.remove_by_plugin("pluginA")
+    assert reg.index == {}
+    assert "pluginA" not in reg.by_plugin
+
+
+def test_register_command_decorator_metadata_and_resolution(monkeypatch):
+    registry = CommandRegistry()
+    monkeypatch.setattr(command_mod, "COMMANDS", registry)
+
+    @command_mod.command(
+        "demo run",
+        role=Role.USER,
+        aliases=["dr"],
+        short="Run demo",
+        usage=",demo run",
+        examples=[",demo run now"],
+        category="tests",
+        context="private",
+    )
+    def handler():
+        return "ok"
+
+    for name, cmd in handler.__commands__:
+        registry.register(name, cmd, "tests")
+
+    cmd, args = command_mod.resolve_command("demo run now")
+    assert cmd.handler is handler
+    assert args == ["now"]
+    alias_cmd, alias_args = command_mod.resolve_command("dr later")
+    assert alias_cmd.handler is handler
+    assert alias_args == ["later"]
+    assert handler._command_names == ["demo run", "dr"]
+    assert command_mod.check_permission(Role.USER, cmd) is True
+    assert command_mod.has_permission(Role.BANNED, cmd.role) is False
+
+
+def test_debug_leaks_outputs_registry_state(monkeypatch, capsys):
+    registry = CommandRegistry()
+    cmd = command_mod.Command(
+        name="leak demo",
+        handler=fake_handler1,
+        role=Role.USER,
+        aliases=["ld"],
+    )
+    registry.register("leak demo", cmd, "pluginA")
+    monkeypatch.setattr(command_mod, "COMMANDS", registry)
+
+    command_mod.debug_leaks()
+
+    out = capsys.readouterr().out
+    assert "COMMAND REGISTRY DEBUG" in out
+    assert "index size: 1" in out
+    assert "Handlers still referenced" in out
+    assert "Plugins still registered" in out
+    assert "pluginA" in out

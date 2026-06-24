@@ -846,3 +846,239 @@ async def test_connect_xmpp_awaits_async_connect(monkeypatch):
 
     assert await envsbot.connect_xmpp(FakeXMPP()) == "connected"
     assert calls == [{"host": "xmpp.example.org", "port": 5222, "use_ssl": False}]
+
+
+def test_boundjid_domain_and_configured_domain_edges(monkeypatch):
+    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=None)) is None
+    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(domain=" xmpp.example.org "))) == "xmpp.example.org"
+    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(host=" host.example.org "))) == "host.example.org"
+    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(domain=" ", host=""))) is None
+
+    monkeypatch.setattr(envsbot, "config", {"jid": "invalid"})
+    assert envsbot._configured_jid_domain() is None
+    monkeypatch.setattr(envsbot, "config", {"jid": "bot@example.org/resource"})
+    assert envsbot._configured_jid_domain() == "example.org"
+
+
+def test_connect_kwargs_falls_back_to_boundjid_and_uninspectable_signature(monkeypatch):
+    class FakeXMPP:
+        boundjid = types.SimpleNamespace(domain="bound.example.org")
+
+        def connect(self, host=None, port=None):
+            return True
+
+    monkeypatch.setattr(envsbot, "config", {"jid": "invalid", "host": None, "port": 5222, "direct_tls": False})
+    assert envsbot._connect_kwargs(FakeXMPP()) == {"host": "bound.example.org", "port": 5222}
+
+    assert envsbot._connect_signature_parameters(object()) == {}
+
+
+@pytest.mark.asyncio
+async def test_on_start_runs_startup_sequence(monkeypatch, bot):
+    features = []
+    broadcasts = []
+    calls = []
+
+    monkeypatch.setattr(envsbot.Bot, "__getitem__", lambda self, key: types.SimpleNamespace(add_feature=lambda feature: features.append((key, feature))), raising=False)
+    bot.presence = types.SimpleNamespace(broadcast=lambda: broadcasts.append("broadcast"))
+    bot.get_roster = AsyncMock(side_effect=lambda: calls.append("roster"))
+    bot.db = types.SimpleNamespace(connect=AsyncMock(side_effect=lambda: calls.append("db")))
+    bot.bot_plugins = types.SimpleNamespace(
+        load_all=AsyncMock(side_effect=lambda: calls.append("load_all")),
+        call_on_ready=AsyncMock(side_effect=lambda: calls.append("ready")),
+    )
+    bot._create_startup_backup = AsyncMock(side_effect=lambda: calls.append("backup"))
+    bot._send_restart_notification = AsyncMock(side_effect=lambda: calls.append("restart"))
+    bot.roster = types.SimpleNamespace(auto_subscribe=False)
+
+    await envsbot.Bot.on_start(bot, object())
+
+    assert bot.connection_start_time is not None
+    assert features == [("xep_0030", "http://jabber.org/protocol/muc#user")]
+    assert broadcasts == ["broadcast", "broadcast"]
+    assert calls == ["roster", "db", "load_all", "ready", "backup", "restart"]
+    assert bot.roster.auto_subscribe is True
+
+
+@pytest.mark.asyncio
+async def test_parse_owner_role_and_reply_shortcuts(monkeypatch, bot):
+    monkeypatch.setattr(envsbot, "config", {"owner": "owner@example.org/res"})
+    assert bot._parse_bare_jid("user@example.org/res", label="user") == "user@example.org"
+    assert bot._parse_bare_jid("bad@@example", label="user") is None
+    assert await bot._get_owner_bare_jid() == "owner@example.org"
+
+    bot.db.users.get = AsyncMock(side_effect=[None, {"jid": "u@example.org"}, {"jid": "u@example.org", "role": 80}])
+    assert await envsbot.Bot.get_user_role(bot, "missing@example.org") == envsbot.Role.NONE
+    assert await envsbot.Bot.get_user_role(bot, "norole@example.org") == envsbot.Role.NONE
+    assert await envsbot.Bot.get_user_role(bot, "user@example.org") == envsbot.Role.USER
+    assert await envsbot.Bot.get_user_role(bot, "owner@example.org") == envsbot.Role.OWNER
+    assert await envsbot.Bot.get_user_role(bot, "bad@@example") == envsbot.Role.NONE
+
+    sent = []
+    monkeypatch.setattr(bot, "reply", lambda msg, text, **kwargs: sent.append((text, kwargs)))
+    m = {"type": "chat", "get": lambda key, default=None: "chat" if key == "type" else default}
+    bot.reply_ok(m, "done", mention=False)
+    bot.reply_info(m, "heads up")
+    bot.reply_warn(m, "careful")
+    bot.reply_error(m, "broken")
+    bot.reply_usage(m, ",demo <arg>")
+    assert [text for text, _kwargs in sent] == [
+        "✅ done",
+        "ℹ️ heads up",
+        "🟡️ careful",
+        "🔴 broken",
+        "🟡️ Usage: ,demo <arg>",
+    ]
+    assert sent[0][1]["mention"] is False
+
+
+@pytest.mark.asyncio
+async def test_reply_send_wrapper_and_muc_helper_edges(monkeypatch, bot):
+    safe = AsyncMock()
+    monkeypatch.setattr(bot, "_safe_send_message", safe)
+    await envsbot.Bot._reply_send_wrapper(bot, "message")
+    safe.assert_awaited_once_with("message")
+
+    safe.side_effect = RuntimeError("boom")
+    await envsbot.Bot._reply_send_wrapper(bot, "message")
+
+    class BrokenPresence:
+        @property
+        def joined_rooms(self):
+            raise RuntimeError("broken")
+
+    bot.presence = BrokenPresence()
+    import core_plugins.rooms as rooms_mod
+    rooms_mod.JOINED_ROOMS.clear()
+    rooms_mod.JOINED_ROOMS["room@conf"] = {"nicks": {"Alice": {"jid": "alice@example.org/res"}}}
+    try:
+        assert bot._joined_room_jids() == {"room@conf"}
+        assert bot._is_muc_private_message({"type": "chat", "from": DummyFrom("room@conf", "Alice"), "get": lambda key, default=None: "chat" if key == "type" else default}) is True
+        assert bot._is_muc_private_message({"type": "chat", "from": DummyFrom("room@conf", ""), "get": lambda key, default=None: "chat" if key == "type" else default}) is False
+        assert bot._is_muc_private_message({"get": lambda key, default=None: default}) is False
+        assert bot._get_message_room_and_nick({"from": DummyFrom("room@conf", "Alice"), "get": lambda key, default=None: None}) == ("room@conf", "Alice")
+        assert bot._get_message_room_and_nick({}) == (None, None)
+        bot.plugin = {"xep_0045": types.SimpleNamespace(get_jid_property=lambda *args: None)}
+        assert bot._lookup_muc_occupant_jid("room@conf", "Alice") == "alice@example.org/res"
+        assert bot._lookup_muc_occupant_jid("room@conf", "Missing") is None
+    finally:
+        rooms_mod.JOINED_ROOMS.clear()
+
+
+@pytest.mark.asyncio
+async def test_main_normal_path_closes_database(monkeypatch):
+    calls = []
+
+    class FakeDB:
+        async def close(self):
+            calls.append("db.close")
+
+    class FakeXMPP:
+        def __init__(self):
+            self.disconnected = asyncio.Future()
+            self.disconnected.set_result(None)
+            self.db = FakeDB()
+
+        def disconnect(self):
+            calls.append("disconnect")
+
+    fake_xmpp = FakeXMPP()
+    monkeypatch.setattr(
+        envsbot,
+        "validate_startup_config",
+        lambda cfg: calls.append(("validate", cfg)),
+    )
+    monkeypatch.setattr(envsbot, "Bot", lambda: fake_xmpp)
+
+    async def fake_connect(xmpp):
+        calls.append(("connect", xmpp))
+
+    monkeypatch.setattr(envsbot, "connect_xmpp", fake_connect)
+
+    await envsbot.main()
+
+    assert calls == [
+        ("validate", envsbot.config),
+        ("connect", fake_xmpp),
+        "db.close",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_main_config_error_uses_exit_handler(monkeypatch):
+    error = envsbot.ConfigError("bad config")
+    exit_handler = MagicMock(side_effect=SystemExit(2))
+    bot_factory = MagicMock()
+
+    def fail_validation(cfg):
+        raise error
+
+    monkeypatch.setattr(envsbot, "validate_startup_config", fail_validation)
+    monkeypatch.setattr(envsbot, "exit_on_config_error", exit_handler)
+    monkeypatch.setattr(envsbot, "Bot", bot_factory)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await envsbot.main()
+
+    assert excinfo.value.code == 2
+    exit_handler.assert_called_once_with(error)
+    bot_factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_main_shutdown_timeout_and_close_error(monkeypatch):
+    calls = []
+
+    class RestartableDisconnected:
+        def __init__(self):
+            self.await_count = 0
+
+        def __await__(self):
+            async def inner():
+                self.await_count += 1
+                if self.await_count == 1:
+                    raise KeyboardInterrupt()
+                return None
+
+            return inner().__await__()
+
+    class FakeDB:
+        async def close(self):
+            calls.append("db.close")
+            raise RuntimeError("close failed")
+
+    class FakeXMPP:
+        def __init__(self):
+            self.disconnected = RestartableDisconnected()
+            self.db = FakeDB()
+
+        def disconnect(self):
+            calls.append("disconnect")
+
+    fake_xmpp = FakeXMPP()
+    monkeypatch.setattr(
+        envsbot,
+        "validate_startup_config",
+        lambda cfg: calls.append("validate"),
+    )
+    monkeypatch.setattr(envsbot, "Bot", lambda: fake_xmpp)
+
+    async def fake_connect(xmpp):
+        calls.append("connect")
+
+    async def fake_wait_for(awaitable, timeout):
+        calls.append(("wait_for", awaitable, timeout))
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(envsbot, "connect_xmpp", fake_connect)
+    monkeypatch.setattr(envsbot.asyncio, "wait_for", fake_wait_for)
+
+    await envsbot.main()
+
+    assert calls == [
+        "validate",
+        "connect",
+        "disconnect",
+        ("wait_for", fake_xmpp.disconnected, 2.0),
+        "db.close",
+    ]

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import types
 
 import plugins.pin as pin
@@ -367,3 +367,76 @@ async def test_pin_on_load_registers_groupchat_handler(bot):
     assert args[1] == "groupchat_message"
     assert callable(args[2])
     assert kwargs == {}
+
+
+def test_pin_store_and_recent_target_helpers(monkeypatch):
+    assert pin._normalize_pin_data(None) == {}
+    assert pin._normalize_pin_data({"room": {"pins": "bad"}, 123: []}) == {
+        "room": {"pins": []},
+        "123": {"pins": []},
+    }
+
+    assert pin._is_pin_add_command_body(" ,pin add ")
+    assert not pin._is_pin_add_command_body(",pin add last")
+
+    entries = [
+        {"body": "   ", "nick": "blank"},
+        {"body": ",pin add", "nick": "cmd"},
+        {"body": "📌 Pinned message as #1", "nick": "bot"},
+        {"body": "first", "nick": "alice"},
+        {"body": "second", "nick": "bob"},
+    ]
+    monkeypatch.setattr(pin, "_recent_cache_entries", lambda room: list(entries))
+
+    assert pin._get_recent_target("room", offset=0) is None
+    assert pin._get_recent_target("room", offset=1)["body"] == "second"
+    assert pin._get_recent_target("room", offset=2)["body"] == "first"
+    assert pin._get_recent_target("room", offset=3) is None
+
+    monkeypatch.setattr(pin, "_recent_cache_entries", lambda room: [])
+    assert pin._get_recent_target("room") is None
+
+
+def test_pin_load_save_helpers(monkeypatch):
+    class Store:
+        def __init__(self):
+            self.data = {"room": {"pins": [{"id": 1}]}}
+            self.saved = None
+
+        async def get_global(self, key, default=None):
+            assert key == pin.PIN_DATA_KEY
+            return self.data
+
+        async def set_global(self, key, value):
+            assert key == pin.PIN_DATA_KEY
+            self.saved = value
+
+    store = Store()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = store
+
+    async def run():
+        assert await pin._load_pin_data(bot) == store.data
+        await pin._save_pin_data(bot, {"room": {"pins": []}})
+        assert store.saved == {"room": {"pins": []}}
+
+    import asyncio
+    asyncio.run(run())
+
+@pytest.mark.asyncio
+async def test_pin_permission_and_recent_cache_direct_helpers(monkeypatch, make_msg, room_jid):
+    checks = []
+
+    async def fake_is_mod(bot_arg, room_arg, nick_arg):
+        checks.append((room_arg, nick_arg))
+        return nick_arg == "alice"
+
+    monkeypatch.setattr(pin, "is_room_moderator_or_admin", fake_is_mod)
+    bot = MagicMock()
+    assert await pin._sender_can_manage_pins_in_room(bot, make_msg(resource="alice"), room_jid) is True
+    assert await pin._sender_can_manage_pins_in_room(bot, make_msg(resource="bob"), room_jid) is False
+    assert checks == [(room_jid, "alice"), (room_jid, "bob")]
+
+    entries = [{"body": "hello"}]
+    monkeypatch.setattr(pin, "get_cached_messages", lambda namespace, room: [(namespace, room), *entries])
+    assert pin._recent_cache_entries(room_jid) == [(pin.CACHE_NAMESPACE, room_jid), *entries]

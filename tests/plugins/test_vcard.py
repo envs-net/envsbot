@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock
 from plugins import vcard
 
 
+ORIGINAL_GET_VCARD = vcard.get_vcard
+
+
 @pytest.fixture
 def fake_bot(monkeypatch):
     bot = SimpleNamespace()
@@ -227,3 +230,178 @@ async def test_vcard_field_returns_none_for_invalid_missing_and_empty_timezone(f
     )
     monkeypatch.setattr(vcard._core, "_get_user_timezone", AsyncMock(return_value=None))
     assert await vcard.vcard_field(fake_bot, m, "Alice", "TIMEZONE", is_room=True) is None
+
+
+@pytest.mark.asyncio
+async def test_format_vcard_field_for_nick_all_value_shapes():
+    assert await vcard._format_vcard_field_for_nick(
+        "URL", "URLs", ["https%3A//example.org/a%20b"], "Alice"
+    ) == ["URLs - Alice:", "    • https://example.org/a b"]
+    assert await vcard._format_vcard_field_for_nick("URL", "URLs", [], "Alice") == [
+        "URLs - Alice:",
+        "    • —",
+    ]
+
+    note_lines = await vcard._format_vcard_field_for_nick(
+        "NOTE", "Notes", ["first line\nsecond line"], "Alice", ["room@conf"]
+    )
+    assert note_lines[0] == "Notes - Alice in room@conf:"
+    assert "    • first line" in note_lines
+    assert "      second line" in note_lines
+
+    assert await vcard._format_vcard_field_for_nick("EMAIL", "Emails", ["a@example.org"], "Alice") == [
+        "Emails - Alice:",
+        "    • a@example.org",
+    ]
+    assert await vcard._format_vcard_field_for_nick("FN", "Full Name", "Alice Example", "Alice") == [
+        "Full Name - Alice:",
+        "    • Alice Example",
+    ]
+    assert await vcard._format_vcard_field_for_nick("ORG", "Orgs", None, "Alice") == [
+        "Orgs - Alice:",
+        "    • —",
+    ]
+
+
+def test_vcard_reply_helpers_and_empty_checks(fake_bot):
+    m = msg(from_jid="room@x/Alice")
+    vcard._vcard_reply_missing_nick(fake_bot, m, "Alice", "room@x", own=False)
+    vcard._vcard_reply_missing_nick(fake_bot, m, "Alice", "room@x", own=True)
+    vcard._vcard_reply_missing_field(fake_bot, m, "Full Name", "Alice", "room@x")
+    vcard._vcard_reply_empty_requested_user(fake_bot, m, "Full Name", "Alice")
+    replies = [entry[0] for entry in fake_bot._replies]
+    assert "Nick 'Alice' not found" in replies[0]
+    assert "Your Nick 'Alice' not found" in replies[1]
+    assert "No Full Name found" in replies[2]
+    assert "No Full Name set" in replies[3]
+
+    assert vcard._vcard_value_is_empty(None) is True
+    assert vcard._vcard_value_is_empty("") is True
+    assert vcard._vcard_value_is_empty([]) is True
+    assert vcard._vcard_value_is_empty("x") is False
+    assert vcard._vcard_should_format_field("FN") is True
+    assert vcard._vcard_should_format_field("LOCALITY") is False
+
+
+@pytest.mark.asyncio
+async def test_vcard_room_lookup_fetches_replies_and_handles_missing(fake_bot, monkeypatch):
+    room = "room@x"
+    m = msg(from_jid=f"{room}/Alice", type_="groupchat")
+    vcard.JOINED_ROOMS[room] = {"nicks": {"Alice": {"jid": "alice@example.org"}}}
+    try:
+        monkeypatch.setattr(vcard, "_vcard_fetch_value", AsyncMock(return_value="Alice Example"))
+        await vcard._vcard_handle_room_lookup(
+            fake_bot, "sender@example.org", m, "FN", "Full Name", "Alice", room
+        )
+        assert any(isinstance(reply[0], list) and "Alice Example" in "\n".join(reply[0]) for reply in fake_bot._replies)
+
+        fake_bot._replies.clear()
+        vcard._vcard_fetch_value.return_value = None
+        await vcard._vcard_handle_room_lookup(
+            fake_bot, "sender@example.org", m, "FN", "Full Name", "Alice", room
+        )
+        assert "No Full Name found" in fake_bot._replies[-1][0]
+
+        fake_bot._replies.clear()
+        await vcard._vcard_handle_room_lookup(
+            fake_bot, "sender@example.org", m, "FN", "Full Name", "Missing", room, own=True
+        )
+        assert "Your Nick 'Missing' not found" in fake_bot._replies[-1][0]
+    finally:
+        vcard.JOINED_ROOMS.pop(room, None)
+
+
+@pytest.mark.asyncio
+async def test_resolve_vcard_target_room_and_dm_edges(fake_bot, monkeypatch):
+    room = "room@x"
+    m = msg(from_jid=f"{room}/Alice", type_="groupchat")
+    vcard.JOINED_ROOMS[room] = {"nicks": {"Alice": {"jid": "alice@example.org"}, "NoJid": {}}}
+    try:
+        assert await vcard._resolve_vcard_target(fake_bot, m, ["Alice"], True, {room: True}) == (
+            "alice@example.org",
+            "Alice",
+            room,
+        )
+        assert await vcard._resolve_vcard_target(fake_bot, m, [], True, {room: True}) == (
+            "alice@example.org",
+            "Alice",
+            room,
+        )
+        assert await vcard._resolve_vcard_target(fake_bot, m, ["Alice"], True, {}) == (None, None, None)
+        assert await vcard._resolve_vcard_target(fake_bot, m, ["Missing"], True, {room: True}) == (None, None, None)
+        assert await vcard._resolve_vcard_target(fake_bot, m, ["NoJid"], True, {room: True}) == (None, None, None)
+
+        dm = msg(from_jid="alice@example.org/resource", type_="chat")
+        monkeypatch.setattr(vcard._core, "_is_muc_pm", lambda msg: False)
+        assert await vcard._resolve_vcard_target(fake_bot, dm, [], False, {}) == (
+            "alice@example.org",
+            "alice@example.org",
+            "Direct Message",
+        )
+        assert await vcard._resolve_vcard_target(fake_bot, dm, ["Bob"], False, {}) == (None, None, None)
+    finally:
+        vcard.JOINED_ROOMS.pop(room, None)
+
+
+@pytest.mark.asyncio
+async def test_get_vcard_timezone_and_get_vcard_info_paths(fake_bot, monkeypatch):
+    m = msg(from_jid="room@x/Alice", type_="chat")
+    monkeypatch.setattr(vcard._core, "_is_muc_pm", lambda msg: True)
+    monkeypatch.setattr(vcard._core, "_get_user_timezone", AsyncMock(return_value="Europe/Berlin"))
+    monkeypatch.setattr(vcard._core, "get_real_jid", AsyncMock(return_value=("real@example.org", None, None)))
+
+    assert await vcard._get_vcard_timezone(fake_bot, m, "target@example.org", True, ["Alice"]) == "Europe/Berlin"
+    vcard._core._get_user_timezone.assert_awaited_with(fake_bot, "target@example.org")
+    assert await vcard._get_vcard_timezone(fake_bot, m, None, True, ["Alice"]) is None
+    assert await vcard._get_vcard_timezone(fake_bot, m, "ignored@example.org", True, []) == "Europe/Berlin"
+
+    result_vcard = RichDummyVcard()
+    plugin = SimpleNamespace(get_vcard=AsyncMock(return_value={"vcard_temp": result_vcard}))
+    fake_bot.plugin = {"xep_0054": plugin}
+    assert await ORIGINAL_GET_VCARD(fake_bot, m, "alice@example.org") is result_vcard
+    plugin.get_vcard.assert_awaited_once()
+
+    plugin.get_vcard = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await ORIGINAL_GET_VCARD(fake_bot, m, "alice@example.org") is None
+
+    fake_bot.plugin = {}
+    with pytest.raises(RuntimeError):
+        await ORIGINAL_GET_VCARD(fake_bot, m, "alice@example.org")
+
+    monkeypatch.setattr(vcard, "get_user_vcard", AsyncMock(return_value={"FN": "Alice"}))
+    assert await vcard.get_info(fake_bot, m, "alice@example.org") == {"FN": "Alice"}
+    vcard.get_user_vcard.return_value = None
+    assert await vcard.get_info(fake_bot, m, "alice@example.org") is None
+
+
+@pytest.mark.asyncio
+async def test_get_user_vcard_and_fetch_value_helpers(fake_bot, monkeypatch):
+    async def rich_get_vcard(bot, msg, jid=None):
+        assert jid == "alice@example.org"
+        return RichDummyVcard()
+
+    monkeypatch.setattr(vcard, "get_vcard", rich_get_vcard)
+    monkeypatch.setattr(
+        vcard._core,
+        "get_real_jid",
+        AsyncMock(return_value=("alice@example.org", False, False)),
+    )
+    monkeypatch.setattr(
+        vcard._core,
+        "_get_user_timezone",
+        AsyncMock(return_value="Europe/Berlin"),
+    )
+
+    m = msg(from_jid="room@x/Alice", type_="groupchat")
+    data = await vcard.get_user_vcard(fake_bot, m, "alice@example.org")
+    assert data["FN"] == "Alice Example"
+    assert data["LOCALITY"] == "Berlin"
+    assert data["TZ"] == "Europe/Berlin"
+
+    assert await vcard._vcard_fetch_value(fake_bot, m, "TIMEZONE", "alice@example.org") == "Europe/Berlin"
+    assert await vcard._vcard_fetch_value(fake_bot, m, "FN", "alice@example.org") == "Alice Example"
+
+def test_append_vcard_list_values_adds_each_value():
+    lines = []
+    vcard._append_vcard_list_values(lines, ["one", "two"])
+    assert lines == ["    • one", "    • two"]

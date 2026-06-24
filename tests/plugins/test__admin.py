@@ -315,3 +315,243 @@ async def test_on_load_sets_start_time(monkeypatch):
     monkeypatch.setattr(_admin, "log", FakeLogger())
     await _admin.on_load("bot")
     assert "set" in called and "info" in called
+
+
+def test_status_formatting_helpers_cover_edges(monkeypatch):
+    assert _admin.human_time(24 * 3600 + 60) == "1d 1m"
+    assert _admin.human_size(1024 ** 4) == "1.0 TiB"
+    assert _admin._section("Title", ["one", "two"]) == [
+        "Title:", "• one", "• two", ""
+    ]
+
+    monkeypatch.setattr(_admin.metadata, "version", lambda package: "9.9")
+    assert _admin._package_version("pkg") == "9.9"
+
+    def missing_version(package):
+        raise _admin.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(_admin.metadata, "version", missing_version)
+    assert _admin._package_version("missing") == "unknown"
+
+    monkeypatch.setitem(_admin.config, "visible_key", "value")
+    monkeypatch.setitem(_admin.config, "empty_key", "")
+    monkeypatch.setitem(_admin.config, "none_key", None)
+    assert _admin._safe_config_value("visible_key") == "value"
+    assert _admin._safe_config_value("empty_key", "fallback") == "fallback"
+    assert _admin._safe_config_value("none_key", "fallback") == "fallback"
+    assert _admin._safe_config_value("missing_key", "fallback") == "fallback"
+
+
+def test_presence_connection_and_room_snapshots(monkeypatch):
+    assert _admin._format_presence(types.SimpleNamespace()) == "unknown"
+    assert _admin._format_presence(
+        types.SimpleNamespace(presence=types.SimpleNamespace(status={"show": "away"}))
+    ) == "away"
+    assert _admin._format_presence(
+        types.SimpleNamespace(presence=types.SimpleNamespace(status={"show": "chat", "status": "ready"}))
+    ) == "chat / ready"
+
+    assert _admin._connection_line(types.SimpleNamespace()) == "Connection: unknown"
+
+    class BadConnectionTime:
+        def __rsub__(self, other):
+            raise RuntimeError("bad time")
+
+    assert _admin._connection_line(
+        types.SimpleNamespace(connection_start_time=BadConnectionTime())
+    ) == "Connection: unknown"
+
+    assert _admin._room_occupant_count({"nicks": {"a": {}, "b": {}}}) == 2
+    assert _admin._room_occupant_count({"nicks": ["a"]}) == 0
+
+    monkeypatch.setattr(_admin, "JOINED_ROOMS", {
+        "room@example.org": {"nicks": {"alice": {}}},
+        "empty@example.org": None,
+    })
+    snapshot = _admin._joined_rooms_snapshot()
+    assert snapshot == (
+        ("room@example.org", {"nicks": {"alice": {}}}),
+        ("empty@example.org", {}),
+    )
+
+    class BrokenRooms:
+        def items(self):
+            raise RuntimeError("broken")
+
+    monkeypatch.setattr(_admin, "JOINED_ROOMS", BrokenRooms())
+    assert _admin._joined_rooms_snapshot() == ()
+
+
+def test_command_plugin_and_task_status_helpers(monkeypatch):
+    class Cmd:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeCommands(dict):
+        pass
+
+    fake_commands = FakeCommands({
+        ("ping",): Cmd("ping"),
+        ("p",): Cmd("ping"),
+        ("bot", "status"): Cmd("bot status"),
+    })
+    fake_commands.by_plugin = {"foo": (("ping",),)}
+    monkeypatch.setattr(_admin, "COMMANDS", fake_commands)
+    assert _admin._command_counts() == (2, 1)
+
+    assert _admin._task_summary_line(types.SimpleNamespace()) == "Tasks: unavailable"
+    failed_supervisor = types.SimpleNamespace(summary=lambda: (2, 1, 3))
+    assert _admin._task_summary_line(
+        types.SimpleNamespace(tasks=failed_supervisor)
+    ) == "Tasks: 2 running, 1 failed, 3 finished"
+    ok_supervisor = types.SimpleNamespace(summary=lambda: (2, 0, 3))
+    assert _admin._task_summary_line(
+        types.SimpleNamespace(tasks=ok_supervisor)
+    ) == "Tasks: 2 running, 3 finished"
+
+    assert _admin._plugin_status_lines(types.SimpleNamespace(bot_plugins=None))[:2] == [
+        "Loaded: 0/0", "Commands: 2 (+1 aliases)"
+    ]
+
+    class BrokenDiscover:
+        plugins = {"foo": object()}
+
+        def discover(self):
+            raise RuntimeError("nope")
+
+    lines = _admin._plugin_status_lines(types.SimpleNamespace(
+        bot_plugins=BrokenDiscover(), tasks=ok_supervisor
+    ))
+    assert "Loaded: 1/unknown" in lines
+    assert "Tasks: 2 running, 3 finished" in lines
+
+
+def test_detail_line_helpers(monkeypatch):
+    assert _admin._room_detail_lines(()) == ["—"]
+    room_lines = _admin._room_detail_lines((
+        ("z@example.org", {"nick": "bot", "role": "moderator", "affiliation": "member", "nicks": {"a": {}}}),
+        ("a@example.org", {}),
+    ))
+    assert room_lines[0].startswith("a@example.org | nick=unknown | occupants=0")
+    assert room_lines[1].startswith("z@example.org | nick=bot | occupants=1")
+
+    assert _admin._plugin_detail_lines(types.SimpleNamespace(bot_plugins=None)) == ["—"]
+
+    plugin_module = types.SimpleNamespace(PLUGIN_META={"version": "2.0", "category": "fun"})
+    manager = types.SimpleNamespace(plugins={"foo": plugin_module, "bar": object()}, meta={"bar": {"version": "1.0"}})
+    lines = _admin._plugin_detail_lines(types.SimpleNamespace(bot_plugins=manager))
+    assert "bar 1.0 | category=unknown" in lines[0]
+    assert "foo 2.0 | category=fun" in lines[1]
+
+    assert _admin._task_detail_lines(types.SimpleNamespace(tasks=None)) == ["unavailable"]
+    empty_supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [])
+    assert _admin._task_detail_lines(types.SimpleNamespace(tasks=empty_supervisor)) == ["—"]
+    task = types.SimpleNamespace(
+        plugin="rss", name="feed", status="failed",
+        created_at="2026-06-24T10:00:00", last_error="boom",
+    )
+    supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [task])
+    assert _admin._task_detail_lines(types.SimpleNamespace(tasks=supervisor)) == [
+        "rss/feed | failed | created=2026-06-24T10:00:00 | error=boom"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_database_status_line_edges(tmp_path):
+    assert await _admin._database_status_lines(types.SimpleNamespace()) == [
+        "Status: disconnected"
+    ]
+
+    configured = types.SimpleNamespace(db=types.SimpleNamespace(conn=None, path=None))
+    assert await _admin._database_status_lines(configured) == [
+        "Status: configured", "Path: unknown", "Size: unknown", "Integrity: unknown"
+    ]
+
+    db_file = tmp_path / "bot.db"
+    db_file.write_bytes(b"abc")
+
+    async def no_row(query):
+        return None
+
+    lines = await _admin._database_status_lines(types.SimpleNamespace(
+        db=types.SimpleNamespace(conn=object(), path=db_file, fetch_one=no_row)
+    ))
+    assert f"Path: {db_file}" in lines
+    assert "Size: 3 B" in lines
+    assert "Integrity: unknown" in lines
+
+    async def broken_fetch(query):
+        raise RuntimeError("sqlite down")
+
+    lines = await _admin._database_status_lines(types.SimpleNamespace(
+        db=types.SimpleNamespace(conn=object(), path=tmp_path / "missing.db", fetch_one=broken_fetch)
+    ))
+    assert "Size: file not found" in lines
+    assert "Integrity: unknown" in lines
+
+
+@pytest.mark.asyncio
+async def test_room_feature_override_line_success_and_error(monkeypatch):
+    async def fake_list_room_features(bot, room_jid):
+        return [types.SimpleNamespace(modified=True), types.SimpleNamespace(modified=False)]
+
+    import utils.room_features as room_features
+    monkeypatch.setattr(room_features, "list_room_features", fake_list_room_features)
+    assert await _admin._room_feature_override_line(
+        object(), (("one@example.org", {}), ("two@example.org", {}))
+    ) == "Room feature overrides: 2"
+
+    async def broken_list_room_features(bot, room_jid):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(room_features, "list_room_features", broken_list_room_features)
+    assert await _admin._room_feature_override_line(
+        object(), (("one@example.org", {}),)
+    ) == "Room feature overrides: unknown"
+
+
+def test_status_argument_helpers(fake_bot):
+    assert _admin._invalid_status_args([]) is False
+    assert _admin._invalid_status_args(["full"]) is False
+    assert _admin._invalid_status_args(["all"]) is False
+    assert _admin._invalid_status_args(["details"]) is False
+    assert _admin._invalid_status_args(["nope"]) is True
+    assert _admin._status_is_full([]) is False
+    assert _admin._status_is_full(["FULL"]) is True
+    assert _admin._status_is_full(["all"]) is True
+    assert _admin._status_is_full(["details"]) is True
+
+    replies = []
+    fake_bot.reply_usage = lambda msg, text: replies.append(("usage", text))
+    _admin._reply_status_usage(fake_bot, DummyMsg())
+    assert replies == [("usage", ",bot status [full]")]
+
+    del fake_bot.reply_usage
+    _admin._reply_status_usage(fake_bot, DummyMsg())
+    assert fake_bot._replies[-1][0] == "Usage: ,bot status [full]"
+
+
+@pytest.mark.asyncio
+async def test_on_ready_version_worker_branches(monkeypatch, fake_bot):
+    monkeypatch.setitem(_admin.config, "version_check_enabled", False)
+    await _admin.on_ready(fake_bot)
+    assert not hasattr(fake_bot, "version_check_task")
+
+    class ExistingTask:
+        def done(self):
+            return False
+
+    monkeypatch.setitem(_admin.config, "version_check_enabled", True)
+    fake_bot.version_check_task = ExistingTask()
+    await _admin.on_ready(fake_bot)
+    assert isinstance(fake_bot.version_check_task, ExistingTask)
+
+    created = []
+
+    monkeypatch.setattr(_admin, "version_check_worker", lambda bot: "worker")
+    monkeypatch.setattr(_admin, "create_plugin_task", lambda *a, **k: created.append((a, k)) or "task")
+    fake_bot.version_check_task = types.SimpleNamespace(done=lambda: True)
+    await _admin.on_ready(fake_bot)
+    assert fake_bot.version_check_task == "task"
+    assert created[0][0][1] == "_admin"
+    assert created[0][1]["name"] == "version-check"

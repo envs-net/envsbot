@@ -305,3 +305,24 @@ async def test_muc_pm_sender_can_manage_room(fake_bot):
     assert allowed is False and "permissions" in reason
     assert allowed is False and (
         "permissions" in reason or "only be used" in reason)
+
+
+def test_get_stanza_id_prefers_stanza_id_and_handles_errors(caplog):
+    class StanzaMsg(dict):
+        def get(self, key, default=None):
+            if key == "stanza_id":
+                return {"id": "stable-id"}
+            return super().get(key, default)
+
+    assert _core.get_stanza_id(StanzaMsg(id="fallback")) == "stable-id"
+    assert _core.get_stanza_id({"stanza_id": {}, "id": "fallback"}) == "fallback"
+    assert _core.get_stanza_id({"stanza_id": {"id": 123}}) == "123"
+
+    class BrokenStanza:
+        def __init__(self):
+            self.calls = 0
+        def get(self, key, default=None):
+            self.calls += 1
+            raise RuntimeError(f"broken {key}")
+
+    assert _core.get_stanza_id(BrokenStanza()) is None

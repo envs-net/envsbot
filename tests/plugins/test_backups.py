@@ -79,3 +79,121 @@ async def test_restore_runs_with_confirmation(bot, msg, monkeypatch):
     audit.assert_awaited_once()
     bot.reply_ok.assert_called_once()
     assert "Backup restored" in bot.reply_ok.call_args.args[1]
+
+
+def test_backup_formatting_helpers():
+    backup = MagicMock()
+    backup.name = "envsbot-backup.zip"
+    backup.created_at = "2026-06-24T12:00:00Z"
+    backup.reason = "manual"
+    backup.size = 2048
+    backup.files = ["bot.db", "config.py"]
+
+    assert backups_plugin._format_bytes(1024) == "1.0 KiB"
+    assert backups_plugin._format_bytes(1024 * 1024) == "1.0 MiB"
+    assert backups_plugin._backup_list_line(3, backup) == (
+        "3. envsbot-backup.zip · 2026-06-24T12:00:00Z · manual · "
+        "2.0 KiB · bot.db, config.py"
+    )
+
+    backup.files = []
+    assert "no file list" in backups_plugin._backup_list_line(1, backup)
+
+
+@pytest.mark.asyncio
+async def test_backup_create_handles_failures(bot, msg, monkeypatch):
+    create = AsyncMock(side_effect=RuntimeError("disk full"))
+    monkeypatch.setattr(backups_plugin, "create_backup", create)
+
+    await backups_plugin.backup_create(bot, "admin@example.org", "admin", [], msg, False)
+
+    bot.reply_error.assert_called_once()
+    assert "Backup failed: disk full" in bot.reply_error.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_backup_list_uses_pagination(bot, msg, monkeypatch):
+    backup = MagicMock()
+    backup.name = "backup.zip"
+    backup.created_at = "now"
+    backup.reason = "manual"
+    backup.size = 1024
+    backup.files = []
+    monkeypatch.setattr(backups_plugin, "list_backups", lambda: [backup])
+
+    await backups_plugin.backup_list(bot, "admin@example.org", "admin", ["all"], msg, False)
+
+    lines = bot.reply.call_args.args[1]
+    assert lines[0] == "📦 Managed backups"
+    assert any("backup.zip" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_backup_show_usage_error_and_details(bot, msg, monkeypatch):
+    await backups_plugin.backup_show(bot, "admin@example.org", "admin", [], msg, False)
+    bot.reply_usage.assert_called_once_with(msg, ",backup show <archive|last>")
+
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(side_effect=backups_plugin.BackupError("missing")))
+    await backups_plugin.backup_show(bot, "admin@example.org", "admin", ["missing.zip"], msg, False)
+    bot.reply_error.assert_called_once_with(msg, "missing")
+
+    details = {
+        "name": "backup.zip",
+        "size": 2048,
+        "manifest": {
+            "created_at": "2026-06-24T12:00:00Z",
+            "reason": "manual",
+            "version": "1",
+            "files": [{"name": "bot.db", "size": 1024}],
+            "missing": [{"name": "vcard.py", "source": "root"}],
+        },
+    }
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(backups_plugin, "backup_details", MagicMock(return_value=details))
+
+    await backups_plugin.backup_show(bot, "admin@example.org", "admin", ["last"], msg, False)
+
+    lines = bot.reply.call_args.args[1]
+    assert lines[:7] == [
+        "📦 Backup details",
+        "Name: backup.zip",
+        "Created: 2026-06-24T12:00:00Z",
+        "Reason: manual",
+        "Version: 1",
+        "Size: 2.0 KiB",
+        "Files:",
+    ]
+    assert "• bot.db (1.0 KiB)" in lines
+    assert "Missing at backup time:" in lines
+    assert "• vcard.py from root" in lines
+
+
+@pytest.mark.asyncio
+async def test_backup_show_handles_empty_manifest_lists(bot, msg, monkeypatch):
+    details = {
+        "name": "backup.zip",
+        "size": 0,
+        "manifest": {},
+    }
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(backups_plugin, "backup_details", MagicMock(return_value=details))
+
+    await backups_plugin.backup_show(bot, "admin@example.org", "admin", ["last"], msg, False)
+
+    lines = bot.reply.call_args.args[1]
+    assert "Created: unknown" in lines
+    assert "Reason: unknown" in lines
+    assert "Version: unknown" in lines
+    assert "• none" in lines
+
+
+@pytest.mark.asyncio
+async def test_backup_restore_handles_backup_and_generic_errors(bot, msg, monkeypatch):
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(side_effect=backups_plugin.BackupError("bad archive")))
+    await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["bad.zip", "confirm"], msg, False)
+    bot.reply_error.assert_called_with(msg, "bad archive")
+
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(backups_plugin, "restore_backup", AsyncMock(side_effect=RuntimeError("boom")))
+    await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last", "confirm"], msg, False)
+    assert "Restore failed: boom" in bot.reply_error.call_args.args[1]

@@ -247,3 +247,169 @@ async def test_no_unintended_attr(plugin_store):
     # Should not have public dicts for data storage
     for attr in ["data", "cache", "values"]:
         assert not hasattr(plugin_store, attr)
+
+from database.users import UserManager, GLOBAL_JID
+
+
+class MappingRow(dict):
+    """Tiny row object that behaves like sqlite Row for dict(row)."""
+
+    def __iter__(self):
+        return iter(self.items())
+
+
+class RichCursor:
+    def __init__(self, rows=None, one=None):
+        self.rows = rows or []
+        self.one = one
+
+    async def fetchone(self):
+        return self.one
+
+    async def fetchall(self):
+        return self.rows
+
+
+class RichDummyDB:
+    def __init__(self):
+        self.users = {}
+        self.runtime = {}
+        self.calls = []
+        self.fail_on = None
+
+    async def execute(self, query, params=()):
+        normalized = " ".join(query.split())
+        self.calls.append((normalized, params))
+        if self.fail_on and self.fail_on in normalized:
+            raise RuntimeError("forced db failure")
+
+        if normalized.startswith("SELECT * FROM users WHERE jid=?"):
+            row = self.users.get(params[0])
+            return RichCursor(one=MappingRow(row) if row else None)
+
+        if normalized.startswith("SELECT * FROM users ORDER BY"):
+            rows = [MappingRow(row) for row in self.users.values()]
+            return RichCursor(rows=rows)
+
+        if normalized.startswith("SELECT data, last_updated FROM users_runtime"):
+            row = self.runtime.get(params[0])
+            return RichCursor(one=row)
+
+        if normalized.startswith("DELETE FROM users WHERE jid"):
+            self.users.pop(params[0], None)
+            return RichCursor()
+
+        if normalized.startswith("DELETE FROM users_runtime WHERE jid"):
+            self.runtime.pop(params[0], None)
+            return RichCursor()
+
+        return RichCursor()
+
+
+def _queries(db):
+    return [query for query, _params in db.calls]
+
+
+@pytest.mark.asyncio
+async def test_runtime_store_delete_clear_and_uncached_shapes():
+    db = RichDummyDB()
+    um = UserManager(db)
+    store = um.plugin("shape")
+
+    um._runtime_cache["broken@jid"] = {"shape": {"old": True}}
+    await store.set("broken@jid", "new", 1)
+    assert um._runtime_cache["broken@jid"]["plugins"]["shape"] == {"new": 1}
+
+    await store.delete("broken@jid", "new")
+    assert await store.get("broken@jid", "new") is None
+    assert "broken@jid" in um._dirty_runtime
+
+    await store.set("broken@jid", "keep", "value")
+    await store.clear("broken@jid")
+    assert await store.get("broken@jid") == {}
+
+    await store.delete("missing@jid", "absent")
+    assert um._runtime_cache["missing@jid"] == {"plugins": {}}
+
+
+@pytest.mark.asyncio
+async def test_user_manager_create_get_set_list_update_and_delete_cache_cleanup():
+    db = RichDummyDB()
+    db.users["db@jid"] = {
+        "jid": "db@jid",
+        "nickname": "DbNick",
+        "role": 20,
+        "created_at": "old",
+        "last_seen": "old",
+        "registered": 1,
+    }
+    um = UserManager(db)
+
+    assert await um.get("missing@jid") is None
+    db_user = await um.get("db@jid")
+    assert db_user["nickname"] == "DbNick"
+
+    await um.create("new@jid", "NewNick")
+    assert await um.set("new@jid", "role", 60) is um._users_cache["new@jid"]
+    assert await um.set("absent@jid", "role", 60) is None
+    await um.update_last_seen("new@jid")
+
+    listed = await um.list()
+    assert [row["jid"] for row in listed] == ["db@jid", "new@jid"]
+
+    um._runtime_cache["new@jid"] = {"plugins": {"demo": {"x": 1}}}
+    um._dirty_runtime.add("new@jid")
+    um._nick_index = {"Nick": {"new@jid", "other@jid"}, "Solo": ["new@jid"]}
+    await um.delete("new@jid")
+
+    assert "new@jid" not in um._users_cache
+    assert "new@jid" not in um._runtime_cache
+    assert "new@jid" not in um._dirty_runtime
+    assert um._nick_index == {"Nick": {"other@jid"}}
+
+
+@pytest.mark.asyncio
+async def test_user_manager_value_helpers_and_flush_all_success():
+    db = RichDummyDB()
+    um = UserManager(db)
+
+    data = {"a": {"b": {"c": 3}}, "plain": "text"}
+    assert await um.get_value(data, "a.b.c") == 3
+    assert await um.get_value(data, "a.b.missing") is None
+    assert await um.get_value(data, "plain.child") is None
+
+    cache = {}
+    dirty = set()
+    await um.set_value(cache, dirty, "jid@x", "nested.key", "value")
+    assert cache == {"jid@x": {"nested": {"key": "value"}}}
+    assert dirty == {"jid@x"}
+
+    await um.create("flush@jid", "FlushNick")
+    await um.plugin("demo").set("flush@jid", "seen", True)
+    um._nick_index = {"FlushNick": {"flush@jid"}}
+    await um.flush_all()
+
+    queries = _queries(db)
+    assert "SAVEPOINT flush_checkpoint" in queries
+    assert "RELEASE flush_checkpoint" in queries
+    assert not um._dirty_users
+    assert not um._dirty_runtime
+    assert GLOBAL_JID in um._runtime_cache
+    assert um._runtime_cache[GLOBAL_JID]["plugins"]["users"]["_nick_index"] == {
+        "FlushNick": ["flush@jid"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_user_manager_flush_all_rolls_back_and_keeps_dirty_flags():
+    db = RichDummyDB()
+    db.fail_on = "INSERT INTO users (jid"
+    um = UserManager(db)
+    await um.create("bad@jid", "Bad")
+
+    with pytest.raises(RuntimeError, match="forced db failure"):
+        await um.flush_all()
+
+    queries = _queries(db)
+    assert "ROLLBACK TO flush_checkpoint" in queries
+    assert um._dirty_users == {"bad@jid"}

@@ -72,3 +72,84 @@ async def test_room_feature_defaults_handle_missing_defaults(monkeypatch):
     assert state.enabled is False
     assert state.default is False
     assert state.modified is False
+
+
+def test_room_feature_name_aliases_flags_and_format(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={
+                "information": {"type": "dict", "key": "INFO_ENABLED"},
+                "karma": {"type": "dict", "key": "KARMA_ENABLED"},
+            },
+            PLUGIN_DEFAULTS={"information": True, "karma": False},
+        ),
+    )
+
+    assert room_features.available_features() == ["information", "karma"]
+    assert room_features.is_known_feature("infos")
+    assert room_features.is_known_feature("roominfo")
+    assert not room_features.is_known_feature("missing")
+    assert room_features._coerce_feature_flag("yes") is True
+    assert room_features._coerce_feature_flag("disabled", fallback=True) is False
+    assert room_features._coerce_feature_flag(None, fallback=True) is True
+    assert room_features._coerce_feature_flag(object()) is True
+
+    line = room_features.format_room_feature_line(
+        room_features.RoomFeatureState(
+            name="karma",
+            enabled=True,
+            default=False,
+            modified=True,
+        )
+    )
+    assert line == "• karma: enabled | default: off (modified)"
+
+
+@pytest.mark.asyncio
+async def test_room_feature_set_list_alias_and_unsupported_storage(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={
+                "information": {"type": "dict", "key": "INFO_ENABLED"},
+                "legacy": {"type": "list", "key": "LEGACY_ENABLED"},
+            },
+            PLUGIN_DEFAULTS={"information": False},
+        ),
+    )
+    store = DummyStore({"INFO_ENABLED": "not-a-dict"})
+    bot = _bot_with_store(store)
+
+    state = await room_features.set_room_feature(bot, "room@conf", "info", True)
+    assert state.name == "information"
+    assert state.enabled is True
+    assert store.data["INFO_ENABLED"] == {"room@conf": True}
+
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={"information": {"type": "dict", "key": "INFO_ENABLED"}},
+            PLUGIN_DEFAULTS={"information": False},
+        ),
+    )
+    listed = await room_features.list_room_features(bot, "room@conf")
+    assert [item.name for item in listed] == ["information"]
+    assert listed[0].enabled is True
+
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={"legacy": {"type": "list", "key": "LEGACY_ENABLED"}},
+            PLUGIN_DEFAULTS={},
+        ),
+    )
+    with pytest.raises(ValueError, match="Unsupported room feature storage type"):
+        await room_features.get_room_feature(bot, "room@conf", "legacy")
+
+    with pytest.raises(ValueError, match="Unsupported room feature storage type"):
+        await room_features.set_room_feature(bot, "room@conf", "legacy", True)

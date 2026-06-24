@@ -3,6 +3,7 @@ import types
 import asyncio
 import csv
 from plugins import info as info_plugin
+from unittest.mock import MagicMock
 
 # ---- AIOHTTP ASYNC CTX MOCKING HELPERS ----
 
@@ -405,3 +406,60 @@ async def test_information_command_toggle_on(dummy_bot, fake_room_msg):
                                           fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
     assert "Usage" in text or "usage" in text
+
+
+def test_fetch_wikipedia_summary_paths(monkeypatch):
+    class Resp:
+        def __init__(self, status, data):
+            self.status_code = status
+            self._data = data
+        def json(self):
+            return self._data
+
+    calls = []
+
+    def fake_get(url, headers=None, timeout=None):
+        calls.append((url, headers, timeout))
+        return Resp(200, {
+            "title": "Example",
+            "extract": "Summary text",
+            "content_urls": {"desktop": {"page": "https://example.org/wiki/Example"}},
+        })
+
+    monkeypatch.setattr(info_plugin.requests, "get", fake_get)
+    assert info_plugin.fetch_wikipedia_summary("Example Page") == (
+        "Example", "Summary text", "https://example.org/wiki/Example"
+    )
+    assert "Example%20Page" in calls[0][0]
+    assert calls[0][1]["User-Agent"] == info_plugin.INFO_HTTP_USER_AGENT
+    assert calls[0][2] == info_plugin.INFO_HTTP_TIMEOUT
+
+    monkeypatch.setattr(
+        info_plugin.requests,
+        "get",
+        lambda *a, **k: Resp(200, {
+            "type": "disambiguation",
+            "titles": {"canonical": "Example_(disambiguation)"},
+        }),
+    )
+    assert info_plugin.fetch_wikipedia_summary("Example") == (
+        "Example_(disambiguation)", "Disambiguation page", None
+    )
+
+    monkeypatch.setattr(info_plugin.requests, "get", lambda *a, **k: Resp(404, {}))
+    assert info_plugin.fetch_wikipedia_summary("Missing") is None
+
+    monkeypatch.setattr(
+        info_plugin.requests,
+        "get",
+        lambda *a, **k: Resp(200, {"title": "Incomplete"}),
+    )
+    assert info_plugin.fetch_wikipedia_summary("Incomplete") is None
+
+@pytest.mark.asyncio
+async def test_info_store_getter_uses_information_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await info_plugin.get_info_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("information")

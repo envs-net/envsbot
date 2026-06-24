@@ -1,7 +1,10 @@
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, Mock
+from unittest.mock import AsyncMock, patch, Mock, MagicMock
+from types import SimpleNamespace
 import plugins.weather as weather
+
+ORIGINAL_GET_WEATHER_STORE = weather.get_weather_store
 
 # --- Support patching of weather.JOINED_ROOMS ---
 
@@ -378,3 +381,45 @@ def test_weather_target_and_location_helpers():
     assert weather._select_location(None, "Berlin", "DE") == "Berlin"
     assert weather._select_location("Kreuzberg", "Berlin", "DE") == "Kreuzberg"
     assert weather._select_location(None, None, None) == ""
+
+
+@pytest.mark.asyncio
+async def test_get_display_name_uses_first_roomnick_and_fallbacks(caplog):
+    class Store:
+        def __init__(self, value=None, exc=None):
+            self.value = value
+            self.exc = exc
+        async def get(self, jid, key):
+            assert jid == "alice@example.org"
+            assert key == "roomnicks"
+            if self.exc:
+                raise self.exc
+            return self.value
+
+    class Users:
+        def __init__(self, store):
+            self.store = store
+        def plugin(self, name):
+            assert name == "users"
+            return self.store
+
+    bot = Mock()
+    bot.db.users = Users(Store({"room1": [], "room2": ["Alice", "Ali"]}))
+    assert await weather.get_display_name(bot, "alice@example.org") == "Alice"
+
+    bot.db.users = Users(Store({"room1": []}))
+    assert await weather.get_display_name(bot, "alice@example.org") == "unknown"
+
+    bot.db.users = Users(Store(exc=RuntimeError("db down")))
+    assert await weather.get_display_name(bot, "alice@example.org") == "unknown"
+
+@pytest.mark.asyncio
+async def test_weather_store_getter_uses_plugin_store():
+    marker = object()
+    bot = SimpleNamespace(
+        db=SimpleNamespace(
+            users=SimpleNamespace(plugin=MagicMock(return_value=marker))
+        )
+    )
+    assert await ORIGINAL_GET_WEATHER_STORE(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("weather")

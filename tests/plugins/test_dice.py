@@ -4,6 +4,7 @@ import random
 import plugins.dice as dice
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 # --- Mock helpers
 
@@ -201,3 +202,11 @@ async def test_1d_roll_default(bot, monkeypatch):
     await dice.dice_command(bot, "u", "n", ["d6"], msg, False)
     out = bot.replies[-1][0]
     assert "[2]" in out and out.startswith("🎲")
+
+@pytest.mark.asyncio
+async def test_dice_store_getter_uses_plugin_store():
+    marker = object()
+    bot = MagicMock()
+    bot.db.users.plugin.return_value = marker
+    assert await dice.get_dice_store(bot) is marker
+    bot.db.users.plugin.assert_called_once_with("dice")

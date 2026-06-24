@@ -482,3 +482,21 @@ async def test_room_feature_toggle_branches(fake_bot, fake_msg, monkeypatch):
     await rooms._handle_room_feature_toggle(fake_bot, fake_msg, False, ["pin"], enabled=False)
     rooms.audit_event.assert_awaited_once()
     assert "pin is now disabled" in fake_bot.reply_ok.call_args.args[1]
+
+@pytest.mark.asyncio
+async def test_on_unload_leaves_rooms_and_preserves_reload_snapshot(fake_bot):
+    rooms.JOINED_ROOMS.update({
+        "room1@conf": {"nick": "BotOne"},
+        "room2@conf": {"nick": "BotTwo"},
+    })
+    fake_bot.presence.joined_rooms = {"room1@conf": "BotOne", "room2@conf": "BotTwo"}
+
+    await rooms.on_unload(fake_bot)
+
+    assert fake_bot._reload_rooms == {
+        "room1@conf": {"nick": "BotOne"},
+        "room2@conf": {"nick": "BotTwo"},
+    }
+    fake_bot.plugin["xep_0045"].leave_muc.assert_any_call("room1@conf", "BotOne")
+    fake_bot.plugin["xep_0045"].leave_muc.assert_any_call("room2@conf", "BotTwo")
+    assert fake_bot.presence.joined_rooms == {}

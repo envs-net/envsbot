@@ -543,3 +543,70 @@ async def test_on_load_unload_calls(monkeypatch, make_bot):
     await rss.on_unload(bot)
 
     assert "foo" not in rss.CHECK_TASKS or rss.CHECK_TASKS["foo"].done()
+
+
+@pytest.mark.asyncio
+async def test_rss_task_and_flush_helpers(monkeypatch, make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    await rss.save_feeds(store, {
+        "https://example.org/feed.xml": {"period": 123, "rooms": ["room@conf"]},
+        "https://example.org/default.xml": {"rooms": ["room@conf"]},
+    })
+
+    await rss._flush_user_store(bot)
+    assert bot.flush_count == 1
+
+    await rss._flush_user_store(SimpleNamespace(db=SimpleNamespace(users=SimpleNamespace())))
+
+    created = []
+    class PendingTask:
+        def __init__(self, done=False):
+            self._done = done
+        def done(self):
+            return self._done
+
+    def fake_create_plugin_task(bot_arg, plugin, coro, name=None):
+        assert plugin == "rss"
+        created.append((coro, name))
+        coro.close()
+        return PendingTask(False)
+
+    monkeypatch.setattr(rss, "create_plugin_task", fake_create_plugin_task)
+    rss.CHECK_TASKS.clear()
+    await rss.ensure_task(bot, store, "https://example.org/feed.xml", 123)
+    assert created[0][1] == "rss-check-https://example.org/feed.xml"
+
+    created.clear()
+    await rss.ensure_task(bot, store, "https://example.org/feed.xml", 123)
+    assert created == []
+
+    rss.CHECK_TASKS["https://example.org/feed.xml"] = PendingTask(True)
+    await rss.ensure_task(bot, store, "https://example.org/feed.xml", 123)
+    assert len(created) == 1
+
+    rss.CHECK_TASKS.clear()
+    created.clear()
+    await rss.restart_all_tasks(bot)
+    assert {name for _, name in created} == {
+        "rss-check-https://example.org/feed.xml",
+        "rss-check-https://example.org/default.xml",
+    }
+
+def test_rss_now_is_integer_timestamp(monkeypatch):
+    monkeypatch.setattr(rss.time, "time", lambda: 1234.9)
+    assert rss._now() == 1234
+
+
+@pytest.mark.asyncio
+async def test_reset_retry_state_updates_and_preserves_unchanged(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/feed.xml"
+    await rss.save_feeds(store, {url: {"error_count": 2, "next_retry": 99}})
+
+    assert await rss._reset_retry_state(bot, store, url) is True
+    assert store[rss.RSS_KEY][url]["error_count"] == 0
+    assert store[rss.RSS_KEY][url]["next_retry"] == 0
+
+    assert await rss._reset_retry_state(bot, store, url) is False

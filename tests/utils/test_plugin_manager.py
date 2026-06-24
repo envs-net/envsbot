@@ -1,4 +1,6 @@
 import types
+from unittest.mock import AsyncMock
+
 import pytest
 
 from utils import plugin_manager
@@ -154,3 +156,134 @@ async def test_core_plugin_reload_uses_internal_unload(monkeypatch):
     assert success is True
     assert "help" in pm.plugins
     assert "reloaded" in message
+
+
+def test_source_discovery_precedence_and_fallback(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot)
+
+    packages = {
+        "core_plugins": types.SimpleNamespace(__path__=["core-path"]),
+        "plugins": types.SimpleNamespace(__path__=["plugin-path"]),
+        "notpkg": types.SimpleNamespace(),
+    }
+
+    def fake_import(name):
+        if name == "missing":
+            raise ImportError("missing")
+        return packages[name]
+
+    def fake_iter_modules(path):
+        if path == ["core-path"]:
+            return [types.SimpleNamespace(name="help"), types.SimpleNamespace(name="dupe")]
+        if path == ["plugin-path"]:
+            return [types.SimpleNamespace(name="xkcd"), types.SimpleNamespace(name="dupe")]
+        return []
+
+    monkeypatch.setattr(plugin_manager.importlib, "import_module", fake_import)
+    monkeypatch.setattr(plugin_manager.pkgutil, "iter_modules", fake_iter_modules)
+
+    assert pm.discover() == ["dupe", "help", "xkcd"]
+    assert pm.plugin_sources["dupe"] == {"package": "core_plugins", "core": True}
+    assert pm._module_path("xkcd") == "plugins.xkcd"
+    assert pm.is_core_plugin("help") is True
+    assert pm.is_core_plugin("xkcd") is False
+
+    single = PluginManager(bot, package="missing", core_package=None)
+    assert single.discover() == []
+    assert single._source_info("custom") == {"package": "missing", "core": False}
+
+
+def test_dependency_validation_and_topological_sort(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot, package="fakepkg")
+    pm.meta = {
+        "base": {"name": "base", "requires": []},
+        "mid": {"name": "mid", "requires": ["base"]},
+        "leaf": {"name": "leaf", "requires": ["mid"]},
+        "missingdep": {"name": "missingdep", "requires": ["nope"]},
+        "cycle": {"name": "cycle", "requires": ["cycle"]},
+    }
+    monkeypatch.setattr(pm, "discover", lambda: ["base", "mid", "leaf", "missingdep", "cycle"])
+
+    assert pm._topological_sort(["leaf", "base", "mid"]) == ["base", "mid", "leaf"]
+    assert pm._validate_dependencies("leaf") == (True, "")
+    assert pm._validate_dependencies("missingdep") == (
+        False,
+        "Plugin missingdep requires nope, which is not available",
+    )
+    valid, msg = pm._validate_dependencies("cycle")
+    assert valid is False
+    assert "Circular dependency" in msg
+
+    monkeypatch.setattr(plugin_manager.importlib, "import_module", lambda _name: (_ for _ in ()).throw(ImportError("boom")))
+    valid, msg = pm._validate_dependencies("external")
+    assert valid is False
+    assert "Cannot load external" in msg
+
+
+@pytest.mark.asyncio
+async def test_event_task_on_ready_and_detailed_info(monkeypatch):
+    class EventBot(FakeBot):
+        def __init__(self):
+            super().__init__()
+            self.tasks = types.SimpleNamespace(
+                create=lambda plugin, coro, name=None: (coro.close(), (plugin, name))[1],
+                cancel_plugin=AsyncMock(return_value=2),
+            )
+
+        def add_event_handler(self, event, handler):
+            self.calls.append(("add", event, handler))
+
+        def del_event_handler(self, event, handler):
+            self.calls.append(("del", event, handler))
+
+    bot = EventBot()
+    pm = PluginManager(bot)
+    handler = lambda *_args: None
+    pm.register_event("demo", "message", handler)
+    assert bot.calls == [("add", "message", handler)]
+    assert pm._event_handlers == {"demo": [("message", handler)]}
+
+    async def never_run():
+        await plugin_manager.asyncio.sleep(10)
+
+    assert pm.create_task("demo", never_run(), name="demo-task") == ("demo", "demo-task")
+    assert await pm._cancel_plugin_tasks("demo") == 2
+
+    ready = []
+    ready_mod = types.SimpleNamespace(on_ready=lambda bot_arg: ready.append(bot_arg))
+    bad_mod = types.SimpleNamespace(on_ready=lambda bot_arg: (_ for _ in ()).throw(RuntimeError("boom")))
+    pm.plugins = {"ready": ready_mod, "bad": bad_mod}
+    await pm.call_on_ready()
+    assert ready == [bot]
+
+    pm.meta = {"help": {"name": "help"}}
+    pm.plugin_sources = {"help": {"package": "core_plugins", "core": True}}
+    assert await pm.get_plugin_info("help") == {"name": "help", "source": "core"}
+
+    imported = make_fake_plugin(meta={"name": "xkcd", "description": "comic"})
+    monkeypatch.setattr(pm, "_import", AsyncMock(return_value=imported))
+    pm.plugin_sources["xkcd"] = {"package": "plugins", "core": False}
+    assert await pm.get_plugin_info("xkcd") == {
+        "name": "xkcd",
+        "description": "comic",
+        "source": "plugins",
+    }
+
+    monkeypatch.setattr(pm, "discover", lambda: ["help", "xkcd", "weather"])
+    pm.plugins = {"help": ready_mod}
+    pm.plugin_sources.update({
+        "weather": {"package": "plugins", "core": False},
+    })
+    detailed = await pm.list_detailed()
+    assert detailed["core"]["loaded"] == ["help"]
+    assert sorted(detailed["plugins"]["available"]) == ["weather", "xkcd"]
+
+def test_plugin_manager_list_and_available_use_loaded_and_discovered(monkeypatch):
+    pm = PluginManager(FakeBot())
+    pm.plugins = {"weather": object(), "help": object()}
+    assert pm.list() == ["help", "weather"]
+
+    monkeypatch.setattr(pm, "discover", lambda: ["help", "weather", "xkcd", "rss"])
+    assert pm.available() == ["rss", "xkcd"]
