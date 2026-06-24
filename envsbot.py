@@ -447,9 +447,18 @@ class Bot(slixmpp.ClientXMPP):
             return Role.NONE
 
         try:
-            db_role = role_from_int(row['role'])
-        except KeyError:
+            db_role = role_from_int(int(row['role']))
+        except (KeyError, TypeError, ValueError):
             return Role.NONE
+
+        if db_role == Role.OWNER:
+            log.warning(
+                "[BOT] Ignoring stored owner role for non-config user: %s",
+                jid,
+            )
+            db_role = Role.USER
+        elif db_role == Role.NONE:
+            db_role = Role.USER
 
         return await self._get_room_role_from_presence(jid, room, db_role)
 

@@ -264,7 +264,7 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "users",
     },
     "users role": {
-        "short": "Change a user's global bot role.",
+        "short": "Change a user's global bot role with hierarchy checks.",
         "usage": "{prefix}users role <jid> <role>",
         "examples": ["{prefix}users role alice@example.org trusted"],
         "context": "private chat / MUC PM",
@@ -285,7 +285,7 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
         "category": "users",
     },
     "users delete": {
-        "short": "Delete one user record and its runtime data.",
+        "short": "Delete one non-privileged user record and its runtime data.",
         "usage": "{prefix}users delete <jid>",
         "examples": ["{prefix}users delete alice@example.org"],
         "context": "private chat / MUC PM",

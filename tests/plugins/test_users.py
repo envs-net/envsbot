@@ -205,11 +205,7 @@ async def test_users_list_shows_users(mock_bot, mock_msg):
 
 @pytest.mark.asyncio
 async def test_users_role_permission_logic(mock_bot, mock_msg):
-    with patch.object(users_mod, "prefix", ","), \
-            patch(
-            "core_plugins.users.JID",
-            new=lambda x:
-            types.SimpleNamespace(bare=x if isinstance(x, str) else str(x))):
+    with patch.object(users_mod, "prefix", ","):
         mock_bot.db.users.get = AsyncMock(
             return_value={"jid": "receiver@example.com",
                           "role": users_mod.Role.USER.value})
@@ -232,7 +228,7 @@ async def test_users_delete_logic(mock_bot, mock_msg):
         mock_bot.db.users.delete = AsyncMock()
         args = ["to@delete"]
         with patch.object(mock_bot, "reply"):
-            await users_mod.users_delete(mock_bot, "sender", "nick", args,
+            await users_mod.users_delete(mock_bot, "sender@example.org", "nick", args,
                                          mock_msg, False)
             mock_bot.db.users.delete.assert_awaited_with("to@delete")
 
@@ -338,11 +334,18 @@ async def test_on_load_initializes_or_skips(mock_bot):
 @pytest.mark.asyncio
 async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
     monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    assert users_mod._parse_user_jid("owner@example.org/resource") == "owner@example.org"
+    assert users_mod._parse_user_jid("not-a-jid") is None
+    assert users_mod._owner_jid() == "owner@example.org"
     assert users_mod._is_config_owner("owner@example.org/resource") is True
     assert users_mod._is_config_owner("someone@example.org") is False
     assert users_mod._role_from_user(None) == users_mod.Role.USER
     assert users_mod._role_from_user({"role": "not-an-int"}) == users_mod.Role.USER
+    assert users_mod._role_from_user({"role": users_mod.Role.OWNER.value}) == users_mod.Role.USER
+    assert users_mod._role_from_user({"role": users_mod.Role.NONE.value}) == users_mod.Role.USER
     assert users_mod._role_label(users_mod.Role.ADMIN) == "admin"
+    assert "owner" not in users_mod.ROLE_NAMES
+    assert "none" not in users_mod.ROLE_NAMES
 
     mock_bot.get_user_role = AsyncMock(side_effect=RuntimeError("boom"))
     assert await users_mod._actor_role(mock_bot, "actor@example.org") == users_mod.Role.NONE
@@ -350,18 +353,30 @@ async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
     mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
     denied_cases = [
         ("actor@example.org", "owner@example.org", users_mod.Role.USER, users_mod.Role.USER, "owner"),
-        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.OWNER, "Owner"),
-        ("actor@example.org", "actor@example.org", users_mod.Role.ADMIN, users_mod.Role.USER, "lower"),
-        ("actor@example.org", "actor@example.org", users_mod.Role.ADMIN, users_mod.Role.SUPERADMIN, "raise"),
+        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.OWNER, "cannot be assigned"),
+        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.NONE, "cannot be assigned"),
+        ("actor@example.org", "actor@example.org", users_mod.Role.ADMIN, users_mod.Role.USER, "own role"),
+        ("actor@example.org", "actor@example.org", users_mod.Role.ADMIN, users_mod.Role.SUPERADMIN, "own role"),
         ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.SUPERADMIN, "superadmin"),
         ("actor@example.org", "target@example.org", users_mod.Role.SUPERADMIN, users_mod.Role.ADMIN, "superadmin"),
         ("actor@example.org", "target@example.org", users_mod.Role.ADMIN, users_mod.Role.USER, "equal"),
-        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.SUPERADMIN, "superadmin"),
+        ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.ADMIN, "below"),
     ]
     for actor, target, old_role, new_role, fragment in denied_cases:
         allowed, reason = await users_mod._can_change_role(mock_bot, actor, target, old_role, new_role)
         assert allowed is False
         assert fragment.lower() in reason.lower()
+
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.USER)
+    allowed, reason = await users_mod._can_change_role(
+        mock_bot,
+        "user@example.org",
+        "target@example.org",
+        users_mod.Role.USER,
+        users_mod.Role.NEW,
+    )
+    assert allowed is False
+    assert "not allowed" in reason
 
     mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.OWNER)
     allowed, reason = await users_mod._can_change_role(
@@ -429,6 +444,11 @@ async def test_users_update_and_delete_command_edge_branches(mock_bot, mock_msg,
     )
     assert "Invalid role" in mock_bot.reply.call_args.args[1]
 
+    await users_mod.users_update(
+        mock_bot, "admin@example.org", "nick", ["not-a-jid", "user"], mock_msg, False
+    )
+    assert "Invalid user JID" in mock_bot.reply.call_args.args[1]
+
     mock_bot.db.users.get = AsyncMock(return_value=None)
     await users_mod.users_update(
         mock_bot, "admin@example.org", "nick", ["missing@example.org", "user"], mock_msg, False
@@ -464,14 +484,18 @@ async def test_users_roles_and_admins_output(mock_bot, mock_msg, monkeypatch):
     assert "owner" in roles_text
     assert "superadmin" in roles_text
 
+    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org/resource")
     mock_bot.db.users.list = AsyncMock(return_value=[
         {"jid": "admin@example.org", "role": users_mod.Role.ADMIN.value},
         {"jid": "user@example.org", "role": users_mod.Role.USER.value},
         {"jid": "super@example.org", "role": users_mod.Role.SUPERADMIN.value},
+        {"jid": "legacy-owner@example.org", "role": users_mod.Role.OWNER.value},
     ])
     await users_mod.users_admins(mock_bot, "sender", "nick", ["all"], mock_msg, False)
     admins_text = "\n".join(mock_bot.reply.call_args.args[1])
     assert "owner@example.org" in admins_text
+    assert "owner@example.org/resource" not in admins_text
     assert "admin@example.org" in admins_text
     assert "super@example.org" in admins_text
+    assert "legacy-owner@example.org" not in admins_text
     assert "user@example.org" not in admins_text

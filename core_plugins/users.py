@@ -32,6 +32,18 @@ prefix = getattr(config, "prefix", ",")
 
 MAX_ROOM_NICKS = config.get("users", {}).get("max_room_nicks", 5)
 
+ASSIGNABLE_ROLES = (
+    Role.SUPERADMIN,
+    Role.ADMIN,
+    Role.MODERATOR,
+    Role.TRUSTED,
+    Role.USER,
+    Role.NEW,
+    Role.BANNED,
+)
+
+ROLE_NAMES = {role.name.lower(): role for role in ASSIGNABLE_ROLES}
+
 PLUGIN_META = {
     "name": "users",
     "version": "0.1.0",
@@ -173,7 +185,7 @@ async def _send_user_info(bot, msg, user: dict):
     - last seen
     """
     try:
-        role = role_from_int(user["role"])
+        role = _role_from_user(user)
 
         created = user.get("created_at") or user.get("created")
         last_seen = user.get("last_seen")
@@ -285,12 +297,32 @@ async def update_last_seen(bot, real_jid: str):
 
 
 
+def _parse_user_jid(value: str) -> str | None:
+    """Return a bare user JID, rejecting room-only or malformed values."""
+    try:
+        jid = JID(str(value).strip())
+    except Exception:
+        return None
+
+    if not jid.user or not jid.domain:
+        return None
+
+    return str(jid.bare)
+
+
+def _owner_jid() -> str | None:
+    """Return the configured owner JID as bare JID if it is valid."""
+    owner = config.get("owner")
+    if not owner:
+        return None
+    return _parse_user_jid(owner)
+
+
 def _is_config_owner(jid: str) -> bool:
     """Return True if jid is the configured owner."""
-    try:
-        return str(JID(config.get("owner", "")).bare) == str(JID(jid).bare)
-    except Exception:
-        return False
+    owner = _owner_jid()
+    target = _parse_user_jid(jid)
+    return bool(owner and target and owner == target)
 
 
 async def _actor_role(bot, actor_jid: str) -> Role:
@@ -303,44 +335,62 @@ async def _actor_role(bot, actor_jid: str) -> Role:
 
 
 def _role_from_user(user: dict | None) -> Role:
-    """Return a stored user role, defaulting to USER for missing rows."""
+    """Return a safe stored user role, defaulting to USER for invalid rows."""
     if not user:
         return Role.USER
     try:
-        return role_from_int(int(user.get("role", Role.USER.value)))
+        role = role_from_int(int(user.get("role", Role.USER.value)))
     except Exception:
         return Role.USER
+
+    # OWNER is intentionally config-only. NONE is an internal command-time
+    # state for unknown users and must not be trusted as persisted data.
+    if role in (Role.OWNER, Role.NONE):
+        return Role.USER
+    return role
 
 
 def _role_label(role: Role) -> str:
     return role.name.lower()
 
 
+def _available_role_names() -> str:
+    """Return role names that may be assigned through the users command."""
+    return ", ".join(ROLE_NAMES)
+
+
+def _can_manage_roles(actor_role: Role) -> bool:
+    """Return True for roles allowed to change/delete user records."""
+    return actor_role <= Role.ADMIN
+
+
 async def _can_change_role(bot, actor: str, target: str, target_role: Role, new_role: Role) -> tuple[bool, str]:
     """Validate role changes and prevent privilege mistakes."""
     actor_role = await _actor_role(bot, actor)
+    if not _can_manage_roles(actor_role):
+        return False, "⛔ You are not allowed to manage user roles."
     if _is_config_owner(target):
         return False, "⛔ The configured owner cannot be changed from the bot."
-    if new_role == Role.OWNER:
-        return False, "⛔ Owner can only be configured in config.py."
-    if target == actor and new_role.value > actor_role.value:
-        return False, "⛔ You cannot lower your own privileges."
-    if target == actor and new_role.value < actor_role.value:
-        return False, "⛔ You cannot raise your own role."
+    if new_role not in ASSIGNABLE_ROLES:
+        return False, "⛔ This role cannot be assigned from the bot."
+    if target == actor:
+        return False, "⛔ You cannot change your own role."
     if new_role == Role.SUPERADMIN and actor_role != Role.OWNER:
         return False, "⛔ Only the owner can assign superadmin."
     if target_role == Role.SUPERADMIN and actor_role != Role.OWNER:
         return False, "⛔ Only the owner can modify superadmin users."
-    if target != actor and target_role.value <= actor_role.value:
+    if target_role.value <= actor_role.value:
         return False, "⛔ You cannot modify users with equal or higher role."
-    if new_role.value < actor_role.value:
-        return False, "⛔ You cannot assign a role higher than your own."
+    if new_role.value <= actor_role.value:
+        return False, "⛔ You can only assign roles below your own role."
     return True, ""
 
 
 async def _can_delete_user(bot, actor: str, target: str, target_role: Role) -> tuple[bool, str]:
     """Validate user deletion and prevent removing privileged accounts."""
     actor_role = await _actor_role(bot, actor)
+    if not _can_manage_roles(actor_role):
+        return False, "⛔ You are not allowed to delete users."
     if _is_config_owner(target):
         return False, "⛔ The configured owner cannot be deleted."
     if target == actor:
@@ -520,20 +570,18 @@ async def users_update(bot, sender, nick, args, msg, is_room):
             bot.reply_usage(msg, f"{prefix}users role <jid> <role>")
             return
 
-        try:
-            actor = str(JID(sender).bare)
-            target = str(JID(args[0]).bare)
-        except Exception:
-            bot.reply(msg, "🟡️ Invalid JID.")
+        actor = _parse_user_jid(sender)
+        target = _parse_user_jid(args[0])
+        if not actor or not target:
+            bot.reply(msg, "🟡️ Invalid user JID.")
             return
 
-        role_map = {role.name.lower(): role for role in Role}
         role_name = args[1].lower()
-        if role_name not in role_map:
-            bot.reply(msg, f"🟡️ Invalid role. Available: {', '.join(role_map)}")
+        if role_name not in ROLE_NAMES:
+            bot.reply(msg, f"🟡️ Invalid role. Available: {_available_role_names()}")
             return
 
-        new_role = role_map[role_name]
+        new_role = ROLE_NAMES[role_name]
         um = bot.db.users
         target_user = await um.get(target)
         if not target_user:
@@ -574,14 +622,18 @@ async def users_roles(bot, sender, nick, args, msg, is_room):
         "Lower numbers have higher privileges.",
         "",
     ]
-    for role in Role:
+    lines.append(f"• {Role.OWNER.name.lower():10} = {Role.OWNER.value} (config-only)")
+    for role in ASSIGNABLE_ROLES:
         lines.append(f"• {role.name.lower():10} = {role.value}")
+    lines.append(f"• {Role.NONE.name.lower():10} = {Role.NONE.value} (internal only)")
     lines += [
         "",
         "Protection rules:",
         "• owner comes only from config.py",
-        "• only owner can assign superadmin",
-        "• users cannot promote themselves",
+        "• none is internal and cannot be assigned",
+        "• only owner can assign or modify superadmin",
+        "• users cannot change/delete themselves",
+        "• users can only assign roles below their own role",
         "• users cannot modify/delete equal or higher roles",
     ]
     bot.reply(msg, lines)
@@ -594,11 +646,11 @@ async def users_admins(bot, sender, nick, args, msg, is_room):
     page = parse_page_args(args)
     lines = []
     for user in users:
-        role = role_from_int(int(user.get("role", Role.USER.value)))
+        role = _role_from_user(user)
         if role <= Role.ADMIN:
             lines.append(f"• {user['jid']} — {role.name.lower()}")
 
-    owner = config.get("owner")
+    owner = _owner_jid()
     if owner and not any(line.startswith(f"• {owner} ") for line in lines):
         lines.insert(0, f"• {owner} — owner (config)")
 
@@ -629,11 +681,10 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
             bot.reply(msg, f"🟡️ Usage: {prefix}users delete <jid>")
             return
 
-        try:
-            jid = str(JID(args[0]).bare)
-        except Exception:
-            log.warning(f"[USERS] 🟡️ Invalid JID for delete: {args[0]}")
-            bot.reply(msg, "🟡️ Invalid JID.")
+        jid = _parse_user_jid(args[0])
+        if not jid:
+            log.warning("[USERS] 🟡️ Invalid JID for delete: %s", args[0])
+            bot.reply(msg, "🟡️ Invalid user JID.")
             return
 
         um = bot.db.users
@@ -644,7 +695,11 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
             bot.reply(msg, f"🟡️ User not found: {jid}")
             return
 
-        actor = str(JID(sender).bare)
+        actor = _parse_user_jid(sender)
+        if not actor:
+            bot.reply(msg, "🟡️ Invalid sender JID.")
+            return
+
         target_role = _role_from_user(user)
         allowed, reason = await _can_delete_user(bot, actor, jid, target_role)
         if not allowed:
