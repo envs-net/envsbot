@@ -665,7 +665,7 @@ async def users_update(bot, sender, nick, args, msg, is_room):
             details={"old_role": _role_label(old_role), "new_role": _role_label(new_role)},
         )
 
-        log.info("[USERS] 🔄 Role updated: %s %s -> %s", target, old_role, new_role)
+        log.info("[USERS] 🔄 Role updated")
         bot.reply(msg, f"🔄 Updated role for {target}: {_role_label(old_role)} → {_role_label(new_role)}")
 
     except Exception:

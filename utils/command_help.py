@@ -13,7 +13,18 @@ Usage string notation used in this module:
 
 from __future__ import annotations
 
-COMMAND_HELP: dict[str, dict[str, object]] = {
+from typing import TypedDict
+
+
+class CommandMetadata(TypedDict, total=False):
+    short: str
+    usage: str
+    examples: list[str]
+    context: str
+    category: str
+
+
+COMMAND_HELP: dict[str, CommandMetadata] = {
     "help": {
         "short": "Show help for plugins and commands.",
         "usage": "{prefix}help [all|commands|plugins|roles|categories|(category <name>)|<plugin>|<command>]",
@@ -352,6 +363,6 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
 }
 
 
-def metadata_for(name: str) -> dict[str, object]:
+def metadata_for(name: str) -> CommandMetadata:
     """Return structured metadata for a command name if known."""
-    return dict(COMMAND_HELP.get(name.lower(), {}))
+    return CommandMetadata(**COMMAND_HELP.get(name.lower(), {}))

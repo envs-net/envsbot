@@ -12,6 +12,51 @@ logging.getLogger("core_plugins.rooms").setLevel(logging.CRITICAL)
 # Import the module under test
 
 
+ROOM_JID = "room@conference.test"
+BOT_JID = "bot@domain"
+BOT_NICK = "BotNick"
+USER_NICK = "Nick"
+USER_JID = "user@jid"
+
+
+class FromJID:
+    def __init__(self, bare: str, resource: str):
+        self.bare = bare
+        self.resource = resource
+
+
+class FakeJID:
+    def __init__(self, bare: str):
+        self.bare = bare
+
+
+class FakeMuc:
+    def __init__(self, values: dict[str, object]):
+        self._values = values
+
+    def get(self, key: str):
+        return self._values.get(key)
+
+
+def make_presence(
+    nick: str,
+    *,
+    room: str = ROOM_JID,
+    role: str = "participant",
+    jid: str = USER_JID,
+    affiliation: str = "member",
+    type_: str = "available",
+) -> PresenceStub:
+    return PresenceStub(
+        from_=FromJID(room, nick),
+        muc=FakeMuc({
+            "role": role,
+            "jid": FakeJID(jid),
+            "affiliation": affiliation,
+        }),
+        type=type_,
+    )
+
 @pytest.fixture(autouse=True)
 def cleanup_joined_rooms():
     """Ensure JOINED_ROOMS is clean for each test."""
@@ -74,86 +119,41 @@ async def test_is_nick_change_true_and_false():
 
 @pytest.mark.asyncio
 async def test_on_muc_presence_join_or_leave(fake_bot):
-    bot_room = "room@conference.test"
-    bot_nick = "BotNick"
-    user_nick = "Nick"
-    fake_bot.boundjid.bare = "bot@domain"
+    fake_bot.boundjid.bare = BOT_JID
 
-    # Minimal stub helpers
-    class FromJID:
-        def __init__(self, bare, resource):
-            self.bare = bare
-            self.resource = resource
-
-    class FakeJID:
-        def __init__(self, bare):
-            self.bare = bare
-
-    class FakeMuc:
-        def __init__(self, values):
-            self._values = values
-
-        def get(self, k):
-            return self._values.get(k)
-
-    from_jid = FromJID(bot_room, bot_nick)
-
-    # 1. Bot joins
-    from_jid.resource = bot_nick
-    pres = PresenceStub(
-        from_=from_jid,
-        muc=FakeMuc({
-            "role": "moderator",
-            "jid": FakeJID(fake_bot.boundjid.bare),
-            "affiliation": "admin"
-        }),
-        type="available"
+    # Bot joins.
+    await rooms.on_muc_presence(
+        fake_bot,
+        make_presence(
+            BOT_NICK,
+            role="moderator",
+            jid=BOT_JID,
+            affiliation="admin",
+        ),
     )
-    await rooms.on_muc_presence(fake_bot, pres)
-    assert bot_room in rooms.JOINED_ROOMS
-    assert bot_nick in rooms.JOINED_ROOMS[bot_room]["nicks"]
+    assert ROOM_JID in rooms.JOINED_ROOMS
+    assert BOT_NICK in rooms.JOINED_ROOMS[ROOM_JID]["nicks"]
 
-    # 2. User joins
-    from_jid.resource = user_nick
-    pres = PresenceStub(
-        from_=from_jid,
-        muc=FakeMuc({
-            "role": "participant",
-            "jid": FakeJID("user@jid"),
-            "affiliation": "member"
-        }),
-        type="available"
-    )
-    await rooms.on_muc_presence(fake_bot, pres)
-    assert user_nick in rooms.JOINED_ROOMS[bot_room]["nicks"]
+    # User joins.
+    await rooms.on_muc_presence(fake_bot, make_presence(USER_NICK))
+    assert USER_NICK in rooms.JOINED_ROOMS[ROOM_JID]["nicks"]
 
-    # 3. User leaves
-    from_jid.resource = user_nick
-    pres = PresenceStub(
-        from_=from_jid,
-        muc=FakeMuc({
-            "role": "participant",
-            "jid": FakeJID("user@jid"),
-            "affiliation": "member"
-        }),
-        type="unavailable"
-    )
-    await rooms.on_muc_presence(fake_bot, pres)
-    assert user_nick not in rooms.JOINED_ROOMS[bot_room]["nicks"]
+    # User leaves.
+    await rooms.on_muc_presence(fake_bot, make_presence(USER_NICK, type_="unavailable"))
+    assert USER_NICK not in rooms.JOINED_ROOMS[ROOM_JID]["nicks"]
 
-    # 4. Bot leaves
-    from_jid.resource = bot_nick
-    pres = PresenceStub(
-        from_=from_jid,
-        muc=FakeMuc({
-            "role": "moderator",
-            "jid": FakeJID(fake_bot.boundjid.bare),
-            "affiliation": "admin"
-        }),
-        type="unavailable"
+    # Bot leaves.
+    await rooms.on_muc_presence(
+        fake_bot,
+        make_presence(
+            BOT_NICK,
+            role="moderator",
+            jid=BOT_JID,
+            affiliation="admin",
+            type_="unavailable",
+        ),
     )
-    await rooms.on_muc_presence(fake_bot, pres)
-    assert bot_room not in rooms.JOINED_ROOMS
+    assert ROOM_JID not in rooms.JOINED_ROOMS
 
 
 @pytest.mark.asyncio
