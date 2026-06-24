@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+# envsbot: Modular XMPP Bot Framework
+# Author: creme <xmpp:creme@envs.net>
+# License: GPL-3.0
+
 import slixmpp
 import asyncio
 import inspect
