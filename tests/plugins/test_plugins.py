@@ -62,6 +62,11 @@ def msg():
     return {"from": MagicMock(), "type": "chat"}
 
 
+def test_plugin_list_has_bare_plugins_alias():
+    assert "plugins" in plugins_module.plugin_list._command_names
+    assert "plugins list" in plugins_module.plugin_list._command_names
+
+
 @pytest.mark.asyncio
 async def test_plugin_list(bot, msg):
     await plugins_module.plugin_list(bot, "adminjid", "AdminNick", [],

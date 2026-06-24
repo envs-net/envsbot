@@ -25,7 +25,7 @@ PLUGIN_META = {
 prefix = config.get("prefix", ",")
 
 
-@command("plugin list", role=Role.ADMIN, aliases=["plugins list"])
+@command("plugin list", role=Role.ADMIN, aliases=["plugins", "plugins list"])
 async def plugin_list(bot, sender, nick, args, msg, is_room):
     """List all plugins grouped by category."""
     categories = await bot.bot_plugins.list_detailed()
@@ -56,7 +56,7 @@ async def plugin_list(bot, sender, nick, args, msg, is_room):
             entries,
             page_request=page,
             page_size=14,
-            command_hint=f"{bot.prefix}plugins list",
+            command_hint=f"{bot.prefix}plugins",
         ),
     )
 

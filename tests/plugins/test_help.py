@@ -1,9 +1,13 @@
-import pytest
+import ast
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import core_plugins.help as help_plugin
 import utils.command as command_utils
+import utils.command_help as command_help
 
 import utils.config
 utils.config.config["prefix"] = ","
@@ -455,3 +459,59 @@ async def test_help_store_getter_uses_help_plugin_store():
     bot.db.users.plugin.return_value = marker
     assert await help_plugin.get_help_store(bot) is marker
     bot.db.users.plugin.assert_called_once_with("help")
+
+
+def test_command_help_metadata_is_complete():
+    root = Path(help_plugin.__file__).resolve().parents[1]
+    command_names = []
+    incomplete = []
+
+    for rel in ("plugins", "core_plugins"):
+        for path in sorted((root / rel).glob("*.py")):
+            tree = ast.parse(path.read_text())
+            for node in tree.body:
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for decorator in node.decorator_list:
+                    if not isinstance(decorator, ast.Call):
+                        continue
+                    func = decorator.func
+                    is_command = (
+                        isinstance(func, ast.Name) and func.id == "command"
+                    ) or (
+                        isinstance(func, ast.Attribute) and func.attr == "command"
+                    )
+                    if not is_command:
+                        continue
+                    if (
+                        not decorator.args
+                        or not isinstance(decorator.args[0], ast.Constant)
+                    ):
+                        continue
+
+                    name = str(decorator.args[0].value)
+                    command_names.append(name)
+                    explicit_help = {kw.arg for kw in decorator.keywords} & {
+                        "short",
+                        "usage",
+                    }
+                    if name not in command_help.COMMAND_HELP and not explicit_help:
+                        incomplete.append(
+                            f"{path.relative_to(root)}:{node.name}:{name}"
+                        )
+
+    assert command_names
+    assert not incomplete
+
+
+def test_plugin_command_aliases_are_documented_for_shortcut():
+    import core_plugins.plugins as plugin_commands
+
+    assert "plugins" in plugin_commands.plugin_list._command_names
+    assert command_help.COMMAND_HELP["plugin list"]["usage"] == (
+        "{prefix}plugins [all|page|last]"
+    )
+    assert (
+        "{prefix}plugins"
+        in command_help.COMMAND_HELP["plugin list"]["examples"]
+    )

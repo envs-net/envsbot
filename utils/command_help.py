@@ -135,8 +135,12 @@ COMMAND_HELP: dict[str, dict[str, object]] = {
     },
     "plugin list": {
         "short": "List loaded and available core/optional plugins.",
-        "usage": "{prefix}plugins list [all|page|last]",
-        "examples": ["{prefix}plugins list", "{prefix}plugins list all"],
+        "usage": "{prefix}plugins [all|page|last]",
+        "examples": [
+            "{prefix}plugins",
+            "{prefix}plugins all",
+            "{prefix}plugins list",
+        ],
         "context": "private chat / MUC PM",
         "category": "core",
     },

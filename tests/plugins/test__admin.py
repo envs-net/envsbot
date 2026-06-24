@@ -355,7 +355,7 @@ def test_presence_connection_and_room_snapshots(monkeypatch):
 
     class BadConnectionTime:
         def __rsub__(self, other):
-            raise RuntimeError("bad time")
+            return NotImplemented
 
     assert _admin._connection_line(
         types.SimpleNamespace(connection_start_time=BadConnectionTime())

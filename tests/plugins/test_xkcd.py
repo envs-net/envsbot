@@ -69,7 +69,7 @@ async def test_fetch_xkcd_success(monkeypatch):
         async def __aexit__(self, *a): pass
         def get(self, url, timeout=None): return DummyResp()
 
-    monkeypatch.setattr("aiohttp.ClientSession", lambda: DummySession())
+    monkeypatch.setattr("aiohttp.ClientSession", DummySession)
     url = "https://xkcd.com/1/info.0.json"
     data = await xkcd.fetch_xkcd(url)
     assert data["num"] == 1
@@ -88,7 +88,7 @@ async def test_fetch_xkcd_http_error(monkeypatch):
         async def __aexit__(self, *a): pass
         def get(self, url, timeout=None): return DummyResp()
 
-    monkeypatch.setattr("aiohttp.ClientSession", lambda: DummySession())
+    monkeypatch.setattr("aiohttp.ClientSession", DummySession)
     data = await xkcd.fetch_xkcd("https://xkcd.com/404/info.0.json")
     assert data is None
 
@@ -99,7 +99,7 @@ async def test_fetch_xkcd_exception(monkeypatch):
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
         def get(self, url, timeout=None): raise Exception("fail")
-    monkeypatch.setattr("aiohttp.ClientSession", lambda: DummySession())
+    monkeypatch.setattr("aiohttp.ClientSession", DummySession)
     data = await xkcd.fetch_xkcd("https://xkcd.com/1/info.0.json")
     assert data is None
 
@@ -458,7 +458,7 @@ class DummyAiohttpSession:
 @pytest.mark.asyncio
 async def test_build_full_index_handles_missing_up_to_date_and_indexes(monkeypatch):
     monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock())
-    monkeypatch.setattr(xkcd.aiohttp, "ClientSession", lambda: DummyAiohttpSession())
+    monkeypatch.setattr(xkcd.aiohttp, "ClientSession", DummyAiohttpSession)
 
     store = DummyXkcdStore()
     bot = xkcd_bot_with_store(store)
@@ -497,7 +497,7 @@ async def test_catch_up_missing_comics_skips_missing_fetches_and_persists(monkey
     broadcasted = []
     saved = []
 
-    monkeypatch.setattr(xkcd.aiohttp, "ClientSession", lambda: DummyAiohttpSession())
+    monkeypatch.setattr(xkcd.aiohttp, "ClientSession", DummyAiohttpSession)
 
     async def fake_get_xkcd(comic_id, session=None):
         fetched.append(comic_id)
@@ -567,7 +567,7 @@ async def test_cancel_task_none_done_cancelled_and_error(caplog):
     await xkcd._cancel_task(None, "none")
 
     done_task = asyncio.create_task(asyncio.sleep(0))
-    await done_task
+    assert await done_task is None
     await xkcd._cancel_task(done_task, "done")
 
     pending_task = asyncio.create_task(asyncio.sleep(60))
