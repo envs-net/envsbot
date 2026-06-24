@@ -355,14 +355,15 @@ Create a managed ZIP backup archive.
 Role: `admin`  
 Context: `private chat / MUC PM`  
 Category: `admin`  
-Usage: `,backup [reason]`
+Usage: `,backup create [reason]`
 
 Aliases: `,backup`
 
 Examples:
 
+- `,backup create`
+- `,backup create before config change`
 - `,backup`
-- `,backup before config change`
 
 #### `,backup list`
 

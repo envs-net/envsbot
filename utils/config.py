@@ -225,7 +225,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "USERS": "users",
 }
 
-CONFIG_KEYS = (
+NORMALIZED_CONFIG_KEYS = (
     set(DEFAULT_CONFIG)
     | set(REQUIRED_CONFIG_KEYS)
     | set(OPTIONAL_CONFIG_TYPES)
@@ -559,7 +559,7 @@ def _load_python_config(path: Path) -> dict:
 
         # Allow already-normalized lowercase keys for tests and small local
         # overrides, but keep the documented operator format uppercase.
-        if name in CONFIG_KEYS:
+        if name in NORMALIZED_CONFIG_KEYS:
             loaded[name] = value
             continue
 

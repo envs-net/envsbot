@@ -52,3 +52,42 @@ class PresenceStub(dict):
             return self[item]
         except KeyError as exc:
             raise AttributeError(item) from exc
+
+
+class JIDStub:
+    """Small bare/resource JID test double for stanza helpers."""
+
+    def __init__(self, bare: str, resource: str = ""):
+        self.bare = bare
+        self.resource = resource
+
+
+class MUCInfoStub:
+    """Small MUC payload test double with dict-like get access."""
+
+    def __init__(self, **values):
+        self._values = values
+
+    def get(self, key: str):
+        return self._values.get(key)
+
+
+def make_presence_stub(
+    room: str,
+    nick: str,
+    *,
+    role: str = "participant",
+    jid: str = "user@example.org",
+    affiliation: str = "member",
+    type_: str = "available",
+) -> PresenceStub:
+    """Build a reusable MUC presence stanza test double."""
+    return PresenceStub(
+        from_=JIDStub(room, nick),
+        muc=MUCInfoStub(
+            role=role,
+            jid=JIDStub(jid),
+            affiliation=affiliation,
+        ),
+        type=type_,
+    )

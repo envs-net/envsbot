@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import types
 
-from tests.helpers import PresenceStub
+from tests.helpers import PresenceStub, make_presence_stub
 
 # Patch the logging to avoid noisy output
 import logging
@@ -19,25 +19,6 @@ USER_NICK = "Nick"
 USER_JID = "user@jid"
 
 
-class FromJID:
-    def __init__(self, bare: str, resource: str):
-        self.bare = bare
-        self.resource = resource
-
-
-class FakeJID:
-    def __init__(self, bare: str):
-        self.bare = bare
-
-
-class FakeMuc:
-    def __init__(self, values: dict[str, object]):
-        self._values = values
-
-    def get(self, key: str):
-        return self._values.get(key)
-
-
 def make_presence(
     nick: str,
     *,
@@ -47,15 +28,20 @@ def make_presence(
     affiliation: str = "member",
     type_: str = "available",
 ) -> PresenceStub:
-    return PresenceStub(
-        from_=FromJID(room, nick),
-        muc=FakeMuc({
-            "role": role,
-            "jid": FakeJID(jid),
-            "affiliation": affiliation,
-        }),
-        type=type_,
+    return make_presence_stub(
+        room,
+        nick,
+        role=role,
+        jid=jid,
+        affiliation=affiliation,
+        type_=type_,
     )
+
+
+def patch_reply_methods(bot):
+    """Attach the reply helpers used by room command tests."""
+    for name in ("reply_error", "reply_usage", "reply_warn", "reply_info", "reply_ok"):
+        setattr(bot, name, MagicMock())
 
 @pytest.fixture(autouse=True)
 def cleanup_joined_rooms():
@@ -84,6 +70,7 @@ def fake_bot():
     bot.db.users = MagicMock()
     bot.prefix = "!"
     bot.reply = MagicMock()
+    patch_reply_methods(bot)
     bot.presence.broadcast = MagicMock()
     return bot
 
@@ -443,11 +430,7 @@ async def test_on_load_missing_dependencies_and_normal_startup(fake_bot):
 
 @pytest.mark.asyncio
 async def test_room_feature_toggle_branches(fake_bot, fake_msg, monkeypatch):
-    fake_bot.reply_error = MagicMock()
-    fake_bot.reply_usage = MagicMock()
-    fake_bot.reply_warn = MagicMock()
-    fake_bot.reply_info = MagicMock()
-    fake_bot.reply_ok = MagicMock()
+    patch_reply_methods(fake_bot)
     fake_bot.prefix = ","
 
     await rooms._handle_room_feature_toggle(fake_bot, fake_msg, True, ["pin"], enabled=True)

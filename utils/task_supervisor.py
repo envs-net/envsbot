@@ -7,9 +7,28 @@ import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Awaitable
+from typing import Any, Awaitable, Protocol
 
 log = logging.getLogger(__name__)
+
+
+class PluginTaskCreator(Protocol):
+    """Callable shape exposed by PluginManager.create_task."""
+
+    def __call__(
+        self,
+        plugin: str,
+        coro: Awaitable[Any],
+        *,
+        name: str | None = None,
+    ) -> asyncio.Task[Any]:
+        ...
+
+
+class BotLike(Protocol):
+    """Minimal bot shape required for plugin task creation."""
+
+    bot_plugins: Any
 
 
 def _now() -> str:
@@ -73,7 +92,13 @@ def _is_plugin_task_creator(candidate: object) -> bool:
     return has_varargs or len(positional) >= 2
 
 
-def create_plugin_task(bot, plugin: str, coro: Awaitable, *, name: str | None = None) -> asyncio.Task:
+def create_plugin_task(
+    bot: BotLike,
+    plugin: str,
+    coro: Awaitable[Any],
+    *,
+    name: str | None = None,
+) -> asyncio.Task[Any]:
     """Create a supervised task when available, otherwise a plain task.
 
     The fallback keeps unit-test doubles and small plugin tests simple while
@@ -102,16 +127,16 @@ class TaskSupervisor:
     """Track plugin background tasks and cancel them on unload/shutdown."""
 
     def __init__(self):
-        self._tasks: dict[asyncio.Task, dict] = {}
-        self._by_plugin: dict[str, set[asyncio.Task]] = {}
+        self._tasks: dict[asyncio.Task[Any], dict[str, Any]] = {}
+        self._by_plugin: dict[str, set[asyncio.Task[Any]]] = {}
 
     def create(
         self,
         plugin: str,
-        coro: Awaitable,
+        coro: Awaitable[Any],
         *,
         name: str | None = None,
-    ) -> asyncio.Task:
+    ) -> asyncio.Task[Any]:
         """Create and track a task for a plugin."""
         task_name = name or f"{plugin}-task"
         task = asyncio.create_task(coro, name=task_name)
@@ -127,7 +152,7 @@ class TaskSupervisor:
         task.add_done_callback(self._on_task_done)
         return task
 
-    def _on_task_done(self, task: asyncio.Task) -> None:
+    def _on_task_done(self, task: asyncio.Task[Any]) -> None:
         meta = self._tasks.get(task)
         if not meta:
             log.debug(
@@ -152,12 +177,18 @@ class TaskSupervisor:
             )
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
-        """Cancel all running tasks owned by a plugin."""
-        tasks = [task for task in self._by_plugin.get(plugin, set()) if not task.done()]
+        """Cancel all running tasks owned by a plugin.
+
+        Returns:
+            Number of running tasks that were requested to cancel.
+        """
+        tasks = [
+            task for task in self._by_plugin.get(plugin, set()) if not task.done()
+        ]
         for task in tasks:
             task.cancel()
         if tasks:
-            pending: set[asyncio.Task] = set()
+            pending: set[asyncio.Task[Any]] = set()
             results: list[object] = []
             gather_future = asyncio.gather(*tasks, return_exceptions=True)
             try:
@@ -165,7 +196,10 @@ class TaskSupervisor:
             except asyncio.TimeoutError:
                 pending = {task for task in tasks if not task.done()}
                 for task in pending:
-                    log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
+                    log.warning(
+                        "[TASKS] Plugin task did not stop in time: %s",
+                        task.get_name(),
+                    )
 
                 finished = [task for task in tasks if task.done()]
                 if finished:
@@ -186,7 +220,9 @@ class TaskSupervisor:
                     plugin_tasks.discard(task)
                     meta = self._tasks.get(task, {})
                     has_error = meta.get("last_error") is not None
-                    keep_for_diagnostics = has_error and task.done() and not task.cancelled()
+                    keep_for_diagnostics = (
+                        has_error and task.done() and not task.cancelled()
+                    )
                     if not keep_for_diagnostics:
                         self._tasks.pop(task, None)
                 if not plugin_tasks:
@@ -194,7 +230,11 @@ class TaskSupervisor:
         return len(tasks)
 
     async def cancel_all(self, *, timeout: float = 5.0) -> int:
-        """Cancel all running supervised tasks."""
+        """Cancel all running supervised tasks.
+
+        Returns:
+            Total number of running tasks cancelled across all plugins.
+        """
         plugins = list(self._by_plugin)
         total = 0
         for plugin in plugins:
