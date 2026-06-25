@@ -41,6 +41,13 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 
 Requires **Python 3.12+**.
 
+For production installations, use the **latest tagged release** instead of the
+`main` branch. The `main` branch is the active development branch and may contain
+changes that are not part of a stable release yet.
+
+The quickstart below automatically checks out the newest local version-sorted tag.
+You can also replace `LATEST_TAG` with an explicit release such as `v1.0.0`.
+
 ```bash
 sudo useradd -m -s /bin/bash envsbot -d /srv/envsbot
 sudo su - envsbot
@@ -48,6 +55,10 @@ sudo su - envsbot
 cd /srv/envsbot
 git clone https://git.envs.net/envs/envsbot.git
 cd envsbot
+git fetch --tags
+LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+git checkout "$LATEST_TAG"
+echo "Using EnvsBot release $LATEST_TAG"
 
 python3 -m venv venv
 source venv/bin/activate
@@ -62,6 +73,38 @@ $EDITOR vcard.py
 
 python envsbot.py
 ```
+
+---
+
+## Updating
+
+Use tagged releases for updates as well. Do not update a production bot by
+blindly pulling `main`.
+
+Example update flow for a systemd installation:
+
+```bash
+sudo systemctl stop envsbot.service
+
+sudo su - envsbot
+cd /srv/envsbot/envsbot
+git fetch --tags
+LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+git checkout "$LATEST_TAG"
+echo "Using EnvsBot release $LATEST_TAG"
+
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+exit
+
+sudo systemctl start envsbot.service
+sudo journalctl -u envsbot.service -f
+```
+
+Before updating, keep a copy of `config.py`, `vcard.py` and `bot.db`, or create
+a managed bot backup with `,backup`. After updating, check `config_sample.py` for
+new options and compare your live config with `,config diff`.
 
 ---
 
@@ -359,6 +402,7 @@ Drone CI is configured in `.drone.yml`.
 * [`docs/commands.md`](docs/commands.md) - generated command reference
 * [`docs/help.md`](docs/help.md) - runtime help guide
 * [`docs/maintenance.md`](docs/maintenance.md) - offline SQLite maintenance
+* [`docs/release-checklist.md`](docs/release-checklist.md) - release preparation checklist
 
 Regenerate the command reference after changing command metadata:
 

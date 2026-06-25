@@ -7,10 +7,12 @@ This directory contains the operator and command documentation for EnvsBot.
 - [`commands.md`](commands.md) - generated command reference from the live command metadata
 - [`help.md`](help.md) - runtime help behavior and usage examples
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
+- [`release-checklist.md`](release-checklist.md) - release preparation and tagging checklist
 
 Operational notes:
 
 - Core/admin plugins live in `core_plugins/`; optional feature plugins live in `plugins/`. Core plugins keep stable public names but cannot be unloaded at runtime.
+- Production installations should use the latest tagged release, not the moving `main` branch.
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
 - Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.

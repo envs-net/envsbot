@@ -173,10 +173,10 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,users admins` | `admin` | `private chat / MUC PM` | List users with admin-level roles. |
-| `,users delete` | `admin` | `private chat / MUC PM` | Delete one user record and its runtime data. |
+| `,users delete` | `admin` | `private chat / MUC PM` | Delete one non-privileged user record and its runtime data. |
 | `,users info` | `admin` | `private chat / MUC PM` | Show user info by JID or known nickname. |
 | `,users list` | `admin` | `private chat only` | List users currently known in one joined room. |
-| `,users role` | `admin` | `private chat / MUC PM` | Change a user's global bot role. |
+| `,users role` | `admin` | `private chat / MUC PM` | Change a user's global bot role with hierarchy checks. |
 | `,users roles` | `admin` | `private chat / MUC PM` | Show available roles and their ordering. |
 
 ### Utility
@@ -565,14 +565,15 @@ List loaded and available core/optional plugins.
 Role: `admin`  
 Context: `private chat / MUC PM`  
 Category: `core`  
-Usage: `,plugins list [all|page|last]`
+Usage: `,plugins [all|page|last]`
 
-Aliases: `,plugins list`
+Aliases: `,plugins`, `,plugins list`
 
 Examples:
 
+- `,plugins`
+- `,plugins all`
 - `,plugins list`
-- `,plugins list all`
 
 #### `,plugin load`
 
@@ -877,7 +878,7 @@ Examples:
 
 #### `,users delete`
 
-Delete one user record and its runtime data.
+Delete one non-privileged user record and its runtime data.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  
@@ -922,7 +923,7 @@ Examples:
 
 #### `,users role`
 
-Change a user's global bot role.
+Change a user's global bot role with hierarchy checks.
 
 Role: `admin`  
 Context: `private chat / MUC PM`  

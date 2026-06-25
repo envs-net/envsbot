@@ -1,4 +1,5 @@
 venv/
+.venv/
 __pycache__/
 logs/
 tmp/
@@ -22,3 +23,7 @@ slang_removals.csv
 data/
 mutants/
 html/
+htmlcov/
+dist/
+build/
+*.egg-info/
