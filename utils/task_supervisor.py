@@ -22,7 +22,8 @@ class PluginTaskCreator(Protocol):
         *,
         name: str | None = None,
     ) -> asyncio.Task[Any]:
-        ...
+        """Create and return a supervised plugin task."""
+        raise NotImplementedError
 
 
 class BotLike(Protocol):
@@ -173,7 +174,7 @@ class TaskSupervisor:
                 "[TASKS] Background task failed: %s.%s",
                 plugin,
                 meta["name"],
-                exc_info=(type(exc), exc, exc.__traceback__),
+                exc_info=exc,
             )
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
@@ -211,7 +212,7 @@ class TaskSupervisor:
                 if isinstance(result, Exception):
                     log.debug(
                         "[TASKS] Task raised during cancellation",
-                        exc_info=(type(result), result, result.__traceback__),
+                        exc_info=result,
                     )
 
             plugin_tasks = self._by_plugin.get(plugin)
