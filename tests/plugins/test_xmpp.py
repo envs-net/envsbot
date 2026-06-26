@@ -221,10 +221,14 @@ async def test_cmd_xmpp_srv(monkeypatch, bot, msg):
 
     bot.reply.assert_called()
     reply_text = bot.reply.call_args[0][1]
-    assert "xmpp.example.org:5222" in reply_text
-    assert "_xmpp-client._tcp.example.org" in {
-        call[0] for call in fake_resolver.calls
-    }
+    reply_lines = {line.strip() for line in reply_text.splitlines()}
+    assert "xmpp.example.org:5222 (priority=5, weight=10)" in reply_lines
+    assert [call[0] for call in fake_resolver.calls] == [
+        "_xmpp-client._tcp.example.org",
+        "_xmpp-server._tcp.example.org",
+        "_xmpps-client._tcp.example.org",
+        "_xmpps-server._tcp.example.org",
+    ]
     assert to_thread_calls
 
 

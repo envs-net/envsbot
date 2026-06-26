@@ -945,13 +945,21 @@ async def test_rooms_invite_command_list_cleanup_and_errors(fake_bot, fake_msg, 
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", [], fake_msg, False)
     assert "rooms invite list" in fake_bot.reply.call_args.args[1]
 
-    monkeypatch.setattr(rooms, "cleanup_expired_room_invites", AsyncMock(return_value=2))
-    monkeypatch.setattr(rooms, "cleanup_all_room_invites", AsyncMock(return_value=3))
+    cleanup_expired = AsyncMock(return_value=2)
+    cleanup_all = AsyncMock(return_value=3)
+    monkeypatch.setattr(rooms, "cleanup_expired_room_invites", cleanup_expired)
+    monkeypatch.setattr(rooms, "cleanup_all_room_invites", cleanup_all)
     monkeypatch.setattr(rooms, "audit_event", AsyncMock())
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["cleanup", "expired"], fake_msg, False)
     assert "Deleted: 2" in fake_bot.reply_ok.call_args.args[1]
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["cleanup"], fake_msg, False)
     assert "Deleted: 3" in fake_bot.reply_ok.call_args.args[1]
+    await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["cleanup", "all"], fake_msg, False)
+    assert "Deleted: 3" in fake_bot.reply_ok.call_args.args[1]
+    cleanup_expired.assert_awaited_once_with(fake_bot)
+    assert cleanup_all.await_count == 2
+    await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["cleanup", "1"], fake_msg, False)
+    fake_bot.reply_usage.assert_called_with(fake_msg, "!rooms invite cleanup [all|expired]")
 
     fake_bot.pending_room_invites = {
         2: {"id": 2, "room_jid": "b@conf", "inviter": "b@example.org", "reason": ""},

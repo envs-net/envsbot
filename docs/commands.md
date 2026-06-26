@@ -715,7 +715,7 @@ List, accept, decline or clean up pending room invites.
 Role: `admin`<br>
 Context: `private chat / MUC PM / invite notify room`<br>
 Category: `rooms`<br>
-Usage: `,rooms invite <list|accept|decline|cleanup> [id|all|expired]`
+Usage: `,rooms invite list [all|page|last] | ,rooms invite accept <id> | ,rooms invite decline <id> | ,rooms invite cleanup [all|expired]`
 
 Aliases: `,room invite`
 
@@ -725,6 +725,8 @@ Examples:
 - `,rooms invite list all`
 - `,rooms invite accept 1`
 - `,rooms invite decline 1`
+- `,rooms invite cleanup`
+- `,rooms invite cleanup all`
 - `,rooms invite cleanup expired`
 
 #### `,rooms join`

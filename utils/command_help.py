@@ -275,12 +275,19 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "rooms invite": {
         "short": "List, accept, decline or clean up pending room invites.",
-        "usage": "{prefix}rooms invite <list|accept|decline|cleanup> [id|all|expired]",
+        "usage": (
+            "{prefix}rooms invite list [all|page|last] | "
+            "{prefix}rooms invite accept <id> | "
+            "{prefix}rooms invite decline <id> | "
+            "{prefix}rooms invite cleanup [all|expired]"
+        ),
         "examples": [
             "{prefix}rooms invite list",
             "{prefix}rooms invite list all",
             "{prefix}rooms invite accept 1",
             "{prefix}rooms invite decline 1",
+            "{prefix}rooms invite cleanup",
+            "{prefix}rooms invite cleanup all",
             "{prefix}rooms invite cleanup expired",
         ],
         "context": "private chat / MUC PM / invite notify room",

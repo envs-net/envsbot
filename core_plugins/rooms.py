@@ -1732,25 +1732,41 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             f"  {bot.prefix}rooms invite list [all|page|last]\n"
             f"  {bot.prefix}rooms invite accept <id>\n"
             f"  {bot.prefix}rooms invite decline <id>\n"
-            f"  {bot.prefix}rooms invite cleanup [expired]",
+            f"  {bot.prefix}rooms invite cleanup [all|expired]",
         )
         return
 
     action = args[0].lower()
 
     if action == "cleanup":
-        if len(args) > 1 and args[1].lower() == "expired":
+        cleanup_mode = args[1].lower() if len(args) > 1 else "all"
+        if len(args) > 2 or cleanup_mode not in {"all", "expired"}:
+            bot.reply_usage(
+                msg,
+                f"{bot.prefix}rooms invite cleanup [all|expired]",
+            )
+            return
+
+        if cleanup_mode == "expired":
             count = await cleanup_expired_room_invites(bot)
-            bot.reply_ok(msg, f"Expired pending room invite cleanup completed. Deleted: {count}")
+            bot.reply_ok(
+                msg,
+                "Expired pending room invite cleanup completed. "
+                f"Deleted: {count}",
+            )
         else:
             count = await cleanup_all_room_invites(bot)
-            bot.reply_ok(msg, f"Pending room invite cleanup completed. Deleted: {count}")
+            bot.reply_ok(
+                msg,
+                "Pending room invite cleanup completed. "
+                f"Deleted: {count}",
+            )
         await audit_event(
             bot,
             "room_invites_cleaned",
             actor=sender_jid,
             target="room_invites",
-            details={"mode": "expired" if len(args) > 1 else "all", "count": count},
+            details={"mode": cleanup_mode, "count": count},
         )
         return
 
