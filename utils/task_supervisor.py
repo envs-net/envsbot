@@ -93,6 +93,14 @@ def _is_plugin_task_creator(candidate: object) -> bool:
     return has_varargs or len(positional) >= 2
 
 
+def _asyncio_create_task_supports_name() -> bool:
+    """Return whether asyncio.create_task accepts a task name keyword."""
+    try:
+        return "name" in inspect.signature(asyncio.create_task).parameters
+    except (TypeError, ValueError):
+        return True
+
+
 def create_plugin_task(
     bot: BotLike,
     plugin: str,
@@ -118,15 +126,9 @@ def create_plugin_task(
     creator = getattr(manager, "create_task", None)
     if _is_plugin_task_creator(creator):
         return creator(plugin, coro, name=name)
-    try:
+    if _asyncio_create_task_supports_name():
         return asyncio.create_task(coro, name=name)
-    except TypeError as exc:
-        # Compatibility fallback for older Python versions where
-        # asyncio.create_task does not accept the ``name`` keyword. Do not
-        # mask unrelated TypeError exceptions raised for invalid awaitables.
-        if "unexpected keyword argument" in str(exc) and "name" in str(exc):
-            return asyncio.create_task(coro)
-        raise
+    return asyncio.create_task(coro)
 
 
 class TaskSupervisor:
@@ -202,8 +204,6 @@ class TaskSupervisor:
         for task in tasks:
             task.cancel()
         if tasks:
-            pending: set[asyncio.Task[Any]] = set()
-            results: list[object] = []
             gather_future = asyncio.gather(*tasks, return_exceptions=True)
             try:
                 results = await asyncio.wait_for(gather_future, timeout=timeout)
@@ -212,7 +212,9 @@ class TaskSupervisor:
                 try:
                     await gather_future
                 except asyncio.CancelledError:
-                    pass
+                    log.debug(
+                        "[TASKS] Timed-out gather future cancelled during cleanup"
+                    )
 
                 pending = {task for task in tasks if not task.done()}
                 for task in pending:
@@ -224,6 +226,8 @@ class TaskSupervisor:
                 finished = [task for task in tasks if task.done()]
                 if finished:
                     results = await asyncio.gather(*finished, return_exceptions=True)
+                else:
+                    results = []
 
             for result in results:
                 if isinstance(result, asyncio.CancelledError):

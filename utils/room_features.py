@@ -3,9 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol, cast
 
 from utils.formatting import bool_label
+
+
+class PluginStore(Protocol):
+    async def get_global(self, key: str, default: object = None) -> object: ...
+
+    async def set_global(self, key: str, value: object) -> None: ...
+
+
+class PluginUsers(Protocol):
+    def plugin(self, name: str) -> PluginStore: ...
+
+
+class RoomFeatureDatabase(Protocol):
+    users: PluginUsers
+
+
+class BotProtocol(Protocol):
+    db: RoomFeatureDatabase
+
+
+RoomFeatureConfig = dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -32,7 +53,7 @@ def _normalize_plugin_name(name: str) -> str:
     return aliases.get(value, value)
 
 
-def _coerce_feature_flag(value: Any, fallback: bool = False) -> bool:
+def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -48,12 +69,12 @@ def _coerce_feature_flag(value: Any, fallback: bool = False) -> bool:
     return bool(value)
 
 
-def _plugin_store_config() -> dict[str, dict[str, Any]]:
+def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
     rooms = _rooms_module()
     config = getattr(rooms, "PLUGIN_STORE_CONFIG", None)
     if not isinstance(config, dict):
         return {}
-    return config
+    return cast(dict[str, RoomFeatureConfig], config)
 
 
 def _plugin_defaults() -> dict[str, bool]:
@@ -61,7 +82,7 @@ def _plugin_defaults() -> dict[str, bool]:
     defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
     if not isinstance(defaults, dict):
         return {}
-    return defaults
+    return cast(dict[str, bool], defaults)
 
 
 def available_features() -> list[str]:
@@ -72,7 +93,7 @@ def is_known_feature(plugin: str) -> bool:
     return _normalize_plugin_name(plugin) in available_features()
 
 
-async def _state_for(bot: Any, room_jid: str, plugin: str) -> RoomFeatureState:
+async def _state_for(bot: BotProtocol, room_jid: str, plugin: str) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     config = _plugin_store_config()
     if plugin not in config:
@@ -83,7 +104,7 @@ async def _state_for(bot: Any, room_jid: str, plugin: str) -> RoomFeatureState:
         raise ValueError(f"Unsupported room feature storage type: {typ}")
 
     store = bot.db.users.plugin(plugin)
-    state = await store.get_global(conf["key"], default={})
+    state = await store.get_global(cast(str, conf["key"]), default={})
     if not isinstance(state, dict):
         state = {}
 
@@ -97,14 +118,14 @@ async def _state_for(bot: Any, room_jid: str, plugin: str) -> RoomFeatureState:
     )
 
 
-async def get_room_feature(bot: Any, room_jid: str, plugin: str) -> RoomFeatureState:
+async def get_room_feature(bot: BotProtocol, room_jid: str, plugin: str) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     if not is_known_feature(plugin):
         raise KeyError(plugin)
     return await _state_for(bot, room_jid, plugin)
 
 
-async def set_room_feature(bot: Any, room_jid: str, plugin: str, enabled: bool) -> RoomFeatureState:
+async def set_room_feature(bot: BotProtocol, room_jid: str, plugin: str, enabled: bool) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     config = _plugin_store_config()
     if plugin not in config:
@@ -115,15 +136,15 @@ async def set_room_feature(bot: Any, room_jid: str, plugin: str, enabled: bool) 
         raise ValueError(f"Unsupported room feature storage type: {conf['type']}")
 
     store = bot.db.users.plugin(plugin)
-    state = await store.get_global(conf["key"], default={})
+    state = await store.get_global(cast(str, conf["key"]), default={})
     if not isinstance(state, dict):
         state = {}
     state[room_jid] = bool(enabled)
-    await store.set_global(conf["key"], state)
+    await store.set_global(cast(str, conf["key"]), state)
     return await _state_for(bot, room_jid, plugin)
 
 
-async def list_room_features(bot: Any, room_jid: str) -> list[RoomFeatureState]:
+async def list_room_features(bot: BotProtocol, room_jid: str) -> list[RoomFeatureState]:
     return [await _state_for(bot, room_jid, name) for name in available_features()]
 
 
