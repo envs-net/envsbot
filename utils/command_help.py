@@ -37,7 +37,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "core",
     },
     "help inroom": {
-        "short": "Enable, disable or show public room help availability.",
+        "short": "Enable, disable or show room help availability.",
         "usage": "{prefix}help inroom <on|off|status>",
         "examples": ["{prefix}help inroom status"],
         "context": "room or MUC PM",

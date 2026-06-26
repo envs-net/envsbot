@@ -121,7 +121,7 @@ Privileged commands are normally intended for private chats or MUC PMs. The conf
 
 ## In-room help
 
-By default, public room help can be disabled per room to reduce noise. Admins or users with sufficient permissions can control the room setting with:
+By default, room help can be disabled per room to reduce noise. When it is disabled, help remains available via private chat or MUC PM. Admins or users with sufficient permissions can control the room setting with:
 
 ```text
 ,help inroom status
