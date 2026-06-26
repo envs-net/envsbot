@@ -87,18 +87,42 @@ async def test_on_groupchat_message_updates_last_seen(mock_bot, mock_msg):
 
 
 @pytest.mark.asyncio
-async def test_track_room_nick(build_mock_bot):
+async def test_track_room_nick(build_mock_bot, monkeypatch):
     bot = build_mock_bot()
     bot.db.users.get = AsyncMock(return_value=None)
     bot.db.users.create = AsyncMock()
     plugin_store = AsyncMock()
-    plugin_store.get = AsyncMock(return_value={})
+    plugin_store.get = AsyncMock(return_value={
+        "roomY": ["oldnick", "oldernick"],
+        "roomZ": ["sharednick"],
+    })
     plugin_store.set = AsyncMock()
     bot.db.users.plugin.return_value = plugin_store
-    bot.db.users._nick_index = {}
+    bot.db.users._nick_index = {
+        "nickname": ["other@x"],
+        "oldnick": ["jid@x", "other@x"],
+        "stale": ["jid@x"],
+    }
     bot.db.users._nick_index_lock = asyncio.Lock()
+
+    monkeypatch.setattr(users_mod, "MAX_ROOM_NICKS", 2)
+
     await users_mod.track_room_nick(bot, "jid@x", "roomY", "nickname")
-    assert plugin_store.set.await_count >= 1
+
+    bot.db.users.create.assert_awaited_once_with("jid@x", "nickname")
+    plugin_store.set.assert_awaited_once_with(
+        "jid@x",
+        "roomnicks",
+        {
+            "roomY": ["nickname", "oldnick"],
+            "roomZ": ["sharednick"],
+        },
+    )
+    assert bot.db.users._nick_index == {
+        "nickname": ["other@x", "jid@x"],
+        "oldnick": ["other@x", "jid@x"],
+        "sharednick": ["jid@x"],
+    }
 
 
 @pytest.mark.asyncio
@@ -130,6 +154,8 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
                       new=AsyncMock()) as s_ui:
             await users_mod.users_info(mock_bot, "sender", "n", ["M"],
                                        mock_msg, False)
+            s_ui.assert_awaited_once()
+            assert s_ui.await_args.args[2]["jid"] == "user2@example.com"
         # 3. Multiple users match by nick
         with patch("core_plugins.users.find_users_by_nick_safe",
                    new=AsyncMock(return_value=["a@e", "b@e"])), \
@@ -142,12 +168,23 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
                     if "multiple users found" in str(arg).lower():
                         found = True
             assert found
-        # 4. Edge: user not found
+        # 4. Edge: nick index points to a user that no longer exists
+        mock_bot.db.users.get = AsyncMock(side_effect=[None, None])
+        with patch("core_plugins.users.find_users_by_nick_safe",
+                   new=AsyncMock(return_value=["ghost@example.com"])), \
+                patch.object(mock_bot, "reply") as bot_reply:
+            await users_mod.users_info(mock_bot, "sender", "n", ["ghost"],
+                                       mock_msg, False)
+            assert "not registered" in bot_reply.call_args.args[1].lower()
+        # 5. Edge: user not found
         mock_bot.db.users.get = AsyncMock(return_value=None)
-        with patch.object(mock_bot, "reply") as bot_reply:
+        with patch("core_plugins.users.find_users_by_nick_safe",
+                   new=AsyncMock(return_value=[])), \
+                patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n",
                                        ["zzznotfound"], mock_msg, False)
-        # 5. args missing
+            assert "no users found" in bot_reply.call_args.args[1].lower()
+        # 6. args missing
         with patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n", [],
                                        mock_msg, False)
@@ -179,12 +216,13 @@ async def test_users_list_shows_users(mock_bot, mock_msg):
           patch.object(mock_bot, "reply") as bot_reply):
         await users_mod.users_list(mock_bot, "send", "nick", [],
                                    mock_msg, False)
-        found = False
-        for call in bot_reply.call_args_list:
-            for arg in call[0]:
-                if "users in room-a" in str(arg).lower():
-                    found = True
-        assert found
+        reply_text = bot_reply.call_args.args[1]
+        assert "📋 Users in room-A:" in reply_text
+        assert "[member/admin] B (b@example)" in reply_text
+        assert "[member/user] A (a@example)" in reply_text
+        assert reply_text.index("[member/admin] B") < reply_text.index(
+            "[member/user] A"
+        )
     # No nicks
     users_mod.JOINED_ROOMS["room-B"] = {"nicks": {}}
     mock_msg['from'].bare = "room-B"
@@ -195,12 +233,7 @@ async def test_users_list_shows_users(mock_bot, mock_msg):
           patch.object(mock_bot, "reply") as bot_reply):
         await users_mod.users_list(mock_bot, "send", "nick", ["room-B"],
                                    mock_msg, False)
-        found = False
-        for call in bot_reply.call_args_list:
-            for arg in call[0]:
-                if "no users found" in str(arg).lower():
-                    found = True
-        assert found
+        assert bot_reply.call_args.args[1] == "ℹ️ No users found in room: room-B"
 
 
 @pytest.mark.asyncio
@@ -248,9 +281,12 @@ async def test_users_delete_errors(mock_bot, mock_msg):
             assert found
         # Invalid JID
         args = ["invalidjid"]
+        mock_bot.db.users.delete = AsyncMock()
         with patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_delete(mock_bot, "s", "n", args,
                                          mock_msg, False)
+            assert "Invalid user JID" in bot_reply.call_args.args[1]
+        mock_bot.db.users.delete.assert_not_awaited()
         # User not found
         mock_bot.db.users.get = AsyncMock(return_value=None)
         args = ["notfound@x"]
@@ -492,13 +528,21 @@ async def test_users_roles_and_admins_output(mock_bot, mock_msg, monkeypatch):
         {"jid": "legacy-owner@example.org", "role": users_mod.Role.OWNER.value},
     ])
     await users_mod.users_admins(mock_bot, "sender", "nick", ["all"], mock_msg, False)
-    admins_text = "\n".join(mock_bot.reply.call_args.args[1])
+    admins_lines = mock_bot.reply.call_args.args[1]
+    admins_text = "\n".join(admins_lines)
+    assert admins_lines[0] == "👥 Admin users"
     assert "owner@example.org" in admins_text
     assert "owner@example.org/resource" not in admins_text
     assert "admin@example.org" in admins_text
     assert "super@example.org" in admins_text
     assert "legacy-owner@example.org" not in admins_text
     assert "user@example.org" not in admins_text
+    assert admins_text.index("owner@example.org") < admins_text.index(
+        "admin@example.org"
+    )
+    assert admins_text.index("admin@example.org") < admins_text.index(
+        "super@example.org"
+    )
 
 
 @pytest.mark.asyncio
@@ -607,6 +651,7 @@ async def test_users_delete_audit_events(mock_bot, mock_msg):
     assert "equal or higher" in kwargs["details"]["reason"]
 
     mock_bot.audit.reset_mock()
+    mock_bot.db.users.delete.reset_mock()
     await users_mod.users_delete(
         mock_bot,
         "admin@example.org",
@@ -621,6 +666,7 @@ async def test_users_delete_audit_events(mock_bot, mock_msg):
         target="not-a-jid",
         details={"plugin": "users", "reason": "invalid_user_jid"},
     )
+    mock_bot.db.users.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio

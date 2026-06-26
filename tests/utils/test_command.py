@@ -77,6 +77,7 @@ def test_registry_remove_nonexistent_does_nothing():
     assert ("abc",) in reg.index
 
 from utils import command as command_mod
+from utils.command_help import metadata_for
 
 
 def test_registry_debug_dump_and_remove_by_handler_plugin():
@@ -146,6 +147,23 @@ def test_register_command_decorator_metadata_and_resolution(monkeypatch):
     assert handler._command_names == ["demo run", "dr"]
     assert command_mod.check_permission(Role.USER, cmd) is True
     assert command_mod.has_permission(Role.BANNED, cmd.role) is False
+
+
+def test_register_command_decorator_handles_missing_help_metadata(monkeypatch):
+    registry = CommandRegistry()
+    monkeypatch.setattr(command_mod, "COMMANDS", registry)
+
+    assert metadata_for("unknown command") is None
+
+    @command_mod.command("unknown command", role=Role.USER)
+    def handler():
+        return "ok"
+
+    assert handler.__commands__[0][1].short == ""
+    assert handler.__commands__[0][1].usage == ""
+    assert handler.__commands__[0][1].examples == []
+    assert handler.__commands__[0][1].category == ""
+    assert handler.__commands__[0][1].context == "any"
 
 
 def test_debug_leaks_outputs_registry_state(monkeypatch, capsys):

@@ -247,7 +247,7 @@ def command(
     if aliases is None:
         aliases = []
 
-    defaults = metadata_for(name)
+    defaults = metadata_for(name) or {}
     if not short:
         short = str(defaults.get("short", ""))
     if not usage:

@@ -705,6 +705,9 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
 }
 
 
-def metadata_for(name: str) -> CommandMetadata:
-    """Return structured metadata for a command name if known."""
-    return CommandMetadata(**COMMAND_HELP.get(name.lower(), {}))
+def metadata_for(name: str) -> CommandMetadata | None:
+    """Return structured metadata for a command name, or None if unknown."""
+    metadata = COMMAND_HELP.get(name.lower())
+    if metadata is None:
+        return None
+    return CommandMetadata(**metadata)
