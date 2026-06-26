@@ -711,10 +711,11 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     # Add feed to room
     if sub == "add":
         if len(args) != 2:
+            prefix = config.get("prefix", ",")
             bot.reply(
                 msg,
-                f"Usage: {config['prefix', ',']
-                          }rss add <feedurl> (in a room or MUC DM only)",
+                f"Usage: {prefix}rss add <feedurl> "
+                "(in a room or MUC DM only)",
             )
             return
 
@@ -806,10 +807,10 @@ async def _add_feed(bot, msg, url, store, room):
             await ensure_task(bot, store, url, feeds[url]["period"])
 
             log.info(f"[RSS] Added new feed {store}\n\n{feeds}")
+            period = feeds[url]["period"]
             bot.reply(
                 msg,
-                f"✅ Added feed: {title} ({url}) every {
-                    feeds[url]['period']}s to {room}",
+                f"✅ Added feed: {title} ({url}) every {period}s to {room}",
             )
         except Exception as e:
             log.exception(f"Failed to fetch or parse feed {url}")

@@ -7,29 +7,23 @@ import plugins.rss as rss
 import core_plugins.rooms
 
 
-# Patch rss.config for all tests to support both subscript and get
-# (for legacy plugin code)
 @pytest.fixture(autouse=True)
 def patch_config(monkeypatch):
-    class DummyConfig(dict):
-        def __getitem__(self, key):
-            if isinstance(key, tuple):
-                k, default = key
-            else:
-                k, default = key, None
+    monkeypatch.setattr(rss, "config", {"prefix": ","})
 
-            if k == "prefix":
-                return ","
 
-            return default or ","
 
-        def get(self, key, default=None):
-            if key == "prefix":
-                return ","
 
-            return default or ","
+@pytest.mark.asyncio
+async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
-    monkeypatch.setattr(rss, "config", DummyConfig())
+    monkeypatch.setattr(rss, "config", {"prefix": "!"})
+
+    await rss.rss_command(bot, "jid", "nick", ["add"], msg, True)
+
+    assert bot.replies[-1][1].startswith("Usage: !rss add")
 
 
 @pytest.fixture

@@ -115,12 +115,12 @@ findings that have been reviewed and are clearly false positives.
 
 ## Tagging
 
-Update the version in `pyproject.toml` if needed, then create and push the tag:
+Update the version in `pyproject.toml` and `utils/version.py` if needed, then create and push the tag:
 
 ```bash
-git tag -a v1.0.0 -m "Release v1.0.0"
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin main
-git push origin v1.0.0
+git push origin vX.Y.Z
 ```
 
 After pushing, verify that the release page shows the new tag and update the

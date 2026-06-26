@@ -179,11 +179,53 @@ async def test_cmd_xmpp_ping(bot, msg):
 
 
 @pytest.mark.asyncio
-async def test_cmd_xmpp_srv(bot, msg):
+async def test_cmd_xmpp_srv(monkeypatch, bot, msg):
     bot.db.users.plugin.return_value.get_global = AsyncMock(
         return_value={"room@muc.example": True})
-    await xmpp.cmd_xmpp_srv(bot, "jid", "nick", ["gmail.com"], msg, True)
+
+    class FakeTarget:
+        def __str__(self):
+            return "xmpp.example.org."
+
+    class FakeRecord:
+        target = FakeTarget()
+        port = 5222
+        priority = 5
+        weight = 10
+
+    class FakeResolver:
+        def __init__(self):
+            self.calls = []
+
+        def resolve(self, name, rdtype, raise_on_no_answer=False):
+            self.calls.append((name, rdtype, raise_on_no_answer))
+            if name == "_xmpp-client._tcp.example.org":
+                return [FakeRecord()]
+            return []
+
+    fake_resolver = FakeResolver()
+    to_thread_calls = []
+
+    def fake_make_srv_resolver(_dns_resolver, timeout_seconds):
+        assert timeout_seconds == xmpp.XMPP_QUERY_TIMEOUT_SECONDS
+        return fake_resolver
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        to_thread_calls.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(xmpp, "_make_srv_resolver", fake_make_srv_resolver)
+    monkeypatch.setattr(xmpp.asyncio, "to_thread", fake_to_thread)
+
+    await xmpp.cmd_xmpp_srv(bot, "jid", "nick", ["example.org"], msg, True)
+
     bot.reply.assert_called()
+    reply_text = bot.reply.call_args[0][1]
+    assert "xmpp.example.org:5222" in reply_text
+    assert "_xmpp-client._tcp.example.org" in {
+        call[0] for call in fake_resolver.calls
+    }
+    assert to_thread_calls
 
 
 @pytest.mark.asyncio

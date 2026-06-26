@@ -665,7 +665,8 @@ async def cmd_xmpp_ping(bot, sender_jid, nick, args, msg, is_room):
 
 
 def _reply_xmpp_srv_missing_domain(bot, msg):
-    bot.reply(msg, "❌ Missing domain\nUsage: {prefix}x srv <domain>")
+    prefix = config.get("prefix", ",")
+    bot.reply(msg, f"❌ Missing domain\nUsage: {prefix}x srv <domain>")
 
 
 def _reply_xmpp_srv_invalid_domain(bot, msg, error_msg):
@@ -682,12 +683,22 @@ def _reply_xmpp_srv_dns_missing(bot, msg):
                    " python-dnspython: pip install dnspython")
 
 
-def _collect_srv_records(domain, service, dns_resolver, dns_exception):
+def _make_srv_resolver(dns_resolver, timeout_seconds):
+    resolver = dns_resolver.Resolver()
+    resolver.lifetime = timeout_seconds
+    resolver.timeout = timeout_seconds
+    return resolver
+
+
+def _collect_srv_records(domain, service, resolver, dns_exception):
     srv_name = f"{service}.{domain}"
 
     try:
-        answers = dns_resolver.resolve(srv_name, 'SRV',
-                                       raise_on_no_answer=False)
+        answers = resolver.resolve(
+            srv_name,
+            "SRV",
+            raise_on_no_answer=False,
+        )
 
         if not answers:
             return "❌ Not found"
@@ -695,17 +706,14 @@ def _collect_srv_records(domain, service, dns_resolver, dns_exception):
         records = []
         for rdata in answers:
             target = str(rdata.target).rstrip('.')
-            port = rdata.port
-            priority = rdata.priority
-            weight = rdata.weight
             records.append({
-                'target': target,
-                'port': port,
-                'priority': priority,
-                'weight': weight
+                "target": target,
+                "port": rdata.port,
+                "priority": rdata.priority,
+                "weight": rdata.weight,
             })
 
-        records.sort(key=lambda x: (x['priority'], -x['weight']))
+        records.sort(key=lambda x: (x["priority"], -x["weight"]))
 
         formatted = []
         for rec in records:
@@ -720,6 +728,13 @@ def _collect_srv_records(domain, service, dns_resolver, dns_exception):
         return f"❌ Not found ({type(e).__name__})"
     except Exception as e:
         return f"❌ Error: {e}"
+
+
+def _collect_all_srv_records(domain, services, resolver, dns_exception):
+    return {
+        service: _collect_srv_records(domain, service, resolver, dns_exception)
+        for service in services
+    }
 
 
 def _build_xmpp_srv_result(domain, services, srv_records):
@@ -795,14 +810,14 @@ async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
             '_xmpps-server._tcp',
         ]
 
-        srv_records = {}
-        for service in services:
-            srv_records[service] = _collect_srv_records(
-                domain,
-                service,
-                dns.resolver,
-                dns.exception,
-            )
+        resolver = _make_srv_resolver(dns.resolver, XMPP_QUERY_TIMEOUT_SECONDS)
+        srv_records = await asyncio.to_thread(
+            _collect_all_srv_records,
+            domain,
+            services,
+            resolver,
+            dns.exception,
+        )
 
         result = _build_xmpp_srv_result(domain, services, srv_records)
         bot.reply(msg, result)
