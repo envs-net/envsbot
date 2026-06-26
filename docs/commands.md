@@ -43,7 +43,6 @@ Lower role values have more privileges. A command is visible when your role is s
 | `audit` | `core` | `core` | Admin audit log viewer |
 | `backups` | `core` | `core` | Managed ZIP backups and restore helpers. |
 | `config_cmd` | `core` | `core` | Safe config inspection, validation and reload commands. |
-| `db` | `core` | `core` | SQLite status and integrity inspection helpers. |
 | `help` | `core` | `core` | Dynamic help for plugins and commands. |
 | `plugins` | `core` | `core` | Runtime plugin management |
 | `presence` | `core` | `info` | Bot presence and status management |
@@ -87,7 +86,6 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config reload` | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
-| `,db status` | `admin` | `private chat / MUC PM` | Show SQLite database path, size and integrity status. |
 | `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
 | `,tasks` | `admin` | `private chat / MUC PM` | Show supervised background task status. |
 
@@ -473,28 +471,6 @@ Examples:
 
 - `,config validate`
 
-### db
-
-Source: `core`
-Category: `core`
-
-SQLite status and integrity inspection helpers.
-
-#### `,db status`
-
-Show SQLite database path, size and integrity status.
-
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
-Usage: `,db status`
-
-Aliases: `,database status`
-
-Examples:
-
-- `,db status`
-
 ### help
 
 Source: `core`
@@ -727,9 +703,9 @@ Examples:
 
 List, accept or decline pending room invites.
 
-Role: `admin`
-Context: `private chat / MUC PM / invite notify room`
-Category: `rooms`
+Role: `admin`  
+Context: `private chat / MUC PM / invite notify room`  
+Category: `rooms`  
 Usage: `,rooms invite <list|accept|decline|cleanup> [id]`
 
 Aliases: `,room invite`

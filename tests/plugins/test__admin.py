@@ -143,7 +143,8 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     replies = fake_bot._replies
     assert any(isinstance(r[0], list)
                and "🤖 EnvsBot Status" in r[0][0] for r in replies)
-    reply = "\n".join(replies[-1][0])
+    reply_lines = replies[-1][0]
+    reply = "\n".join(reply_lines)
     assert "Core:" in reply
     assert "Runtime:" in reply
     assert "XMPP:" in reply
@@ -265,6 +266,7 @@ async def test_bot_status_handles_exception(monkeypatch, fake_bot):
 @pytest.mark.asyncio
 async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fake_bot):
     _admin.BOT_START_TIME = datetime.now() - timedelta(minutes=5)
+    fake_bot.last_version_check_result = "1.4.0"
     _admin.JOINED_ROOMS.clear()
     _admin.JOINED_ROOMS["room@example.org"] = {
         "nick": "EnvsBot",
@@ -273,7 +275,14 @@ async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fak
         "nicks": {"alice": {}, "bob": {}},
     }
     await _admin.bot_status(fake_bot, Sender(), "nick", ["full"], DummyMsg(), False)
-    reply = "\n".join(fake_bot._replies[-1][0])
+    reply_lines = fake_bot._replies[-1][0]
+    reply = "\n".join(reply_lines)
+    assert reply_lines.index("• Latest release: v1.4.0") == (
+        reply_lines.index("• Version: v1.3.0") + 1
+    )
+    assert "Page count: 1" in reply
+    assert "Page size: 1" in reply
+    assert "Freelist pages: 1" in reply
     assert "Rooms:" in reply
     assert "room@example.org | nick=EnvsBot | occupants=2" in reply
     assert "Loaded plugins:" in reply
@@ -466,6 +475,15 @@ async def test_database_status_line_edges(tmp_path):
     assert await _admin._database_status_lines(configured) == [
         "Status: configured", "Path: unknown", "Size: unknown", "Integrity: unknown"
     ]
+    assert await _admin._database_status_lines(configured, full=True) == [
+        "Status: configured",
+        "Path: unknown",
+        "Size: unknown",
+        "Integrity: unknown",
+        "Page count: unknown",
+        "Page size: unknown",
+        "Freelist pages: unknown",
+    ]
 
     db_file = tmp_path / "bot.db"
     db_file.write_bytes(b"abc")
@@ -480,14 +498,35 @@ async def test_database_status_line_edges(tmp_path):
     assert "Size: 3 B" in lines
     assert "Integrity: unknown" in lines
 
+    async def pragma_rows(query):
+        return {
+            "PRAGMA integrity_check": ("ok",),
+            "PRAGMA page_count": (11,),
+            "PRAGMA page_size": (4096,),
+            "PRAGMA freelist_count": (2,),
+        }[query]
+
+    full_lines = await _admin._database_status_lines(types.SimpleNamespace(
+        db=types.SimpleNamespace(conn=object(), path=db_file, fetch_one=pragma_rows)
+    ), full=True)
+    assert f"Path: {db_file}" in full_lines
+    assert "Size: 3 B" in full_lines
+    assert "Integrity: ok" in full_lines
+    assert "Page count: 11" in full_lines
+    assert "Page size: 4096" in full_lines
+    assert "Freelist pages: 2" in full_lines
+
     async def broken_fetch(query):
         raise RuntimeError("sqlite down")
 
     lines = await _admin._database_status_lines(types.SimpleNamespace(
         db=types.SimpleNamespace(conn=object(), path=tmp_path / "missing.db", fetch_one=broken_fetch)
-    ))
+    ), full=True)
     assert "Size: file not found" in lines
     assert "Integrity: unknown" in lines
+    assert "Page count: unknown" in lines
+    assert "Page size: unknown" in lines
+    assert "Freelist pages: unknown" in lines
 
 
 @pytest.mark.asyncio

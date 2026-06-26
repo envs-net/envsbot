@@ -75,7 +75,7 @@ and MUC private message where possible:
 ,checkupdate
 ,config show
 ,config diff
-,db status
+,bot status full
 ,backup
 ,backup list
 ,rooms list

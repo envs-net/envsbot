@@ -157,13 +157,6 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "context": "private chat / MUC PM",
         "category": "admin",
     },
-    "db status": {
-        "short": "Show SQLite database path, size and integrity status.",
-        "usage": "{prefix}db status",
-        "examples": ["{prefix}db status"],
-        "context": "private chat / MUC PM",
-        "category": "admin",
-    },
     "plugin list": {
         "short": "List loaded and available core/optional plugins.",
         "usage": "{prefix}plugins [all|page|last]",

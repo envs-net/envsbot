@@ -34,7 +34,6 @@ CORE_PLUGIN_NAMES = {
     "audit",
     "backups",
     "config_cmd",
-    "db",
     "help",
     "plugins",
     "presence",

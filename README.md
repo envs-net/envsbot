@@ -220,7 +220,6 @@ Examples assume the default command prefix `,`.
 | `,restore <archive|last> confirm` | Restore a managed backup after explicit confirmation |
 | `,audit last [limit]` | Show recent administrative audit events |
 | `,audit user <jid>` | Show audit events for one actor |
-| `,db status` | Show SQLite path, size and integrity status |
 | `,plugins list [all/page/last]` | List core and optional plugins |
 | `,plugins load <name>` | Load a plugin at runtime |
 | `,plugins unload <name>` | Unload an optional plugin at runtime |
@@ -363,7 +362,7 @@ Restore is owner-only and creates a safety backup before overwriting files. Rest
 
 ## SQLite Maintenance
 
-Use `,db status` for safe online status and integrity checks.
+Use `,bot status` for a compact safe online database status check. Use `,bot status full` for additional SQLite page details.
 
 Do **not** run `VACUUM` from inside the live bot process. Stop the bot first and perform maintenance manually:
 

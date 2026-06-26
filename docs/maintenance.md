@@ -23,8 +23,10 @@ Adjust the service name and database path if your installation uses different na
 For a quick online status check from the bot, use:
 
 ```text
-,db status
+,bot status
 ```
+
+Use `,bot status full` for additional SQLite page details.
 
 
 ## Managed ZIP backups

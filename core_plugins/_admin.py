@@ -187,16 +187,19 @@ def _core_status_lines(bot) -> list[str]:
     """Return core bot status lines."""
     lines = [
         f"Version: {display_version(getattr(bot, 'version', __version__))}",
-        f"JID: {getattr(bot, 'boundjid', 'unknown')}",
-        f"Prefix: {_safe_config_value('prefix', getattr(bot, 'prefix', ','))}",
-        _bot_uptime_line(),
-        _connection_line(bot),
-        f"Presence: {_format_presence(bot)}",
     ]
 
     latest = getattr(bot, "last_version_check_result", None)
     if latest:
         lines.append(f"Latest release: {display_version(latest)}")
+
+    lines.extend([
+        f"JID: {getattr(bot, 'boundjid', 'unknown')}",
+        f"Prefix: {_safe_config_value('prefix', getattr(bot, 'prefix', ','))}",
+        _bot_uptime_line(),
+        _connection_line(bot),
+        f"Presence: {_format_presence(bot)}",
+    ])
     return lines
 
 
@@ -273,8 +276,13 @@ def _plugin_status_lines(bot) -> list[str]:
     ]
 
 
-async def _database_status_lines(bot) -> list[str]:
-    """Return read-only SQLite status lines."""
+async def _database_status_lines(bot, *, full: bool = False) -> list[str]:
+    """Return read-only SQLite status lines.
+
+    The compact status output includes safe online database checks. ``full``
+    adds page-level SQLite details for operators who need a little more
+    context.
+    """
     db = getattr(bot, "db", None)
     if not db:
         return ["Status: disconnected"]
@@ -297,6 +305,12 @@ async def _database_status_lines(bot) -> list[str]:
     fetch_one = getattr(db, "fetch_one", None)
     if not fetch_one or not getattr(db, "conn", None):
         lines.append("Integrity: unknown")
+        if full:
+            lines.extend([
+                "Page count: unknown",
+                "Page size: unknown",
+                "Freelist pages: unknown",
+            ])
         return lines
 
     try:
@@ -305,6 +319,22 @@ async def _database_status_lines(bot) -> list[str]:
     except Exception:
         log.debug("[ADMIN] Could not run database integrity check", exc_info=True)
         lines.append("Integrity: unknown")
+
+    if not full:
+        return lines
+
+    for label, pragma in (
+        ("Page count", "PRAGMA page_count"),
+        ("Page size", "PRAGMA page_size"),
+        ("Freelist pages", "PRAGMA freelist_count"),
+    ):
+        try:
+            row = await fetch_one(pragma)
+            value = row[0] if row else "unknown"
+        except Exception:
+            log.debug("[ADMIN] Could not run %s", pragma, exc_info=True)
+            value = "unknown"
+        lines.append(f"{label}: {value}")
 
     return lines
 
@@ -395,7 +425,7 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     plugin_lines = _plugin_status_lines(bot)
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
     lines.extend(_section("Plugins", plugin_lines))
-    lines.extend(_section("Database", await _database_status_lines(bot)))
+    lines.extend(_section("Database", await _database_status_lines(bot, full=full)))
 
     if full:
         lines.extend(_section("Rooms", _room_detail_lines(room_snapshot)))
@@ -585,8 +615,8 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
     Display current bot status and statistics.
 
     Shows core runtime details, XMPP room state, loaded plugins, command
-    counts and read-only database status. Use ``full`` for room and plugin
-    details.
+    counts and read-only database status. Use ``full`` for detailed
+    database, room and plugin details.
 
     Usage:
         {prefix}bot status [full]
