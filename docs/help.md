@@ -50,6 +50,63 @@ xmpp
 
 The exact list depends on loaded plugins and your role.
 
+
+## Command contexts
+
+Command details include a context line so users know where a command is expected to work.
+The most common contexts are:
+
+```text
+room
+MUC PM
+private chat
+invite notify room
+```
+
+`private chat / MUC PM` means either a normal 1:1 chat with the bot or a private
+message through a room occupant JID. Some clients prefer normal private chats in
+non-anonymous rooms; for room-scoped settings, pass the target room JID explicitly.
+
+## Room settings without MUC PM
+
+Room plugin settings can be managed in two ways. In a room message or MUC PM, the
+bot can infer the target room automatically:
+
+```text
+,rooms plugins
+,rooms enable weather
+,rooms disable xkcd
+,rooms set_plugin_defaults
+```
+
+In a normal private chat, include the target room JID:
+
+```text
+,rooms plugins room@conference.example.org all
+,rooms enable room@conference.example.org weather
+,rooms disable room@conference.example.org xkcd
+,rooms set_plugin_defaults room@conference.example.org
+```
+
+The sender must be a room admin/owner in the target room or have a bot
+moderator/admin role. This keeps clients without MUC-PM support usable without
+opening room settings to normal room users.
+
+## Notification rooms
+
+EnvsBot does not have a separate fixed `ADMIN_ROOM` setting. Global bot access is
+defined by `OWNER`, `ADMINS` and stored bot roles. Notification targets are
+configured separately:
+
+```text
+VERSION_CHECK_NOTIFY_JID
+ROOM_INVITE_NOTIFY_JID
+```
+
+When one of these values points to a MUC room, the bot joins that room before
+sending the notification. The room is not automatically stored as an autojoin
+room unless you add it with `,rooms add` or `,rooms join`.
+
 ## Roles and visibility
 
 Help output is role-aware. Commands that require a stronger role are hidden or rejected.

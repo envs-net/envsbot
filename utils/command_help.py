@@ -200,6 +200,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "short": "Restore room plugin toggles for a room; requires room admin/owner or bot moderator.",
         "usage": "{prefix}rooms set_plugin_defaults [<room_jid>]",
         "examples": [
+            "{prefix}rooms set_plugin_defaults",
             "{prefix}rooms spd",
             "{prefix}rooms set_plugin_defaults room@conference.example.org",
         ],
@@ -273,12 +274,14 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "rooms",
     },
     "rooms invite": {
-        "short": "List, accept or decline pending room invites.",
-        "usage": "{prefix}rooms invite <list|accept|decline|cleanup> [id]",
+        "short": "List, accept, decline or clean up pending room invites.",
+        "usage": "{prefix}rooms invite <list|accept|decline|cleanup> [id|all|expired]",
         "examples": [
             "{prefix}rooms invite list",
+            "{prefix}rooms invite list all",
             "{prefix}rooms invite accept 1",
             "{prefix}rooms invite decline 1",
+            "{prefix}rooms invite cleanup expired",
         ],
         "context": "private chat / MUC PM / invite notify room",
         "category": "rooms",

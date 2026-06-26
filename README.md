@@ -237,7 +237,9 @@ Examples assume the default command prefix `,`.
 | `,users admins [all/page/last]` | List privileged users |
 | `,users role <jid> <role>` | Change a user's role |
 
-Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or admin room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role.
+Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or operational notification room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role.
+
+EnvsBot has no separate fixed `ADMIN_ROOM` setting. Global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles. Update and invite notification targets are configured separately with `VERSION_CHECK_NOTIFY_JID` and `ROOM_INVITE_NOTIFY_JID`.
 
 For paginated commands, `all` disables paging and prints the full result set. Full reference: [`docs/commands.md`](docs/commands.md).
 
@@ -267,7 +269,6 @@ Core plugins:
 * `config_cmd` - safe config inspection, validation and reload
 * `backups` - managed ZIP backups and restore commands
 * `audit` - admin audit log viewer
-* `db` - SQLite online status checks
 * `presence` - bot presence/status controls
 
 Optional plugins:

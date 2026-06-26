@@ -414,6 +414,7 @@ async def _general(bot, role: Role) -> list[str]:
     lines += [
         "",
         f"Tip: use {bot.prefix}help commands for a category-based overview or {bot.prefix}help all for everything.",
+        f"Room settings: use {bot.prefix}help rooms plugins and pass <room_jid> when using a normal private chat.",
     ]
     return lines
 
@@ -574,6 +575,7 @@ def _roles() -> list[str]:
         "",
         "Only the configured owner should be able to grant superadmin rights.",
         "Privileged commands are normally intended for private chats or MUC PMs.",
+        "Room setting commands can also be used from a normal private chat when the target room JID is supplied.",
     ]
 
 

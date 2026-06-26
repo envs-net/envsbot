@@ -23,6 +23,7 @@ Operational notes:
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.
   Automatic update notifications go to `VERSION_CHECK_NOTIFY_JID`, or to `OWNER` when unset.
   When the notification target is a MUC room, the bot joins it before sending.
+- EnvsBot has no separate fixed `ADMIN_ROOM`; global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles.
 - Incoming MUC invites are stored as pending room invites when `ROOM_INVITES_ENABLED` is enabled.
   They are announced to `ROOM_INVITE_NOTIFY_JID`, `VERSION_CHECK_NOTIFY_JID`, or `OWNER` and can be accepted or declined with `,rooms invite`.
 - `,audit last` shows recent administrative changes such as role updates, room changes, plugin reloads and config reloads.
@@ -38,7 +39,7 @@ python scripts/generate_commands_md.py
 
 ## Room plugin settings
 
-Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat/admin room when the target room JID is provided explicitly. Examples:
+Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat when the target room JID is provided explicitly. Examples:
 
 ```text
 ,rooms plugins room@conference.example.org all
@@ -47,4 +48,4 @@ Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, o
 ,rooms set_plugin_defaults room@conference.example.org
 ```
 
-The sender must be a room admin/owner in the target room or have a bot moderator/admin role. This allows clients without MUC-PM support to manage room settings safely.
+The sender must be a room admin/owner in the target room or have a bot moderator/admin role. This allows clients without MUC-PM support to manage room settings safely. If you use a notification room as an operational/admin room, pass the target room JID explicitly in room-setting commands.

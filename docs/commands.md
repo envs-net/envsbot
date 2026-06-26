@@ -20,6 +20,13 @@ Runtime help is available through:
 
 For paginated commands, `all` disables paging and `last` jumps to the final page.
 
+## Context notes
+
+- `private chat / MUC PM` means a normal 1:1 chat with the bot or a MUC private message through a room occupant JID.
+- Room-scoped feature commands can infer the target room from a room message or MUC PM.
+- When using a normal private chat, pass `<room_jid>` explicitly for room-scoped feature commands.
+- EnvsBot has no separate fixed `ADMIN_ROOM` setting; global bot privileges come from `OWNER`, `ADMINS` and stored bot roles.
+
 ## Role legend
 
 Lower role values have more privileges. A command is visible when your role is strong enough.
@@ -157,7 +164,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms delete` | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
 | `,rooms disable` | `user` | `room / MUC PM / private chat with <room_jid>` | Disable a room plugin toggle; requires room admin/owner or bot moderator. |
 | `,rooms enable` | `user` | `room / MUC PM / private chat with <room_jid>` | Enable a room plugin toggle; requires room admin/owner or bot moderator. |
-| `,rooms invite` | `admin` | `private chat / MUC PM / invite notify room` | List, accept or decline pending room invites. |
+| `,rooms invite` | `admin` | `private chat / MUC PM / invite notify room` | List, accept, decline or clean up pending room invites. |
 | `,rooms join` | `admin` | `private chat / MUC PM` | Join a room immediately and store it if needed. |
 | `,rooms leave` | `admin` | `private chat / MUC PM` | Leave a room without deleting its stored configuration. |
 | `,rooms list` | `admin` | `private chat / MUC PM` | List stored rooms and currently joined rooms. |
@@ -226,9 +233,9 @@ Bot administration commands
 
 Check whether a newer EnvsBot release is available.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,bot checkupdate`
 
 Aliases: `,bot updatecheck`, `,checkupdate`, `,updatecheck`
@@ -243,9 +250,9 @@ Examples:
 
 Restart the bot process gracefully.
 
-Role: `owner`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `owner`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,bot restart`
 
 Aliases: `,restart`
@@ -258,9 +265,9 @@ Examples:
 
 Stop the bot using the configured stop command.
 
-Role: `owner`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `owner`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,bot shutdown`
 
 Aliases: `,shutdown`
@@ -273,9 +280,9 @@ Examples:
 
 Show bot, runtime, XMPP, plugin and database status.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,bot status [full]`
 
 Aliases: `,bot info`, `,status`
@@ -290,9 +297,9 @@ Examples:
 
 Show the running EnvsBot version and latest checked release.
 
-Role: `user`  
-Context: `any`  
-Category: `core`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `core`<br>
 Usage: `,bot version`
 
 Aliases: `,version`
@@ -313,9 +320,9 @@ Admin audit log viewer
 
 Show recent admin audit events.
 
-Role: `admin`  
-Context: `private recommended`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
 Usage: `,audit last [all|page|last|limit]`
 
 Aliases: `,audit`, `,audits last`
@@ -329,9 +336,9 @@ Examples:
 
 Show recent audit events for one actor JID.
 
-Role: `admin`  
-Context: `private recommended`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
 Usage: `,audit user <jid>`
 
 Aliases: `,audits user`
@@ -351,9 +358,9 @@ Managed ZIP backups and restore helpers.
 
 Create a managed ZIP backup archive.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,backup create [reason]`
 
 Aliases: `,backup`
@@ -368,9 +375,9 @@ Examples:
 
 List managed backup archives.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,backup list [all|page|last]`
 
 Aliases: `,backup ls`, `,backups`
@@ -384,9 +391,9 @@ Examples:
 
 Show manifest details for one managed backup archive.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,backup show <archive|last>`
 
 Examples:
@@ -397,9 +404,9 @@ Examples:
 
 Restore a managed backup after explicit confirmation.
 
-Role: `owner`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `owner`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,restore <archive|last> confirm`
 
 Aliases: `,backup restore`
@@ -419,9 +426,9 @@ Safe config inspection, validation and reload commands.
 
 Show config values that differ from config_sample.py defaults.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,config diff [all|page|last]`
 
 Examples:
@@ -433,9 +440,9 @@ Examples:
 
 Reload config.py into the running bot where possible.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,config reload`
 
 Examples:
@@ -446,9 +453,9 @@ Examples:
 
 Show the effective config grouped like config_sample.py, with secrets redacted.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,config show [all|page|last]`
 
 Aliases: `,config`
@@ -462,9 +469,9 @@ Examples:
 
 Validate the current config.py file.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,config validate`
 
 Examples:
@@ -482,9 +489,9 @@ Dynamic help for plugins and commands.
 
 Show help for plugins and commands.
 
-Role: `none`  
-Context: `any`  
-Category: `core`  
+Role: `none`<br>
+Context: `any`<br>
+Category: `core`<br>
 Usage: `,help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]`
 
 Aliases: `,h`
@@ -501,9 +508,9 @@ Examples:
 
 Enable, disable or show room help availability.
 
-Role: `user`  
-Context: `room or MUC PM`  
-Category: `core`  
+Role: `user`<br>
+Context: `room or MUC PM`<br>
+Category: `core`<br>
 Usage: `,help inroom <on|off|status>`
 
 Aliases: `,h inroom`
@@ -524,9 +531,9 @@ Runtime plugin management
 
 Show metadata and source information for one plugin.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `core`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `core`<br>
 Usage: `,plugin info <plugin>`
 
 Aliases: `,plugins info`
@@ -539,9 +546,9 @@ Examples:
 
 List loaded and available core/optional plugins.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `core`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `core`<br>
 Usage: `,plugins [all|page|last]`
 
 Aliases: `,plugins`, `,plugins list`
@@ -556,9 +563,9 @@ Examples:
 
 Load one plugin or all plugins.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `core`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `core`<br>
 Usage: `,plugin load <plugin|all>`
 
 Aliases: `,plugins load`
@@ -571,9 +578,9 @@ Examples:
 
 Reload one plugin or all plugins.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `core`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `core`<br>
 Usage: `,plugin reload <plugin|all> [auto]`
 
 Aliases: `,plugins reload`
@@ -587,9 +594,9 @@ Examples:
 
 Unload one optional plugin; core plugins are protected.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `core`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `core`<br>
 Usage: `,plugin unload <plugin> [force]`
 
 Aliases: `,plugins unload`
@@ -609,9 +616,9 @@ Bot presence and status management
 
 Show or control per-room access to presence lookup.
 
-Role: `none`  
-Context: `any`  
-Category: `info`  
+Role: `none`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,presence [on|off|status]`
 
 Examples:
@@ -623,9 +630,9 @@ Examples:
 
 Set the bot presence state and status text.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `info`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `info`<br>
 Usage: `,presence set <online|chat|away|xa|dnd> [message]`
 
 Examples:
@@ -643,9 +650,9 @@ Database-backed room management
 
 Add or update a stored room configuration.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms add <room_jid> [nick] [autojoin]`
 
 Aliases: `,room add`
@@ -658,9 +665,9 @@ Examples:
 
 Remove a stored room and leave it if currently joined.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms delete <room_jid>`
 
 Aliases: `,room delete`
@@ -673,9 +680,9 @@ Examples:
 
 Disable a room plugin toggle; requires room admin/owner or bot moderator.
 
-Role: `user`
-Context: `room / MUC PM / private chat with <room_jid>`
-Category: `rooms`
+Role: `user`<br>
+Context: `room / MUC PM / private chat with <room_jid>`<br>
+Category: `rooms`<br>
 Usage: `,rooms disable [<room_jid>] <plugin>`
 
 Aliases: `,room disable`, `,room feature disable`, `,rooms feature disable`
@@ -689,9 +696,9 @@ Examples:
 
 Enable a room plugin toggle; requires room admin/owner or bot moderator.
 
-Role: `user`
-Context: `room / MUC PM / private chat with <room_jid>`
-Category: `rooms`
+Role: `user`<br>
+Context: `room / MUC PM / private chat with <room_jid>`<br>
+Category: `rooms`<br>
 Usage: `,rooms enable [<room_jid>] <plugin>`
 
 Aliases: `,room enable`, `,room feature enable`, `,rooms feature enable`
@@ -703,28 +710,30 @@ Examples:
 
 #### `,rooms invite`
 
-List, accept or decline pending room invites.
+List, accept, decline or clean up pending room invites.
 
-Role: `admin`  
-Context: `private chat / MUC PM / invite notify room`  
-Category: `rooms`  
-Usage: `,rooms invite <list|accept|decline|cleanup> [id]`
+Role: `admin`<br>
+Context: `private chat / MUC PM / invite notify room`<br>
+Category: `rooms`<br>
+Usage: `,rooms invite <list|accept|decline|cleanup> [id|all|expired]`
 
 Aliases: `,room invite`
 
 Examples:
 
 - `,rooms invite list`
+- `,rooms invite list all`
 - `,rooms invite accept 1`
 - `,rooms invite decline 1`
+- `,rooms invite cleanup expired`
 
 #### `,rooms join`
 
 Join a room immediately and store it if needed.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms join <room_jid> [nick]`
 
 Aliases: `,room join`
@@ -737,9 +746,9 @@ Examples:
 
 Leave a room without deleting its stored configuration.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms leave <room_jid>`
 
 Aliases: `,room leave`
@@ -752,9 +761,9 @@ Examples:
 
 List stored rooms and currently joined rooms.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms list [all|page|last]`
 
 Aliases: `,room list`
@@ -768,9 +777,9 @@ Examples:
 
 Show room plugin toggles; requires room admin/owner or bot moderator.
 
-Role: `user`
-Context: `room / MUC PM / private chat with <room_jid>`
-Category: `rooms`
+Role: `user`<br>
+Context: `room / MUC PM / private chat with <room_jid>`<br>
+Category: `rooms`<br>
 Usage: `,rooms plugins [<room_jid>] [all|page|last]`
 
 Aliases: `,room feature list`, `,room features`, `,room plugins`, `,rooms feature list`, `,rooms features`
@@ -785,15 +794,16 @@ Examples:
 
 Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
 
-Role: `user`
-Context: `room / MUC PM / private chat with <room_jid>`
-Category: `rooms`
+Role: `user`<br>
+Context: `room / MUC PM / private chat with <room_jid>`<br>
+Category: `rooms`<br>
 Usage: `,rooms set_plugin_defaults [<room_jid>]`
 
 Aliases: `,room set_plugin_defaults`, `,room spd`, `,rooms spd`
 
 Examples:
 
+- `,rooms set_plugin_defaults`
 - `,rooms spd`
 - `,rooms set_plugin_defaults room@conference.example.org`
 
@@ -801,9 +811,9 @@ Examples:
 
 Synchronize joined rooms with stored autojoin settings.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms sync`
 
 Aliases: `,room sync`
@@ -816,9 +826,9 @@ Examples:
 
 Update one field of a stored room.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `rooms`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,rooms update <room_jid> <nick|autojoin|status> <value>`
 
 Aliases: `,room update`
@@ -838,9 +848,9 @@ Inspect supervised background tasks.
 
 Show supervised background task status.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `admin`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
 Usage: `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]`
 
 Aliases: `,bot tasks`
@@ -863,9 +873,9 @@ User management with caching, nick lookup and logging
 
 List users with admin-level roles.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
 Usage: `,users admins [all|page|last]`
 
 Aliases: `,user admin`, `,user admins`, `,users admin`
@@ -878,9 +888,9 @@ Examples:
 
 Delete one non-privileged user record and its runtime data.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
 Usage: `,users delete <jid>`
 
 Aliases: `,user delete`
@@ -893,9 +903,9 @@ Examples:
 
 Show user info by JID or known nickname.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
 Usage: `,users info <jid|nick>`
 
 Aliases: `,user info`
@@ -908,9 +918,9 @@ Examples:
 
 List users currently known in one joined room.
 
-Role: `admin`  
-Context: `private chat only`  
-Category: `users`  
+Role: `admin`<br>
+Context: `private chat only`<br>
+Category: `users`<br>
 Usage: `,users list [room_jid]`
 
 Aliases: `,user list`
@@ -923,9 +933,9 @@ Examples:
 
 Change a user's global bot role with hierarchy checks.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
 Usage: `,users role <jid> <role>`
 
 Aliases: `,user role`
@@ -938,9 +948,9 @@ Examples:
 
 Show available roles and their ordering.
 
-Role: `admin`  
-Context: `private chat / MUC PM`  
-Category: `users`  
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
 Usage: `,users roles`
 
 Aliases: `,user roles`
@@ -960,9 +970,9 @@ Automatic birthday notifications in rooms (opt-in per room)
 
 Enable, disable or show birthday notifications for a room.
 
-Role: `user`  
-Context: `room or MUC PM`  
-Category: `rooms`  
+Role: `user`<br>
+Context: `room or MUC PM`<br>
+Category: `rooms`<br>
 Usage: `,birthday_notify <on|off|status>`
 
 Examples:
@@ -980,9 +990,9 @@ Roll dice with optional modifiers and success conditions.
 
 Roll dice using common dice notation.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,dice [NdM]`
 
 Aliases: `,r`, `,roll`
@@ -1003,9 +1013,9 @@ Duck game for MUCs with room toggles and leaderboards
 
 Befriend the current duck.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,bef`
 
 Examples:
@@ -1016,9 +1026,9 @@ Examples:
 
 Start or interact with the duck game.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,duck`
 
 Examples:
@@ -1029,9 +1039,9 @@ Examples:
 
 Show duck game stats.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,duckstats [nick]`
 
 Examples:
@@ -1042,9 +1052,9 @@ Examples:
 
 Set a trap in the duck game.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,trap`
 
 Examples:
@@ -1062,9 +1072,9 @@ Wikipedia, Fediverse, Urban Dictionary and acronym lookup.
 
 Look up stored acronym definitions.
 
-Role: `user`  
-Context: `any`  
-Category: `info`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,acronyms <term>`
 
 Aliases: `,acro`, `,acronym`
@@ -1077,9 +1087,9 @@ Examples:
 
 Add a definition to an acronym.
 
-Role: `user`  
-Context: `any`  
-Category: `info`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,acronyms add <term> <definition>`
 
 Aliases: `,acro add`, `,acronym add`
@@ -1092,9 +1102,9 @@ Examples:
 
 Delete an acronym completely.
 
-Role: `admin`  
-Context: `any`  
-Category: `info`  
+Role: `admin`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,acronyms delete <term>`
 
 Aliases: `,acro delete`, `,acronym delete`
@@ -1107,9 +1117,9 @@ Examples:
 
 List known acronyms.
 
-Role: `admin`  
-Context: `any`  
-Category: `info`  
+Role: `admin`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,acronyms list [all|page|last]`
 
 Aliases: `,acro list`, `,acronym list`
@@ -1122,9 +1132,9 @@ Examples:
 
 Merge one acronym into another.
 
-Role: `admin`  
-Context: `any`  
-Category: `info`  
+Role: `admin`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,acronyms merge <source> <target>`
 
 Aliases: `,acro merge`, `,acronym merge`
@@ -1137,9 +1147,9 @@ Examples:
 
 Remove one acronym definition.
 
-Role: `user`  
-Context: `any`  
-Category: `info`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,acronyms remove <term> <number>`
 
 Aliases: `,acro remove`, `,acronym remove`
@@ -1152,9 +1162,9 @@ Examples:
 
 Look up Fediverse account or instance information.
 
-Role: `user`  
-Context: `any`  
-Category: `info`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,fediverse <account|instance>`
 
 Aliases: `,fedi`
@@ -1167,9 +1177,9 @@ Examples:
 
 Enable, disable or show room access to information commands.
 
-Role: `moderator`  
-Context: `room or MUC PM`  
-Category: `info`  
+Role: `moderator`<br>
+Context: `room or MUC PM`<br>
+Category: `info`<br>
 Usage: `,info <on|off|status>`
 
 Examples:
@@ -1180,9 +1190,9 @@ Examples:
 
 Search Urban Dictionary.
 
-Role: `user`  
-Context: `any`  
-Category: `info`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,udict <term>`
 
 Aliases: `,ud`
@@ -1195,9 +1205,9 @@ Examples:
 
 Search Wikipedia.
 
-Role: `user`  
-Context: `any`  
-Category: `info`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `info`<br>
 Usage: `,wikipedia <term>`
 
 Aliases: `,wiki`
@@ -1217,9 +1227,9 @@ Room-local karma tracking with nick++ / nick--
 
 Show or update karma for a term.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,karma [term|term++|term--]`
 
 Examples:
@@ -1238,9 +1248,9 @@ Pin room messages with paging and non-reply fallback.
 
 Pin, list or delete room pins.
 
-Role: `user`  
-Context: `any`  
-Category: `rooms`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `rooms`<br>
 Usage: `,pin <add|list|delete|on|off|status> ...`
 
 Examples:
@@ -1258,9 +1268,9 @@ Room polls with voting, history and auto-close
 
 Create and manage polls.
 
-Role: `user`  
-Context: `any`  
-Category: `rooms`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `rooms`<br>
 Usage: `,poll <new|vote|list|close|on|off|status> ...`
 
 Examples:
@@ -1278,9 +1288,9 @@ Schedule and manage reminders
 
 Create a reminder.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,remind <when> <text>`
 
 Aliases: `,rem`, `,reminder`
@@ -1293,9 +1303,9 @@ Examples:
 
 Delete one reminder.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,remind delete <id>`
 
 Aliases: `,remind cancel`, `,remind rm`
@@ -1308,9 +1318,9 @@ Examples:
 
 List your reminders.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,reminders [all|page|last]`
 
 Aliases: `,remind list`, `,rems`
@@ -1330,9 +1340,9 @@ RSS/Atom feed watcher and poster
 
 Manage RSS feed subscriptions for a room.
 
-Role: `moderator`  
-Context: `any`  
-Category: `rooms`  
+Role: `moderator`<br>
+Context: `any`<br>
+Category: `rooms`<br>
 Usage: `,rss <add|list|delete|on|off|status> ...`
 
 Examples:
@@ -1350,9 +1360,9 @@ Message correction using sed-like syntax
 
 Apply sed-style corrections to recent messages.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,s/old/new/`
 
 Examples:
@@ -1370,9 +1380,9 @@ Store and deliver messages for users when they join a room again.
 
 Leave a message for another user.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,tell <nick> <message>`
 
 Examples:
@@ -1390,9 +1400,9 @@ Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and
 
 Show the current date.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,date [timezone]`
 
 Examples:
@@ -1403,9 +1413,9 @@ Examples:
 
 Echo text back to you.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,echo <text>`
 
 Examples:
@@ -1416,9 +1426,9 @@ Examples:
 
 Check whether the bot is alive.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,ping`
 
 Aliases: `,pong`
@@ -1431,9 +1441,9 @@ Examples:
 
 Show when a user was last seen.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,seen <nick|jid>`
 
 Aliases: `,s`
@@ -1446,9 +1456,9 @@ Examples:
 
 Show the current time.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,time [timezone]`
 
 Aliases: `,t`
@@ -1461,9 +1471,9 @@ Examples:
 
 Enable, disable or show room access to utility commands.
 
-Role: `moderator`  
-Context: `room or MUC PM`  
-Category: `utility`  
+Role: `moderator`<br>
+Context: `room or MUC PM`<br>
+Category: `utility`<br>
 Usage: `,tools <on|off|status>`
 
 Examples:
@@ -1474,9 +1484,9 @@ Examples:
 
 Convert or show Unix timestamps.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,ts [timestamp]`
 
 Examples:
@@ -1487,9 +1497,9 @@ Examples:
 
 Show current UTC time.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,utc`
 
 Examples:
@@ -1507,9 +1517,9 @@ URL title and YouTube info fetcher for groupchats
 
 Check URLs for status and metadata.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,urlcheck <url>`
 
 Examples:
@@ -1527,9 +1537,9 @@ Lookup and display vCard of a MUC occupant by MUC JID only
 
 Show or set your birthday.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,birthday [YYYY-MM-DD]`
 
 Aliases: `,b`
@@ -1542,9 +1552,9 @@ Examples:
 
 Show or set profile emails.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,emails [email]`
 
 Aliases: `,e`
@@ -1557,9 +1567,9 @@ Examples:
 
 Show or set your full name.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,fullname [name]`
 
 Aliases: `,f`
@@ -1572,9 +1582,9 @@ Examples:
 
 Show or set profile nicknames.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,nicknames [names]`
 
 Aliases: `,nicks`
@@ -1587,9 +1597,9 @@ Examples:
 
 Show or set profile notes.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,notes [text]`
 
 Examples:
@@ -1600,9 +1610,9 @@ Examples:
 
 Show or set organisations in your profile.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,organisations [text]`
 
 Aliases: `,orgs`
@@ -1615,9 +1625,9 @@ Examples:
 
 Show your configured timezone.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,timezone`
 
 Aliases: `,tz`
@@ -1630,9 +1640,9 @@ Examples:
 
 Set your timezone in the bot profile.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,timezone set <IANA timezone>`
 
 Aliases: `,tz set`
@@ -1645,9 +1655,9 @@ Examples:
 
 Show or set profile URLs.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,urls [url]`
 
 Aliases: `,u`
@@ -1660,9 +1670,9 @@ Examples:
 
 Show your bot profile/vCard data.
 
-Role: `user`  
-Context: `any`  
-Category: `profile`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `profile`<br>
 Usage: `,vcard`
 
 Aliases: `,v`
@@ -1682,9 +1692,9 @@ Gives weather according to users location (supports MUCs and MUC DMs)
 
 Show weather for a location.
 
-Role: `user`  
-Context: `any`  
-Category: `utility`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `utility`<br>
 Usage: `,weather <location>`
 
 Aliases: `,w`
@@ -1704,9 +1714,9 @@ XKCD comic fetcher and broadcaster with full indexing
 
 Show an XKCD comic.
 
-Role: `user`  
-Context: `any`  
-Category: `fun`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `fun`<br>
 Usage: `,xkcd [latest|random|number]`
 
 Examples:
@@ -1724,9 +1734,9 @@ XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)
 
 Enable, disable or show room access to XMPP lookup commands.
 
-Role: `user`  
-Context: `room or MUC PM`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `room or MUC PM`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp <on|off|status>`
 
 Aliases: `,x`
@@ -1739,9 +1749,9 @@ Examples:
 
 Check XMPP compliance features via disco.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp compliance <jid>`
 
 Aliases: `,x compliance`
@@ -1754,9 +1764,9 @@ Examples:
 
 Show contact addresses from service discovery.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp contact <jid>`
 
 Aliases: `,x contact`
@@ -1769,9 +1779,9 @@ Examples:
 
 Show help for XMPP lookup subcommands.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp help`
 
 Aliases: `,x help`
@@ -1784,9 +1794,9 @@ Examples:
 
 Show service discovery identity/features.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp info <jid>`
 
 Aliases: `,x info`
@@ -1799,9 +1809,9 @@ Examples:
 
 List service discovery items.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp items <jid>`
 
 Aliases: `,x items`
@@ -1814,9 +1824,9 @@ Examples:
 
 Ping an XMPP entity.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp ping <jid>`
 
 Aliases: `,x ping`
@@ -1829,9 +1839,9 @@ Examples:
 
 Look up XMPP DNS SRV records.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp srv <domain>`
 
 Aliases: `,x srv`
@@ -1844,9 +1854,9 @@ Examples:
 
 Query XMPP entity uptime.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp uptime <jid>`
 
 Aliases: `,x uptime`
@@ -1859,9 +1869,9 @@ Examples:
 
 Query XMPP software version via XEP-0092.
 
-Role: `user`  
-Context: `any`  
-Category: `xmpp`  
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
 Usage: `,xmpp version <jid>`
 
 Aliases: `,x version`
