@@ -16,6 +16,16 @@ class MsgNS(types.SimpleNamespace):
         return getattr(self, key, default)
 
 
+@pytest.fixture(autouse=True)
+def reset_urlcheck_runtime_state():
+    """Keep URL check tests independent when mutmut reuses the process."""
+    urlcheck._url_timestamps.clear()
+    urlcheck.JOINED_ROOMS.clear()
+    yield
+    urlcheck._url_timestamps.clear()
+    urlcheck.JOINED_ROOMS.clear()
+
+
 @pytest.fixture
 def fake_bot(monkeypatch):
     bot = MagicMock()
