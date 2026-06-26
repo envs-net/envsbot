@@ -103,8 +103,22 @@ VCARD_FETCH_TIMEOUT_SECONDS = 10
 VERSION_CHECK_ENABLED = False
 VERSION_CHECK_INTERVAL = 3600
 VERSION_CHECK_URL = "https://github.com/envs-net/envsbot/releases/latest"
-VERSION_CHECK_NOTIFY_JID = ""  # empty = notify OWNER
+# Empty = notify OWNER. If this is a MUC room, the bot joins it before sending.
+VERSION_CHECK_NOTIFY_JID = ""
 UPDATECHECK_TIMEOUT_SECONDS = 15
+
+
+# ================= ROOM INVITES =================
+
+# When enabled, incoming MUC invites are stored as pending room invites and
+# announced to ROOM_INVITE_NOTIFY_JID, VERSION_CHECK_NOTIFY_JID, or OWNER.
+# The bot does not join the invited room until an admin accepts the invite.
+ROOM_INVITES_ENABLED = True
+ROOM_INVITE_NOTIFY_JID = ""  # empty = VERSION_CHECK_NOTIFY_JID, then OWNER
+
+# Pending room invites older than this many days are expired automatically.
+# Set to 0 to keep pending invites until accepted/declined/cleanup.
+ROOM_INVITE_MAX_AGE_DAYS = 30
 
 
 # ================= URL CHECK =================

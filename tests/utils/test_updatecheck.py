@@ -254,3 +254,32 @@ async def test_version_check_worker_cancelled(monkeypatch):
 
     with pytest.raises(asyncio.CancelledError):
         await updatecheck.version_check_worker(SimpleNamespace())
+
+
+@pytest.mark.asyncio
+async def test_send_update_notification_joins_muc_target(monkeypatch):
+    monkeypatch.setitem(updatecheck.config, "version_check_url", "https://example.test/releases/latest")
+    monkeypatch.setitem(updatecheck.config, "version_check_notify_jid", "room@conf.test")
+    monkeypatch.setitem(updatecheck.config, "owner", "owner@example.org")
+
+    joined = AsyncMock()
+    monkeypatch.setattr(updatecheck, "ensure_notification_target_joined", joined)
+
+    sent = []
+
+    async def safe_send(message):
+        sent.append(message)
+
+    def make_message(**kwargs):
+        return kwargs
+
+    bot = SimpleNamespace(
+        presence=SimpleNamespace(joined_rooms={}),
+        make_message=make_message,
+        _safe_send_message=safe_send,
+    )
+
+    await updatecheck.send_update_notification(bot, "9.9.9")
+
+    joined.assert_awaited_once_with(bot, "room@conf.test")
+    assert sent[0]["mto"] == "room@conf.test"

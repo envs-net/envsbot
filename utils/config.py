@@ -50,6 +50,9 @@ DEFAULT_CONFIG = {
     "version_check_enabled": False,
     "version_check_interval": 3600,
     "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
+    "room_invites_enabled": True,
+    "room_invite_notify_jid": "",
+    "room_invite_max_age_days": 30,
     "urlcheck_wait_seconds": 120,
     "urlcheck_fetch_timeout_seconds": 8,
     "urlcheck_max_redirects": 5,
@@ -152,6 +155,9 @@ OPTIONAL_CONFIG_TYPES = {
     "version_check_interval": int,
     "version_check_url": str,
     "version_check_notify_jid": str,
+    "room_invites_enabled": bool,
+    "room_invite_notify_jid": str,
+    "room_invite_max_age_days": int,
     "ducks": dict,
     "users": dict,
 }
@@ -221,6 +227,9 @@ PYTHON_CONFIG_KEY_MAP = {
     "VERSION_CHECK_INTERVAL": "version_check_interval",
     "VERSION_CHECK_URL": "version_check_url",
     "VERSION_CHECK_NOTIFY_JID": "version_check_notify_jid",
+    "ROOM_INVITES_ENABLED": "room_invites_enabled",
+    "ROOM_INVITE_NOTIFY_JID": "room_invite_notify_jid",
+    "ROOM_INVITE_MAX_AGE_DAYS": "room_invite_max_age_days",
     "DUCKS": "ducks",
     "USERS": "users",
 }
@@ -277,6 +286,14 @@ CONFIG_DISPLAY_SECTIONS = (
             "VERSION_CHECK_URL",
             "VERSION_CHECK_NOTIFY_JID",
             "UPDATECHECK_TIMEOUT_SECONDS",
+        ),
+    ),
+    (
+        "Room Invites",
+        (
+            "ROOM_INVITES_ENABLED",
+            "ROOM_INVITE_NOTIFY_JID",
+            "ROOM_INVITE_MAX_AGE_DAYS",
         ),
     ),
     (
@@ -777,7 +794,10 @@ def check_optional_keys(cfg):
                 value,
                 key,
                 errors,
-                allow_empty=key == "version_check_notify_jid",
+                allow_empty=key in {
+                    "version_check_notify_jid",
+                    "room_invite_notify_jid",
+                },
             )
             continue
 

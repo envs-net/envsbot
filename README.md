@@ -159,7 +159,23 @@ VERSION_CHECK_URL = "https://github.com/envs-net/envsbot/releases/latest"
 VERSION_CHECK_NOTIFY_JID = "admin@example.org"
 ```
 
-When `VERSION_CHECK_NOTIFY_JID` is empty, automatic update notifications are sent to the configured `owner` JID. Manual checks through `,checkupdate` work even when the periodic worker is disabled.
+When `VERSION_CHECK_NOTIFY_JID` is empty, automatic update notifications are sent to the configured `owner` JID.
+If `VERSION_CHECK_NOTIFY_JID` is a MUC room JID, EnvsBot joins that room before sending the notification and uses a groupchat message.
+The notification room is joined at send time and is not automatically added to the stored room list unless you also add it with `,rooms add` or `,rooms join`.
+Manual checks through `,checkupdate` work even when the periodic worker is disabled.
+
+Incoming MUC invites can be reviewed before the bot joins the invited room:
+
+```python
+ROOM_INVITES_ENABLED = True
+ROOM_INVITE_NOTIFY_JID = ""  # empty = VERSION_CHECK_NOTIFY_JID, then OWNER
+ROOM_INVITE_MAX_AGE_DAYS = 30
+```
+
+When invited to a room, EnvsBot stores a pending invite and notifies `ROOM_INVITE_NOTIFY_JID`, `VERSION_CHECK_NOTIFY_JID`, or the configured `owner`.
+If the notification target is a MUC room, the bot joins it before sending the approval message.
+The bot does not join the invited room until an admin accepts the invite with `,rooms invite accept <id>`.
+Declined invites are removed with `,rooms invite decline <id>`.
 
 For migration, legacy `config.json` is still accepted when no `config.py` exists, but new installations should use the Python config file. The JSON sample is no longer maintained.
 
@@ -212,6 +228,8 @@ Examples assume the default command prefix `,`.
 | `,rooms list [all/page/last]` | List known rooms |
 | `,rooms add <room_jid> <nick> [autojoin]` | Add a room to the database |
 | `,rooms join <room_jid> [nick]` | Join a room immediately |
+| `,rooms invite list [all/page/last]` | List pending room invites |
+| `,rooms invite accept/decline <id>` | Accept or decline a pending room invite |
 | `,rooms leave <room_jid>` | Leave a room |
 | `,rooms plugins [all/page/last]` | Show plugin states for the current room |
 | `,rooms enable <plugin>` | Enable a room-toggleable plugin for this room |

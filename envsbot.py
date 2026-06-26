@@ -192,6 +192,7 @@ class Bot(slixmpp.ClientXMPP):
         self.register_plugin("xep_0153")
         self.register_plugin("xep_0163")
         self.register_plugin("xep_0199")
+        self.register_plugin("xep_0249")
         self.register_plugin("xep_0359")
         self.register_plugin("xep_0461")
         self.register_plugin("xep_0511")
@@ -733,12 +734,27 @@ class Bot(slixmpp.ClientXMPP):
             log.warning("[BOT] Failed to parse resolved JID: %s", e)
             return str(sender_jid), room
 
-    def _can_execute_command_in_room(self, cmd_obj, is_room):
+    def _can_execute_command_in_room(self, cmd_obj, is_room, room=None):
         """
         Enforce the MUC direct-message restriction for privileged commands.
         """
+        if not is_room:
+            return True
+
         required_role = getattr(cmd_obj, "role", Role.NONE)
-        return not (required_role <= Role.MODERATOR and is_room)
+        if required_role > Role.MODERATOR:
+            return True
+
+        try:
+            from core_plugins.rooms import room_invite_admin_rooms
+
+            if (getattr(cmd_obj, "name", "") == "rooms invite"
+                    and str(room or "").lower() in room_invite_admin_rooms()):
+                return True
+        except Exception:
+            log.debug("[BOT] Could not inspect room invite admin rooms", exc_info=True)
+
+        return False
 
     def _command_error_message(self, user_role, cmd_name, error):
         """
@@ -838,7 +854,7 @@ class Bot(slixmpp.ClientXMPP):
             self.reply(msg, "🔴 You are not allowed to use this command.")
             return
 
-        if not self._can_execute_command_in_room(cmd_obj, is_room):
+        if not self._can_execute_command_in_room(cmd_obj, is_room, room):
             self.reply(msg, "🔴 Use this command in MUC Direct Message only.")
             return
 

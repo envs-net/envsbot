@@ -21,6 +21,10 @@ Operational notes:
 - `,tasks` shows supervised background tasks without the rest of the status output.
 - `,version` shows the running EnvsBot version and the latest checked release.
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.
+  Automatic update notifications go to `VERSION_CHECK_NOTIFY_JID`, or to `OWNER` when unset.
+  When the notification target is a MUC room, the bot joins it before sending.
+- Incoming MUC invites are stored as pending room invites when `ROOM_INVITES_ENABLED` is enabled.
+  They are announced to `ROOM_INVITE_NOTIFY_JID`, `VERSION_CHECK_NOTIFY_JID`, or `OWNER` and can be accepted or declined with `,rooms invite`.
 - `,audit last` shows recent administrative changes such as role updates, room changes, plugin reloads and config reloads.
 - Role changes are guarded so the configured owner and superadmins cannot be modified by lower roles.
 

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from utils.config import config
 from utils.version import __version__, display_version, normalized_version
+from utils.xmpp_notify import ensure_notification_target_joined, notification_message_type
 
 log = logging.getLogger(__name__)
 
@@ -131,13 +132,7 @@ def update_notification_target() -> str | None:
 
 def _notification_type(bot, target: str) -> str:
     """Return a safe message type for update notifications."""
-    try:
-        joined_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", {}) or {}
-        if target in joined_rooms:
-            return "groupchat"
-    except Exception:
-        log.debug("Could not inspect joined rooms for update notification", exc_info=True)
-    return "chat"
+    return notification_message_type(bot, target)
 
 
 async def send_update_notification(bot, remote_version: str) -> None:
@@ -152,6 +147,8 @@ async def send_update_notification(bot, remote_version: str) -> None:
     if not callable(message) or not callable(safe_send):
         log.debug("Version check notification skipped: bot send helpers unavailable")
         return
+
+    await ensure_notification_target_joined(bot, target)
 
     release_url = config.get("version_check_url", DEFAULT_RELEASE_URL)
     body = (

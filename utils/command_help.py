@@ -266,6 +266,17 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "context": "private chat / MUC PM",
         "category": "rooms",
     },
+    "rooms invite": {
+        "short": "List, accept or decline pending room invites.",
+        "usage": "{prefix}rooms invite <list|accept|decline|cleanup> [id]",
+        "examples": [
+            "{prefix}rooms invite list",
+            "{prefix}rooms invite accept 1",
+            "{prefix}rooms invite decline 1",
+        ],
+        "context": "private chat / MUC PM / invite notify room",
+        "category": "rooms",
+    },
     "rooms leave": {
         "short": "Leave a room without deleting its stored configuration.",
         "usage": "{prefix}rooms leave <room_jid>",

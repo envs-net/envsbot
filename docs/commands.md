@@ -159,6 +159,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms delete` | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
 | `,rooms disable` | `moderator` | `MUC PM only` | Disable a room-scoped plugin for the current room. |
 | `,rooms enable` | `moderator` | `MUC PM only` | Enable a room-scoped plugin for the current room. |
+| `,rooms invite` | `admin` | `private chat / MUC PM / invite notify room` | List, accept or decline pending room invites. |
 | `,rooms join` | `admin` | `private chat / MUC PM` | Join a room immediately and store it if needed. |
 | `,rooms leave` | `admin` | `private chat / MUC PM` | Leave a room without deleting its stored configuration. |
 | `,rooms list` | `admin` | `private chat / MUC PM` | List stored rooms and currently joined rooms. |
@@ -721,6 +722,23 @@ Aliases: `,room enable`
 Examples:
 
 - `,rooms enable weather`
+
+#### `,rooms invite`
+
+List, accept or decline pending room invites.
+
+Role: `admin`
+Context: `private chat / MUC PM / invite notify room`
+Category: `rooms`
+Usage: `,rooms invite <list|accept|decline|cleanup> [id]`
+
+Aliases: `,room invite`
+
+Examples:
+
+- `,rooms invite list`
+- `,rooms invite accept 1`
+- `,rooms invite decline 1`
 
 #### `,rooms join`
 

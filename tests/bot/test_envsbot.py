@@ -506,7 +506,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert registered_plugins == [
         "xep_0012", "xep_0030", "xep_0045", "xep_0054",
         "xep_0084", "xep_0092", "xep_0153", "xep_0163",
-        "xep_0199", "xep_0359", "xep_0461", "xep_0511",
+        "xep_0199", "xep_0249", "xep_0359", "xep_0461", "xep_0511",
     ]
     assert event_handlers == [
         ("session_start", "on_start"),

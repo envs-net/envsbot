@@ -388,7 +388,7 @@ async def test_on_load_restores_reload_rooms_and_registers_presence_handler(fake
     await rooms.on_load(fake_bot)
 
     assert not hasattr(fake_bot, "_reload_rooms")
-    fake_bot.bot_plugins.register_event.assert_called_once()
+    assert fake_bot.bot_plugins.register_event.call_count == 4
     assert rooms.JOINED_ROOMS["room1@conf"] == {
         "nick": "RuntimeNick",
         "autojoin": True,
@@ -413,13 +413,13 @@ async def test_on_load_restores_reload_rooms_and_registers_presence_handler(fake
 async def test_on_load_missing_dependencies_and_normal_startup(fake_bot):
     fake_bot.plugin["xep_0045"] = None
     await rooms.on_load(fake_bot)
-    fake_bot.bot_plugins.register_event.assert_called_once()
+    assert fake_bot.bot_plugins.register_event.call_count == 4
 
     fake_bot.bot_plugins.register_event.reset_mock()
     fake_bot.plugin["xep_0045"] = MagicMock()
     fake_bot.db.rooms = None
     await rooms.on_load(fake_bot)
-    fake_bot.bot_plugins.register_event.assert_called_once()
+    assert fake_bot.bot_plugins.register_event.call_count == 4
 
     fake_bot.db.rooms = MagicMock()
     fake_bot._reload_rooms = None
@@ -483,3 +483,89 @@ async def test_on_unload_leaves_rooms_and_preserves_reload_snapshot(fake_bot):
     fake_bot.plugin["xep_0045"].leave_muc.assert_any_call("room1@conf", "BotOne")
     fake_bot.plugin["xep_0045"].leave_muc.assert_any_call("room2@conf", "BotTwo")
     assert fake_bot.presence.joined_rooms == {}
+
+
+class InviteMessage(dict):
+    """Small message double with XML payload for room invite tests."""
+
+    def __init__(self, from_jid: str, xml):
+        super().__init__()
+        self["from"] = types.SimpleNamespace(
+            bare=from_jid.split("/", 1)[0],
+            resource=from_jid.split("/", 1)[1] if "/" in from_jid else None,
+        )
+        self["type"] = "chat"
+        self.xml = xml
+
+
+def test_extract_direct_room_invite():
+    xml = rooms.ET.fromstring(
+        "<message><x xmlns='jabber:x:conference' "
+        "jid='NewRoom@conference.test' reason='join us'/></message>"
+    )
+    msg = InviteMessage("inviter@example.org", xml)
+
+    invite = rooms.extract_room_invite(msg)
+
+    assert invite == {
+        "room_jid": "newroom@conference.test",
+        "inviter": "inviter@example.org",
+        "reason": "join us",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_room_invite_stores_and_announces(fake_bot, monkeypatch):
+    xml = rooms.ET.fromstring(
+        "<message><x xmlns='jabber:x:conference' "
+        "jid='room2@conference.test'/></message>"
+    )
+    msg = InviteMessage("inviter@example.org", xml)
+    fake_bot.db.conn = None
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+    fake_bot.make_message = MagicMock(side_effect=lambda **kwargs: kwargs)
+    fake_bot._safe_send_message = AsyncMock()
+    fake_bot.audit = AsyncMock()
+    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
+    monkeypatch.setitem(rooms.config, "room_invite_notify_jid", "admins@conference.test")
+    monkeypatch.setattr(
+        rooms,
+        "ensure_notification_target_joined",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(rooms, "notification_message_type", lambda bot, target: "groupchat")
+
+    handled = await rooms.handle_room_invite(fake_bot, msg)
+
+    assert handled is True
+    assert fake_bot.pending_room_invites[1]["room_jid"] == "room2@conference.test"
+    outbound = fake_bot._safe_send_message.await_args.args[0]
+    assert outbound["mto"] == "admins@conference.test"
+    assert outbound["mtype"] == "groupchat"
+    assert "rooms invite accept 1" in outbound["mbody"]
+
+
+@pytest.mark.asyncio
+async def test_rooms_invite_accept_joins_and_removes_pending(fake_bot, fake_msg, monkeypatch):
+    fake_bot.db.conn = None
+    fake_bot.pending_room_invites = {
+        7: {
+            "id": 7,
+            "room_jid": "room3@conference.test",
+            "inviter": "inviter@example.org",
+            "reason": "",
+            "created_at": 1,
+        }
+    }
+    fake_bot.pending_room_invite_index = {("room3@conference.test", "inviter@example.org"): 7}
+    join_invited = AsyncMock()
+    monkeypatch.setattr(rooms, "_join_invited_room", join_invited)
+    monkeypatch.setattr(rooms, "load_pending_room_invites", AsyncMock(return_value=fake_bot.pending_room_invites))
+    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
+    monkeypatch.setitem(rooms.config, "nick", "EnvsBot")
+
+    await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["accept", "7"], fake_msg, False)
+
+    join_invited.assert_awaited_once_with(fake_bot, "room3@conference.test", "EnvsBot")
+    assert fake_bot.pending_room_invites == {}
+    fake_bot.reply_ok.assert_called()
