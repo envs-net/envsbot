@@ -313,6 +313,12 @@ async def test_update_avatar_all_paths(monkeypatch, tmp_path):
             super().__init__(plugins)
             self.boundjid = types.SimpleNamespace(bare="bot@example.org")
 
+        def __eq__(self, other):
+            return (
+                dict.__eq__(self, other)
+                and getattr(other, "boundjid", None) == self.boundjid
+            )
+
     async def noop_publish_avatar(data):
         return None
 

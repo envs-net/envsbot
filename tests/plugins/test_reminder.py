@@ -154,23 +154,23 @@ async def test_reminder_db_helpers(dummy_bot):
 # ---------------
 
 
-async def _wait_for_reminder_delivery(reminder_id: int, called: list) -> bool:
-    """Wait for a scheduled reminder task without relying on fixed sleeps."""
-    deadline = asyncio.get_running_loop().time() + 1.0
-
-    while asyncio.get_running_loop().time() < deadline:
-        if called and reminder_id not in reminder.ACTIVE_REMINDERS:
-            return True
-        await asyncio.sleep(0.01)
-
-    return bool(called and reminder_id not in reminder.ACTIVE_REMINDERS)
-
 
 @pytest.mark.asyncio
 async def test_schedule_and_cancel_task(dummy_bot, dummy_msg):
     # Setup
     reminder.REMINDER_ENABLED = True
     called = []
+
+    async def wait_for_delivery(reminder_id: int) -> bool:
+        """Wait for a scheduled reminder task without relying on fixed sleeps."""
+        deadline = asyncio.get_running_loop().time() + 1.0
+
+        while asyncio.get_running_loop().time() < deadline:
+            if called and reminder_id not in reminder.ACTIVE_REMINDERS:
+                return True
+            await asyncio.sleep(0.01)
+
+        return bool(called and reminder_id not in reminder.ACTIVE_REMINDERS)
 
     async def fake_send(bot, mto, mbody, mtype):
         called.append((mto, mbody, mtype))
@@ -179,7 +179,7 @@ async def test_schedule_and_cancel_task(dummy_bot, dummy_msg):
         # Schedule an immediate reminder and wait until the task is done.
         _ = reminder._schedule_task(
             dummy_bot, 42, "a@b", "u", "msg", 0.0, dummy_msg)
-        assert await _wait_for_reminder_delivery(42, called)
+        assert await wait_for_delivery(42)
 
     # Cancel/restore path (reminder in future)
     _ = reminder._schedule_task(

@@ -497,6 +497,12 @@ class InviteMessage(dict):
         self["type"] = "chat"
         self.xml = xml
 
+    def __eq__(self, other):
+        return (
+            dict.__eq__(self, other)
+            and getattr(other, "xml", None) == self.xml
+        )
+
 
 def test_extract_direct_room_invite():
     xml = rooms.ET.fromstring(
@@ -584,6 +590,13 @@ class PluginStanza(dict):
         self._plugins = plugins or {}
         self.xml = None
 
+    def __eq__(self, other):
+        return (
+            dict.__eq__(self, other)
+            and getattr(other, "_plugins", None) == self._plugins
+            and getattr(other, "xml", None) == self.xml
+        )
+
     def get_plugin(self, name, check=True):
         plugin = self._plugins.get(name)
         if isinstance(plugin, BaseException):
@@ -597,6 +610,12 @@ class FallbackPluginStanza(dict):
     def __init__(self, plugin):
         super().__init__()
         self._plugin = plugin
+
+    def __eq__(self, other):
+        return (
+            dict.__eq__(self, other)
+            and getattr(other, "_plugin", None) == self._plugin
+        )
 
     def get_plugin(self, name):
         return self._plugin if name == "muc" else None
@@ -620,7 +639,7 @@ class ExplodingMappingPlugin:
         raise RuntimeError("get failed")
 
     def __getitem__(self, key):
-        raise RuntimeError("getitem failed")
+        raise KeyError(key)
 
 
 @pytest.mark.asyncio
@@ -863,7 +882,7 @@ async def test_room_invite_event_handlers(fake_bot, monkeypatch):
 
     class FallbackTypeMessage(dict):
         def __getitem__(self, key):
-            raise RuntimeError("no item")
+            raise KeyError(key)
 
         def get(self, key, default=None):
             return "normal" if key == "type" else default

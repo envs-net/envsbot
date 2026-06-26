@@ -120,8 +120,13 @@ def create_plugin_task(
         return creator(plugin, coro, name=name)
     try:
         return asyncio.create_task(coro, name=name)
-    except TypeError:
-        return asyncio.create_task(coro)
+    except TypeError as exc:
+        # Compatibility fallback for older Python versions where
+        # asyncio.create_task does not accept the ``name`` keyword. Do not
+        # mask unrelated TypeError exceptions raised for invalid awaitables.
+        if "unexpected keyword argument" in str(exc) and "name" in str(exc):
+            return asyncio.create_task(coro)
+        raise
 
 
 class TaskSupervisor:
@@ -167,7 +172,15 @@ class TaskSupervisor:
         if task.cancelled():
             return
 
-        exc = task.exception()
+        try:
+            exc = task.exception()
+        except asyncio.InvalidStateError:
+            log.debug(
+                "[TASKS] Task exception unavailable due to invalid state: %r",
+                task,
+            )
+            return
+
         if exc is not None:
             meta["last_error"] = f"{type(exc).__name__}: {exc}"
             log.error(
@@ -195,6 +208,12 @@ class TaskSupervisor:
             try:
                 results = await asyncio.wait_for(gather_future, timeout=timeout)
             except asyncio.TimeoutError:
+                gather_future.cancel()
+                try:
+                    await gather_future
+                except asyncio.CancelledError:
+                    pass
+
                 pending = {task for task in tasks if not task.done()}
                 for task in pending:
                     log.warning(

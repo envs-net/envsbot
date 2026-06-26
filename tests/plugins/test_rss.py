@@ -267,6 +267,12 @@ def test_extract_entry_link_variants():
         def __init__(self):
             self.links = [{"rel": "alternate", "href": "http://example.com"}]
 
+        def __eq__(self, other):
+            return (
+                dict.__eq__(self, other)
+                and getattr(other, "links", None) == self.links
+            )
+
         def __contains__(self, key):
             return key == "links"
 
