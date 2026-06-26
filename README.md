@@ -230,12 +230,14 @@ Examples assume the default command prefix `,`.
 | `,rooms invite list [all/page/last]` | List pending room invites |
 | `,rooms invite accept/decline <id>` | Accept or decline a pending room invite |
 | `,rooms leave <room_jid>` | Leave a room |
-| `,rooms plugins [all/page/last]` | Show plugin states for the current room |
-| `,rooms enable <plugin>` | Enable a room-toggleable plugin for this room |
-| `,rooms disable <plugin>` | Disable a room-toggleable plugin for this room |
+| `,rooms plugins [<room_jid>] [all/page/last]` | Show plugin states for a room |
+| `,rooms enable [<room_jid>] <plugin>` | Enable a room-toggleable plugin for a room |
+| `,rooms disable [<room_jid>] <plugin>` | Disable a room-toggleable plugin for a room |
 | `,users roles` | Show available user roles |
 | `,users admins [all/page/last]` | List privileged users |
 | `,users role <jid> <role>` | Change a user's role |
+
+Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or admin room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role.
 
 For paginated commands, `all` disables paging and prints the full result set. Full reference: [`docs/commands.md`](docs/commands.md).
 

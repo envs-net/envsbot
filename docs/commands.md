@@ -155,14 +155,14 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,poll` | `user` | `any` | Create and manage polls. |
 | `,rooms add` | `admin` | `private chat / MUC PM` | Add or update a stored room configuration. |
 | `,rooms delete` | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
-| `,rooms disable` | `moderator` | `MUC PM only` | Disable a room-scoped plugin for the current room. |
-| `,rooms enable` | `moderator` | `MUC PM only` | Enable a room-scoped plugin for the current room. |
+| `,rooms disable` | `user` | `room / MUC PM / private chat with <room_jid>` | Disable a room plugin toggle; requires room admin/owner or bot moderator. |
+| `,rooms enable` | `user` | `room / MUC PM / private chat with <room_jid>` | Enable a room plugin toggle; requires room admin/owner or bot moderator. |
 | `,rooms invite` | `admin` | `private chat / MUC PM / invite notify room` | List, accept or decline pending room invites. |
 | `,rooms join` | `admin` | `private chat / MUC PM` | Join a room immediately and store it if needed. |
 | `,rooms leave` | `admin` | `private chat / MUC PM` | Leave a room without deleting its stored configuration. |
 | `,rooms list` | `admin` | `private chat / MUC PM` | List stored rooms and currently joined rooms. |
-| `,rooms plugins` | `moderator` | `MUC PM only` | Show plugin toggle state for the current room. |
-| `,rooms set_plugin_defaults` | `moderator` | `MUC PM only` | Restore room plugin toggles to default values. |
+| `,rooms plugins` | `user` | `room / MUC PM / private chat with <room_jid>` | Show room plugin toggles; requires room admin/owner or bot moderator. |
+| `,rooms set_plugin_defaults` | `user` | `room / MUC PM / private chat with <room_jid>` | Restore room plugin toggles for a room; requires room admin/owner or bot moderator. |
 | `,rooms sync` | `admin` | `private chat / MUC PM` | Synchronize joined rooms with stored autojoin settings. |
 | `,rooms update` | `admin` | `private chat / MUC PM` | Update one field of a stored room. |
 | `,rss` | `moderator` | `any` | Manage RSS feed subscriptions for a room. |
@@ -671,33 +671,35 @@ Examples:
 
 #### `,rooms disable`
 
-Disable a room-scoped plugin for the current room.
+Disable a room plugin toggle; requires room admin/owner or bot moderator.
 
-Role: `moderator`  
-Context: `MUC PM only`  
-Category: `rooms`  
-Usage: `,rooms disable <plugin>`
+Role: `user`
+Context: `room / MUC PM / private chat with <room_jid>`
+Category: `rooms`
+Usage: `,rooms disable [<room_jid>] <plugin>`
 
-Aliases: `,room disable`
+Aliases: `,room disable`, `,room feature disable`, `,rooms feature disable`
 
 Examples:
 
 - `,rooms disable xkcd`
+- `,rooms disable room@conference.example.org xkcd`
 
 #### `,rooms enable`
 
-Enable a room-scoped plugin for the current room.
+Enable a room plugin toggle; requires room admin/owner or bot moderator.
 
-Role: `moderator`  
-Context: `MUC PM only`  
-Category: `rooms`  
-Usage: `,rooms enable <plugin>`
+Role: `user`
+Context: `room / MUC PM / private chat with <room_jid>`
+Category: `rooms`
+Usage: `,rooms enable [<room_jid>] <plugin>`
 
-Aliases: `,room enable`
+Aliases: `,room enable`, `,room feature enable`, `,rooms feature enable`
 
 Examples:
 
 - `,rooms enable weather`
+- `,rooms enable room@conference.example.org weather`
 
 #### `,rooms invite`
 
@@ -764,34 +766,36 @@ Examples:
 
 #### `,rooms plugins`
 
-Show plugin toggle state for the current room.
+Show room plugin toggles; requires room admin/owner or bot moderator.
 
-Role: `moderator`  
-Context: `MUC PM only`  
-Category: `rooms`  
-Usage: `,rooms plugins [all|page|last]`
+Role: `user`
+Context: `room / MUC PM / private chat with <room_jid>`
+Category: `rooms`
+Usage: `,rooms plugins [<room_jid>] [all|page|last]`
 
-Aliases: `,room plugins`
+Aliases: `,room feature list`, `,room features`, `,room plugins`, `,rooms feature list`, `,rooms features`
 
 Examples:
 
 - `,rooms plugins`
 - `,rooms plugins all`
+- `,rooms plugins room@conference.example.org all`
 
 #### `,rooms set_plugin_defaults`
 
-Restore room plugin toggles to default values.
+Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
 
-Role: `moderator`  
-Context: `MUC PM only`  
-Category: `rooms`  
-Usage: `,rooms set_plugin_defaults`
+Role: `user`
+Context: `room / MUC PM / private chat with <room_jid>`
+Category: `rooms`
+Usage: `,rooms set_plugin_defaults [<room_jid>]`
 
 Aliases: `,room set_plugin_defaults`, `,room spd`, `,rooms spd`
 
 Examples:
 
 - `,rooms spd`
+- `,rooms set_plugin_defaults room@conference.example.org`
 
 #### `,rooms sync`
 

@@ -35,3 +35,16 @@ Run this after changing command decorators or `utils/command_help.py`:
 ```bash
 python scripts/generate_commands_md.py
 ```
+
+## Room plugin settings
+
+Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat/admin room when the target room JID is provided explicitly. Examples:
+
+```text
+,rooms plugins room@conference.example.org all
+,rooms enable room@conference.example.org weather
+,rooms disable room@conference.example.org xkcd
+,rooms set_plugin_defaults room@conference.example.org
+```
+
+The sender must be a room admin/owner in the target room or have a bot moderator/admin role. This allows clients without MUC-PM support to manage room settings safely.

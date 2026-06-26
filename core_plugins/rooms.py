@@ -18,6 +18,7 @@ bot automatically joins them when it starts.
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from xml.etree import ElementTree as ET
@@ -174,6 +175,131 @@ def _jid_bare(value) -> str:
         return str(JID(str(value)).bare).lower()
     except Exception:
         return str(value).split("/", 1)[0].lower()
+
+
+def _looks_like_room_jid(value: object) -> bool:
+    """Return True if a value looks like a bare MUC JID argument."""
+    raw = str(value or "").strip()
+    room_jid = _jid_bare(raw)
+    if not raw or "/" in raw or "@" not in room_jid:
+        return False
+    node, domain = room_jid.split("@", 1)
+    return bool(node and domain)
+
+
+def _message_context_room(msg, is_room: bool) -> str:
+    """Return the implicit room for public room messages or MUC PMs."""
+    try:
+        from_jid = msg["from"]
+        room_jid = _jid_bare(from_jid)
+        nick = getattr(from_jid, "resource", None)
+    except Exception:
+        return ""
+
+    if is_room:
+        return room_jid
+    if nick and room_jid in JOINED_ROOMS:
+        return room_jid
+    return ""
+
+
+async def _maybe_get_user_role(bot, sender_jid: str, room_jid: str) -> Role:
+    """Return the sender role for a room without assuming async mocks."""
+    get_user_role = getattr(bot, "get_user_role", None)
+    if not callable(get_user_role):
+        return Role.NONE
+    try:
+        result = get_user_role(sender_jid, room_jid)
+        if inspect.isawaitable(result):
+            result = await result
+        return result if isinstance(result, Role) else Role.NONE
+    except Exception:
+        log.debug("[ROOMS] Could not resolve role for %s in %s", sender_jid, room_jid, exc_info=True)
+        return Role.NONE
+
+
+def _sender_has_room_affiliation(sender_jid: str, room_jid: str) -> bool:
+    """Return True if sender is visible as room admin/owner in JOINED_ROOMS."""
+    sender_bare = _jid_bare(sender_jid)
+    if not sender_bare:
+        return False
+    room_data = JOINED_ROOMS.get(room_jid) or {}
+    nicks = room_data.get("nicks") or {}
+    if not isinstance(nicks, dict):
+        return False
+    for occupant in tuple(nicks.values()):
+        if not isinstance(occupant, dict):
+            continue
+        occupant_jid = _jid_bare(occupant.get("jid"))
+        affiliation = str(occupant.get("affiliation") or "").lower()
+        if occupant_jid == sender_bare and affiliation in {"admin", "owner"}:
+            return True
+    return False
+
+
+async def _sender_can_manage_room_settings(bot, sender_jid: str, room_jid: str) -> bool:
+    """Return True when sender may manage room-scoped bot settings."""
+    sender_bare = _jid_bare(sender_jid)
+    if not sender_bare:
+        return False
+    role = await _maybe_get_user_role(bot, sender_bare, room_jid)
+    if role <= Role.MODERATOR:
+        return True
+    return _sender_has_room_affiliation(sender_bare, room_jid)
+
+
+async def _room_is_known(bot, room_jid: str) -> bool:
+    """Return True if the room is joined or stored in the room database."""
+    if room_jid in JOINED_ROOMS:
+        return True
+    rooms_db = getattr(getattr(bot, "db", None), "rooms", None)
+    get_room = getattr(rooms_db, "get", None)
+    if not callable(get_room):
+        return False
+    try:
+        result = get_room(room_jid)
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+    except Exception:
+        log.debug("[ROOMS] Could not look up room %s", room_jid, exc_info=True)
+        return False
+
+
+async def _resolve_room_settings_target(bot, msg, is_room: bool, args: list[str], sender_jid: str, usage: str):
+    """Resolve and authorize the target room for room setting commands."""
+    remaining = list(args)
+    explicit = False
+    if remaining and _looks_like_room_jid(remaining[0]):
+        room_jid = _jid_bare(remaining.pop(0))
+        explicit = True
+    else:
+        room_jid = _message_context_room(msg, is_room)
+
+    if not room_jid:
+        bot.reply_usage(msg, usage)
+        bot.reply_info(
+            msg,
+            "Use a MUC PM, run the command in the room, or pass <room_jid> when using a normal DM/admin room.",
+        )
+        return None
+
+    if not explicit and not is_room and room_jid not in JOINED_ROOMS:
+        bot.reply_error(msg, "This command can only infer a room from MUC PMs or room messages.")
+        return None
+
+    if not await _room_is_known(bot, room_jid):
+        bot.reply_error(msg, f"Room '{room_jid}' is not currently joined or stored.")
+        return None
+
+    if not await _sender_can_manage_room_settings(bot, sender_jid, room_jid):
+        bot.reply_error(
+            msg,
+            f"Only room admins/owners or bot moderators can manage room settings for '{room_jid}'.",
+        )
+        return None
+
+    return room_jid, remaining
 
 
 def _invite_inviter_from_attr(value: str | None, room_jid: str = "") -> str:
@@ -999,38 +1125,22 @@ async def set_room_control_defaults(bot, room_jid, defaults=None):
 # -------------------------------------------------
 # ROOMS SETDEFAULTS
 # -------------------------------------------------
-@command("rooms set_plugin_defaults", role=Role.MODERATOR,
-         aliases=["room set_plugin_defaults",
-                  "rooms spd", "room spd"])
+@command(
+    "rooms set_plugin_defaults",
+    role=Role.USER,
+    aliases=["room set_plugin_defaults", "rooms spd", "room spd"],
+)
 async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
-    """
-    Reset all room plugins to the defaults for the current room.
-
-    Usage:
-        {prefix}room set_plugin_defaults
-        {prefix}room spd
-    """
-    if is_room:
-        bot.reply(msg,
-                  "🔴 This command can only be used in MUC PMs to the bot.")
+    """Reset room plugin toggles to their defaults."""
+    usage = f"{bot.prefix}rooms set_plugin_defaults [<room_jid>]"
+    resolved = await _resolve_room_settings_target(bot, msg, is_room, args, sender_jid, usage)
+    if resolved is None:
         return
-    if len(args) != 0:
-        bot.reply(msg, f"🟡️ Usage: {bot.prefix}room set_plugin_defaults")
-        return
-    room_jid = msg['from'].bare
-    if room_jid not in JOINED_ROOMS:
-        bot.reply(msg, f"🔴 Room '{room_jid}' is not currently joined."
-                       " Please join the room first before setting defaults.")
-        log.warning(f"[ROOMS] 🟡️ Room '{
-                    room_jid}' not joined for setdefaults!")
+    room_jid, remaining = resolved
+    if remaining:
+        bot.reply_usage(msg, usage)
         return
 
-    room = await bot.db.rooms.get(room_jid)
-    if not room:
-        bot.reply(msg, f"🔴 Room '{room_jid}' does not exist in the database.")
-        log.warning(f"[ROOMS] 🟡️ Room '{
-                    room_jid}' not found in DB for setdefaults!")
-        return
     try:
         await set_room_control_defaults(bot, room_jid)
         await audit_event(
@@ -1039,38 +1149,36 @@ async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
             actor=sender_jid,
             target=room_jid,
         )
-        bot.reply(msg, f"✅ Restored plugin defaults for room '{room_jid}'.")
-        log.info(f"[ROOMS] ✅ Restored plugin defaults for room '{room_jid}'.")
+        bot.reply_ok(msg, f"Restored plugin defaults for room '{room_jid}'.")
+        log.info("[ROOMS] Restored plugin defaults for room %s", room_jid)
     except Exception as e:
-        bot.reply(msg, f"🔴 Error restoring defaults: {e}")
-        log.exception(f"[ROOMS] 🔴 Error restoring defaults for room '{
-                      room_jid}': {e}")
+        bot.reply_error(msg, f"Error restoring defaults: {e}")
+        log.exception("[ROOMS] Error restoring defaults for room %s", room_jid)
 
 
 # -------------------------------------------------
 # ROOMS PLUGINS
 # -------------------------------------------------
-@command("rooms plugins", role=Role.MODERATOR, aliases=["room plugins"])
+@command(
+    "rooms plugins",
+    role=Role.USER,
+    aliases=[
+        "room plugins",
+        "rooms features",
+        "room features",
+        "rooms feature list",
+        "room feature list",
+    ],
+)
 async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
-    """Show plugin setup for the current room."""
-    if is_room:
-        bot.reply_error(
-            msg,
-            "This command can only be used in MUC PMs to the bot.",
-        )
+    """Show plugin setup for a room."""
+    usage = f"{bot.prefix}rooms plugins [<room_jid>] [all|page|last]"
+    resolved = await _resolve_room_settings_target(bot, msg, is_room, args, sender_jid, usage)
+    if resolved is None:
         return
+    room_jid, remaining = resolved
 
-    room_jid = msg['from'].bare
-    if room_jid not in JOINED_ROOMS:
-        bot.reply_error(
-            msg,
-            f"Room '{room_jid}' is not currently joined. "
-            "Please join the room first to view plugin settings.",
-        )
-        log.warning("[ROOMS] room %s not joined for plugins command", room_jid)
-        return
-
-    page = parse_page_args(args)
+    page = parse_page_args(remaining)
     states = await list_room_features(bot, room_jid)
     feature_lines = [format_room_feature_line(state) for state in states]
     lines = format_page(
@@ -1078,36 +1186,33 @@ async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
         feature_lines,
         page_request=page,
         page_size=12,
-        command_hint=f"{bot.prefix}rooms plugins",
+        command_hint=f"{bot.prefix}rooms plugins {room_jid}",
     )
 
     log.info("[ROOMS] displaying plugin settings for room %s", room_jid)
     bot.reply(msg, lines)
 
 
-async def _handle_room_feature_toggle(bot, msg, is_room, args, *, enabled: bool):
+async def _handle_room_feature_toggle(bot, sender_jid, msg, is_room, args, *, enabled: bool):
     """Shared implementation for rooms enable/disable."""
-    if is_room:
-        bot.reply_error(msg, "This command can only be used in MUC PMs to the bot.")
+    action = "enable" if enabled else "disable"
+    usage = f"{bot.prefix}rooms {action} [<room_jid>] <plugin>"
+    resolved = await _resolve_room_settings_target(bot, msg, is_room, args, sender_jid, usage)
+    if resolved is None:
         return
-    if len(args) != 1:
-        action = "enable" if enabled else "disable"
-        bot.reply_usage(msg, f"{bot.prefix}rooms {action} <plugin>")
-        return
-
-    room_jid = msg['from'].bare
-    if room_jid not in JOINED_ROOMS:
-        bot.reply_error(msg, f"Room '{room_jid}' is not currently joined.")
+    room_jid, remaining = resolved
+    if len(remaining) != 1:
+        bot.reply_usage(msg, usage)
         return
 
-    plugin = args[0].lower()
+    plugin = remaining[0].lower()
     try:
         previous = await get_room_feature(bot, room_jid, plugin)
         state = await set_room_feature(bot, room_jid, plugin, enabled)
     except KeyError:
         bot.reply_warn(
             msg,
-            f"Unknown room plugin '{plugin}'. Use {bot.prefix}rooms plugins to list valid names.",
+            f"Unknown room plugin '{plugin}'. Use {bot.prefix}rooms plugins {room_jid} to list valid names.",
         )
         return
 
@@ -1118,23 +1223,31 @@ async def _handle_room_feature_toggle(bot, msg, is_room, args, *, enabled: bool)
     await audit_event(
         bot,
         "room_feature_changed",
-        actor=msg["from"],
+        actor=sender_jid,
         target=room_jid,
         details={"plugin": state.name, "enabled": state.enabled},
     )
     bot.reply_ok(msg, f"{state.name} is now {'enabled' if state.enabled else 'disabled'} for {room_jid}.")
 
 
-@command("rooms enable", role=Role.MODERATOR, aliases=["room enable"])
+@command(
+    "rooms enable",
+    role=Role.USER,
+    aliases=["room enable", "rooms feature enable", "room feature enable"],
+)
 async def cmd_room_enable(bot, sender_jid, nick, args, msg, is_room):
-    """Enable a room-scoped plugin for the current room."""
-    await _handle_room_feature_toggle(bot, msg, is_room, args, enabled=True)
+    """Enable a room-scoped plugin for a room."""
+    await _handle_room_feature_toggle(bot, sender_jid, msg, is_room, args, enabled=True)
 
 
-@command("rooms disable", role=Role.MODERATOR, aliases=["room disable"])
+@command(
+    "rooms disable",
+    role=Role.USER,
+    aliases=["room disable", "rooms feature disable", "room feature disable"],
+)
 async def cmd_room_disable(bot, sender_jid, nick, args, msg, is_room):
-    """Disable a room-scoped plugin for the current room."""
-    await _handle_room_feature_toggle(bot, msg, is_room, args, enabled=False)
+    """Disable a room-scoped plugin for a room."""
+    await _handle_room_feature_toggle(bot, sender_jid, msg, is_room, args, enabled=False)
 
 
 # -------------------------------------------------
