@@ -1,10 +1,47 @@
 import asyncio
 from types import SimpleNamespace
+
 from unittest.mock import Mock
 
 import pytest
 
+from utils import task_supervisor as ts
 from utils.task_supervisor import TaskSupervisor, create_plugin_task
+
+
+def test_asyncio_create_task_supports_name_branches(monkeypatch):
+    def signature_with_name(_obj):
+        return SimpleNamespace(parameters={"name": object()})
+
+    monkeypatch.setattr(ts.inspect, "signature", signature_with_name)
+    assert ts._asyncio_create_task_supports_name() is True
+
+    def signature_without_name(_obj):
+        return SimpleNamespace(parameters={})
+
+    monkeypatch.setattr(ts.inspect, "signature", signature_without_name)
+    assert ts._asyncio_create_task_supports_name() is False
+
+
+def test_asyncio_create_task_supports_name_signature_failures(monkeypatch):
+    def raise_type_error(_obj):
+        raise TypeError("no signature")
+
+    monkeypatch.setattr(ts.inspect, "signature", raise_type_error)
+    assert ts._asyncio_create_task_supports_name() is True
+
+    def raise_value_error(_obj):
+        raise ValueError("no signature")
+
+    monkeypatch.setattr(ts.inspect, "signature", raise_value_error)
+    assert ts._asyncio_create_task_supports_name() is True
+
+    def raise_runtime_error(_obj):
+        raise RuntimeError("unexpected failure")
+
+    monkeypatch.setattr(ts.inspect, "signature", raise_runtime_error)
+    with pytest.raises(RuntimeError, match="unexpected failure"):
+        ts._asyncio_create_task_supports_name()
 
 
 @pytest.mark.asyncio
