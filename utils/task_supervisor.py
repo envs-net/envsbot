@@ -147,7 +147,10 @@ class TaskSupervisor:
     ) -> asyncio.Task[Any]:
         """Create and track a task for a plugin."""
         task_name = name or f"{plugin}-task"
-        task = asyncio.create_task(coro, name=task_name)
+        if _asyncio_create_task_supports_name():
+            task = asyncio.create_task(coro, name=task_name)
+        else:
+            task = asyncio.create_task(coro)
         meta = {
             "plugin": plugin,
             "name": task_name,
@@ -205,6 +208,7 @@ class TaskSupervisor:
             task.cancel()
         if tasks:
             gather_future = asyncio.gather(*tasks, return_exceptions=True)
+            results: list[Any] = []
             try:
                 results = await asyncio.wait_for(gather_future, timeout=timeout)
             except asyncio.TimeoutError:

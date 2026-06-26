@@ -13,8 +13,24 @@ class AttrInfo:
     """Attribute-like disco response used by notification helper tests."""
 
     def __init__(self, *, features=None, identities=None):
-        self.features = features
-        self.identities = identities
+        self.features = tuple(features or ())
+        self.identities = tuple(identities or ())
+
+
+class GetItemBot:
+    """Bot double exposing plugins through Slixmpp-style item access."""
+
+    plugin = None
+
+    def __init__(self, plugins=None, *, boundjid=None, presence=None):
+        self._plugins = plugins or {}
+        self.boundjid = boundjid
+        self.presence = presence
+
+    def __getitem__(self, key):
+        if key in self._plugins:
+            return self._plugins[key]
+        raise KeyError(key)
 
 
 @pytest.fixture(autouse=True)
@@ -88,15 +104,16 @@ async def test_target_is_muc_room_handles_missing_or_failing_disco():
     failing = SimpleNamespace(get_info=AsyncMock(side_effect=RuntimeError("boom")))
     assert await xmpp_notify.target_is_muc_room(SimpleNamespace(plugin={"xep_0030": failing}), "room@conf.test") is False
 
-    class BotGetItem:
-        plugin = None
-
-        def __getitem__(self, key):
-            if key == "xep_0030":
-                return SimpleNamespace(get_info=AsyncMock(return_value={"features": [xmpp_notify._MUC_FEATURE]}))
-            raise KeyError(key)
-
-    assert await xmpp_notify.target_is_muc_room(BotGetItem(), "room@conf.test") is True
+    getitem_bot = GetItemBot(
+        {
+            "xep_0030": SimpleNamespace(
+                get_info=AsyncMock(
+                    return_value={"features": [xmpp_notify._MUC_FEATURE]}
+                )
+            )
+        }
+    )
+    assert await xmpp_notify.target_is_muc_room(getitem_bot, "room@conf.test") is True
 
 
 @pytest.mark.asyncio
@@ -122,13 +139,7 @@ async def test_ensure_room_joined_skips_existing_room():
 async def test_ensure_room_joined_requires_muc_plugin():
     assert await xmpp_notify.ensure_room_joined(SimpleNamespace(plugin={}), "room@conf.test") is False
 
-    class BotGetItemMissing:
-        plugin = None
-
-        def __getitem__(self, key):
-            raise KeyError(key)
-
-    assert await xmpp_notify.ensure_room_joined(BotGetItemMissing(), "room@conf.test") is False
+    assert await xmpp_notify.ensure_room_joined(GetItemBot(), "room@conf.test") is False
 
 
 @pytest.mark.asyncio
@@ -160,17 +171,15 @@ async def test_ensure_room_joined_uses_explicit_or_bound_nick_and_getitem_fallba
     monkeypatch.setitem(xmpp_notify.config, "nick", "")
     muc = SimpleNamespace(join_muc=AsyncMock())
 
-    class BotGetItem:
-        plugin = None
-        boundjid = SimpleNamespace(resource="BoundBot")
-        presence = SimpleNamespace(joined_rooms={}, status={})
+    getitem_bot = GetItemBot(
+        {"xep_0045": muc},
+        boundjid=SimpleNamespace(resource="BoundBot"),
+        presence=SimpleNamespace(joined_rooms={}, status={}),
+    )
 
-        def __getitem__(self, key):
-            if key == "xep_0045":
-                return muc
-            raise KeyError(key)
-
-    assert await xmpp_notify.ensure_room_joined(BotGetItem(), "room@conf.test", nick="Explicit") is True
+    assert await xmpp_notify.ensure_room_joined(
+        getitem_bot, "room@conf.test", nick="Explicit"
+    ) is True
     muc.join_muc.assert_awaited_once_with("room@conf.test", "Explicit", pshow=None, pstatus=None)
 
 

@@ -27,7 +27,7 @@ class CommandMetadata(TypedDict, total=False):
 COMMAND_HELP: dict[str, CommandMetadata] = {
     "help": {
         "short": "Show help for plugins and commands.",
-        "usage": "{prefix}help [all|commands|plugins|roles|categories|(category <name>)|<plugin>|<command>]",
+        "usage": "{prefix}help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]",
         "examples": [
             "{prefix}help",
             "{prefix}help rooms",

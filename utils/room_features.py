@@ -9,13 +9,16 @@ from utils.formatting import bool_label
 
 
 class PluginStore(Protocol):
-    async def get_global(self, key: str, default: object = None) -> object: ...
+    async def get_global(self, key: str, default: object = None) -> object:
+        raise NotImplementedError
 
-    async def set_global(self, key: str, value: object) -> None: ...
+    async def set_global(self, key: str, value: object) -> None:
+        raise NotImplementedError
 
 
 class PluginUsers(Protocol):
-    def plugin(self, name: str) -> PluginStore: ...
+    def plugin(self, name: str) -> PluginStore:
+        raise NotImplementedError
 
 
 class RoomFeatureDatabase(Protocol):

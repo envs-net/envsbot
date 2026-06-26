@@ -144,6 +144,7 @@ async def test_snapshot_without_done_keeps_cancelled_and_failed_tasks():
     items = supervisor.snapshot(include_done=False)
     statuses = {item.name: item.status for item in items}
 
+    assert "success" not in statuses
     assert statuses == {"cancelled": "cancelled", "failure": "failed"}
 
 
@@ -179,8 +180,6 @@ async def test_task_supervisor_failure_summary_and_cancel_all():
 
 @pytest.mark.asyncio
 async def test_task_supervisor_ignores_untracked_done_task_and_creator_shapes(caplog):
-    from utils import task_supervisor as ts
-
     caplog.set_level("DEBUG", logger="utils.task_supervisor")
 
     async def marker():
