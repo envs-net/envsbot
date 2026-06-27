@@ -10,12 +10,13 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from urllib.parse import urlparse
 
 
 ALLOWED_FETCH_SCHEMES = frozenset({"http", "https"})
 LOCALHOST_NAMES = frozenset({"localhost", "localhost.localdomain"})
+Resolver = Callable[[str], Iterable[str]]
 
 
 class UnsafeFetchURL(ValueError):
@@ -56,7 +57,10 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _resolved_ips(hostname: str, resolver=None) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+def _resolved_ips(
+    hostname: str,
+    resolver: Resolver | None = None,
+) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     if resolver is None:
         try:
             infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
@@ -75,7 +79,12 @@ def _resolved_ips(hostname: str, resolver=None) -> set[ipaddress.IPv4Address | i
     return ips
 
 
-def validate_fetch_url(url: str, *, allow_private: bool = False, resolver=None) -> str:
+def validate_fetch_url(
+    url: str,
+    *,
+    allow_private: bool = False,
+    resolver: Resolver | None = None,
+) -> str:
     """Validate a user-supplied fetch URL and return the normalized string.
 
     When ``allow_private`` is false, loopback, private, link-local, multicast,
@@ -112,7 +121,7 @@ async def validate_fetch_url_async(
     url: str,
     *,
     allow_private: bool = False,
-    resolver=None,
+    resolver: Resolver | None = None,
 ) -> str:
     """Async wrapper for :func:`validate_fetch_url`.
 
