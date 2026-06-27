@@ -448,8 +448,8 @@ def fetch_url_title(url, max_redirects=None):
                 )
                 try:
                     resp.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("Ignoring error while closing redirect response: %s", exc)
                 continue
 
             # Only try to find title/desc in text/html

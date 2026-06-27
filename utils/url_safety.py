@@ -44,7 +44,16 @@ def _ip_from_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Add
 
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True only for globally routable addresses."""
-    return ip.is_global
+    is_global = getattr(ip, "is_global", None)
+    if is_global is not None:
+        return bool(is_global)
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
 
 
 def _resolved_ips(hostname: str, resolver=None) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -107,8 +116,9 @@ async def validate_fetch_url_async(
 ) -> str:
     """Async wrapper for :func:`validate_fetch_url`.
 
-    DNS resolution is run in a worker thread so command handlers do not block the
-    event loop while validating user-supplied URLs.
+    The synchronous validation is run in a worker thread so command handlers do
+    not block the event loop. If the default resolver path is used, DNS lookup
+    also happens in that worker thread.
     """
     return await asyncio.to_thread(
         validate_fetch_url,
