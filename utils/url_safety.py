@@ -53,9 +53,8 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     keeps the behavior conservative on older or unusual ``ipaddress`` objects by
     rejecting every range that must not be fetched by public bot commands.
     """
-    is_global = getattr(ip, "is_global", None)
-    if is_global is not None:
-        return is_global
+    if hasattr(ip, "is_global"):
+        return ip.is_global
 
     # Compatibility fallback for address objects without ``is_global``.
     # Treat only clearly public addresses as fetchable and keep special-use
@@ -85,7 +84,9 @@ def _resolved_ips(
             )
         except OSError as exc:
             raise UnsafeFetchURL("hostname could not be resolved safely") from exc
-        values: Iterable[str] = (info[4][0] for info in infos)
+        values = tuple(info[4][0] for info in infos)
+        if not values:
+            raise UnsafeFetchURL("hostname could not be resolved safely")
     else:
         resolved_values = resolver(hostname)
         if resolved_values is None:
@@ -106,6 +107,10 @@ def _resolved_ips(
                 value,
             )
             continue
+
+    if not ips:
+        raise UnsafeFetchURL("all resolved IP addresses were invalid")
+
     return ips
 
 
@@ -142,8 +147,6 @@ def validate_fetch_url(
         return url
 
     ips = _resolved_ips(hostname, resolver=resolver)
-    if not ips:
-        raise UnsafeFetchURL("hostname could not be resolved safely")
 
     if any(not _is_public_ip(ip) for ip in ips):
         raise UnsafeFetchURL("private or local network URLs are not allowed")

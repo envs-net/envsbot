@@ -74,6 +74,20 @@ def test_validate_fetch_url_logs_invalid_resolver_values(caplog):
     assert "not-an-ip" in caplog.text
 
 
+def test_validate_fetch_url_rejects_only_invalid_resolver_values(caplog):
+    with caplog.at_level(logging.WARNING, logger=url_safety.__name__):
+        with pytest.raises(
+            url_safety.UnsafeFetchURL,
+            match="all resolved IP addresses were invalid",
+        ):
+            url_safety.validate_fetch_url(
+                "https://example.org/feed",
+                resolver=lambda hostname: ["not-an-ip"],
+            )
+
+    assert "invalid IP address value" in caplog.text
+
+
 def test_validate_fetch_url_allow_private_skips_network_checks():
     url = "http://127.0.0.1/status"
 
