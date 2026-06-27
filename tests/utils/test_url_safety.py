@@ -68,3 +68,42 @@ async def test_validate_fetch_url_async_uses_same_policy():
     )
 
     assert result == "https://example.org/feed"
+
+
+def test_is_public_ip_fallback_for_legacy_ipaddress_objects():
+    class LegacyPublicIP:
+        is_private = False
+        is_loopback = False
+        is_link_local = False
+        is_multicast = False
+        is_unspecified = False
+
+    class LegacyPrivateIP:
+        is_private = True
+        is_loopback = False
+        is_link_local = False
+        is_multicast = False
+        is_unspecified = False
+
+    assert url_safety._is_public_ip(LegacyPublicIP()) is True
+    assert url_safety._is_public_ip(LegacyPrivateIP()) is False
+
+
+@pytest.mark.asyncio
+async def test_validate_fetch_url_async_uses_running_loop_executor(monkeypatch):
+    calls = []
+
+    class FakeLoop:
+        async def run_in_executor(self, executor, func):
+            calls.append(executor)
+            return func()
+
+    monkeypatch.setattr(url_safety.asyncio, "get_running_loop", lambda: FakeLoop())
+
+    result = await url_safety.validate_fetch_url_async(
+        "https://example.org/feed",
+        resolver=lambda hostname: ["93.184.216.34"],
+    )
+
+    assert result == "https://example.org/feed"
+    assert calls == [None]

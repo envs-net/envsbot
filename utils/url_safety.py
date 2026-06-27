@@ -8,6 +8,7 @@ SSRF guardrails before opening network connections and again after redirects.
 from __future__ import annotations
 
 import asyncio
+import functools
 import ipaddress
 import socket
 from collections.abc import Callable, Iterable
@@ -44,10 +45,19 @@ def _ip_from_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Add
 
 
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Return True only for globally routable addresses."""
+    """Return True only for globally routable addresses.
+
+    Prefer ``ip.is_global`` when the runtime provides it.  The explicit fallback
+    keeps the behavior conservative on older or unusual ``ipaddress`` objects by
+    rejecting every range that must not be fetched by public bot commands.
+    """
     is_global = getattr(ip, "is_global", None)
     if is_global is not None:
         return bool(is_global)
+
+    # Compatibility fallback for address objects without ``is_global``.
+    # Treat only clearly public addresses as fetchable and keep special-use
+    # ranges blocked.
     return not (
         ip.is_private
         or ip.is_loopback
@@ -90,7 +100,11 @@ def validate_fetch_url(
     When ``allow_private`` is false, loopback, private, link-local, multicast,
     unspecified and otherwise non-global addresses are rejected.  Hostnames are
     resolved before fetches so DNS names pointing to private networks are blocked
-    too.  Tests can inject ``resolver`` to avoid real DNS.
+    too.  This is a pre-flight validation step, not a guarantee about the
+    eventual connection target: DNS answers can change between validation and
+    connect.  Callers must validate again immediately before each outbound fetch
+    and after every redirect hop.  Tests can inject ``resolver`` to avoid real
+    DNS.
     """
     url = str(url or "").strip()
     hostname = _hostname(url)
@@ -129,9 +143,11 @@ async def validate_fetch_url_async(
     not block the event loop. If the default resolver path is used, DNS lookup
     also happens in that worker thread.
     """
-    return await asyncio.to_thread(
+    func = functools.partial(
         validate_fetch_url,
         url,
         allow_private=allow_private,
         resolver=resolver,
     )
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, func)
