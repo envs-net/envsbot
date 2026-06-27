@@ -29,7 +29,7 @@ class FetchURLTooLarge(ValueError):
 
 
 def _hostname(value: str) -> str:
-    parsed = urlparse(str(value or "").strip())
+    parsed = urlparse(value.strip())
     if parsed.scheme.lower() not in ALLOWED_FETCH_SCHEMES:
         raise UnsafeFetchURL("only http and https URLs are allowed")
     if not parsed.netloc or not parsed.hostname:
@@ -73,15 +73,25 @@ def _resolved_ips(
 ) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     if resolver is None:
         try:
-            infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+            # socket.getaddrinfo() names this parameter ``type``; use
+            # positional arguments here to avoid shadowing/confusion warnings.
+            infos = socket.getaddrinfo(
+                hostname,
+                None,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
+            )
         except OSError as exc:
             raise UnsafeFetchURL("hostname could not be resolved safely") from exc
         values: Iterable[str] = (info[4][0] for info in infos)
     else:
-        values = resolver(hostname)
+        resolved_values = resolver(hostname)
+        if resolved_values is None:
+            raise UnsafeFetchURL("hostname resolver returned no results")
+        values = resolved_values
 
     ips = set()
-    for value in values or ():
+    for value in values:
         try:
             ips.add(ipaddress.ip_address(str(value).strip("[]")))
         except ValueError:

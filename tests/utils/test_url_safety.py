@@ -44,10 +44,33 @@ def test_validate_fetch_url_rejects_hostname_resolving_to_private_address():
         )
 
 
+def test_validate_fetch_url_rejects_none_resolver_result():
+    with pytest.raises(url_safety.UnsafeFetchURL, match="resolver returned no results"):
+        url_safety.validate_fetch_url(
+            "https://example.org/feed",
+            resolver=lambda hostname: None,
+        )
+
+
 def test_validate_fetch_url_allow_private_skips_network_checks():
     url = "http://127.0.0.1/status"
 
     assert url_safety.validate_fetch_url(url, allow_private=True) == url
+
+
+def test_validate_fetch_url_default_resolver_uses_stream_socket(monkeypatch):
+    calls = []
+
+    def fake_getaddrinfo(host, port, family, socket_type):
+        calls.append((host, port, family, socket_type))
+        return [(None, None, None, None, ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(url_safety.socket, "getaddrinfo", fake_getaddrinfo)
+
+    assert url_safety.validate_fetch_url("https://example.org/feed") == "https://example.org/feed"
+    assert calls == [
+        ("example.org", None, url_safety.socket.AF_UNSPEC, url_safety.socket.SOCK_STREAM)
+    ]
 
 
 def test_validate_fetch_url_wraps_resolver_failures(monkeypatch):
