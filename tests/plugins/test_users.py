@@ -126,6 +126,21 @@ async def test_track_room_nick(build_mock_bot, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_find_users_by_nick_safe_sorts_and_handles_missing(build_mock_bot):
+    bot = build_mock_bot()
+    bot.db.users._nick_index = {
+        "Nick": ["z@example.net", "a@example.net"],
+        "Other": ["other@example.net"],
+    }
+
+    assert await users_mod.find_users_by_nick_safe(bot, "Nick") == [
+        "a@example.net",
+        "z@example.net",
+    ]
+    assert await users_mod.find_users_by_nick_safe(bot, "Missing") == []
+
+
+@pytest.mark.asyncio
 async def test_update_last_seen_newer_skipped(build_mock_bot):
     bot = build_mock_bot()
     bot.db.users.get = AsyncMock(

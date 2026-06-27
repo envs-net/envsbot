@@ -232,6 +232,20 @@ async def test_cmd_xmpp_srv(monkeypatch, bot, msg):
     assert to_thread_calls
 
 
+def test_make_srv_resolver_sets_timeouts():
+    class FakeDNSResolver:
+        class Resolver:
+            def __init__(self):
+                self.lifetime = None
+                self.timeout = None
+
+    resolver = xmpp._make_srv_resolver(FakeDNSResolver, 3.5)
+
+    assert isinstance(resolver, FakeDNSResolver.Resolver)
+    assert resolver.lifetime == 3.5
+    assert resolver.timeout == 3.5
+
+
 @pytest.mark.asyncio
 async def test_cmd_xmpp_compliance(bot, msg):
     bot.db.users.plugin.return_value.get_global = AsyncMock(
