@@ -52,6 +52,14 @@ def test_validate_fetch_url_rejects_none_resolver_result():
         )
 
 
+def test_validate_fetch_url_rejects_empty_resolver_result():
+    with pytest.raises(url_safety.UnsafeFetchURL, match="resolver returned no results"):
+        url_safety.validate_fetch_url(
+            "https://example.org/feed",
+            resolver=lambda hostname: [],
+        )
+
+
 def test_validate_fetch_url_allow_private_skips_network_checks():
     url = "http://127.0.0.1/status"
 

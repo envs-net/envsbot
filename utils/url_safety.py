@@ -53,7 +53,7 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """
     is_global = getattr(ip, "is_global", None)
     if is_global is not None:
-        return bool(is_global)
+        return is_global
 
     # Compatibility fallback for address objects without ``is_global``.
     # Treat only clearly public addresses as fetchable and keep special-use
@@ -88,7 +88,9 @@ def _resolved_ips(
         resolved_values = resolver(hostname)
         if resolved_values is None:
             raise UnsafeFetchURL("hostname resolver returned no results")
-        values = resolved_values
+        values = tuple(resolved_values)
+        if not values:
+            raise UnsafeFetchURL("hostname resolver returned no results")
 
     ips = set()
     for value in values:
