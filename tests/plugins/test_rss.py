@@ -223,8 +223,10 @@ async def test_fetch_feed_handle_redirect_and_structure(monkeypatch):
         def __contains__(self, k):
             return k == "feed"
 
-    def fake_parse(url, request_headers=None):
-        return DummyFeed(url)
+    def fake_parse(payload, request_headers=None, response_headers=None):
+        assert payload == b"feed-data"
+        assert response_headers == {"content-type": "application/rss+xml"}
+        return DummyFeed("https://someurl.com/feed")
 
     feedparser_mod = type(
         "Feedparser", (), {"parse": staticmethod(fake_parse)})()
@@ -233,13 +235,129 @@ async def test_fetch_feed_handle_redirect_and_structure(monkeypatch):
     async def fake_to_thread(fn, *a, **kw):
         return fn(*a, **kw)
 
+    async def fake_fetch_feed_bytes(url):
+        assert url == "https://someurl.com/feed"
+        return b"feed-data", url, "application/rss+xml"
+
     monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_feed_bytes)
 
     result = await rss.fetch_feed("https://someurl.com/feed")
 
     assert result.feed["href"] == "https://someurl.com/feed"
     assert result.feed["id"] == "https://someurl.com/feed"
     assert result.feed["title"] == "Test"
+
+
+@pytest.mark.asyncio
+async def test_fetch_feed_rejects_unsafe_feed_url(monkeypatch):
+    async def blocked(url, *, allow_private=False):
+        assert url == "http://127.0.0.1/feed"
+        assert allow_private is False
+        raise rss.UnsafeFetchURL("blocked")
+
+    class DummySession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        def get(self, *args, **kwargs):
+            pytest.fail("unsafe RSS URL should not be fetched")
+
+    monkeypatch.setattr(rss, "validate_fetch_url_async", blocked)
+    monkeypatch.setattr(
+        rss.aiohttp,
+        "ClientSession",
+        lambda **kwargs: DummySession(),
+    )
+
+    with pytest.raises(rss.UnsafeFetchURL):
+        await rss._fetch_feed_bytes("http://127.0.0.1/feed")
+
+
+@pytest.mark.asyncio
+async def test_fetch_feed_bytes_redirect_and_size_limit(monkeypatch):
+    validated = []
+
+    async def allow(url, *, allow_private=False):
+        validated.append(url)
+        return url
+
+    class DummyContent:
+        def __init__(self, chunks):
+            self.chunks = chunks
+
+        async def iter_chunked(self, size):
+            for chunk in self.chunks:
+                yield chunk
+
+    class DummyResp:
+        def __init__(self, status, url, headers, chunks=()):
+            self.status = status
+            self.url = url
+            self.headers = headers
+            self.content = DummyContent(chunks)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        def raise_for_status(self):
+            if self.status >= 400:
+                raise rss.aiohttp.ClientResponseError(
+                    None, (), status=self.status
+                )
+
+    class DummySession:
+        def __init__(self, **kwargs):
+            self.calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        def get(self, url, allow_redirects=False):
+            self.calls.append(url)
+            if len(self.calls) == 1:
+                return DummyResp(302, url, {"Location": "/real.xml"})
+            return DummyResp(
+                200,
+                url,
+                {"Content-Type": "application/rss+xml"},
+                [b"abc"],
+            )
+
+    monkeypatch.setattr(rss, "validate_fetch_url_async", allow)
+    monkeypatch.setattr(rss.aiohttp, "ClientSession", DummySession)
+
+    body, final_url, content_type = await rss._fetch_feed_bytes(
+        "https://example.org/feed"
+    )
+
+    assert body == b"abc"
+    assert final_url == "https://example.org/real.xml"
+    assert content_type == "application/rss+xml"
+    assert validated == [
+        "https://example.org/feed",
+        "https://example.org/real.xml",
+    ]
+
+    monkeypatch.setattr(rss, "RSS_MAX_READ_BYTES", 4)
+
+    class BigSession(DummySession):
+        def get(self, url, allow_redirects=False):
+            return DummyResp(200, url, {}, [b"123", b"45"])
+
+    monkeypatch.setattr(rss.aiohttp, "ClientSession", BigSession)
+
+    with pytest.raises(rss.FetchURLTooLarge):
+        await rss._fetch_feed_bytes("https://example.org/big.xml")
 
 
 @pytest.mark.asyncio
@@ -302,6 +420,7 @@ def test_get_latest_entry_id():
 def test_normalize_and_resolve_url():
     assert rss._normalize_url("EXAMPLE.COM/abc/") == "https://EXAMPLE.COM/abc"
     assert rss._normalize_url("http://abc.com") == "http://abc.com"
+    assert rss._normalize_url("ftp://abc.com/feed") == "ftp://abc.com/feed"
 
     assert (
         rss._resolve_relative_url(
@@ -366,6 +485,17 @@ async def test_rss_add_failures(monkeypatch, make_bot):
                           msg, True)
 
     assert any("Failed to fetch or parse feed" in r[1] for r in bot.replies)
+
+
+@pytest.mark.asyncio
+async def test_rss_add_rejects_unsupported_feed_scheme(monkeypatch, make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
+
+    await rss.rss_command(bot, "jid", "nick", ["add", "ftp://bad/feed"], msg, True)
+
+    assert any("Failed to fetch or parse feed" in r[1] for r in bot.replies)
+    assert not bot.plugin_store.get(rss.RSS_KEY)
 
 
 @pytest.mark.asyncio

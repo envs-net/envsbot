@@ -16,6 +16,10 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.COMMAND_PREFIX == ","
     assert sample.TIMEZONE == "Europe/Berlin"
     assert sample.BACKUP_ON_START is True
+    assert sample.ALLOW_PRIVATE_FETCH_URLS is False
+    assert sample.RSS_FETCH_TIMEOUT_SECONDS == sample.HTTP_TIMEOUT_SECONDS
+    assert sample.RSS_MAX_REDIRECTS > 0
+    assert sample.RSS_MAX_READ_BYTES > 0
     assert sample.DUCKS["min_messages"] < sample.DUCKS["max_messages"]
     assert sample.PIN_PAGE_SIZE > 0
     assert sample.XKCD_CHECK_INTERVAL > 0

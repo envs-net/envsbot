@@ -46,7 +46,7 @@ For production installations, use the **latest tagged release** instead of the
 changes that are not part of a stable release yet.
 
 The quickstart below automatically checks out the newest local version-sorted tag.
-You can also replace `LATEST_TAG` with an explicit release such as `v1.0.0`.
+You can also replace `LATEST_TAG` with an explicit release such as `vX.Y.Z`.
 
 ```bash
 sudo useradd -m -s /bin/bash envsbot -d /srv/envsbot

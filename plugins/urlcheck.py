@@ -38,6 +38,7 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
+from utils.url_safety import UnsafeFetchURL, validate_fetch_url
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins._core import handle_room_toggle_command
 
@@ -87,6 +88,7 @@ URLCHECK_USER_AGENT = str(
     or config.get("http_user_agent")
     or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
 )
+ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
 
 # seconds to wait until next URL output
 _wait_secs_url = URLCHECK_WAIT_SECONDS
@@ -261,6 +263,8 @@ async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):
         elif ctype:
             return
 
+    except UnsafeFetchURL as e:
+        log.info("[URLCHECK] Blocked unsafe URL %s: %s", url, e)
     except Exception as e:
         if str(e) == "Too many redirects":
             bot.reply(
@@ -413,6 +417,10 @@ def fetch_url_title(url, max_redirects=None):
         max_redirects = URLCHECK_MAX_REDIRECTS
 
     headers = {"User-Agent": URLCHECK_USER_AGENT}
+    url = validate_fetch_url(
+        url,
+        allow_private=ALLOW_PRIVATE_FETCH_URLS,
+    )
 
     session = requests.Session()
     session.headers.update(headers)
@@ -434,6 +442,14 @@ def fetch_url_title(url, max_redirects=None):
             if (status in (301, 302, 303, 307, 308)
                     and "Location" in resp.headers):
                 url = urljoin(resp.url, resp.headers["Location"])
+                url = validate_fetch_url(
+                    url,
+                    allow_private=ALLOW_PRIVATE_FETCH_URLS,
+                )
+                try:
+                    resp.close()
+                except Exception:
+                    pass
                 continue
 
             # Only try to find title/desc in text/html

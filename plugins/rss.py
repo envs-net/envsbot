@@ -17,12 +17,19 @@ import time
 import html
 import hashlib
 from difflib import SequenceMatcher
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+
+import aiohttp
 
 from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
+from utils.url_safety import (
+    FetchURLTooLarge,
+    UnsafeFetchURL,
+    validate_fetch_url_async,
+)
 from core_plugins.rooms import JOINED_ROOMS
 
 try:
@@ -57,6 +64,19 @@ RSS_USER_AGENT = str(
     or config.get("http_user_agent")
     or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
 )
+RSS_FETCH_TIMEOUT_SECONDS = float(
+    config.get(
+        "rss_fetch_timeout_seconds",
+        config.get("http_timeout_seconds", 8),
+    )
+    or 8
+)
+RSS_MAX_REDIRECTS = max(1, int(config.get("rss_max_redirects", 5) or 5))
+RSS_MAX_READ_BYTES = max(
+    4096,
+    int(config.get("rss_max_read_bytes", 1048576) or 1048576),
+)
+ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
 
 
 def _command_prefix(bot=None) -> str:
@@ -278,8 +298,9 @@ def _normalize_url(url: str) -> str:
     # Remove trailing slashes and normalize scheme
     url = url.rstrip("/")
 
-    # Ensure scheme exists
-    if not url.startswith(("http://", "https://", "ftp://")):
+    # Ensure scheme exists.  Preserve unsupported explicit schemes so the
+    # shared fetch safety validator can reject them cleanly.
+    if not urlparse(url).scheme:
         url = "https://" + url
 
     return url
@@ -336,12 +357,57 @@ async def save_feeds(store, feeds):
     await store.set_global(RSS_KEY, feeds)
 
 
+async def _read_limited_response(resp) -> bytes:
+    """Read an aiohttp response without exceeding RSS_MAX_READ_BYTES."""
+    chunks = bytearray()
+    async for chunk in resp.content.iter_chunked(8192):
+        chunks.extend(chunk)
+        if len(chunks) > RSS_MAX_READ_BYTES:
+            raise FetchURLTooLarge(
+                f"feed response exceeds {RSS_MAX_READ_BYTES} bytes"
+            )
+    return bytes(chunks)
+
+
+async def _fetch_feed_bytes(url: str) -> tuple[bytes, str, str]:
+    """Fetch feed bytes with explicit timeout and redirect safety checks."""
+    headers = _get_feed_headers()
+    timeout = aiohttp.ClientTimeout(total=RSS_FETCH_TIMEOUT_SECONDS)
+    current_url = url
+
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        headers=headers,
+    ) as session:
+        for _ in range(RSS_MAX_REDIRECTS + 1):
+            current_url = await validate_fetch_url_async(
+                current_url,
+                allow_private=ALLOW_PRIVATE_FETCH_URLS,
+            )
+            async with session.get(current_url, allow_redirects=False) as resp:
+                if resp.status in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location")
+                    if not location:
+                        raise UnsafeFetchURL(
+                            "redirect response without Location header"
+                        )
+                    current_url = urljoin(str(resp.url), location)
+                    continue
+
+                resp.raise_for_status()
+                body = await _read_limited_response(resp)
+                content_type = resp.headers.get("Content-Type", "")
+                return body, str(resp.url), content_type
+
+    raise UnsafeFetchURL("too many redirects")
+
+
 async def fetch_feed(url):
     """
     Fetch and parse RSS feed with proper URL handling.
 
-    Prevents feedparser from modifying the feed URL through redirects or
-    normalization.
+    Fetching is done with aiohttp so timeouts, redirects and private-network
+    safety checks are enforced before feedparser parses the response bytes.
 
     Args:
         url: Feed URL to fetch
@@ -352,17 +418,18 @@ async def fetch_feed(url):
     if not feedparser:
         raise RuntimeError("feedparser module not installed")
 
-    headers = _get_feed_headers()
+    body, _final_url, content_type = await _fetch_feed_bytes(url)
 
-    # Parse with request_headers and preserve original URL
     result = await asyncio.to_thread(
         feedparser.parse,
-        url,
-        request_headers=headers,
+        body,
+        response_headers=(
+            {"content-type": content_type} if content_type else None
+        ),
     )
 
-    # Force the feed URL to be the original URL we requested
-    # This prevents feedparser from using redirected URLs
+    # Force the feed URL to be the original URL we requested.  This keeps
+    # storage stable even when the server redirects the fetch request.
     if "feed" in result:
         result.feed["href"] = url
         result.feed["id"] = url

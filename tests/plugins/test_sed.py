@@ -108,17 +108,50 @@ def test_apply_sed_valid_and_invalid():
 
 
 def test_apply_sed_timeout(monkeypatch):
-    # simulate a pattern that hangs (catastrophic backtracking)
+    def fake_run_worker(original_text, pattern, replacement, flags_str):
+        return None, -1, pattern
 
-    def fake_worker(*_, **__):
-        import time
-        time.sleep(2)
-    monkeypatch.setattr(sed, "_regex_worker", fake_worker)
-    # forcibly reduce timeout for the test
-    monkeypatch.setattr(sed, "REGEX_TIMEOUT", 0.2)
-    out, n = sed.apply_sed("A"*1000, "(A+)+", "B", "g")
-    # This triggers the timeout condition, returning (None, -1)
+    monkeypatch.setattr(sed, "_run_sed_worker", fake_run_worker)
+    out, n = sed.apply_sed("A" * 1000, "(A+)+", "B", "g")
     assert out is None and n == -1
+
+
+def test_multiprocessing_context_avoids_plain_fork(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        sed.multiprocessing,
+        "get_all_start_methods",
+        lambda: ["fork", "spawn"],
+    )
+
+    def fake_get_context(method=None):
+        calls.append(method)
+        return object()
+
+    monkeypatch.setattr(sed.multiprocessing, "get_context", fake_get_context)
+
+    assert sed._multiprocessing_context() is not None
+    assert calls == ["spawn"]
+
+
+def test_multiprocessing_context_prefers_forkserver(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        sed.multiprocessing,
+        "get_all_start_methods",
+        lambda: ["fork", "spawn", "forkserver"],
+    )
+
+    def fake_get_context(method=None):
+        calls.append(method)
+        return object()
+
+    monkeypatch.setattr(sed.multiprocessing, "get_context", fake_get_context)
+
+    assert sed._multiprocessing_context() is not None
+    assert calls == ["forkserver"]
 
 
 def test_get_last_message_and_get_message_by_id_cache(monkeypatch):

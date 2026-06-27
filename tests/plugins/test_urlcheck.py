@@ -117,6 +117,7 @@ async def test_fetch_url_title_basic(monkeypatch):
 
         def close(self): pass
     monkeypatch.setattr(urlcheck, "requests", MagicMock(Session=MySession))
+    monkeypatch.setattr(urlcheck, "validate_fetch_url", lambda url, **kwargs: url)
     final_url, status, ctype, title, _, desc = urlcheck.fetch_url_title(
         "https://xx")
     assert final_url == "https://final"
@@ -124,6 +125,53 @@ async def test_fetch_url_title_basic(monkeypatch):
     assert "text/html" in ctype
     assert title == "X"
     assert desc == "desc"
+
+
+def test_fetch_url_title_blocks_unsafe_initial_url(monkeypatch):
+    monkeypatch.setattr(
+        urlcheck.requests,
+        "Session",
+        lambda: pytest.fail("unsafe URL should not be fetched"),
+    )
+
+    with pytest.raises(urlcheck.UnsafeFetchURL):
+        urlcheck.fetch_url_title("http://127.0.0.1/private")
+
+
+def test_fetch_url_title_blocks_unsafe_redirect(monkeypatch):
+    seen = []
+
+    def fake_validate(url, **kwargs):
+        seen.append(url)
+        if "127.0.0.1" in url:
+            raise urlcheck.UnsafeFetchURL("blocked")
+        return url
+
+    class FakeRedirectResp:
+        url = "https://example.org/feed"
+        headers = {"Location": "http://127.0.0.1/private"}
+        status_code = 302
+
+        def close(self):
+            pass
+
+    class MySession:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, url, allow_redirects, timeout, stream):
+            return FakeRedirectResp()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(urlcheck, "requests", MagicMock(Session=MySession))
+    monkeypatch.setattr(urlcheck, "validate_fetch_url", fake_validate)
+
+    with pytest.raises(urlcheck.UnsafeFetchURL):
+        urlcheck.fetch_url_title("https://example.org/feed")
+
+    assert seen == ["https://example.org/feed", "http://127.0.0.1/private"]
 
 
 def test_youtube_regex():

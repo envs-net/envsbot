@@ -83,6 +83,10 @@ BACKUP_ON_START = True
 HTTP_TIMEOUT_SECONDS = 8
 HTTP_USER_AGENT = "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
 
+# Safety guard for user-supplied URLs fetched by RSS and URL title checks.
+# Keep False for normal public bots. Set True only for trusted/private rooms.
+ALLOW_PRIVATE_FETCH_URLS = False
+
 
 # ================= vCARD / AVATAR =================
 
@@ -152,6 +156,11 @@ RSS_BACKOFF_INCREMENT_MULTIPLIER = 60
 # Duplicate title/description detection threshold, 0 < value <= 1.
 RSS_SIMILARITY_THRESHOLD = 0.8
 RSS_USER_AGENT = HTTP_USER_AGENT
+
+# Explicit RSS HTTP fetch limits.
+RSS_FETCH_TIMEOUT_SECONDS = HTTP_TIMEOUT_SECONDS
+RSS_MAX_REDIRECTS = 5
+RSS_MAX_READ_BYTES = 1048576
 
 
 # ================= BIRTHDAY NOTIFY =================

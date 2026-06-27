@@ -293,9 +293,27 @@ def _validate_sed_inputs(original_text: str, pattern: str, replacement: str,
     return original_text, pattern, replacement, flags_str, None
 
 
+def _multiprocessing_context():
+    """Return a safe multiprocessing context for regex isolation.
+
+    Avoid the plain fork start method: in a threaded asyncio bot, Python
+    3.13 warns that forking can deadlock.  Prefer forkserver where
+    available because it keeps the fast copy-on-write behavior without
+    forking the active bot process; fall back to spawn on platforms that
+    do not offer forkserver.
+    """
+    available_methods = multiprocessing.get_all_start_methods()
+
+    for method in ("forkserver", "spawn"):
+        if method in available_methods:
+            return multiprocessing.get_context(method)
+
+    return multiprocessing.get_context()
+
+
 def _run_sed_worker(original_text: str, pattern: str, replacement: str,
                     flags_str: str):
-    ctx = multiprocessing.get_context("fork")
+    ctx = _multiprocessing_context()
     result_queue = ctx.Queue(maxsize=1)
 
     process = ctx.Process(
