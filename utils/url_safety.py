@@ -49,6 +49,10 @@ def _ip_from_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Add
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True only for globally routable addresses.
 
+    Args:
+        ip: ``ipaddress.IPv4Address`` or ``ipaddress.IPv6Address`` instance
+            to evaluate for public routability.
+
     Prefer ``ip.is_global`` when the runtime provides it.  The explicit fallback
     keeps the behavior conservative on older or unusual ``ipaddress`` objects by
     rejecting every range that must not be fetched by public bot commands.
@@ -88,11 +92,7 @@ def _resolved_ips(
         if not values:
             raise UnsafeFetchURL("hostname could not be resolved safely")
     else:
-        resolved_values = resolver(hostname)
-        if resolved_values is None:
-            values = ()
-        else:
-            values = tuple(resolved_values)
+        values = tuple(resolver(hostname) or ())
         if not values:
             raise UnsafeFetchURL("hostname resolver returned no results")
 
