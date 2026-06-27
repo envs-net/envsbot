@@ -125,6 +125,7 @@ async def reset_poll_data(bot):
     poll_store = bot.db.users.plugin("poll")
     await poll_store.set_global("POLL", {"room@conf": True})
     await poll_store.set_global("POLL_DATA", {})
+    poll._core.JOINED_ROOMS["room@conf"] = {"nicks": {"alice": {}}}
     poll.AUTO_CLOSE_TASKS.clear()
 
 
@@ -138,8 +139,9 @@ def test__parse_create_args():
     d, q, opts, err = poll._parse_create_args("Q? | A | B")
     assert d is None and q == "Q?" and opts == ["A", "B"] and err is None
     # Not enough fields
-    d, q, opts, err = poll._parse_create_args("one | onlyone")
+    d, q, opts, err = poll._parse_create_args("one | onlyone", "!")
     assert err
+    assert "Usage: !poll create" in err
     # Timed but not enough
     d, q, opts, err = poll._parse_create_args("5h | onlyQ | onl")
     assert err

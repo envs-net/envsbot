@@ -110,10 +110,11 @@ def patch_enabled_rooms(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_udict_usage(dummy_bot, fake_room_msg):
+    dummy_bot.prefix = "!"
     await info_plugin.udict_search(dummy_bot, "jid", "nick", [],
                                    fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
-    assert "Usage" in text
+    assert "Usage: !udict <term>" in text
 
 
 @pytest.mark.asyncio
@@ -162,10 +163,11 @@ async def test_udict_error(monkeypatch, dummy_bot, fake_room_msg):
 
 @pytest.mark.asyncio
 async def test_fediverse_usage(dummy_bot, fake_room_msg):
+    dummy_bot.prefix = "!"
     await info_plugin.fediverse_latest(dummy_bot, "jid", "nick", [],
                                        fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
-    assert "Usage:" in text
+    assert "Usage: !fediverse <@user@instance>" in text
 
 
 @pytest.mark.asyncio
@@ -366,11 +368,12 @@ async def test_acronyms_delete_by_desc_and_nick(tmp_slang_files, dummy_bot,
 
 @pytest.mark.asyncio
 async def test_wikipedia_usage(dummy_bot, fake_room_msg):
+    dummy_bot.prefix = "!"
     dummy_bot.reset()
     await info_plugin.wikipedia_command(dummy_bot, "jid", "nick", [],
                                         fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
-    assert "usage" in text.lower()
+    assert "Usage: !wikipedia <search term>" in text
 
 
 @pytest.mark.asyncio

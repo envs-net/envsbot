@@ -40,6 +40,16 @@ from core_plugins._core import (
 
 log = logging.getLogger(__name__)
 
+
+def _command_prefix(bot=None) -> str:
+    """Return the currently configured command prefix for usage replies."""
+    return str(
+        getattr(bot, "prefix", None)
+        or config.get("prefix", ",")
+        or ","
+    )
+
+
 INFO_KEY = "INFORMATION"
 INFO_HTTP_TIMEOUT = float(config.get("http_timeout_seconds", 8) or 8)
 INFO_HTTP_USER_AGENT = str(config.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)")
@@ -89,7 +99,7 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"🟡️ Usage: {config.get('prefix', ',')}fediverse <@user@instance>"
+            f"🟡️ Usage: {_command_prefix(bot)}fediverse <@user@instance>"
         )
         return
 
@@ -179,7 +189,7 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"🟡️ Usage: {config.get('prefix', ',')}udict <term>"
+            f"🟡️ Usage: {_command_prefix(bot)}udict <term>"
         )
         return
 
@@ -263,7 +273,7 @@ async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     if not args:
-        bot.reply(msg, "Usage: ,wikipedia <search term>")
+        bot.reply(msg, f"Usage: {_command_prefix(bot)}wikipedia <search term>")
         return
 
     term = " ".join(args)
@@ -400,7 +410,7 @@ async def acronyms_cmd(bot, sender, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"Usage: {bot.prefix}acronyms <acronym>"
+            f"Usage: {_command_prefix(bot)}acronyms <acronym>"
         )
         return None
     query = args[0].strip().lower()
@@ -444,7 +454,7 @@ async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
     if len(args) < 2:
         bot.reply(
             msg,
-            f"Usage: {bot.prefix}acronyms add <acronym> <description>"
+            f"Usage: {_command_prefix(bot)}acronyms add <acronym> <description>"
         )
         return None
     abbreviation = args[0].strip()
@@ -505,7 +515,7 @@ async def acronyms_remove_cmd(bot, sender, nick, args, msg, is_room):
     if len(args) < 2:
         bot.reply(
             msg,
-            f"Usage: {bot.prefix}acronyms remove <acronym> <description>"
+            f"Usage: {_command_prefix(bot)}acronyms remove <acronym> <description>"
         )
         return None
     abbreviation = args[0].strip()
@@ -688,8 +698,8 @@ async def acronyms_delete_cmd(bot, sender, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"Usage: {bot.prefix}acronyms delete <acronym> <description> OR "
-            f"{bot.prefix}acronyms delete <nick>"
+            f"Usage: {_command_prefix(bot)}acronyms delete <acronym> <description> OR "
+            f"{_command_prefix(bot)}acronyms delete <nick>"
         )
         return None
     total_removed = 0
@@ -765,7 +775,7 @@ async def information_command(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"Usage: {config.get('prefix', ',')}info on|off|status"
+            f"Usage: {_command_prefix(bot)}info on|off|status"
         )
         return None
 
@@ -786,7 +796,7 @@ async def information_command(bot, sender_jid, nick, args, msg, is_room):
 
     bot.reply(
         msg,
-        "Usage: {prefix}information on|off|status (in a room or PM)"
+        f"Usage: {_command_prefix(bot)}information on|off|status (in a room or PM)"
     )
     return None
 

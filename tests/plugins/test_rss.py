@@ -154,6 +154,64 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     await rss.rss_command(bot, "jid1", "nick1", ["foobar"], msg, True)
     assert any("Unknown subcommand" in x[1] for x in bot.replies)
 
+@pytest.mark.asyncio
+async def test_rss_add_delete_reject_plain_private_chat(monkeypatch, make_bot):
+    bot = make_bot()
+    msg = {
+        "from": SimpleNamespace(bare="user@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot, "jid1", "nick1", ["add", "example.org/feed"], msg, False
+    )
+    assert bot.replies[-1][1] == "🔴 RSS add can only be used in a room or MUC DM."
+
+    await rss.rss_command(
+        bot, "jid1", "nick1", ["delete", "example.org/feed"], msg, False
+    )
+    assert bot.replies[-1][1] == "🔴 RSS delete can only be used in a room or MUC DM."
+
+
+@pytest.mark.asyncio
+async def test_rss_add_allows_joined_muc_pm(monkeypatch, make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    fake_feed_link = "https://www.example.com/rss"
+    msg = {
+        "from": SimpleNamespace(bare=room, resource="alice"),
+        "type": "chat",
+    }
+
+    class DummyFeed:
+        def __init__(self):
+            self.feed = {"title": "TestFeed", "link": fake_feed_link}
+            self.entries = [SimpleNamespace(
+                title="EntryTitle",
+                link="https://www.example.com/article",
+                description="EntryDesc",
+                id="https://www.example.com/article",
+            )]
+
+        def __contains__(self, key):
+            return key == "feed"
+
+    async def fake_fetch_feed(url):
+        return DummyFeed()
+
+    monkeypatch.setitem(rss.JOINED_ROOMS, room, {"nicks": {"alice": {}}})
+    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+
+    try:
+        await rss.rss_command(
+            bot, "jid1", "nick1", ["add", fake_feed_link], msg, False
+        )
+    finally:
+        rss.JOINED_ROOMS.pop(room, None)
+
+    assert fake_feed_link in bot.plugin_store.get(rss.RSS_KEY, {})
+
 
 @pytest.mark.asyncio
 async def test_fetch_feed_handle_redirect_and_structure(monkeypatch):

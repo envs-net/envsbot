@@ -58,6 +58,15 @@ MAX_HISTORY_PER_ROOM = int(config.get("poll_max_history_per_room", 50) or 50)
 AUTO_CLOSE_TASKS = {}  # (room_jid, poll_id) -> asyncio.Task
 
 
+def _command_prefix(bot=None) -> str:
+    """Return the currently configured command prefix for usage replies."""
+    return str(
+        getattr(bot, "prefix", None)
+        or config.get("prefix", ",")
+        or ","
+    )
+
+
 async def get_poll_store(bot):
     return bot.db.users.plugin("poll")
 
@@ -139,8 +148,9 @@ def _format_remaining(ends_at: int | None) -> str:
     return " ".join(parts)
 
 
-def _parse_create_args(raw: str) -> tuple[int | None, str | None,
-                                          list[str] | None, str | None]:
+def _parse_create_args(
+    raw: str, prefix: str = ","
+) -> tuple[int | None, str | None, list[str] | None, str | None]:
     """
     Parse:
       question | option1 | option2
@@ -154,7 +164,7 @@ def _parse_create_args(raw: str) -> tuple[int | None, str | None,
     parts = [p for p in parts if p]
 
     if len(parts) < 3:
-        out = "Usage: poll create [duration] | question | option1 |"
+        out = f"Usage: {prefix}poll create [duration] | question | option1 |"
         out += " option2 [| option3 ...]"
         return None, None, None, out
 
@@ -430,7 +440,9 @@ async def _restore_auto_close_tasks(bot):
 async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
                               data, room, args):
     raw = " ".join(args[1:]).strip()
-    duration, question, options, error = _parse_create_args(raw)
+    duration, question, options, error = _parse_create_args(
+        raw, _command_prefix(bot)
+    )
     if error:
         _poll_reply(bot, msg, error)
         return
@@ -502,7 +514,7 @@ async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
         "",
         _format_poll_options(poll),
         "",
-        f"Vote with: {bot.prefix}poll vote {poll_id} <number>",
+        f"Vote with: {_command_prefix(bot)}poll vote {poll_id} <number>",
     ]
     if poll.get("ends_at"):
         v = f"{_format_ts(poll['ends_at'])}"
@@ -566,7 +578,7 @@ async def _poll_handle_history(bot, msg, room_jid, room, args):
 
 async def _poll_handle_show_result(bot, msg, room_jid, room, args, sub):
     if len(args) < 2 or not str(args[1]).isdigit():
-        _poll_reply(bot, msg, f"Usage: {bot.prefix}poll {sub} <id>")
+        _poll_reply(bot, msg, f"Usage: {_command_prefix(bot)}poll {sub} <id>")
         return
 
     poll = _get_poll(room, args[1])
@@ -585,7 +597,7 @@ async def _poll_handle_show_result(bot, msg, room_jid, room, args, sub):
         if poll["status"] == "open":
             lines += [
                 "",
-                f"Vote with: {bot.prefix}poll"
+                f"Vote with: {_command_prefix(bot)}poll"
                 f" vote {poll['id']} <number>",
             ]
         _poll_reply(bot, msg, "\n".join(lines))
@@ -600,7 +612,7 @@ async def _poll_handle_vote(bot, msg, room_jid, room, data, args):
         _poll_reply(
             bot,
             msg,
-            f"Usage: {bot.prefix}poll vote <id> <option-number>",
+            f"Usage: {_command_prefix(bot)}poll vote <id> <option-number>",
         )
         return
 
@@ -651,7 +663,7 @@ async def _poll_handle_vote(bot, msg, room_jid, room, data, args):
 
 async def _poll_handle_manage(bot, msg, room_jid, room, is_room, args, sub):
     if len(args) < 2 or not str(args[1]).isdigit():
-        _poll_reply(bot, msg, f"Usage: {bot.prefix}poll {sub} <id>")
+        _poll_reply(bot, msg, f"Usage: {_command_prefix(bot)}poll {sub} <id>")
         return
 
     poll_id = args[1]
@@ -723,7 +735,8 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
         _poll_reply(
             bot,
             msg,
-            f"Usage: {bot.prefix}poll <on|off|status|create|list|show|result|"
+            f"Usage: {_command_prefix(bot)}poll "
+            "<on|off|status|create|list|show|result|"
             "history|vote|close|cancel|delete>",
         )
         return
@@ -772,7 +785,7 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
         _poll_reply(
             bot,
             msg,
-            f"❌ Unknown poll subcommand. Use {bot.prefix}poll"
+            f"❌ Unknown poll subcommand. Use {_command_prefix(bot)}poll"
             " list|show|result|history|vote|create|close|cancel|delete",
         )
         return

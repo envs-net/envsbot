@@ -59,6 +59,33 @@ RSS_USER_AGENT = str(
 )
 
 
+def _command_prefix(bot=None) -> str:
+    """Return the currently configured command prefix for usage replies."""
+    return str(
+        getattr(bot, "prefix", None)
+        or config.get("prefix", ",")
+        or ","
+    )
+
+
+def _room_for_feed_command(msg, is_room: bool) -> str | None:
+    """Return the target room for RSS add/delete in public MUCs or MUC PMs."""
+    sender = msg["from"]
+    room_jid = getattr(sender, "bare", None)
+
+    if is_room and msg.get("type") == "groupchat" and room_jid:
+        return str(room_jid)
+
+    if (
+        msg.get("type") in ("chat", "normal")
+        and room_jid in JOINED_ROOMS
+        and getattr(sender, "resource", None)
+    ):
+        return str(room_jid)
+
+    return None
+
+
 def entry_get(entry, key, default=None):
     # Works for both dicts and SimpleNamespace/objects
     if isinstance(entry, dict):
@@ -695,26 +722,20 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     store = bot.db.users.plugin("rss")
 
     if not args:
-        bot.reply(msg, "Usage: rss <add|delete|list> ...")
+        bot.reply(msg, f"Usage: {_command_prefix(bot)}rss <add|delete|list> ...")
         return
 
     sub = args[0].lower()
     room = None
 
-    if is_room or (
-        msg.get("type") in ("chat", "normal")
-        and hasattr(msg["from"], "bare")
-        and "@" in str(msg["from"].bare)
-    ):
-        room = msg["from"].bare
+    room = _room_for_feed_command(msg, is_room)
 
     # Add feed to room
     if sub == "add":
         if len(args) != 2:
-            prefix = config.get("prefix", ",")
             bot.reply(
                 msg,
-                f"Usage: {prefix}rss add <feedurl> "
+                f"Usage: {_command_prefix(bot)}rss add <feedurl> "
                 "(in a room or MUC DM only)",
             )
             return
@@ -729,7 +750,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     # Delete feed from room
     elif sub == "delete":
         if len(args) != 2:
-            bot.reply(msg, "Usage: rss delete <feedurl>")
+            bot.reply(msg, f"Usage: {_command_prefix(bot)}rss delete <feedurl>")
             return
 
         if not room:

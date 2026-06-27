@@ -28,7 +28,17 @@ from utils.audit import audit_event
 
 log = logging.getLogger(__name__)
 
-prefix = getattr(config, "prefix", ",")
+prefix = str(config.get("prefix", ",") or ",")
+
+
+def _command_prefix(bot=None) -> str:
+    """Return the currently configured command prefix for user replies."""
+    return str(
+        getattr(bot, "prefix", None)
+        or config.get("prefix", None)
+        or prefix
+        or ","
+    )
 
 MAX_ROOM_NICKS = config.get("users", {}).get("max_room_nicks", 5)
 
@@ -435,7 +445,7 @@ async def users_info(bot, sender, nick, args, msg, is_room):
     try:
         if not args:
             log.warning("[USERS] 🟡️ users info without args")
-            bot.reply(msg, f"🟡️ Usage: {prefix}users info <jid|nick>")
+            bot.reply(msg, f"🟡️ Usage: {_command_prefix(bot)}users info <jid|nick>")
             return
 
         query = args[0]
@@ -586,7 +596,7 @@ async def users_update(bot, sender, nick, args, msg, is_room):
     try:
         if len(args) != 2:
             log.warning("[USERS] 🟡️ users role wrong number of args")
-            bot.reply_usage(msg, f"{prefix}users role <jid> <role>")
+            bot.reply_usage(msg, f"{_command_prefix(bot)}users role <jid> <role>")
             return
 
         actor = _parse_user_jid(sender)
@@ -720,7 +730,7 @@ async def users_admins(bot, sender, nick, args, msg, is_room):
             lines,
             page_request=page,
             page_size=12,
-            command_hint=f"{bot.prefix}users admins",
+            command_hint=f"{_command_prefix(bot)}users admins",
         ),
     )
 
@@ -737,7 +747,7 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
     """
     try:
         if not args:
-            bot.reply(msg, f"🟡️ Usage: {prefix}users delete <jid>")
+            bot.reply(msg, f"🟡️ Usage: {_command_prefix(bot)}users delete <jid>")
             return
 
         actor = _parse_user_jid(sender)

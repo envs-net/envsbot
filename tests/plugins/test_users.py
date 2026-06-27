@@ -296,6 +296,31 @@ async def test_users_delete_errors(mock_bot, mock_msg):
 
 
 @pytest.mark.asyncio
+async def test_users_usage_replies_use_runtime_prefix(mock_bot, mock_msg):
+    mock_bot.prefix = "!"
+
+    with patch.object(mock_bot, "reply") as bot_reply:
+        await users_mod.users_info(
+            mock_bot, "sender", "nick", [], mock_msg, False
+        )
+        assert bot_reply.call_args.args[1] == "🟡️ Usage: !users info <jid|nick>"
+
+    mock_bot.reply_usage = MagicMock()
+    await users_mod.users_update(
+        mock_bot, "sender", "nick", [], mock_msg, False
+    )
+    mock_bot.reply_usage.assert_called_once_with(
+        mock_msg, "!users role <jid> <role>"
+    )
+
+    with patch.object(mock_bot, "reply") as bot_reply:
+        await users_mod.users_delete(
+            mock_bot, "sender", "nick", [], mock_msg, False
+        )
+        assert bot_reply.call_args.args[1] == "🟡️ Usage: !users delete <jid>"
+
+
+@pytest.mark.asyncio
 async def test__send_user_info_display_full(mock_bot, mock_msg):
     user_data = {
         "jid": "x@y", "nickname": "nn", "role": users_mod.Role.ADMIN.value,
@@ -387,7 +412,7 @@ async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
     assert await users_mod._actor_role(mock_bot, "actor@example.org") == users_mod.Role.NONE
 
     mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
-    denied_cases = [
+    denied_cases = (
         ("actor@example.org", "owner@example.org", users_mod.Role.USER, users_mod.Role.USER, "owner"),
         ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.OWNER, "cannot be assigned"),
         ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.NONE, "cannot be assigned"),
@@ -397,7 +422,7 @@ async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
         ("actor@example.org", "target@example.org", users_mod.Role.SUPERADMIN, users_mod.Role.ADMIN, "superadmin"),
         ("actor@example.org", "target@example.org", users_mod.Role.ADMIN, users_mod.Role.USER, "equal"),
         ("actor@example.org", "target@example.org", users_mod.Role.USER, users_mod.Role.ADMIN, "below"),
-    ]
+    )
     for actor, target, old_role, new_role, fragment in denied_cases:
         allowed, reason = await users_mod._can_change_role(mock_bot, actor, target, old_role, new_role)
         assert allowed is False
@@ -431,12 +456,12 @@ async def test_delete_permission_guard_branches(mock_bot, monkeypatch):
     monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
     mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
 
-    denied_cases = [
+    denied_cases = (
         ("actor@example.org", "owner@example.org", users_mod.Role.USER, "owner"),
         ("actor@example.org", "actor@example.org", users_mod.Role.USER, "own"),
         ("actor@example.org", "target@example.org", users_mod.Role.SUPERADMIN, "superadmin"),
         ("actor@example.org", "target@example.org", users_mod.Role.ADMIN, "equal"),
-    ]
+    )
     for actor, target, role, fragment in denied_cases:
         allowed, reason = await users_mod._can_delete_user(mock_bot, actor, target, role)
         assert allowed is False
