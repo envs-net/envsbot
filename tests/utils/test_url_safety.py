@@ -88,6 +88,31 @@ def test_validate_fetch_url_rejects_only_invalid_resolver_values(caplog):
     assert "invalid IP address value" in caplog.text
 
 
+def test_validate_fetch_url_rejects_none_url():
+    with pytest.raises(url_safety.UnsafeFetchURL, match="only http and https"):
+        url_safety.validate_fetch_url(None, resolver=lambda hostname: ["93.184.216.34"])
+
+
+def test_validate_fetch_redirect_chain_validates_each_hop():
+    resolver_calls = []
+
+    def resolver(hostname):
+        resolver_calls.append(hostname)
+        return ["93.184.216.34"]
+
+    urls = ["https://example.org/feed", "https://example.net/final"]
+
+    assert url_safety.validate_fetch_redirect_chain(urls, resolver=resolver) == urls
+    assert resolver_calls == ["example.org", "example.net"]
+
+
+def test_validate_fetch_redirect_chain_rejects_unsafe_redirect_target():
+    with pytest.raises(url_safety.UnsafeFetchURL, match="private or local"):
+        url_safety.validate_fetch_redirect_chain(
+            ["https://example.org/feed", "http://127.0.0.1/admin"],
+            resolver=lambda hostname: ["93.184.216.34"],
+        )
+
 def test_validate_fetch_url_allow_private_skips_network_checks():
     url = "http://127.0.0.1/status"
 

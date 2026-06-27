@@ -53,9 +53,11 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         ip: ``ipaddress.IPv4Address`` or ``ipaddress.IPv6Address`` instance
             to evaluate for public routability.
 
-    Prefer ``ip.is_global`` when the runtime provides it.  The explicit fallback
-    keeps the behavior conservative on older or unusual ``ipaddress`` objects by
-    rejecting every range that must not be fetched by public bot commands.
+    Prefer ``ip.is_global`` when available.  Standard ``ipaddress`` objects have
+    exposed ``is_global`` since Python 3.4, but the guard keeps this helper
+    compatible with older runtimes and non-standard ``ipaddress``-like objects.
+    The fallback stays conservative by rejecting every range that must not be
+    fetched by public bot commands.
     """
     if hasattr(ip, "is_global"):
         return ip.is_global
@@ -127,11 +129,14 @@ def validate_fetch_url(
     resolved before fetches so DNS names pointing to private networks are blocked
     too.  This is a pre-flight validation step, not a guarantee about the
     eventual connection target: DNS answers can change between validation and
-    connect.  Callers must validate again immediately before each outbound fetch
-    and after every redirect hop.  Tests can inject ``resolver`` to avoid real
-    DNS.
+    connect.  Callers must validate immediately before each outbound request and
+    before following every redirect target.  Tests can inject ``resolver`` to
+    avoid real DNS.
     """
-    url = str(url or "").strip()
+    if url is None:
+        url = ""
+    else:
+        url = str(url).strip()
     hostname = _hostname(url)
 
     if allow_private:
@@ -152,6 +157,23 @@ def validate_fetch_url(
         raise UnsafeFetchURL("private or local network URLs are not allowed")
 
     return url
+
+
+def validate_fetch_redirect_chain(
+    urls: Iterable[str],
+    *,
+    allow_private: bool = False,
+    resolver: Resolver | None = None,
+) -> list[str]:
+    """Validate each URL hop in a fetch or redirect chain.
+
+    This helper enforces per-hop validation so callers can safely validate the
+    initial request URL and each redirect target before following it.
+    """
+    return [
+        validate_fetch_url(url, allow_private=allow_private, resolver=resolver)
+        for url in urls
+    ]
 
 
 async def validate_fetch_url_async(
