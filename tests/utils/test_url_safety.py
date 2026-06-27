@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from utils import url_safety
@@ -58,6 +60,18 @@ def test_validate_fetch_url_rejects_empty_resolver_result():
             "https://example.org/feed",
             resolver=lambda hostname: [],
         )
+
+
+def test_validate_fetch_url_logs_invalid_resolver_values(caplog):
+    with caplog.at_level(logging.WARNING, logger=url_safety.__name__):
+        result = url_safety.validate_fetch_url(
+            "https://example.org/feed",
+            resolver=lambda hostname: ["not-an-ip", "93.184.216.34"],
+        )
+
+    assert result == "https://example.org/feed"
+    assert "invalid IP address value" in caplog.text
+    assert "not-an-ip" in caplog.text
 
 
 def test_validate_fetch_url_allow_private_skips_network_checks():

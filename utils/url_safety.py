@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import ipaddress
+import logging
 import socket
 from collections.abc import Callable, Iterable
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ from urllib.parse import urlparse
 ALLOWED_FETCH_SCHEMES = frozenset({"http", "https"})
 LOCALHOST_NAMES = frozenset({"localhost", "localhost.localdomain"})
 Resolver = Callable[[str], Iterable[str]]
+logger = logging.getLogger(__name__)
 
 
 class UnsafeFetchURL(ValueError):
@@ -87,8 +89,9 @@ def _resolved_ips(
     else:
         resolved_values = resolver(hostname)
         if resolved_values is None:
-            raise UnsafeFetchURL("hostname resolver returned no results")
-        values = tuple(resolved_values)
+            values = ()
+        else:
+            values = tuple(resolved_values)
         if not values:
             raise UnsafeFetchURL("hostname resolver returned no results")
 
@@ -97,6 +100,11 @@ def _resolved_ips(
         try:
             ips.add(ipaddress.ip_address(str(value).strip("[]")))
         except ValueError:
+            logger.warning(
+                "resolver returned invalid IP address value for hostname %r: %r",
+                hostname,
+                value,
+            )
             continue
     return ips
 
