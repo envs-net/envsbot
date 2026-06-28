@@ -138,7 +138,10 @@ def validate_fetch_url(
         url = str(url).strip()
 
     parsed = _parse_fetch_url(url)
-    hostname = parsed.hostname.lower().rstrip(".")
+    parsed_hostname = parsed.hostname
+    if parsed_hostname is None:
+        raise UnsafeFetchURL("URL must include a hostname")
+    hostname = parsed_hostname.lower().rstrip(".")
 
     if allow_private:
         return url
