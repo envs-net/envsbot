@@ -75,6 +75,16 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
+def _hosts_from_addrinfo(
+    addrinfos: Iterable[tuple[object, object, object, object, tuple[object, ...]]],
+) -> tuple[object, ...]:
+    hosts = []
+    for _family, _socktype, _proto, _canonname, sockaddr in addrinfos:
+        if sockaddr:
+            hosts.append(sockaddr[0])
+    return tuple(hosts)
+
+
 def _resolved_ips(
     hostname: str,
     resolver: Resolver | None = None,
@@ -90,8 +100,8 @@ def _resolved_ips(
                 socket.SOCK_STREAM,
             )
         except OSError as exc:
-            raise UnsafeFetchURL("hostname could not be resolved safely") from exc
-        values = tuple(info[4][0] for info in infos)
+            raise UnsafeFetchURL("DNS resolution failed for hostname") from exc
+        values = _hosts_from_addrinfo(infos)
         if not values:
             raise UnsafeFetchURL("hostname could not be resolved safely")
     else:

@@ -1345,7 +1345,7 @@ Manage RSS feed subscriptions for rooms.
 Role: `moderator`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|list|delete|remove|on|off|status> ...`
+Usage: `,rss <add|delete|remove|list> ...`
 
 Examples:
 

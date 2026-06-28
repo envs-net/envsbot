@@ -126,6 +126,31 @@ def test_validate_fetch_url_allow_private_still_requires_valid_http_url(url):
         url_safety.validate_fetch_url(url, allow_private=True)
 
 
+
+def test_hosts_from_addrinfo_unpacks_socket_address_hosts():
+    addrinfos = [
+        (
+            url_safety.socket.AF_INET,
+            url_safety.socket.SOCK_STREAM,
+            6,
+            "",
+            ("93.184.216.34", 443),
+        ),
+        (
+            url_safety.socket.AF_INET6,
+            url_safety.socket.SOCK_STREAM,
+            6,
+            "",
+            ("2606:2800:220:1:248:1893:25c8:1946", 443, 0, 0),
+        ),
+        (url_safety.socket.AF_INET, url_safety.socket.SOCK_STREAM, 6, "", ()),
+    ]
+
+    assert url_safety._hosts_from_addrinfo(addrinfos) == (
+        "93.184.216.34",
+        "2606:2800:220:1:248:1893:25c8:1946",
+    )
+
 def test_validate_fetch_url_default_resolver_uses_stream_socket(monkeypatch):
     calls = []
 
@@ -147,7 +172,7 @@ def test_validate_fetch_url_wraps_resolver_failures(monkeypatch):
 
     monkeypatch.setattr(url_safety.socket, "getaddrinfo", fail_getaddrinfo)
 
-    with pytest.raises(url_safety.UnsafeFetchURL, match="could not be resolved"):
+    with pytest.raises(url_safety.UnsafeFetchURL, match="DNS resolution failed"):
         url_safety.validate_fetch_url("https://example.org/feed")
 
 

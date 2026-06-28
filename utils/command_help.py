@@ -491,7 +491,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "rss": {
         "short": "Manage RSS feed subscriptions for rooms.",
-        "usage": "{prefix}rss <add|list|delete|remove|on|off|status> ...",
+        "usage": "{prefix}rss <add|delete|remove|list> ...",
         "examples": [
             "{prefix}rss list",
             "{prefix}rss delete https://example.org/feed.rss",
