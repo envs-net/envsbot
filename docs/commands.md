@@ -492,7 +492,7 @@ Show help for plugins and commands.
 Role: `none`<br>
 Context: `any`<br>
 Category: `core`<br>
-Usage: `,help [all|commands|plugins|roles|categories|category <name>|plugin <plugin>|command <command>|<plugin> <subcommand>|<command>]`
+Usage: `,help [all|commands|plugins|roles|categories|category <name>|<command>|<plugin> [<subcommand>]]`
 
 Aliases: `,h`
 

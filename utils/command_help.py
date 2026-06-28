@@ -9,6 +9,7 @@ Usage string notation used in this module:
 - ``[optional]``: optional argument or segment.
 - ``<required>``: required argument value.
 - ``a|b``: alternatives; choose one listed option.
+- ``...``: additional arguments may follow.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ class CommandMetadata(TypedDict, total=False):
 COMMAND_HELP: dict[str, CommandMetadata] = {
     "help": {
         "short": "Show help for plugins and commands.",
-        "usage": "{prefix}help [all|commands|plugins|roles|categories|category <name>|plugin <plugin>|command <command>|<plugin> <subcommand>|<command>]",
+        "usage": "{prefix}help [all|commands|plugins|roles|categories|category <name>|<command>|<plugin> [<subcommand>]]",
         "examples": [
             "{prefix}help",
             "{prefix}help rooms",
