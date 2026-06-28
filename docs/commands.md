@@ -492,7 +492,7 @@ Show help for plugins and commands.
 Role: `none`<br>
 Context: `any`<br>
 Category: `core`<br>
-Usage: `,help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]`
+Usage: `,help [all|commands|plugins|roles|categories|category <name>|plugin <plugin>|command <command>|<plugin> <subcommand>|<command>]`
 
 Aliases: `,h`
 
@@ -1345,7 +1345,7 @@ Manage RSS feed subscriptions for rooms.
 Role: `moderator`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|delete|remove|retry|reset|list> ...`
+Usage: `,rss <add|delete|remove|del|rm|retry|reset|list> ...`
 
 Examples:
 

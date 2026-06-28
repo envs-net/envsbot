@@ -27,7 +27,7 @@ class CommandMetadata(TypedDict, total=False):
 COMMAND_HELP: dict[str, CommandMetadata] = {
     "help": {
         "short": "Show help for plugins and commands.",
-        "usage": "{prefix}help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]",
+        "usage": "{prefix}help [all|commands|plugins|roles|categories|category <name>|plugin <plugin>|command <command>|<plugin> <subcommand>|<command>]",
         "examples": [
             "{prefix}help",
             "{prefix}help rooms",
@@ -491,7 +491,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "rss": {
         "short": "Manage RSS feed subscriptions for rooms.",
-        "usage": "{prefix}rss <add|delete|remove|retry|reset|list> ...",
+        "usage": "{prefix}rss <add|delete|remove|del|rm|retry|reset|list> ...",
         "examples": [
             "{prefix}rss list",
             "{prefix}rss list 2",
