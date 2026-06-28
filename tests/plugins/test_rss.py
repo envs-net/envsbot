@@ -920,6 +920,76 @@ async def test_rss_list_shows_retry_backoff(monkeypatch, make_bot):
 
 
 @pytest.mark.asyncio
+async def test_rss_list_uses_pagination(monkeypatch, make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
+
+    monkeypatch.setattr(rss, "RSS_LIST_PAGE_SIZE", 5)
+    bot.plugin_store[rss.RSS_KEY] = {
+        f"https://example.org/feed-{idx}.xml": {
+            "title": f"Feed {idx}",
+            "period": 120,
+            "rooms": ["room@conference.example.org"],
+            "error_count": 0,
+            "next_retry": 0,
+        }
+        for idx in range(12)
+    }
+
+    await rss.rss_command(bot, "jid", "nick", ["list"], msg, True)
+    page_one = "\n".join(bot.replies[-1][1])
+    assert "Watched RSS feeds (12) - Page 1/3" in page_one
+    assert "https://example.org/feed-0.xml" in page_one
+    assert "https://example.org/feed-4.xml" in page_one
+    assert "https://example.org/feed-5.xml" not in page_one
+    assert "Use ,rss list 2 for the next page." in page_one
+
+    await rss.rss_command(bot, "jid", "nick", ["list", "2"], msg, True)
+    page_two = "\n".join(bot.replies[-1][1])
+    assert "Watched RSS feeds (12) - Page 2/3" in page_two
+    assert "https://example.org/feed-5.xml" in page_two
+    assert "https://example.org/feed-9.xml" in page_two
+    assert "https://example.org/feed-10.xml" not in page_two
+
+    await rss.rss_command(bot, "jid", "nick", ["list", "last"], msg, True)
+    last_page = "\n".join(bot.replies[-1][1])
+    assert "Watched RSS feeds (12) - Page 3/3" in last_page
+    assert "https://example.org/feed-10.xml" in last_page
+    assert "https://example.org/feed-11.xml" in last_page
+    assert "next page" not in last_page
+
+
+@pytest.mark.asyncio
+async def test_rss_list_all_and_invalid_page(monkeypatch, make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
+
+    monkeypatch.setattr(rss, "RSS_LIST_PAGE_SIZE", 1)
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/a.xml": {
+            "title": "A",
+            "period": 120,
+            "rooms": ["room@conference.example.org"],
+        },
+        "https://example.org/b.xml": {
+            "title": "B",
+            "period": 120,
+            "rooms": ["room@conference.example.org"],
+        },
+    }
+
+    await rss.rss_command(bot, "jid", "nick", ["list", "all"], msg, True)
+    all_text = "\n".join(bot.replies[-1][1])
+    assert "Watched RSS feeds (2) - all" in all_text
+    assert "https://example.org/a.xml" in all_text
+    assert "https://example.org/b.xml" in all_text
+    assert "next page" not in all_text
+
+    await rss.rss_command(bot, "jid", "nick", ["list", "nope"], msg, True)
+    assert bot.replies[-1][1] == "Usage: ,rss list [page|all|last]"
+
+
+@pytest.mark.asyncio
 async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
     bot = make_bot()
     url = "https://example.org/feed.xml"

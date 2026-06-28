@@ -494,6 +494,8 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "usage": "{prefix}rss <add|delete|remove|retry|reset|list> ...",
         "examples": [
             "{prefix}rss list",
+            "{prefix}rss list 2",
+            "{prefix}rss list all",
             "{prefix}rss retry https://example.org/feed.rss",
             "{prefix}rss delete https://example.org/feed.rss",
             "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",

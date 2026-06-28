@@ -1350,6 +1350,8 @@ Usage: `,rss <add|delete|remove|retry|reset|list> ...`
 Examples:
 
 - `,rss list`
+- `,rss list 2`
+- `,rss list all`
 - `,rss retry https://example.org/feed.rss`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`

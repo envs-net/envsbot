@@ -9,7 +9,7 @@ Commands:
 • {prefix}rss remove <feedurl> [room|all]
 • {prefix}rss retry <feedurl>
 • {prefix}rss reset <feedurl>
-• {prefix}rss list
+• {prefix}rss list [page|all|last]
 
 Feed configuration is stored in the plugin runtime store under the key "RSS".
 """
@@ -28,6 +28,7 @@ from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
+from core_plugins._core import paginate_items
 from utils.url_safety import (
     FetchURLTooLarge,
     UnsafeFetchURL,
@@ -80,6 +81,7 @@ RSS_MAX_READ_BYTES = max(
     int(config.get("rss_max_read_bytes", 1048576) or 1048576),
 )
 ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
+RSS_LIST_PAGE_SIZE = max(1, int(config.get("rss_list_page_size", 10) or 10))
 
 
 def _command_prefix(bot=None) -> str:
@@ -629,6 +631,90 @@ def _format_retry_status(feed, now=None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _rss_list_usage(bot=None) -> str:
+    """Return the usage string for paginated RSS list output."""
+    return f"Usage: {_command_prefix(bot)}rss list [page|all|last]"
+
+
+def _rss_list_page(args, total: int, page_size: int):
+    """Parse RSS list paging arguments.
+
+    Returns ``(page, show_all)`` for valid input, or ``None`` for invalid
+    arguments. The ``args`` list includes the ``list`` subcommand itself.
+    """
+    if len(args) > 2:
+        return None
+
+    if len(args) == 1:
+        return 1, False
+
+    value = str(args[1]).strip().lower()
+
+    if value == "all":
+        return 1, True
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    if value == "last":
+        return total_pages, False
+
+    try:
+        return max(1, int(value)), False
+    except ValueError:
+        return None
+
+
+def _format_feed_list_item(feed_url: str, data: dict, now=None) -> str:
+    """Format one RSS feed entry for ``rss list`` output."""
+    status = _format_retry_status(data, now=now)
+    return (
+        f"- {feed_url}\n Title: {data.get('title', feed_url)}\n"
+        f" Period: {data.get('period', '?')}s\n"
+        f" Rooms: {', '.join(data.get('rooms', []))}\n"
+        f"{status}"
+    )
+
+
+def _format_feed_list(feeds: dict, args, bot=None, now=None) -> list[str] | None:
+    """Return paginated ``rss list`` output lines, or ``None`` on bad args."""
+    items = list(feeds.items())
+    page_size = RSS_LIST_PAGE_SIZE
+    parsed = _rss_list_page(args, len(items), page_size)
+
+    if parsed is None:
+        return None
+
+    page, show_all = parsed
+    now = _now() if now is None else int(now)
+
+    if show_all:
+        page_items = items
+        total = len(items)
+        lines = [f" Watched RSS feeds ({total}) - all:"]
+    else:
+        page_items, page, total_pages, total = paginate_items(
+            items,
+            page,
+            page_size,
+        )
+        lines = [
+            f" Watched RSS feeds ({total}) - Page {page}/{total_pages}:",
+        ]
+
+    lines.extend(
+        _format_feed_list_item(feed_url, data, now=now)
+        for feed_url, data in page_items
+    )
+
+    if not show_all and page < total_pages:
+        lines.append("")
+        lines.append(
+            f"Use {_command_prefix(bot)}rss list {page + 1} for the next page."
+        )
+
+    return lines
+
+
 async def _handle_feed_recovery(bot, store, url, error_count):
     if error_count > 0:
         log.debug("Feed %s recovered, resetting error count", url)
@@ -838,7 +924,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss remove <feedurl> [room|all]
     {prefix}rss retry <feedurl>
     {prefix}rss reset <feedurl>
-    {prefix}rss list
+    {prefix}rss list [page|all|last]
     """
     store = bot.db.users.plugin("rss")
 
@@ -904,17 +990,11 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             bot.reply(msg, "No feeds configured.")
             return
 
-        now = _now()
-        lines = [" Watched RSS feeds:"]
-        for feed_url, data in feeds.items():
-            status = _format_retry_status(data, now=now)
+        lines = _format_feed_list(feeds, args, bot=bot)
 
-            lines.append(
-                f"- {feed_url}\n Title: {data.get('title', feed_url)}\n"
-                f" Period: {data.get('period', '?')}s\n"
-                f" Rooms: {', '.join(data.get('rooms', []))}\n"
-                f"{status}"
-            )
+        if lines is None:
+            bot.reply(msg, _rss_list_usage(bot))
+            return
 
         bot.reply(msg, lines)
 
