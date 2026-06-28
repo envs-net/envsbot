@@ -869,3 +869,151 @@ async def test_reset_retry_state_updates_and_preserves_unchanged(make_bot):
     assert store[rss.RSS_KEY][url]["next_retry"] == 0
 
     assert await rss._reset_retry_state(bot, store, url) is False
+
+
+def test_retry_delay_uses_feed_period():
+    assert rss._retry_delay(2, 1) == 2 * rss.BACKOFF_INCREMENT_MULTIPLIER
+    assert rss._retry_delay(0, 1) == min(
+        rss.DEFAULT_POLL_INTERVAL * rss.BACKOFF_INCREMENT_MULTIPLIER,
+        rss.MAX_BACKOFF_TIME,
+    )
+
+
+def test_format_retry_status_shows_next_retry():
+    status = rss._format_retry_status(
+        {"error_count": 2, "next_retry": 1125},
+        now=1000,
+    )
+
+    assert "Last 2 fetch(es) failed" in status
+    assert "Next retry in: 2m 5s" in status
+
+    assert rss._format_retry_status({"error_count": 0}, now=1000) == ""
+    assert "Next retry: now" in rss._format_retry_status(
+        {"error_count": 1, "next_retry": 999},
+        now=1000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_list_shows_retry_backoff(monkeypatch, make_bot):
+    bot = make_bot()
+    url = "https://example.org/feed.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "period": 120,
+            "rooms": ["room@conference.example.org"],
+            "error_count": 1,
+            "next_retry": 1120,
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
+
+    monkeypatch.setattr(rss, "_now", lambda: 1000)
+
+    await rss.rss_command(bot, "jid", "nick", ["list"], msg, True)
+
+    text = "\n".join(bot.replies[-1][1])
+    assert "⚠️ Last 1 fetch(es) failed" in text
+    assert "Next retry in: 2m" in text
+
+
+@pytest.mark.asyncio
+async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
+    bot = make_bot()
+    url = "https://example.org/feed.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "period": 42,
+            "rooms": ["room@conference.example.org"],
+            "error_count": 3,
+            "next_retry": 9999,
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    class RunningTask:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    old_task = RunningTask()
+    rss.CHECK_TASKS[url] = old_task
+    ensure = AsyncMock()
+    monkeypatch.setattr(rss, "ensure_task", ensure)
+
+    await rss.rss_command(bot, "jid", "nick", ["retry", url], msg, False)
+
+    feed = bot.plugin_store[rss.RSS_KEY][url]
+    assert feed["error_count"] == 0
+    assert feed["next_retry"] == 0
+    assert old_task.cancelled is True
+    ensure.assert_awaited_once_with(bot, bot.plugin_store, url, 42)
+    assert bot.replies[-1][1] == (
+        f"🔁 Retry state reset and RSS check scheduled: {url}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_reset_retry_state_usage_and_missing_feed(make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    await rss.rss_command(bot, "jid", "nick", ["reset"], msg, False)
+    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl>"
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["reset", "https://example.org/missing.xml"],
+        msg,
+        False,
+    )
+    assert bot.replies[-1][1] == "Feed not found."
+
+
+@pytest.mark.asyncio
+async def test_rss_check_loop_empty_feed_resets_retry_state(monkeypatch, make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/feed.xml"
+    store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "link": url,
+            "period": 1,
+            "rooms": ["room@conference.example.org"],
+            "last_id": "old",
+            "error_count": 2,
+            "next_retry": 1000,
+        }
+    }
+
+    class EmptyFeed:
+        entries = []
+        feed = {"title": "Feed", "link": url}
+
+        def __contains__(self, key):
+            return key == "feed"
+
+    async def fetch_feed(_):
+        return EmptyFeed()
+
+    async def fake_sleep(secs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "_now", lambda: 1001)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await rss.rss_check_loop(bot, store, url, 1)
+
+    feed = store[rss.RSS_KEY][url]
+    assert feed["error_count"] == 0
+    assert feed["next_retry"] == 0

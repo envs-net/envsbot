@@ -7,6 +7,8 @@ Commands:
 • {prefix}rss add <feedurl>
 • {prefix}rss delete <feedurl> [room|all]
 • {prefix}rss remove <feedurl> [room|all]
+• {prefix}rss retry <feedurl>
+• {prefix}rss reset <feedurl>
 • {prefix}rss list
 
 Feed configuration is stored in the plugin runtime store under the key "RSS".
@@ -551,14 +553,18 @@ async def _save_last_id(bot, store, url, entry_id):
     return await _set_feed_field(bot, store, url, "last_id", entry_id)
 
 
+def _retry_delay(period, error_count):
+    """Return the retry delay for a failed feed fetch."""
+    base_period = max(1, int(period or DEFAULT_POLL_INTERVAL))
+    multiplier = max(1, int(BACKOFF_INCREMENT_MULTIPLIER or 1))
+    return min(base_period * multiplier * error_count, MAX_BACKOFF_TIME)
+
+
 async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
     log.warning("Failed to fetch RSS feed %s: %s", url, exc)
 
     error_count += 1
-    backoff_delay = (DEFAULT_POLL_INTERVAL *
-                     BACKOFF_INCREMENT_MULTIPLIER * error_count)
-    backoff_delay = min(backoff_delay, MAX_BACKOFF_TIME)
-    next_retry = now + backoff_delay
+    next_retry = now + _retry_delay(period, error_count)
 
     await _set_retry_state(bot, store, url, error_count, next_retry)
     log.debug(
@@ -583,6 +589,44 @@ async def _handle_empty_feed(url, period, parsed):
         await asyncio.sleep(period)
         return True
     return False
+
+
+def _format_duration(seconds: int) -> str:
+    """Format a small duration for human-readable RSS status output."""
+    seconds = max(0, int(seconds))
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds or not parts:
+        parts.append(f"{seconds}s")
+
+    return " ".join(parts[:3])
+
+
+def _format_retry_status(feed, now=None) -> str:
+    """Return RSS list status lines for failed fetches and retry timing."""
+    error_count = int(feed.get("error_count", 0) or 0)
+    if error_count <= 0:
+        return ""
+
+    now = _now() if now is None else int(now)
+    next_retry = int(feed.get("next_retry", 0) or 0)
+    lines = [f"⚠️ Last {error_count} fetch(es) failed"]
+
+    if next_retry > now:
+        lines.append(f"Next retry in: {_format_duration(next_retry - now)}")
+    elif next_retry:
+        lines.append("Next retry: now")
+
+    return "\n".join(lines) + "\n"
 
 
 async def _handle_feed_recovery(bot, store, url, error_count):
@@ -690,10 +734,10 @@ async def rss_check_loop(bot, store, url, period):
             )
             continue
 
+        await _handle_feed_recovery(bot, store, url, error_count)
+
         if await _handle_empty_feed(url, period, parsed):
             continue
-
-        await _handle_feed_recovery(bot, store, url, error_count)
 
         feed_link = await _maybe_update_feed_link(
             bot, store, url, parsed, feed_link
@@ -792,6 +836,8 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss add <feedurl>
     {prefix}rss delete <feedurl> [room|all]
     {prefix}rss remove <feedurl> [room|all]
+    {prefix}rss retry <feedurl>
+    {prefix}rss reset <feedurl>
     {prefix}rss list
     """
     store = bot.db.users.plugin("rss")
@@ -799,7 +845,8 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(
             msg,
-            f"Usage: {_command_prefix(bot)}rss <add|delete|remove|list> ...",
+            f"Usage: {_command_prefix(bot)}rss "
+            "<add|delete|remove|retry|reset|list> ...",
         )
         return
 
@@ -838,6 +885,17 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         await _del_feed(bot, msg, args[1], store, room, delete_target)
         return
 
+    elif sub in {"retry", "reset"}:
+        if len(args) != 2:
+            bot.reply(
+                msg,
+                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl>",
+            )
+            return
+
+        await _reset_feed_retry(bot, msg, args[1], store)
+        return
+
     # List all rooms
     elif sub == "list":
         feeds = await get_feeds(store)
@@ -846,13 +904,10 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             bot.reply(msg, "No feeds configured.")
             return
 
+        now = _now()
         lines = [" Watched RSS feeds:"]
         for feed_url, data in feeds.items():
-            error_count = data.get("error_count", 0)
-            status = ""
-
-            if error_count > 0:
-                status = f" ⚠️ Last {error_count} fetch(es) failed\n"
+            status = _format_retry_status(data, now=now)
 
             lines.append(
                 f"- {feed_url}\n Title: {data.get('title', feed_url)}\n"
@@ -864,7 +919,10 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, lines)
 
     else:
-        bot.reply(msg, "Unknown subcommand. Use add, delete, remove, or list.")
+        bot.reply(
+            msg,
+            "Unknown subcommand. Use add, delete, remove, retry, reset, or list.",
+        )
 
 
 # ----------------
@@ -1008,6 +1066,30 @@ async def _delete_feed_room(bot, msg, url, store, feeds, room):
         msg,
         f"🗑 Removed room {stored_room} from feed: {url}",
     )
+
+
+async def _reset_feed_retry(bot, msg, url, store):
+    """Clear a feed's retry state and restart its checker immediately."""
+    url = _normalize_url(url)
+    feeds = await get_feeds(store)
+
+    if url not in feeds:
+        bot.reply(msg, "Feed not found.")
+        return
+
+    feed = feeds[url]
+    _apply_retry_state(feed, 0, 0)
+    await save_feeds(store, feeds)
+
+    _cancel_feed_task(url)
+    await ensure_task(
+        bot,
+        store,
+        url,
+        feed.get("period", DEFAULT_POLL_INTERVAL),
+    )
+
+    bot.reply(msg, f"🔁 Retry state reset and RSS check scheduled: {url}")
 
 
 async def _del_feed(bot, msg, url, store, room=None, delete_target=None):

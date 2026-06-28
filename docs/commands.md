@@ -1345,11 +1345,12 @@ Manage RSS feed subscriptions for rooms.
 Role: `moderator`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|delete|remove|list> ...`
+Usage: `,rss <add|delete|remove|retry|reset|list> ...`
 
 Examples:
 
 - `,rss list`
+- `,rss retry https://example.org/feed.rss`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`
 
