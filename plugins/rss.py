@@ -5,7 +5,8 @@ You can add/delete specified feeds to your room.
 
 Commands:
 • {prefix}rss add <feedurl>
-• {prefix}rss delete <feedurl>
+• {prefix}rss delete <feedurl> [room|all]
+• {prefix}rss remove <feedurl> [room|all]
 • {prefix}rss list
 
 Feed configuration is stored in the plugin runtime store under the key "RSS".
@@ -304,6 +305,12 @@ def _normalize_url(url: str) -> str:
         url = "https://" + url
 
     return url
+
+
+
+def _normalize_room_jid(room: str) -> str:
+    """Normalize a room JID used as an RSS subscription key."""
+    return str(room or "").strip().lower()
 
 
 def _resolve_relative_url(base_url: str, relative_url: str) -> str:
@@ -783,13 +790,17 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
 
     Usage:
     {prefix}rss add <feedurl>
-    {prefix}rss delete <feedurl>
+    {prefix}rss delete <feedurl> [room|all]
+    {prefix}rss remove <feedurl> [room|all]
     {prefix}rss list
     """
     store = bot.db.users.plugin("rss")
 
     if not args:
-        bot.reply(msg, f"Usage: {_command_prefix(bot)}rss <add|delete|list> ...")
+        bot.reply(
+            msg,
+            f"Usage: {_command_prefix(bot)}rss <add|delete|remove|list> ...",
+        )
         return
 
     sub = args[0].lower()
@@ -814,20 +825,17 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         await _add_feed(bot, msg, args[1], store, room)
         return
 
-    # Delete feed from room
-    elif sub == "delete":
-        if len(args) != 2:
-            bot.reply(msg, f"Usage: {_command_prefix(bot)}rss delete <feedurl>")
-            return
-
-        if not room:
+    # Delete feed from a room, or remove it completely from direct/admin PMs.
+    elif sub in {"delete", "remove", "del", "rm"}:
+        if len(args) not in (2, 3):
             bot.reply(
                 msg,
-                "🔴 RSS delete can only be used in a room or MUC DM.",
+                f"Usage: {_command_prefix(bot)}rss delete <feedurl> [room|all]",
             )
             return
 
-        await _del_feed(bot, msg, args[1], store, room)
+        delete_target = args[2] if len(args) == 3 else None
+        await _del_feed(bot, msg, args[1], store, room, delete_target)
         return
 
     # List all rooms
@@ -856,7 +864,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, lines)
 
     else:
-        bot.reply(msg, "Unknown subcommand. Use add, delete, or list.")
+        bot.reply(msg, "Unknown subcommand. Use add, delete, remove, or list.")
 
 
 # ----------------
@@ -945,7 +953,64 @@ async def _add_feed(bot, msg, url, store, room):
 # -------------------------
 # DELETE RSS FEED FROM ROOM
 # -------------------------
-async def _del_feed(bot, msg, url, store, room):
+def _cancel_feed_task(url: str) -> None:
+    """Cancel the background check task for a feed URL when it exists."""
+    task = CHECK_TASKS.pop(url, None)
+    if task is not None:
+        task.cancel()
+
+
+def _delete_feed_everywhere(bot, msg, url, feeds):
+    """Remove a feed and its task regardless of subscribed rooms."""
+    rooms = list(feeds[url].get("rooms", []))
+    feeds.pop(url)
+    _cancel_feed_task(url)
+
+    room_text = ", ".join(rooms) if rooms else "no rooms"
+    bot.reply(msg, f"🗑 Deleted feed: {url} ({room_text})")
+
+
+async def _delete_feed_room(bot, msg, url, store, feeds, room):
+    """Remove one room subscription from an existing feed."""
+    rooms = feeds[url].setdefault("rooms", [])
+    normalized_room = _normalize_room_jid(room)
+    stored_room = next(
+        (item for item in rooms if _normalize_room_jid(item) == normalized_room),
+        None,
+    )
+
+    if stored_room is None:
+        bot.reply(
+            msg,
+            f"ℹ️ Room {room} was not subscribed to the feed.",
+        )
+        return
+
+    rooms.remove(stored_room)
+
+    if not rooms:
+        feeds.pop(url)
+        _cancel_feed_task(url)
+        bot.reply(
+            msg,
+            f"🗑 Deleted feed: {url} (no rooms left, feed removed)",
+        )
+        return
+
+    await ensure_task(
+        bot,
+        store,
+        url,
+        feeds[url]["period"],
+    )
+
+    bot.reply(
+        msg,
+        f"🗑 Removed room {stored_room} from feed: {url}",
+    )
+
+
+async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     url = _normalize_url(url)
     feeds = await get_feeds(store)
     log.info(f"[RSS] DELETE: {store}\n\n{feeds}")
@@ -954,38 +1019,20 @@ async def _del_feed(bot, msg, url, store, room):
         bot.reply(msg, "Feed not found.")
         return
 
-    if room in feeds[url]["rooms"]:
-        feeds[url]["rooms"].remove(room)
+    target = str(delete_target).strip() if delete_target else ""
 
-        if not feeds[url]["rooms"]:
-            # No rooms left, remove feed
-            feeds.pop(url)
-
-            if url in CHECK_TASKS:
-                CHECK_TASKS[url].cancel()
-                del CHECK_TASKS[url]
-
-            bot.reply(
-                msg,
-                f"🗑 Deleted feed: {url} (no rooms left, feed removed)",
-            )
-        else:
-            await ensure_task(
-                bot,
-                store,
-                url,
-                feeds[url]["period"],
-            )
-
-            bot.reply(
-                msg,
-                f"🗑 Removed this room from feed: {url}",
-            )
-    else:
-        bot.reply(
-            msg,
-            "ℹ️ This room was not subscribed to the feed.",
+    if target.lower() == "all":
+        _delete_feed_everywhere(bot, msg, url, feeds)
+    elif target:
+        await _delete_feed_room(
+            bot, msg, url, store, feeds, _normalize_room_jid(target)
         )
+    elif room:
+        await _delete_feed_room(bot, msg, url, store, feeds, room)
+    else:
+        # Direct/private cleanup path: useful for stale feeds whose room no
+        # longer exists and cannot be addressed via a room or MUC PM anymore.
+        _delete_feed_everywhere(bot, msg, url, feeds)
 
     await save_feeds(store, feeds)
     # await _flush_user_store(bot)

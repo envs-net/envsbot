@@ -69,13 +69,13 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "admin",
     },
     "bot version": {
-        "short": "Show the running bot version and latest checked release.",
+        "short": "Show the running EnvsBot version and latest checked release.",
         "usage": "{prefix}bot version",
         "examples": ["{prefix}bot version", "{prefix}version"],
         "category": "core",
     },
     "bot checkupdate": {
-        "short": "Check whether a newer bot release is available.",
+        "short": "Check whether a newer EnvsBot release is available.",
         "usage": "{prefix}bot checkupdate",
         "examples": [
             "{prefix}bot checkupdate",
@@ -241,7 +241,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     "rooms add": {
         "short": "Add or update a stored room configuration.",
         "usage": "{prefix}rooms add <room_jid> [nick] [autojoin]",
-        "examples": ["{prefix}rooms add test@conference.example.org Bot true"],
+        "examples": ["{prefix}rooms add test@conference.example.org EnvsBot true"],
         "context": "private chat / MUC PM",
         "category": "rooms",
     },
@@ -490,9 +490,13 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "utility",
     },
     "rss": {
-        "short": "Manage RSS feed subscriptions for a room.",
-        "usage": "{prefix}rss <add|list|delete|on|off|status> ...",
-        "examples": ["{prefix}rss list"],
+        "short": "Manage RSS feed subscriptions for rooms.",
+        "usage": "{prefix}rss <add|list|delete|remove|on|off|status> ...",
+        "examples": [
+            "{prefix}rss list",
+            "{prefix}rss delete https://example.org/feed.rss",
+            "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",
+        ],
         "category": "rooms",
     },
     "sed": {

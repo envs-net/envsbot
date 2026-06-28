@@ -85,7 +85,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,backup create` | `admin` | `private chat / MUC PM` | Create a managed ZIP backup archive. |
 | `,backup list` | `admin` | `private chat / MUC PM` | List managed backup archives. |
 | `,backup show` | `admin` | `private chat / MUC PM` | Show manifest details for one managed backup archive. |
-| `,bot checkupdate` | `admin` | `private chat / MUC PM` | Check whether a newer bot release is available. |
+| `,bot checkupdate` | `admin` | `private chat / MUC PM` | Check whether a newer EnvsBot release is available. |
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
 | `,bot status` | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
@@ -100,7 +100,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
-| `,bot version` | `user` | `any` | Show the running bot version and latest checked release. |
+| `,bot version` | `user` | `any` | Show the running EnvsBot version and latest checked release. |
 | `,help` | `none` | `any` | Show help for plugins and commands. |
 | `,help inroom` | `user` | `room or MUC PM` | Enable, disable or show room help availability. |
 | `,plugin info` | `admin` | `private chat / MUC PM` | Show metadata and source information for one plugin. |
@@ -172,7 +172,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms set_plugin_defaults` | `user` | `room / MUC PM / private chat with <room_jid>` | Restore room plugin toggles for a room; requires room admin/owner or bot moderator. |
 | `,rooms sync` | `admin` | `private chat / MUC PM` | Synchronize joined rooms with stored autojoin settings. |
 | `,rooms update` | `admin` | `private chat / MUC PM` | Update one field of a stored room. |
-| `,rss` | `moderator` | `any` | Manage RSS feed subscriptions for a room. |
+| `,rss` | `moderator` | `any` | Manage RSS feed subscriptions for rooms. |
 
 ### Users
 
@@ -231,7 +231,7 @@ Bot administration commands
 
 #### `,bot checkupdate`
 
-Check whether a newer bot release is available.
+Check whether a newer EnvsBot release is available.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
@@ -295,7 +295,7 @@ Examples:
 
 #### `,bot version`
 
-Show the running bot version and latest checked release.
+Show the running EnvsBot version and latest checked release.
 
 Role: `user`<br>
 Context: `any`<br>
@@ -659,7 +659,7 @@ Aliases: `,room add`
 
 Examples:
 
-- `,rooms add test@conference.example.org Bot true`
+- `,rooms add test@conference.example.org EnvsBot true`
 
 #### `,rooms delete`
 
@@ -1340,16 +1340,18 @@ RSS/Atom feed watcher and poster
 
 #### `,rss`
 
-Manage RSS feed subscriptions for a room.
+Manage RSS feed subscriptions for rooms.
 
 Role: `moderator`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|list|delete|on|off|status> ...`
+Usage: `,rss <add|list|delete|remove|on|off|status> ...`
 
 Examples:
 
 - `,rss list`
+- `,rss delete https://example.org/feed.rss`
+- `,rss remove https://example.org/feed.rss old@conference.example.org`
 
 ### sed
 

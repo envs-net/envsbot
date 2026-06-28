@@ -155,7 +155,7 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     assert any("Unknown subcommand" in x[1] for x in bot.replies)
 
 @pytest.mark.asyncio
-async def test_rss_add_delete_reject_plain_private_chat(monkeypatch, make_bot):
+async def test_rss_add_rejects_plain_private_chat(monkeypatch, make_bot):
     bot = make_bot()
     msg = {
         "from": SimpleNamespace(bare="user@example.org", resource="desktop"),
@@ -167,10 +167,81 @@ async def test_rss_add_delete_reject_plain_private_chat(monkeypatch, make_bot):
     )
     assert bot.replies[-1][1] == "🔴 RSS add can only be used in a room or MUC DM."
 
+
+@pytest.mark.asyncio
+async def test_rss_delete_from_private_chat_removes_stale_feed(make_bot):
+    bot = make_bot()
+    url = "https://git.envs.net/dan/envsbot.rss"
+    room = "envs@conference.envs.net"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed of dan/envsbot",
+            "link": url,
+            "period": 1200,
+            "rooms": [room],
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="admin@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(bot, "jid1", "nick1", ["delete", url], msg, False)
+
+    assert bot.plugin_store[rss.RSS_KEY] == {}
+    assert bot.replies[-1][1] == f"🗑 Deleted feed: {url} ({room})"
+
+
+@pytest.mark.asyncio
+async def test_rss_delete_can_target_specific_room_from_private_chat(make_bot):
+    bot = make_bot()
+    url = "https://example.org/feed"
+    stale_room = "old@conference.example.org"
+    active_room = "new@conference.example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "link": url,
+            "period": 1200,
+            "rooms": [stale_room, active_room],
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="admin@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
     await rss.rss_command(
-        bot, "jid1", "nick1", ["delete", "example.org/feed"], msg, False
+        bot, "jid1", "nick1", ["remove", url, stale_room], msg, False
     )
-    assert bot.replies[-1][1] == "🔴 RSS delete can only be used in a room or MUC DM."
+
+    assert bot.plugin_store[rss.RSS_KEY][url]["rooms"] == [active_room]
+    assert bot.replies[-1][1] == (
+        f"🗑 Removed room {stale_room} from feed: {url}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_delete_all_target_removes_feed_from_all_rooms(make_bot):
+    bot = make_bot()
+    url = "https://example.org/feed"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "link": url,
+            "period": 1200,
+            "rooms": ["a@conference.example.org", "b@conference.example.org"],
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="admin@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(bot, "jid1", "nick1", ["rm", url, "all"], msg, False)
+
+    assert bot.plugin_store[rss.RSS_KEY] == {}
+    assert bot.replies[-1][1].startswith(f"🗑 Deleted feed: {url}")
 
 
 @pytest.mark.asyncio
