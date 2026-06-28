@@ -30,6 +30,7 @@ def test_validate_fetch_url_allows_public_hostname_with_resolver():
         "http://172.16.0.1/",
         "http://192.168.1.10/",
         "http://169.254.169.254/",
+        "http://240.0.0.1/",
         "http://[::1]/",
     ],
 )
@@ -167,6 +168,7 @@ def test_is_public_ip_fallback_for_legacy_ipaddress_objects():
         is_link_local = False
         is_multicast = False
         is_unspecified = False
+        is_reserved = False
 
     class LegacyPrivateIP:
         is_private = True
@@ -174,9 +176,19 @@ def test_is_public_ip_fallback_for_legacy_ipaddress_objects():
         is_link_local = False
         is_multicast = False
         is_unspecified = False
+        is_reserved = False
+
+    class LegacyReservedIP:
+        is_private = False
+        is_loopback = False
+        is_link_local = False
+        is_multicast = False
+        is_unspecified = False
+        is_reserved = True
 
     assert url_safety._is_public_ip(LegacyPublicIP()) is True
     assert url_safety._is_public_ip(LegacyPrivateIP()) is False
+    assert url_safety._is_public_ip(LegacyReservedIP()) is False
 
 
 @pytest.mark.asyncio

@@ -63,13 +63,15 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
     # Compatibility fallback for address objects without ``is_global``.
     # Treat only clearly public addresses as fetchable and keep special-use
-    # ranges blocked.
+    # ranges blocked.  Use getattr for ``is_reserved`` so older/non-standard
+    # address-like objects remain conservatively supported.
     return not (
         ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_multicast
         or ip.is_unspecified
+        or getattr(ip, "is_reserved", False)
     )
 
 
@@ -116,7 +118,7 @@ def _resolved_ips(
 
 
 def validate_fetch_url(
-    url: str,
+    url: str | None,
     *,
     allow_private: bool = False,
     resolver: Resolver | None = None,
@@ -181,7 +183,7 @@ def validate_fetch_redirect_chain(
 
 
 async def validate_fetch_url_async(
-    url: str,
+    url: str | None,
     *,
     allow_private: bool = False,
     resolver: Resolver | None = None,
