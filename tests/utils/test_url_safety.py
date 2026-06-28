@@ -119,6 +119,12 @@ def test_validate_fetch_url_allow_private_skips_network_checks():
     assert url_safety.validate_fetch_url(url, allow_private=True) == url
 
 
+@pytest.mark.parametrize("url", ["", "ftp://example.org/feed", "https:///missing-host"])
+def test_validate_fetch_url_allow_private_still_requires_valid_http_url(url):
+    with pytest.raises(url_safety.UnsafeFetchURL):
+        url_safety.validate_fetch_url(url, allow_private=True)
+
+
 def test_validate_fetch_url_default_resolver_uses_stream_socket(monkeypatch):
     calls = []
 

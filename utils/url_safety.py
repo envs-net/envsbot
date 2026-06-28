@@ -13,7 +13,7 @@ import ipaddress
 import logging
 import socket
 from collections.abc import Callable, Iterable
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 
 ALLOWED_FETCH_SCHEMES = frozenset({"http", "https"})
@@ -30,13 +30,13 @@ class FetchURLTooLarge(ValueError):
     """Raised when an HTTP response exceeds the configured read limit."""
 
 
-def _hostname(value: str) -> str:
+def _parse_fetch_url(value: str) -> ParseResult:
     parsed = urlparse(value.strip())
     if parsed.scheme.lower() not in ALLOWED_FETCH_SCHEMES:
         raise UnsafeFetchURL("only http and https URLs are allowed")
     if not parsed.netloc or not parsed.hostname:
         raise UnsafeFetchURL("URL must include a hostname")
-    return parsed.hostname.lower().rstrip(".")
+    return parsed
 
 
 def _ip_from_literal(hostname: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -53,11 +53,10 @@ def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         ip: ``ipaddress.IPv4Address`` or ``ipaddress.IPv6Address`` instance
             to evaluate for public routability.
 
-    Prefer ``ip.is_global`` when available.  Standard ``ipaddress`` objects have
-    exposed ``is_global`` since Python 3.4, but the guard keeps this helper
-    compatible with older runtimes and non-standard ``ipaddress``-like objects.
-    The fallback stays conservative by rejecting every range that must not be
-    fetched by public bot commands.
+    Prefer ``ip.is_global`` when available. The guard keeps this helper
+    compatible with runtimes or non-standard ``ipaddress``-like objects that do
+    not expose that attribute. The fallback stays conservative by rejecting
+    every range that must not be fetched by public bot commands.
     """
     if hasattr(ip, "is_global"):
         return ip.is_global
@@ -137,7 +136,9 @@ def validate_fetch_url(
         url = ""
     else:
         url = str(url).strip()
-    hostname = _hostname(url)
+
+    parsed = _parse_fetch_url(url)
+    hostname = parsed.hostname.lower().rstrip(".")
 
     if allow_private:
         return url
