@@ -545,7 +545,10 @@ def _bare_jid_from_affiliation_item(item) -> str | None:
         if isinstance(attrib, dict) and attrib.get("jid"):
             return _parse_user_jid(attrib["jid"])
     except Exception:
-        pass
+        log.debug(
+            "[USERS] Could not inspect affiliation item attributes",
+            exc_info=True,
+        )
 
     return _parse_user_jid(item)
 
