@@ -88,6 +88,46 @@ async def test_on_groupchat_message_updates_last_seen(mock_bot, mock_msg):
 
 
 @pytest.mark.asyncio
+async def test_on_muc_presence_skips_own_presence(mock_bot):
+    mock_bot.boundjid.bare = "self@example.org"
+    pres = {
+        "type": "available",
+        "muc": {
+            "room": "room@conference.example.org",
+            "nick": "Self",
+            "jid": types.SimpleNamespace(bare="self@example.org"),
+        },
+    }
+
+    with patch("core_plugins.users.track_room_nick", new=AsyncMock()) as track, \
+            patch("core_plugins.users.update_last_seen",
+                  new=AsyncMock()) as last_seen:
+        await users_mod.on_muc_presence(mock_bot, pres)
+
+    track.assert_not_awaited()
+    last_seen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_on_groupchat_message_skips_own_message(mock_bot, mock_msg):
+    mock_bot.boundjid.bare = "self@example.org"
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(bot_has_privilege=lambda room: True),
+    }
+    mock_bot.plugin = {
+        "xep_0045": types.SimpleNamespace(
+            get_jid_property=lambda room, nick, prop: "self@example.org/resource"
+        ),
+    }
+
+    with patch("core_plugins.users.update_last_seen",
+               new=AsyncMock()) as last_seen:
+        await users_mod.on_groupchat_message(mock_bot, mock_msg)
+
+    last_seen.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_track_room_nick(build_mock_bot, monkeypatch):
     bot = build_mock_bot()
     bot.db.users.get = AsyncMock(return_value=None)

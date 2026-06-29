@@ -89,9 +89,8 @@ async def on_muc_presence(bot, pres):
     else:
         return
 
-    # Filter our own messages
-    bare_jid = str(JID(real_jid).bare)
-    if bare_jid == bot.boundjid.bare:
+    # Filter our own presence
+    if real_jid == bot.boundjid.bare:
         return
 
     if pres["type"] == "unavailable":
@@ -134,8 +133,6 @@ async def on_groupchat_message(bot, msg):
     real_jid = str(JID(real_jid).bare)
 
     # Filter our own messages
-    if not real_jid:
-        return
     if real_jid == bot.boundjid.bare:
         return
 
