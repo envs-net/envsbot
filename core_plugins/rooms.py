@@ -54,6 +54,10 @@ PLUGIN_META = {
 # joined rooms module global
 JOINED_ROOMS = {}
 
+# Rooms we intentionally left/deleted. Delayed MUC presence from those
+# rooms must not recreate JOINED_ROOMS entries after the command finished.
+_LEAVING_ROOMS: set[str] = set()
+
 _DIRECT_INVITE_NS = "jabber:x:conference"
 _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 
@@ -719,6 +723,7 @@ async def on_room_invite(bot, msg) -> None:
 
 async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
     """Join a room and store it with autojoin enabled."""
+    _LEAVING_ROOMS.discard(room_jid)
     muc = bot.plugin["xep_0045"]
     await muc.join_muc(
         room_jid,
@@ -765,6 +770,44 @@ def is_nick_change(pres):
     return False
 
 
+async def _maybe_await_result(result):
+    """Await result when a slixmpp helper returns an awaitable."""
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def _leave_runtime_room(bot, room_jid: str) -> bool:
+    """Leave a room and remove all runtime state for it.
+
+    The room may exist in JOINED_ROOMS, in the presence helper, or both.
+    Mark it as intentionally leaving so delayed MUC presence cannot recreate
+    stale JOINED_ROOMS entries after delete/leave/sync.
+    """
+    room_data = JOINED_ROOMS.get(room_jid) or {}
+    presence_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", {})
+    joined = room_jid in JOINED_ROOMS or room_jid in presence_rooms
+    nick_to_leave = room_data.get("nick") or presence_rooms.get(room_jid)
+
+    _LEAVING_ROOMS.add(room_jid)
+
+    if nick_to_leave:
+        try:
+            muc = bot.plugin["xep_0045"]
+            await _maybe_await_result(muc.leave_muc(room_jid, nick_to_leave))
+        except Exception:
+            log.warning("[ROOMS] Error leaving room %s", room_jid, exc_info=True)
+
+    JOINED_ROOMS.pop(room_jid, None)
+    presence_rooms.pop(room_jid, None)
+
+    broadcast = getattr(getattr(bot, "presence", None), "broadcast", None)
+    if callable(broadcast):
+        broadcast()
+
+    return joined
+
+
 async def on_muc_presence(bot, pres):
     try:
         room = pres["from"].bare
@@ -773,6 +816,13 @@ async def on_muc_presence(bot, pres):
         jid = pres["muc"].get("jid")
         affiliation = pres["muc"].get("affiliation")
         jid_bare = str(jid.bare) if jid else None
+
+        if room in _LEAVING_ROOMS and room not in JOINED_ROOMS:
+            log.debug(
+                "[ROOMS] Ignoring stale presence for intentionally left room %s",
+                room,
+            )
+            return
 
         room_info = JOINED_ROOMS.setdefault(room, {
             "nick": "unknown", "autojoin": "unknown", "status": None,
@@ -1027,6 +1077,7 @@ async def autojoin_rooms(bot):
     for room_jid, nick, autojoin, status in rows:
         if not autojoin:
             continue
+        _LEAVING_ROOMS.discard(room_jid)
         log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
         try:
             await muc.join_muc(
@@ -1442,26 +1493,9 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         if db_room:
             await bot.db.rooms.delete(room_jid)
 
-        joined = room_jid in JOINED_ROOMS
+        joined = await _leave_runtime_room(bot, room_jid)
 
         if joined:
-            room_data = JOINED_ROOMS.get(room_jid)
-            if room_data:
-                nick_to_leave = room_data.get("nick")
-                if nick_to_leave:
-                    try:
-                        bot.plugin["xep_0045"].leave_muc(room_jid,
-                                                         nick_to_leave)
-                    except Exception as e:
-                        log.warning(f"[ROOMS] Error leaving room: {e}")
-
-            JOINED_ROOMS.pop(room_jid, None)
-
-            if room_jid in bot.presence.joined_rooms:
-                del bot.presence.joined_rooms[room_jid]
-
-            bot.presence.broadcast()
-
             log.info("[ROOMS] 🚶 Left room %s", room_jid)
 
         log.info("[ROOMS] 🗑️ Deleted room %s", room_jid)
@@ -1584,6 +1618,7 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
         room_nick = room[1] if room else bot.boundjid.resource
 
     try:
+        _LEAVING_ROOMS.discard(room_jid)
         muc = bot.plugin["xep_0045"]
 
         await muc.join_muc(room_jid,
@@ -1674,24 +1709,7 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
         return
 
     try:
-        muc = bot.plugin["xep_0045"]
-
-        room_data = JOINED_ROOMS.get(room_jid)
-        if room_data:
-            nick_to_leave = room_data.get("nick")
-            if nick_to_leave:
-                try:
-                    muc.leave_muc(room_jid, nick_to_leave)
-                except Exception as e:
-                    log.warning(f"[ROOMS] Error leaving MUC: {e}")
-
-        # --- Delete room completely from JOINED_ROOMS --
-        JOINED_ROOMS.pop(room_jid, None)
-
-        if room_jid in bot.presence.joined_rooms:
-            del bot.presence.joined_rooms[room_jid]
-
-        bot.presence.broadcast()
+        await _leave_runtime_room(bot, room_jid)
 
         log.info("[ROOMS] 🚶 Left room %s", room_jid)
         await audit_event(bot, "room_left", actor=sender_jid, target=room_jid)
@@ -1902,12 +1920,7 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
 
     # Leave all currently joined rooms
     for room in tuple(JOINED_ROOMS.keys()):
-        try:
-            muc.leave_muc(room, JOINED_ROOMS[room]["nick"])
-        except KeyError:
-            log.debug(f"[ROOMS] rooms sync - Room already left: '{room}'")
-        if room in bot.presence.joined_rooms:
-            del bot.presence.joined_rooms[room]
+        await _leave_runtime_room(bot, room)
         left.append(room)
     JOINED_ROOMS.clear()
 
@@ -1915,6 +1928,7 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
     for room_jid, nick_name, autojoin, status in rows:
         if autojoin:
             try:
+                _LEAVING_ROOMS.discard(room_jid)
                 await muc.join_muc(
                     room_jid,
                     nick_name,

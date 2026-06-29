@@ -45,12 +45,16 @@ def patch_reply_methods(bot):
 
 @pytest.fixture(autouse=True)
 def cleanup_joined_rooms():
-    """Ensure JOINED_ROOMS is clean for each test."""
+    """Ensure room runtime globals are clean for each test."""
     orig = dict(rooms.JOINED_ROOMS)
+    orig_leaving = set(rooms._LEAVING_ROOMS)
     rooms.JOINED_ROOMS.clear()
+    rooms._LEAVING_ROOMS.clear()
     yield
     rooms.JOINED_ROOMS.clear()
     rooms.JOINED_ROOMS.update(orig)
+    rooms._LEAVING_ROOMS.clear()
+    rooms._LEAVING_ROOMS.update(orig_leaving)
 
 
 @pytest.fixture
@@ -307,6 +311,59 @@ async def test_rooms_delete(fake_bot, fake_msg):
         fake_bot.db.rooms.get = AsyncMock(side_effect=Exception("db error"))
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid],
                                  fake_msg, False)
+
+
+@pytest.mark.asyncio
+async def test_rooms_delete_suppresses_delayed_presence_until_rejoin(fake_bot, fake_msg):
+    room_jid = "room@conference.domain"
+    fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))
+    fake_bot.db.rooms.delete = AsyncMock()
+    fake_bot.plugin["xep_0045"].leave_muc = AsyncMock()
+    rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick", "nicks": {}}
+    fake_bot.presence.joined_rooms[room_jid] = "BotNick"
+
+    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+        await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
+
+    assert room_jid not in rooms.JOINED_ROOMS
+    assert room_jid not in fake_bot.presence.joined_rooms
+    fake_bot.plugin["xep_0045"].leave_muc.assert_awaited_once_with(room_jid, "BotNick")
+
+    await rooms.on_muc_presence(
+        fake_bot,
+        make_presence("OtherNick", room=room_jid, jid="other@example.org"),
+    )
+
+    assert room_jid not in rooms.JOINED_ROOMS
+
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+    fake_bot.db.rooms.add = AsyncMock()
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+        await rooms.rooms_join(fake_bot, "jid", "nick", [room_jid, "BotNick"], fake_msg, False)
+
+    await rooms.on_muc_presence(
+        fake_bot,
+        make_presence("OtherNick", room=room_jid, jid="other@example.org"),
+    )
+
+    assert rooms.JOINED_ROOMS[room_jid]["nicks"]["OtherNick"]["jid"] == "other@example.org"
+
+
+@pytest.mark.asyncio
+async def test_rooms_delete_leaves_presence_only_runtime_entry(fake_bot, fake_msg):
+    room_jid = "room@conference.domain"
+    fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))
+    fake_bot.db.rooms.delete = AsyncMock()
+    fake_bot.presence.joined_rooms[room_jid] = "BotNick"
+    fake_bot.plugin["xep_0045"].leave_muc = AsyncMock()
+
+    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+        await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
+
+    assert room_jid not in rooms.JOINED_ROOMS
+    assert room_jid not in fake_bot.presence.joined_rooms
+    fake_bot.plugin["xep_0045"].leave_muc.assert_awaited_once_with(room_jid, "BotNick")
 
 
 @pytest.mark.asyncio
