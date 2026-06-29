@@ -446,11 +446,83 @@ async def test_cmd_help_dispatches_special_queries(basic_plugins_and_commands):
         (["plugins"], "Loaded plugins"),
         (["roles"], "Roles"),
         (["categories"], "Help categories"),
+        (["room", "settings"], "Room plugin settings"),
         (["category", "other"], "Other commands"),
     ]:
         bot.replies.clear()
         await help_plugin.cmd_help(bot, "user@host", "Nick", args, DummyMsg(",help"), True)
         assert expected in flatten_lines(bot.replies[-1])
+
+
+
+@pytest.mark.asyncio
+async def test_plugin_help_includes_room_feature_controls(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+
+    def duck_handler(*_args, **_kwargs):
+        """Duck command."""
+
+    duck_cmd = command_utils.Command(
+        name="duck",
+        handler=duck_handler,
+        role=command_utils.Role.USER,
+        short="Start or interact with the duck game.",
+        usage="{prefix}duck <on|off|status|befriend|trap>",
+        examples=["{prefix}duck status"],
+        category="fun",
+    )
+    registry.register("duck", duck_cmd, "ducks")
+
+    plugins = {
+        "ducks": SimpleNamespace(
+            __doc__="Duck game plugin",
+            __name__="ducks",
+            PLUGIN_META={
+                "name": "ducks",
+                "description": "Duck game for MUCs",
+                "category": "fun",
+            },
+        )
+    }
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.USER)
+    msg = DummyMsg(body=",help ducks")
+
+    await help_plugin.cmd_help(bot, "user@host", "Nick", ["ducks"], msg, True)
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Plugin: ducks" in reply
+    assert "Room setting:" in reply
+    assert "Feature name: ducks" in reply
+    assert ",rooms enable ducks" in reply
+    assert ",rooms enable room@conference.example.org ducks" in reply
+    assert ",duck on|off|status" in reply
+
+
+@pytest.mark.asyncio
+async def test_room_feature_help_page_lists_feature_names(monkeypatch):
+    monkeypatch.setattr(
+        help_plugin,
+        "_available_room_features",
+        lambda: ["ducks", "information"],
+    )
+    bot = DummyBot(plugins={})
+
+    lines = "\n".join(await help_plugin._room_features(bot, command_utils.Role.USER))
+
+    assert "Room plugin settings" in lines
+    assert ",rooms enable ducks" in lines
+    assert ",rooms enable room@conference.example.org ducks" in lines
+    assert "ducks, information" in lines
+    assert "information can also be addressed as info" in lines
+
+
+def test_room_feature_help_helpers():
+    assert help_plugin._feature_alias_text({"aliases": ["info"]}) == " (alias: info)"
+    assert help_plugin._feature_alias_text({}) == ""
+    assert help_plugin._room_feature_entry("ducks")["feature"] == "ducks"
+    assert help_plugin._room_feature_entry("missing") is None
+
 
 @pytest.mark.asyncio
 async def test_help_store_getter_uses_help_plugin_store():

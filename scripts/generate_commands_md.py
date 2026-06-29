@@ -97,6 +97,48 @@ def _category_title(category: str) -> str:
     return category.replace("_", " ").replace("-", " ").title()
 
 
+def _room_feature_names() -> list[str]:
+    try:
+        from utils.room_features import available_features
+
+        return available_features()
+    except Exception:
+        return []
+
+
+def _room_feature_section() -> list[str]:
+    features = _room_feature_names()
+    lines = [
+        "## Room plugin settings",
+        "",
+        "Room-scoped plugin toggles are managed through the `rooms` commands:",
+        "",
+        f"- `{PREFIX}rooms plugins [<room_jid>] [all|page|last]`",
+        f"- `{PREFIX}rooms enable [<room_jid>] <plugin>`",
+        f"- `{PREFIX}rooms disable [<room_jid>] <plugin>`",
+        f"- `{PREFIX}rooms set_plugin_defaults [<room_jid>]`",
+        "",
+        "Examples:",
+        "",
+        f"- `{PREFIX}rooms enable ducks`",
+        f"- `{PREFIX}rooms disable ducks`",
+        f"- `{PREFIX}rooms enable room@conference.example.org ducks`",
+        f"- `{PREFIX}rooms plugins room@conference.example.org all`",
+        "",
+        "In a room or MUC PM the target room can usually be inferred. In a normal private chat, pass `<room_jid>` explicitly. The sender must be room owner/admin or have a bot moderator/admin role.",
+    ]
+    if features:
+        lines += [
+            "",
+            "Known room feature names:",
+            "",
+            "`" + "`, `".join(features) + "`",
+            "",
+            "`information` can also be addressed as `info`.",
+        ]
+    return lines
+
+
 def _collect():
     plugins = []
     commands = []
@@ -145,6 +187,8 @@ def generate() -> str:
         "- Room-scoped feature commands can infer the target room from a room message or MUC PM.",
         "- When using a normal private chat, pass `<room_jid>` explicitly for room-scoped feature commands.",
         "- EnvsBot has no separate fixed `ADMIN_ROOM` setting; global bot privileges come from `OWNER`, `ADMINS` and stored bot roles.",
+        "",
+        *_room_feature_section(),
         "",
         "## Role legend",
         "",

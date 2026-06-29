@@ -13,6 +13,7 @@ Examples use the default prefix `,`.
 ,help category <name>
 ,help plugins
 ,help roles
+,help room settings
 ,help <plugin>
 ,help <command>
 ,help ,<command>
@@ -25,6 +26,9 @@ Use focused help when you already know the plugin or command name:
 
 ```text
 ,help rooms
+,help room settings
+,help rooms enable
+,help ducks
 ,help rooms add
 ,help users role
 ,help ,users role
@@ -67,15 +71,26 @@ invite notify room
 message through a room occupant JID. Some clients prefer normal private chats in
 non-anonymous rooms; for room-scoped settings, pass the target room JID explicitly.
 
-## Room settings without MUC PM
+## Room plugin settings
 
-Room plugin settings can be managed in two ways. In a room message or MUC PM, the
-bot can infer the target room automatically:
+Use focused help when you need to find how to enable or disable a plugin in one
+room:
+
+```text
+,help room settings
+,help rooms enable
+,help rooms plugins
+,help ducks
+```
+
+Room plugin settings can be managed with the generic `rooms` commands. In a room
+message or MUC PM, the bot can infer the target room automatically:
 
 ```text
 ,rooms plugins
-,rooms enable weather
-,rooms disable xkcd
+,rooms plugins all
+,rooms enable ducks
+,rooms disable ducks
 ,rooms set_plugin_defaults
 ```
 
@@ -83,14 +98,31 @@ In a normal private chat, include the target room JID:
 
 ```text
 ,rooms plugins room@conference.example.org all
-,rooms enable room@conference.example.org weather
+,rooms enable room@conference.example.org ducks
 ,rooms disable room@conference.example.org xkcd
 ,rooms set_plugin_defaults room@conference.example.org
+```
+
+Some plugins also provide a MUC-PM shortcut for their own room toggle:
+
+```text
+,duck on
+,duck off
+,duck status
 ```
 
 The sender must be a room admin/owner in the target room or have a bot
 moderator/admin role. This keeps clients without MUC-PM support usable without
 opening room settings to normal room users.
+
+Common room feature names include:
+
+```text
+birthday_notify, dice, ducks, help, information, karma, pin, poll,
+presence, reminder, sed, tell, tools, urlcheck, vcard, weather, xkcd, xmpp
+```
+
+`information` can also be addressed as `info`.
 
 ## Notification rooms
 

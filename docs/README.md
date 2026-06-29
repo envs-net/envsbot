@@ -39,11 +39,19 @@ python scripts/generate_commands_md.py
 
 ## Room plugin settings
 
-Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat when the target room JID is provided explicitly. Examples:
+Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat when the target room JID is provided explicitly. Runtime help now has a dedicated overview:
+
+```text
+,help room settings
+,help rooms enable
+,help ducks
+```
+
+Examples:
 
 ```text
 ,rooms plugins room@conference.example.org all
-,rooms enable room@conference.example.org weather
+,rooms enable room@conference.example.org ducks
 ,rooms disable room@conference.example.org xkcd
 ,rooms set_plugin_defaults room@conference.example.org
 ```

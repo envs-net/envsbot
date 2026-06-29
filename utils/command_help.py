@@ -28,11 +28,15 @@ class CommandMetadata(TypedDict, total=False):
 COMMAND_HELP: dict[str, CommandMetadata] = {
     "help": {
         "short": "Show help for plugins and commands.",
-        "usage": "{prefix}help [all|commands|plugins|roles|categories|category <name>|<command>|<plugin> [<subcommand>]]",
+        "usage": (
+            "{prefix}help [all|commands|plugins|roles|categories|category <name>|"
+            "room settings|<command>|<plugin> [<subcommand>]]"
+        ),
         "examples": [
             "{prefix}help",
-            "{prefix}help rooms",
-            "{prefix}help rooms add",
+            "{prefix}help room settings",
+            "{prefix}help ducks",
+            "{prefix}help rooms enable",
             "{prefix}help category rooms",
         ],
         "category": "core",
@@ -215,6 +219,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
             "{prefix}rooms plugins",
             "{prefix}rooms plugins all",
             "{prefix}rooms plugins room@conference.example.org all",
+            "{prefix}help room settings",
         ],
         "context": "room / MUC PM / private chat with <room_jid>",
         "category": "rooms",
@@ -223,8 +228,10 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "short": "Enable a room plugin toggle; requires room admin/owner or bot moderator.",
         "usage": "{prefix}rooms enable [<room_jid>] <plugin>",
         "examples": [
+            "{prefix}rooms enable ducks",
+            "{prefix}rooms enable room@conference.example.org ducks",
             "{prefix}rooms enable weather",
-            "{prefix}rooms enable room@conference.example.org weather",
+            "{prefix}help room settings",
         ],
         "context": "room / MUC PM / private chat with <room_jid>",
         "category": "rooms",
@@ -233,8 +240,9 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "short": "Disable a room plugin toggle; requires room admin/owner or bot moderator.",
         "usage": "{prefix}rooms disable [<room_jid>] <plugin>",
         "examples": [
+            "{prefix}rooms disable ducks",
+            "{prefix}rooms disable room@conference.example.org ducks",
             "{prefix}rooms disable xkcd",
-            "{prefix}rooms disable room@conference.example.org xkcd",
         ],
         "context": "room / MUC PM / private chat with <room_jid>",
         "category": "rooms",
@@ -386,14 +394,26 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "dice": {
         "short": "Roll dice using common dice notation.",
-        "usage": "{prefix}dice [NdM]",
-        "examples": ["{prefix}dice", "{prefix}dice 2d6"],
+        "usage": "{prefix}dice <on|off|status|NdM [modifier] [operator] [target]>",
+        "examples": [
+            "{prefix}dice status",
+            "{prefix}dice 2d6",
+            "{prefix}rooms enable dice",
+        ],
         "category": "fun",
     },
     "duck": {
         "short": "Start or interact with the duck game.",
-        "usage": "{prefix}duck",
-        "examples": ["{prefix}duck"],
+        "usage": "{prefix}duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickname]>",
+        "examples": [
+            "{prefix}duck status",
+            "{prefix}duck on",
+            "{prefix}duck befriend",
+            "{prefix}duck stats",
+            "{prefix}rooms enable ducks",
+            "{prefix}rooms enable room@conference.example.org ducks",
+        ],
+        "context": "room / MUC PM; use rooms enable with <room_jid> from private chat",
         "category": "fun",
     },
     "bef": {
@@ -477,26 +497,34 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "karma": {
         "short": "Show or update karma for a term.",
-        "usage": "{prefix}karma [term|term++|term--]",
-        "examples": ["{prefix}karma xmpp++", "{prefix}karma xmpp"],
+        "usage": "{prefix}karma [on|off|status|term|term++|term--]",
+        "examples": [
+            "{prefix}karma status",
+            "{prefix}karma xmpp++",
+            "{prefix}karma xmpp",
+        ],
         "category": "fun",
     },
     "pin": {
         "short": "Pin, list or delete room pins.",
-        "usage": "{prefix}pin <add|list|delete|on|off|status> ...",
-        "examples": ["{prefix}pin list"],
+        "usage": "{prefix}pin <add|list|show|delete|on|off|status> ...",
+        "examples": ["{prefix}pin status", "{prefix}pin list", "{prefix}rooms enable pin"],
         "category": "rooms",
     },
     "poll": {
         "short": "Create and manage polls.",
-        "usage": "{prefix}poll <new|vote|list|close|on|off|status> ...",
-        "examples": ["{prefix}poll list"],
+        "usage": "{prefix}poll <new|vote|list|show|close|cancel|delete|on|off|status> ...",
+        "examples": ["{prefix}poll status", "{prefix}poll list", "{prefix}rooms enable poll"],
         "category": "rooms",
     },
     "remind": {
         "short": "Create a reminder.",
-        "usage": "{prefix}remind <when> <text>",
-        "examples": ["{prefix}remind 10m check logs"],
+        "usage": "{prefix}remind <on|off|status|when> [text]",
+        "examples": [
+            "{prefix}remind status",
+            "{prefix}remind 10m check logs",
+            "{prefix}rooms enable reminder",
+        ],
         "category": "utility",
     },
     "reminders": {
@@ -528,15 +556,15 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "rooms",
     },
     "sed": {
-        "short": "Apply sed-style corrections to recent messages.",
-        "usage": "{prefix}s/old/new/",
-        "examples": ["{prefix}s/teh/the/"],
+        "short": "Apply sed-style corrections or control room access to sed.",
+        "usage": "{prefix}s/old/new/ or {prefix}sed <on|off|status>",
+        "examples": ["{prefix}s/teh/the/", "{prefix}sed status", "{prefix}rooms enable sed"],
         "category": "utility",
     },
     "tell": {
         "short": "Leave a message for another user.",
-        "usage": "{prefix}tell <nick> <message>",
-        "examples": ["{prefix}tell alice I fixed it"],
+        "usage": "{prefix}tell <on|off|status|nick> [message]",
+        "examples": ["{prefix}tell status", "{prefix}tell alice I fixed it"],
         "category": "utility",
     },
     "tools": {
@@ -589,9 +617,10 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "utility",
     },
     "urlcheck": {
-        "short": "Check URLs for status and metadata.",
-        "usage": "{prefix}urlcheck <url>",
-        "examples": ["{prefix}urlcheck https://envs.net"],
+        "short": "Enable, disable or show automatic URL checks in a room.",
+        "usage": "{prefix}urlcheck <on|off|status>",
+        "examples": ["{prefix}urlcheck status", "{prefix}rooms enable urlcheck"],
+        "context": "room or MUC PM",
         "category": "utility",
     },
     "timezone set": {
@@ -601,9 +630,9 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "profile",
     },
     "vcard": {
-        "short": "Show your bot profile/vCard data.",
-        "usage": "{prefix}vcard",
-        "examples": ["{prefix}vcard"],
+        "short": "Show vCard data or control room access to vCard lookups.",
+        "usage": "{prefix}vcard [on|off|status|nick]",
+        "examples": ["{prefix}vcard", "{prefix}vcard status", "{prefix}rooms enable vcard"],
         "category": "profile",
     },
     "fullname": {
@@ -662,15 +691,15 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "rooms",
     },
     "weather": {
-        "short": "Show weather for a location.",
-        "usage": "{prefix}weather <location>",
-        "examples": ["{prefix}weather Berlin"],
+        "short": "Show weather or control room access to weather lookups.",
+        "usage": "{prefix}weather [on|off|status|location|nick]",
+        "examples": ["{prefix}weather status", "{prefix}weather Berlin", "{prefix}rooms enable weather"],
         "category": "utility",
     },
     "xkcd": {
-        "short": "Show an XKCD comic.",
-        "usage": "{prefix}xkcd [latest|random|number]",
-        "examples": ["{prefix}xkcd random"],
+        "short": "Show an XKCD comic or control room access to XKCD.",
+        "usage": "{prefix}xkcd [on|off|status|latest|random|number|search <term>]",
+        "examples": ["{prefix}xkcd status", "{prefix}xkcd random", "{prefix}rooms enable xkcd"],
         "category": "fun",
     },
     "xmpp": {

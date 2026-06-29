@@ -13,6 +13,7 @@ Usage
   {prefix}help roles
   {prefix}help categories
   {prefix}help category <name>
+  {prefix}help room settings
   {prefix}help <plugin>
   {prefix}help <command>
   {prefix}help {prefix}<command>
@@ -20,7 +21,9 @@ Usage
 
 Examples
 --------
-  {prefix}help rooms
+  {prefix}help room settings
+  {prefix}help ducks
+  {prefix}help rooms enable
   {prefix}help rooms add
   {prefix}help {prefix}rooms add
   {prefix}help users role
@@ -55,6 +58,44 @@ PLUGIN_META = {
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
     "requires": ["_core"],
+}
+
+
+# Plugin name -> room feature toggle metadata.  The feature name is the value
+# accepted by `,rooms enable|disable`, while command is the optional
+# plugin-local on/off/status shortcut.
+ROOM_FEATURE_HELP = {
+    "birthday_notify": {"feature": "birthday_notify", "command": "birthday_notify"},
+    "dice": {"feature": "dice", "command": "dice"},
+    "ducks": {"feature": "ducks", "command": "duck"},
+    "help": {"feature": "help", "command": "help inroom"},
+    "info": {"feature": "information", "command": "info", "aliases": ["info"]},
+    "karma": {"feature": "karma", "command": "karma"},
+    "pin": {"feature": "pin", "command": "pin"},
+    "poll": {"feature": "poll", "command": "poll"},
+    "presence": {"feature": "presence", "command": "presence"},
+    "reminder": {"feature": "reminder", "command": "remind"},
+    "sed": {"feature": "sed", "command": "sed"},
+    "tell": {"feature": "tell", "command": "tell"},
+    "tools": {"feature": "tools", "command": "tools"},
+    "urlcheck": {"feature": "urlcheck", "command": "urlcheck"},
+    "vcard": {"feature": "vcard", "command": "vcard"},
+    "weather": {"feature": "weather", "command": "weather"},
+    "xkcd": {"feature": "xkcd", "command": "xkcd"},
+    "xmpp": {"feature": "xmpp", "command": "xmpp"},
+}
+
+ROOM_FEATURE_HELP_QUERIES = {
+    "room settings",
+    "rooms settings",
+    "room plugins",
+    "rooms plugins",
+    "room toggles",
+    "rooms toggles",
+    "room features",
+    "rooms features",
+    "features",
+    "toggles",
 }
 
 
@@ -176,6 +217,53 @@ def _plugin_description(bot, name: str, module) -> str:
     meta = _plugin_meta(bot, name)
     desc = meta.get("description") or _first_line(module.__doc__)
     return desc or "No description available."
+
+
+def _room_feature_entry(plugin: str) -> dict | None:
+    """Return room-toggle metadata for a plugin, if it has room settings."""
+    return ROOM_FEATURE_HELP.get(str(plugin).strip().lower())
+
+
+def _feature_alias_text(entry: dict) -> str:
+    aliases = [str(alias) for alias in entry.get("aliases", []) if alias]
+    if not aliases:
+        return ""
+    return f" (alias: {', '.join(aliases)})"
+
+
+def _plugin_room_feature_lines(bot, plugin: str) -> list[str]:
+    """Return room-setting help for one plugin."""
+    entry = _room_feature_entry(plugin)
+    if not entry:
+        return []
+
+    prefix = bot.prefix
+    feature = str(entry["feature"])
+    command_name = str(entry.get("command") or feature)
+    alias_text = _feature_alias_text(entry)
+
+    return [
+        "",
+        "Room setting:",
+        f"  Feature name: {feature}{alias_text}",
+        f"  Enable current room/MUC PM: {prefix}rooms enable {feature}",
+        f"  Disable current room/MUC PM: {prefix}rooms disable {feature}",
+        f"  Enable from private chat: "
+        f"{prefix}rooms enable room@conference.example.org {feature}",
+        f"  Show room settings: {prefix}rooms plugins [room@conference.example.org] all",
+        f"  Shortcut in MUC PM: {prefix}{command_name} on|off|status",
+    ]
+
+
+def _available_room_features() -> list[str]:
+    """Return configured room-feature names for the room-settings help page."""
+    try:
+        from utils.room_features import available_features
+
+        return available_features()
+    except Exception:
+        log.debug("[HELP] Could not load room feature list", exc_info=True)
+        return sorted({str(entry["feature"]) for entry in ROOM_FEATURE_HELP.values()})
 
 
 # --------------------------------------------------
@@ -318,11 +406,15 @@ async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
     "help",
     aliases=["h"],
     short="Show help for plugins and commands.",
-    usage="{prefix}help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]",
+    usage=(
+        "{prefix}help [all|commands|plugins|roles|categories|"
+        "category <name>|room settings|<plugin>|<command>]"
+    ),
     examples=[
         "{prefix}help",
-        "{prefix}help rooms",
-        "{prefix}help rooms add",
+        "{prefix}help room settings",
+        "{prefix}help ducks",
+        "{prefix}help rooms enable",
         "{prefix}help {prefix}users role",
         "{prefix}help category rooms",
     ],
@@ -356,6 +448,9 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
         return
     if query_lc == "categories":
         bot.reply(msg, await _categories(bot, role))
+        return
+    if query_lc in ROOM_FEATURE_HELP_QUERIES:
+        bot.reply(msg, await _room_features(bot, role))
         return
     if query_lc.startswith("category "):
         category = query_lc.split(None, 1)[1].strip()
@@ -398,6 +493,7 @@ async def _general(bot, role: Role) -> list[str]:
         f"• {bot.prefix}help plugins — list loaded plugins",
         f"• {bot.prefix}help <plugin> — plugin-specific help",
         f"• {bot.prefix}help <command> — focused command help",
+        f"• {bot.prefix}help room settings — how to enable/disable plugins per room",
         f"• {bot.prefix}help roles — role overview",
         f"• {bot.prefix}help categories — list command categories",
         f"• {bot.prefix}help category <name> — commands in one category",
@@ -414,7 +510,7 @@ async def _general(bot, role: Role) -> list[str]:
     lines += [
         "",
         f"Tip: use {bot.prefix}help commands for a category-based overview or {bot.prefix}help all for everything.",
-        f"Room settings: use {bot.prefix}help rooms plugins and pass <room_jid> when using a normal private chat.",
+        f"Room settings: use {bot.prefix}help room settings or {bot.prefix}help <plugin> to find enable/disable examples.",
     ]
     return lines
 
@@ -457,6 +553,42 @@ def _commands_by_category(bot, role: Role) -> dict[str, list[tuple[str, object]]
     for commands in grouped.values():
         commands.sort(key=lambda item: (item[1].name, item[0]))
     return grouped
+
+
+async def _room_features(bot, _role: Role) -> list[str]:
+    """Return an overview for room-scoped plugin toggles."""
+    feature_names = _available_room_features()
+    lines = [
+        "🏠 Room plugin settings",
+        "",
+        "Use these commands to enable, disable or inspect room-scoped plugins:",
+        f"• {bot.prefix}rooms plugins [<room_jid>] [all|page|last]",
+        f"• {bot.prefix}rooms enable [<room_jid>] <plugin>",
+        f"• {bot.prefix}rooms disable [<room_jid>] <plugin>",
+        f"• {bot.prefix}rooms set_plugin_defaults [<room_jid>]",
+        "",
+        "Examples:",
+        f"• {bot.prefix}rooms enable ducks",
+        f"• {bot.prefix}rooms disable ducks",
+        f"• {bot.prefix}rooms enable room@conference.example.org ducks",
+        f"• {bot.prefix}rooms plugins room@conference.example.org all",
+        "",
+        "Notes:",
+        "• In a room or MUC PM, <room_jid> can be omitted.",
+        "• In a normal private chat, pass <room_jid> explicitly.",
+        "• The sender must be room owner/admin or have a bot moderator/admin role.",
+        "• Some plugins also support a MUC-PM shortcut such as `duck on|off|status`.",
+        "",
+        "Available room feature names:",
+    ]
+
+    if not feature_names:
+        lines.append("No room features are configured.")
+    else:
+        lines.append("• " + ", ".join(feature_names))
+        lines.append("• information can also be addressed as info")
+
+    return lines
 
 
 async def _categories(bot, role: Role) -> list[str]:
@@ -547,7 +679,9 @@ async def _plugin(bot, query: str, role: Role) -> list[str]:
     if meta.get("requires"):
         lines.append("Requires: " + ", ".join(meta["requires"]))
 
-    lines += ["", _plugin_description(bot, plugin, module), "", "Commands:"]
+    lines += ["", _plugin_description(bot, plugin, module)]
+    lines.extend(_plugin_room_feature_lines(bot, plugin))
+    lines += ["", "Commands:"]
 
     commands = _commands_for_plugin(bot, plugin, role)
     if not commands:

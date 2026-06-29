@@ -27,6 +27,30 @@ For paginated commands, `all` disables paging and `last` jumps to the final page
 - When using a normal private chat, pass `<room_jid>` explicitly for room-scoped feature commands.
 - EnvsBot has no separate fixed `ADMIN_ROOM` setting; global bot privileges come from `OWNER`, `ADMINS` and stored bot roles.
 
+## Room plugin settings
+
+Room-scoped plugin toggles are managed through the `rooms` commands:
+
+- `,rooms plugins [<room_jid>] [all|page|last]`
+- `,rooms enable [<room_jid>] <plugin>`
+- `,rooms disable [<room_jid>] <plugin>`
+- `,rooms set_plugin_defaults [<room_jid>]`
+
+Examples:
+
+- `,rooms enable ducks`
+- `,rooms disable ducks`
+- `,rooms enable room@conference.example.org ducks`
+- `,rooms plugins room@conference.example.org all`
+
+In a room or MUC PM the target room can usually be inferred. In a normal private chat, pass `<room_jid>` explicitly. The sender must be room owner/admin or have a bot moderator/admin role.
+
+Known room feature names:
+
+`birthday_notify`, `dice`, `ducks`, `help`, `information`, `karma`, `pin`, `poll`, `presence`, `reminder`, `sed`, `tell`, `tools`, `urlcheck`, `vcard`, `weather`, `xkcd`, `xmpp`
+
+`information` can also be addressed as `info`.
+
 ## Role legend
 
 Lower role values have more privileges. A command is visible when your role is strong enough.
@@ -115,11 +139,11 @@ Lower role values have more privileges. A command is visible when your role is s
 | --- | --- | --- | --- |
 | `,bef` | `user` | `any` | Befriend the current duck. |
 | `,dice` | `user` | `any` | Roll dice using common dice notation. |
-| `,duck` | `user` | `any` | Start or interact with the duck game. |
+| `,duck` | `user` | `room / MUC PM; use rooms enable with <room_jid> from private chat` | Start or interact with the duck game. |
 | `,duckstats` | `user` | `any` | Show duck game stats. |
 | `,karma` | `user` | `any` | Show or update karma for a term. |
 | `,trap` | `user` | `any` | Set a trap in the duck game. |
-| `,xkcd` | `user` | `any` | Show an XKCD comic. |
+| `,xkcd` | `user` | `any` | Show an XKCD comic or control room access to XKCD. |
 
 ### Info
 
@@ -151,7 +175,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,timezone` | `user` | `any` | Show your configured timezone. |
 | `,timezone set` | `user` | `any` | Set your timezone in the bot profile. |
 | `,urls` | `user` | `any` | Show or set profile URLs. |
-| `,vcard` | `user` | `any` | Show your bot profile/vCard data. |
+| `,vcard` | `user` | `any` | Show vCard data or control room access to vCard lookups. |
 
 ### Rooms
 
@@ -198,15 +222,15 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,remind` | `user` | `any` | Create a reminder. |
 | `,remind delete` | `user` | `any` | Delete one reminder. |
 | `,reminders` | `user` | `any` | List your reminders. |
-| `,sed` | `user` | `any` | Apply sed-style corrections to recent messages. |
+| `,sed` | `user` | `any` | Apply sed-style corrections or control room access to sed. |
 | `,seen` | `user` | `any` | Show when a user was last seen. |
 | `,tell` | `user` | `any` | Leave a message for another user. |
 | `,time` | `user` | `any` | Show the current time. |
 | `,tools` | `moderator` | `room or MUC PM` | Enable, disable or show room access to utility commands. |
 | `,ts` | `user` | `any` | Convert or show Unix timestamps. |
-| `,urlcheck` | `user` | `any` | Check URLs for status and metadata. |
+| `,urlcheck` | `user` | `room or MUC PM` | Enable, disable or show automatic URL checks in a room. |
 | `,utc` | `user` | `any` | Show current UTC time. |
-| `,weather` | `user` | `any` | Show weather for a location. |
+| `,weather` | `user` | `any` | Show weather or control room access to weather lookups. |
 
 ### Xmpp
 
@@ -495,15 +519,16 @@ Show help for plugins and commands.
 Role: `none`<br>
 Context: `any`<br>
 Category: `core`<br>
-Usage: `,help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]`
+Usage: `,help [all|commands|plugins|roles|categories|category <name>|room settings|<plugin>|<command>]`
 
 Aliases: `,h`
 
 Examples:
 
 - `,help`
-- `,help rooms`
-- `,help rooms add`
+- `,help room settings`
+- `,help ducks`
+- `,help rooms enable`
 - `,help ,users role`
 - `,help category rooms`
 
@@ -692,8 +717,9 @@ Aliases: `,room disable`, `,room feature disable`, `,rooms feature disable`
 
 Examples:
 
+- `,rooms disable ducks`
+- `,rooms disable room@conference.example.org ducks`
 - `,rooms disable xkcd`
-- `,rooms disable room@conference.example.org xkcd`
 
 #### `,rooms enable`
 
@@ -708,8 +734,10 @@ Aliases: `,room enable`, `,room feature enable`, `,rooms feature enable`
 
 Examples:
 
+- `,rooms enable ducks`
+- `,rooms enable room@conference.example.org ducks`
 - `,rooms enable weather`
-- `,rooms enable room@conference.example.org weather`
+- `,help room settings`
 
 #### `,rooms invite`
 
@@ -794,6 +822,7 @@ Examples:
 - `,rooms plugins`
 - `,rooms plugins all`
 - `,rooms plugins room@conference.example.org all`
+- `,help room settings`
 
 #### `,rooms set_plugin_defaults`
 
@@ -1043,14 +1072,15 @@ Roll dice using common dice notation.
 Role: `user`<br>
 Context: `any`<br>
 Category: `fun`<br>
-Usage: `,dice [NdM]`
+Usage: `,dice <on|off|status|NdM [modifier] [operator] [target]>`
 
 Aliases: `,r`, `,roll`
 
 Examples:
 
-- `,dice`
+- `,dice status`
 - `,dice 2d6`
+- `,rooms enable dice`
 
 ### ducks
 
@@ -1077,13 +1107,18 @@ Examples:
 Start or interact with the duck game.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room / MUC PM; use rooms enable with <room_jid> from private chat`<br>
 Category: `fun`<br>
-Usage: `,duck`
+Usage: `,duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickname]>`
 
 Examples:
 
-- `,duck`
+- `,duck status`
+- `,duck on`
+- `,duck befriend`
+- `,duck stats`
+- `,rooms enable ducks`
+- `,rooms enable room@conference.example.org ducks`
 
 #### `,duckstats`
 
@@ -1280,10 +1315,11 @@ Show or update karma for a term.
 Role: `user`<br>
 Context: `any`<br>
 Category: `fun`<br>
-Usage: `,karma [term|term++|term--]`
+Usage: `,karma [on|off|status|term|term++|term--]`
 
 Examples:
 
+- `,karma status`
 - `,karma xmpp++`
 - `,karma xmpp`
 
@@ -1301,11 +1337,13 @@ Pin, list or delete room pins.
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,pin <add|list|delete|on|off|status> ...`
+Usage: `,pin <add|list|show|delete|on|off|status> ...`
 
 Examples:
 
+- `,pin status`
 - `,pin list`
+- `,rooms enable pin`
 
 ### poll
 
@@ -1321,11 +1359,13 @@ Create and manage polls.
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,poll <new|vote|list|close|on|off|status> ...`
+Usage: `,poll <new|vote|list|show|close|cancel|delete|on|off|status> ...`
 
 Examples:
 
+- `,poll status`
 - `,poll list`
+- `,rooms enable poll`
 
 ### reminder
 
@@ -1341,13 +1381,15 @@ Create a reminder.
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,remind <when> <text>`
+Usage: `,remind <on|off|status|when> [text]`
 
 Aliases: `,rem`, `,reminder`
 
 Examples:
 
+- `,remind status`
 - `,remind 10m check logs`
+- `,rooms enable reminder`
 
 #### `,remind delete`
 
@@ -1416,16 +1458,18 @@ Message correction using sed-like syntax
 
 #### `,sed`
 
-Apply sed-style corrections to recent messages.
+Apply sed-style corrections or control room access to sed.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,s/old/new/`
+Usage: `,s/old/new/ or ,sed <on|off|status>`
 
 Examples:
 
 - `,s/teh/the/`
+- `,sed status`
+- `,rooms enable sed`
 
 ### tell
 
@@ -1441,10 +1485,11 @@ Leave a message for another user.
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,tell <nick> <message>`
+Usage: `,tell <on|off|status|nick> [message]`
 
 Examples:
 
+- `,tell status`
 - `,tell alice I fixed it`
 
 ### tools
@@ -1573,16 +1618,17 @@ URL title and YouTube info fetcher for groupchats
 
 #### `,urlcheck`
 
-Check URLs for status and metadata.
+Enable, disable or show automatic URL checks in a room.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room or MUC PM`<br>
 Category: `utility`<br>
-Usage: `,urlcheck <url>`
+Usage: `,urlcheck <on|off|status>`
 
 Examples:
 
-- `,urlcheck https://envs.net`
+- `,urlcheck status`
+- `,rooms enable urlcheck`
 
 ### vcard
 
@@ -1726,18 +1772,20 @@ Examples:
 
 #### `,vcard`
 
-Show your bot profile/vCard data.
+Show vCard data or control room access to vCard lookups.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,vcard`
+Usage: `,vcard [on|off|status|nick]`
 
 Aliases: `,v`
 
 Examples:
 
 - `,vcard`
+- `,vcard status`
+- `,rooms enable vcard`
 
 ### weather
 
@@ -1748,18 +1796,20 @@ Gives weather according to users location (supports MUCs and MUC DMs)
 
 #### `,weather`
 
-Show weather for a location.
+Show weather or control room access to weather lookups.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,weather <location>`
+Usage: `,weather [on|off|status|location|nick]`
 
 Aliases: `,w`
 
 Examples:
 
+- `,weather status`
 - `,weather Berlin`
+- `,rooms enable weather`
 
 ### xkcd
 
@@ -1770,16 +1820,18 @@ XKCD comic fetcher and broadcaster with full indexing
 
 #### `,xkcd`
 
-Show an XKCD comic.
+Show an XKCD comic or control room access to XKCD.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `fun`<br>
-Usage: `,xkcd [latest|random|number]`
+Usage: `,xkcd [on|off|status|latest|random|number|search <term>]`
 
 Examples:
 
+- `,xkcd status`
 - `,xkcd random`
+- `,rooms enable xkcd`
 
 ### xmpp
 
