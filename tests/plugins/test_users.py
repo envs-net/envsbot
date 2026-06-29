@@ -33,7 +33,6 @@ class FakeUserManager:
     def __init__(self, *, plugin_store, nick_index):
         self._plugin_store = plugin_store
         self._nick_index = nick_index
-        self._nick_index_lock = asyncio.Lock()
         self.get = AsyncMock(return_value=None)
         self.create = AsyncMock()
 
@@ -496,7 +495,7 @@ async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
         "user@example.org",
         "target@example.org",
         users_mod.Role.USER,
-        users_mod.Role.NEW,
+        users_mod.Role.ADMIN,
     )
     assert allowed is False
     assert "not allowed" in reason
