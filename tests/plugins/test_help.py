@@ -517,6 +517,46 @@ async def test_room_feature_help_page_lists_feature_names(monkeypatch):
     assert "information can also be addressed as info" in lines
 
 
+def test_available_room_features_uses_configured_feature_list(monkeypatch):
+    import utils.room_features as room_features
+
+    monkeypatch.setattr(
+        room_features,
+        "available_features",
+        lambda: ["ducks", "help", "xkcd"],
+    )
+
+    assert help_plugin._available_room_features() == ["ducks", "help", "xkcd"]
+
+
+def test_available_room_features_falls_back_to_help_metadata(monkeypatch, caplog):
+    import utils.room_features as room_features
+
+    def broken_feature_list():
+        raise RuntimeError("room feature config unavailable")
+
+    monkeypatch.setattr(room_features, "available_features", broken_feature_list)
+    caplog.set_level("DEBUG", logger=help_plugin.log.name)
+
+    features = help_plugin._available_room_features()
+
+    assert features == sorted(
+        {str(entry["feature"]) for entry in help_plugin.ROOM_FEATURE_HELP.values()}
+    )
+    assert "ducks" in features
+    assert "information" in features
+    assert "info" not in features
+    assert len(features) == len(set(features))
+
+    records = [
+        record for record in caplog.records
+        if record.name == help_plugin.log.name
+    ]
+    assert records
+    assert records[-1].message == "[HELP] Could not load room feature list"
+    assert records[-1].exc_info
+
+
 def test_room_feature_help_helpers():
     assert help_plugin._feature_alias_text({"aliases": ["info"]}) == " (alias: info)"
     assert help_plugin._feature_alias_text({}) == ""
