@@ -932,3 +932,7 @@ def test_normalize_affiliation_result_accepts_dict_keys():
     assert users_mod._normalize_affiliation_result({
         "alice@example.org/resource": {},
     }) == {"alice@example.org"}
+
+
+def test_grantable_plugin_names_are_stable_and_human_readable():
+    assert users_mod._grantable_plugin_names() == "rss, pin, poll"

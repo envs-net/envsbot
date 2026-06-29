@@ -1164,3 +1164,23 @@ async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, ma
     assert rss.RSS_KEY not in bot.plugin_store
     rss.fetch_feed.assert_not_awaited()
     assert "RSS plugin grant" in bot.replies[-1][1]
+
+
+def test_filter_feeds_for_room_matches_normalized_room_and_skips_missing_rooms():
+    matching_feed = {
+        "title": "Match",
+        "rooms": ["other@conference.example.org", "Room@Conference.Example.Org"],
+    }
+    feeds = {
+        "https://example.org/match.xml": matching_feed,
+        "https://example.org/other.xml": {
+            "title": "Other",
+            "rooms": ["other@conference.example.org"],
+        },
+        "https://example.org/empty.xml": {"title": "Empty", "rooms": []},
+        "https://example.org/missing.xml": {"title": "Missing"},
+    }
+
+    assert rss._filter_feeds_for_room(feeds, "room@conference.example.org") == {
+        "https://example.org/match.xml": matching_feed,
+    }
