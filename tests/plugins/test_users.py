@@ -16,9 +16,34 @@ def _make_mock_bot(*, include_audit: bool = False):
     bot.bot_plugins.plugins = {}
     bot.reply = MagicMock()
     bot.get_user_role = AsyncMock(return_value=users_mod.Role.USER)
-    if include_audit:
-        bot.audit = AsyncMock()
+    bot.audit = AsyncMock() if include_audit else None
     return bot
+
+
+def assert_reply_contains(bot_reply, substring: str):
+    expected = substring.lower()
+    for call in bot_reply.call_args_list:
+        for arg in call.args:
+            if expected in str(arg).lower():
+                return
+    assert False, f"Expected reply to contain {substring!r}"
+
+
+class FakeUserManager:
+    def __init__(self, *, plugin_store, nick_index):
+        self._plugin_store = plugin_store
+        self._nick_index = nick_index
+        self._nick_index_lock = asyncio.Lock()
+        self.get = AsyncMock(return_value=None)
+        self.create = AsyncMock()
+
+    def plugin(self, name):
+        assert name == "users"
+        return self._plugin_store
+
+    @property
+    def nick_index(self):
+        return self._nick_index
 
 
 @pytest.fixture
@@ -73,8 +98,9 @@ async def test_on_muc_presence_adds_and_tracks_nick(mock_bot, mock_msg):
 @pytest.mark.asyncio
 async def test_on_groupchat_message_updates_last_seen(mock_bot, mock_msg):
     bot_has_priv = MagicMock(return_value=True)
-    mock_bot.bot_plugins.plugins = {'rooms': type(
-        "RoomsPlugin", (), {"bot_has_privilege": bot_has_priv})()}
+    mock_bot.bot_plugins.plugins = {
+        'rooms': types.SimpleNamespace(bot_has_privilege=bot_has_priv)
+    }
     mock_msg['muc'] = {"room": "room-A", "nick": "Nick"}
     mock_bot.plugin = {"xep_0045": MagicMock(
         get_jid_property=lambda r, n, s: "realjid@x")}
@@ -127,27 +153,27 @@ async def test_on_groupchat_message_skips_own_message(mock_bot, mock_msg):
 @pytest.mark.asyncio
 async def test_track_room_nick(build_mock_bot, monkeypatch):
     bot = build_mock_bot()
-    bot.db.users.get = AsyncMock(return_value=None)
-    bot.db.users.create = AsyncMock()
     plugin_store = AsyncMock()
     plugin_store.get = AsyncMock(return_value={
         "roomY": ["oldnick", "oldernick"],
         "roomZ": ["sharednick"],
     })
     plugin_store.set = AsyncMock()
-    bot.db.users.plugin.return_value = plugin_store
-    bot.db.users._nick_index = {
-        "nickname": ["other@x"],
-        "oldnick": ["jid@x", "other@x"],
-        "stale": ["jid@x"],
-    }
-    bot.db.users._nick_index_lock = asyncio.Lock()
+    user_store = FakeUserManager(
+        plugin_store=plugin_store,
+        nick_index={
+            "nickname": ["other@x"],
+            "oldnick": ["jid@x", "other@x"],
+            "stale": ["jid@x"],
+        },
+    )
+    bot.db.users = user_store
 
     monkeypatch.setattr(users_mod, "MAX_ROOM_NICKS", 2)
 
     await users_mod.track_room_nick(bot, "jid@x", "roomY", "nickname")
 
-    bot.db.users.create.assert_awaited_once_with("jid@x", "nickname")
+    user_store.create.assert_awaited_once_with("jid@x", "nickname")
     plugin_store.set.assert_awaited_once_with(
         "jid@x",
         "roomnicks",
@@ -156,7 +182,7 @@ async def test_track_room_nick(build_mock_bot, monkeypatch):
             "roomZ": ["sharednick"],
         },
     )
-    assert bot.db.users._nick_index == {
+    assert user_store.nick_index == {
         "nickname": ["other@x", "jid@x"],
         "oldnick": ["other@x", "jid@x"],
         "sharednick": ["jid@x"],
@@ -166,10 +192,13 @@ async def test_track_room_nick(build_mock_bot, monkeypatch):
 @pytest.mark.asyncio
 async def test_find_users_by_nick_safe_sorts_and_handles_missing(build_mock_bot):
     bot = build_mock_bot()
-    bot.db.users._nick_index = {
-        "Nick": ["z@example.net", "a@example.net"],
-        "Other": ["other@example.net"],
-    }
+    bot.db.users = FakeUserManager(
+        plugin_store=AsyncMock(),
+        nick_index={
+            "Nick": ["z@example.net", "a@example.net"],
+            "Other": ["other@example.net"],
+        },
+    )
 
     assert await users_mod.find_users_by_nick_safe(bot, "Nick") == [
         "a@example.net",
@@ -215,12 +244,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
                 patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n", ["foo"],
                                        mock_msg, False)
-            found = False
-            for call in bot_reply.call_args_list:
-                for arg in call[0]:
-                    if "multiple users found" in str(arg).lower():
-                        found = True
-            assert found
+            assert_reply_contains(bot_reply, "multiple users found")
         # 4. Edge: nick index points to a user that no longer exists
         mock_bot.db.users.get = AsyncMock(side_effect=[None, None])
         with patch("core_plugins.users.find_users_by_nick_safe",
@@ -241,12 +265,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
         with patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n", [],
                                        mock_msg, False)
-            found = False
-            for call in bot_reply.call_args_list:
-                for arg in call[0]:
-                    if "usage:" in str(arg).lower():
-                        found = True
-            assert found
+            assert_reply_contains(bot_reply, "usage:")
 
 
 @pytest.mark.asyncio
@@ -260,9 +279,7 @@ async def test_users_list_shows_users(mock_bot, mock_msg):
                   "affiliation": "member", "role": "admin"},
         }
     }
-    # Patch to force visibility of rooms plugin with required attributes
-    fake_rooms = type("RoomsPlugin", (), {
-                      "JOINED_ROOMS": users_mod.JOINED_ROOMS})()
+    fake_rooms = types.SimpleNamespace(JOINED_ROOMS=users_mod.JOINED_ROOMS)
     mock_bot.bot_plugins.plugins = {"rooms": fake_rooms}
     mock_msg['from'].bare = "room-A"
     with (patch.object(users_mod, "prefix", ","),
@@ -279,8 +296,7 @@ async def test_users_list_shows_users(mock_bot, mock_msg):
     # No nicks
     users_mod.JOINED_ROOMS["room-B"] = {"nicks": {}}
     mock_msg['from'].bare = "room-B"
-    fake_rooms = type("RoomsPlugin", (), {
-                      "JOINED_ROOMS": users_mod.JOINED_ROOMS})()
+    fake_rooms = types.SimpleNamespace(JOINED_ROOMS=users_mod.JOINED_ROOMS)
     mock_bot.bot_plugins.plugins = {"rooms": fake_rooms}
     with (patch.object(users_mod, "prefix", ","),
           patch.object(mock_bot, "reply") as bot_reply):
@@ -326,12 +342,7 @@ async def test_users_delete_errors(mock_bot, mock_msg):
         with patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_delete(mock_bot, "s", "n", [],
                                          mock_msg, False)
-            found = False
-            for call in bot_reply.call_args_list:
-                for arg in call[0]:
-                    if "usage:" in str(arg).lower():
-                        found = True
-            assert found
+            assert_reply_contains(bot_reply, "usage:")
         # Invalid JID
         args = ["invalidjid"]
         mock_bot.db.users.delete = AsyncMock()
@@ -927,3 +938,7 @@ def test_normalize_affiliation_result_accepts_dict_keys():
     assert users_mod._normalize_affiliation_result({
         "alice@example.org/resource": {},
     }) == {"alice@example.org"}
+
+
+def test_grantable_plugin_names_are_stable_and_human_readable():
+    assert users_mod._grantable_plugin_names() == "rss, pin, poll"
