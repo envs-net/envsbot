@@ -427,6 +427,38 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
 
 
 @pytest.mark.asyncio
+async def test_rooms_leave_reports_noop_state(fake_bot, fake_msg):
+    room_jid = "room@conference.domain"
+    unknown_room = "unknown@conference.domain"
+    fake_bot.db.rooms.get = AsyncMock(
+        side_effect=lambda jid: (room_jid, "BotNick", True, None)
+        if jid == room_jid else None
+    )
+    fake_bot.plugin["xep_0045"].leave_muc = AsyncMock()
+    rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick"}
+    fake_bot.presence.joined_rooms[room_jid] = "BotNick"
+
+    with patch("core_plugins.rooms.is_valid_room_jid",
+               AsyncMock(return_value=True)):
+        await rooms.rooms_leave(fake_bot, "jid", "nick", [room_jid],
+                                fake_msg, False)
+        await rooms.rooms_leave(fake_bot, "jid", "nick", [room_jid],
+                                fake_msg, False)
+        await rooms.rooms_leave(fake_bot, "jid", "nick", [unknown_room],
+                                fake_msg, False)
+
+    fake_bot.plugin["xep_0045"].leave_muc.assert_awaited_once_with(
+        room_jid, "BotNick"
+    )
+    replies = [call.args[1] for call in fake_bot.reply.call_args_list]
+    assert f"🚶 Left room: {room_jid}" in replies
+    assert f"ℹ️ Room already left: {room_jid}" in replies
+    assert f"ℹ️ Room is not used by this bot: {unknown_room}" in replies
+    fake_bot.presence.broadcast.assert_called_once()
+    assert unknown_room not in rooms._LEAVING_ROOMS
+
+
+@pytest.mark.asyncio
 async def test_is_valid_muc_domain_true_false(fake_bot):
     xmpp_plugin = MagicMock()
     xmpp_plugin.get_info = AsyncMock(

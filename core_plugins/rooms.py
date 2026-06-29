@@ -789,7 +789,8 @@ async def _leave_runtime_room(bot, room_jid: str) -> bool:
     joined = room_jid in JOINED_ROOMS or room_jid in presence_rooms
     nick_to_leave = room_data.get("nick") or presence_rooms.get(room_jid)
 
-    _LEAVING_ROOMS.add(room_jid)
+    if joined or nick_to_leave:
+        _LEAVING_ROOMS.add(room_jid)
 
     if nick_to_leave:
         try:
@@ -801,9 +802,10 @@ async def _leave_runtime_room(bot, room_jid: str) -> bool:
     JOINED_ROOMS.pop(room_jid, None)
     presence_rooms.pop(room_jid, None)
 
-    broadcast = getattr(getattr(bot, "presence", None), "broadcast", None)
-    if callable(broadcast):
-        broadcast()
+    if joined:
+        broadcast = getattr(getattr(bot, "presence", None), "broadcast", None)
+        if callable(broadcast):
+            broadcast()
 
     return joined
 
@@ -1712,7 +1714,20 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
         return
 
     try:
-        await _leave_runtime_room(bot, room_jid)
+        joined = await _leave_runtime_room(bot, room_jid)
+
+        if not joined:
+            if await _room_is_known(bot, room_jid):
+                bot.reply(
+                    msg,
+                    f"ℹ️ Room already left: {room_jid}",
+                )
+            else:
+                bot.reply(
+                    msg,
+                    f"ℹ️ Room is not used by this bot: {room_jid}",
+                )
+            return
 
         log.info("[ROOMS] 🚶 Left room %s", room_jid)
         await audit_event(bot, "room_left", actor=sender_jid, target=room_jid)
