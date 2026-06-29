@@ -6,6 +6,7 @@ This directory contains the operator and command documentation for EnvsBot.
 
 - [`commands.md`](commands.md) - generated command reference from the live command metadata
 - [`help.md`](help.md) - runtime help behavior and usage examples
+- [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, RSS and grants
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
 - [`release-checklist.md`](release-checklist.md) - release preparation and tagging checklist
 
@@ -13,6 +14,7 @@ Operational notes:
 
 - Core/admin plugins live in `core_plugins/`; optional feature plugins live in `plugins/`. Core plugins keep stable public names but cannot be unloaded at runtime.
 - Production installations should use the latest tagged release, not the moving `main` branch.
+- New operators should start with [`tutorial.md`](tutorial.md) before using the full command reference.
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
 - Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.
@@ -39,7 +41,7 @@ python scripts/generate_commands_md.py
 
 ## Room plugin settings
 
-Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat when the target room JID is provided explicitly. Runtime help now has a dedicated overview:
+Room-scoped plugin toggles can be managed from a MUC PM, directly in the room, or from a normal private chat when the target room JID is provided explicitly. Runtime help has a dedicated overview:
 
 ```text
 ,help room settings

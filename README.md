@@ -14,7 +14,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 
 * Modular plugin architecture with dynamic load, unload and reload support
 * Decorator-based command registry with roles, aliases, usage metadata and generated help
-* Generated command reference in [`docs/commands.md`](docs/commands.md) and runtime help guide in [`docs/help.md`](docs/help.md)
+* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command reference in [`docs/commands.md`](docs/commands.md), and runtime help guide in [`docs/help.md`](docs/help.md)
 * XMPP MUC and direct-message command handling
 * Room management with persistent autojoin rooms and per-room plugin toggles
 * User registration, hardened role management, last-seen tracking and nickname lookup
@@ -244,7 +244,7 @@ Room plugin settings can be changed in multiple contexts. In a MUC PM or directl
 
 EnvsBot has no separate fixed `ADMIN_ROOM` setting. Global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles. Update and invite notification targets are configured separately with `VERSION_CHECK_NOTIFY_JID` and `ROOM_INVITE_NOTIFY_JID`.
 
-For paginated commands, `all` disables paging and prints the full result set. Full reference: [`docs/commands.md`](docs/commands.md).
+For paginated commands, `all` disables paging and prints the full result set. New operators should start with [`docs/tutorial.md`](docs/tutorial.md); full reference: [`docs/commands.md`](docs/commands.md).
 
 ---
 
@@ -422,6 +422,7 @@ Drone CI is configured in `.drone.yml`.
 ## Documentation
 
 * [`docs/README.md`](docs/README.md) - documentation index
+* [`docs/tutorial.md`](docs/tutorial.md) - practical setup and operations walkthrough
 * [`docs/commands.md`](docs/commands.md) - generated command reference
 * [`docs/help.md`](docs/help.md) - runtime help guide
 * [`docs/maintenance.md`](docs/maintenance.md) - offline SQLite maintenance

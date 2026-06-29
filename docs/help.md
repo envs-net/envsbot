@@ -1,6 +1,6 @@
 # Runtime help
 
-EnvsBot builds its help output from the live command registry. This keeps the in-chat help and the generated command reference close to the code.
+EnvsBot builds its help output from the live command registry. This keeps the in-chat help and the generated command reference close to the code. For a practical start-to-finish walkthrough, see [`tutorial.md`](tutorial.md).
 
 ## Main entry points
 
