@@ -34,6 +34,7 @@ import time
 
 from utils.command import command, Role
 from utils.config import config
+from core_plugins.users import user_has_room_plugin_grant
 from core_plugins import _core
 
 from utils.task_supervisor import create_plugin_task
@@ -308,7 +309,18 @@ async def _can_manage_poll(bot, msg, is_room: bool, poll: dict) -> bool:
 
     room_jid = msg["from"].bare
     nick = msg.get("mucnick") or msg["from"].resource or ""
-    return await _core.is_room_moderator_or_admin(bot, room_jid, str(nick))
+    if await _core.is_room_moderator_or_admin(bot, room_jid, str(nick)):
+        return True
+
+    if not sender_jid:
+        return False
+
+    return await user_has_room_plugin_grant(
+        bot,
+        sender_jid,
+        "poll",
+        room_jid,
+    )
 
 
 async def _close_poll(bot, room_jid: str, poll_id: str | int, *,

@@ -440,3 +440,26 @@ async def test_pin_permission_and_recent_cache_direct_helpers(monkeypatch, make_
     entries = [{"body": "hello"}]
     monkeypatch.setattr(pin, "get_cached_messages", lambda namespace, room: [(namespace, room), *entries])
     assert pin._recent_cache_entries(room_jid) == [(pin.CACHE_NAMESPACE, room_jid), *entries]
+
+@pytest.mark.asyncio
+async def test_pin_management_allows_plugin_grant_fallback(monkeypatch, bot, make_msg, room_jid):
+    msg = make_msg(resource="alice")
+    monkeypatch.setattr(pin, "is_room_moderator_or_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        pin,
+        "get_real_jid",
+        AsyncMock(return_value=("alice@example.org", False, True)),
+    )
+    monkeypatch.setattr(
+        pin,
+        "user_has_room_plugin_grant",
+        AsyncMock(return_value=True),
+    )
+
+    assert await pin._sender_can_manage_pins_in_room(bot, msg, room_jid) is True
+    pin.user_has_room_plugin_grant.assert_awaited_once_with(
+        bot,
+        "alice@example.org",
+        "pin",
+        room_jid,
+    )

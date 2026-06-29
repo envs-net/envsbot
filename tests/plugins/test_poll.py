@@ -486,3 +486,41 @@ def test__format_ts_and_remaining():
     assert poll._format_ts(now).startswith(str(time.localtime(now).tm_year))
     assert "1h" in poll._format_remaining(fut)
     assert "no limit" in poll._format_remaining(None)
+
+@pytest.mark.asyncio
+async def test_poll_manage_allows_plugin_grant_fallback(monkeypatch, dummy_bot):
+    msg = public_room_msg(["close", "1"], nick="alice")
+    poll_obj = {
+        "id": 1,
+        "room_jid": "room@conf",
+        "created_by": "other@example.org",
+        "status": "open",
+        "options": ["A", "B"],
+        "votes": {},
+    }
+
+    async def fake_get_real_jid(bot, msg):
+        return "alice@example.org", False, True
+
+    async def fake_is_room_moderator_or_admin(bot, room_jid, nick):
+        return False
+
+    async def fake_user_has_room_plugin_grant(bot, jid, plugin, room_jid):
+        assert jid == "alice@example.org"
+        assert plugin == "poll"
+        assert room_jid == "room@conf"
+        return True
+
+    monkeypatch.setattr(poll._core, "get_real_jid", fake_get_real_jid)
+    monkeypatch.setattr(
+        poll._core,
+        "is_room_moderator_or_admin",
+        fake_is_room_moderator_or_admin,
+    )
+    monkeypatch.setattr(
+        poll,
+        "user_has_room_plugin_grant",
+        fake_user_has_room_plugin_grant,
+    )
+
+    assert await poll._can_manage_poll(dummy_bot, msg, True, poll_obj) is True

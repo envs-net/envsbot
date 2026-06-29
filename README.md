@@ -236,13 +236,11 @@ Examples assume the default command prefix `,`.
 | `,users roles` | Show available user roles |
 | `,users admins [all/page/last]` | List privileged users |
 | `,users role <jid> <role>` | Change a user's role |
-| `,users grant <jid> <plugin>` | Grant room-scoped access to one plugin |
-| `,users revoke <jid> <plugin>` | Remove a room-scoped plugin grant |
-| `,users grants <jid>` | Show a user's plugin grants |
+| `,users grant <jid> <plugin> [plugin ...]` | Grant room-scoped plugin permissions, for example `rss pin poll` |
+| `,users revoke <jid> <plugin> [plugin ...]` | Revoke room-scoped plugin permissions |
+| `,users grants <jid>` | Show room-scoped plugin permissions |
 
-Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or operational notification room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role.
-
-Plugin grants are more limited than global roles. For example, `,users grant alice@example.org rss` allows Alice to manage RSS subscriptions only for rooms where she is visible as admin or owner. It does not grant global moderator access.
+Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or operational notification room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role. Selected plugins can also be delegated per user with `,users grant <jid> rss pin poll`; these grants are room-scoped and still require the user to be owner/admin in the target room.
 
 EnvsBot has no separate fixed `ADMIN_ROOM` setting. Global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles. Update and invite notification targets are configured separately with `VERSION_CHECK_NOTIFY_JID` and `ROOM_INVITE_NOTIFY_JID`.
 

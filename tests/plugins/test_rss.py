@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import plugins.rss as rss
 import core_plugins.rooms
+from utils.command import Role
 
 
 @pytest.fixture(autouse=True)
@@ -12,16 +13,6 @@ def patch_config(monkeypatch):
     monkeypatch.setattr(rss, "config", {"prefix": ","})
 
 
-@pytest.fixture(autouse=True)
-def clear_joined_rooms():
-    old_rooms = dict(core_plugins.rooms.JOINED_ROOMS)
-    core_plugins.rooms.JOINED_ROOMS.clear()
-    rss.JOINED_ROOMS.clear()
-    yield
-    core_plugins.rooms.JOINED_ROOMS.clear()
-    core_plugins.rooms.JOINED_ROOMS.update(old_rooms)
-    rss.JOINED_ROOMS.clear()
-    rss.JOINED_ROOMS.update(old_rooms)
 
 
 @pytest.mark.asyncio
@@ -49,15 +40,6 @@ def make_bot():
         async def set_global(self, key, value):
             self[key] = value
 
-    class UserGrantStore(dict):
-        async def get(self, jid, key=None):
-            data = dict.get(self, jid, {})
-            return data if key is None else data.get(key)
-
-        async def set(self, jid, key, value):
-            data = dict.setdefault(self, jid, {})
-            data[key] = value
-
     class DummyBot:
         def __init__(self):
             self.replies = []
@@ -66,17 +48,16 @@ def make_bot():
             async def flush_all():
                 self.flush_count += 1
 
-            self.plugin_store = DummyStore()
-            self.users_store = UserGrantStore()
             self.db = SimpleNamespace(
                 users=SimpleNamespace(
-                    plugin=lambda name: (
-                        self.users_store if name == "users" else self.plugin_store
-                    ),
+                    plugin=lambda name: self.plugin_store,
                     flush_all=flush_all,
                 )
             )
-            self.get_user_role = AsyncMock(return_value=rss.Role.MODERATOR)
+            self.plugin_store = DummyStore()
+
+        async def get_user_role(self, jid, room=None):
+            return Role.MODERATOR
 
         def reply(self, msg, text, **kwargs):
             self.replies.append((msg, text, kwargs))
@@ -1057,7 +1038,7 @@ async def test_rss_reset_retry_state_usage_and_missing_feed(make_bot):
     msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
 
     await rss.rss_command(bot, "jid", "nick", ["reset"], msg, False)
-    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl> [room]"
+    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl> [room_jid]"
 
     await rss.rss_command(
         bot,
@@ -1111,112 +1092,75 @@ async def test_rss_check_loop_empty_feed_resets_retry_state(monkeypatch, make_bo
     assert feed["error_count"] == 0
     assert feed["next_retry"] == 0
 
-
 @pytest.mark.asyncio
-async def test_rss_plugin_grant_allows_room_admin_add_from_private_chat(monkeypatch, make_bot):
+async def test_rss_plugin_grant_allows_explicit_room_add(monkeypatch, make_bot):
     bot = make_bot()
-    bot.get_user_role = AsyncMock(return_value=rss.Role.USER)
-    sender = "alice@example.org"
-    room = "team@conference.example.org"
-    feed_url = "https://example.org/feed.rss"
-    bot.users_store[sender] = {"plugin_grants": ["rss"]}
-    core_plugins.rooms.JOINED_ROOMS[room] = {
-        "nicks": {
-            "Alice": {"jid": sender, "affiliation": "owner", "role": "moderator"},
-        }
-    }
+    bot.get_user_role = AsyncMock(return_value=Role.USER)
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.rss"
 
     class DummyFeed:
         def __init__(self):
-            self.feed = {"title": "Team Feed", "link": feed_url}
+            self.feed = {"title": "GrantFeed", "link": url}
             self.entries = []
+
+        def __contains__(self, key):
+            return key == "feed"
 
     monkeypatch.setattr(rss, "fetch_feed", AsyncMock(return_value=DummyFeed()))
     monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(
+        rss,
+        "user_has_room_plugin_grant",
+        AsyncMock(return_value=True),
+    )
     msg = {
-        "from": SimpleNamespace(bare=sender, resource="desktop"),
+        "from": SimpleNamespace(bare="alice@example.org", resource="desk"),
         "type": "chat",
     }
 
     await rss.rss_command(
         bot,
-        sender,
-        None,
-        ["add", feed_url, room],
+        "alice@example.org",
+        "alice",
+        ["add", url, room],
         msg,
         False,
     )
 
-    feeds = bot.plugin_store[rss.RSS_KEY]
-    assert feeds[feed_url]["rooms"] == [room]
-    assert "Added feed" in bot.replies[-1][1]
+    assert url in bot.plugin_store[rss.RSS_KEY]
+    assert bot.plugin_store[rss.RSS_KEY][url]["rooms"] == [room]
+    rss.user_has_room_plugin_grant.assert_awaited_once_with(
+        bot, "alice@example.org", "rss", room
+    )
 
 
 @pytest.mark.asyncio
-async def test_rss_plugin_grant_requires_room_admin_affiliation(monkeypatch, make_bot):
+async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, make_bot):
     bot = make_bot()
-    bot.get_user_role = AsyncMock(return_value=rss.Role.USER)
-    sender = "alice@example.org"
-    room = "team@conference.example.org"
-    bot.users_store[sender] = {"plugin_grants": ["rss"]}
-    core_plugins.rooms.JOINED_ROOMS[room] = {
-        "nicks": {
-            "Alice": {"jid": sender, "affiliation": "member", "role": "participant"},
-        }
-    }
-    fetch_feed = AsyncMock()
-    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    bot.get_user_role = AsyncMock(return_value=Role.USER)
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.rss"
+    monkeypatch.setattr(rss, "fetch_feed", AsyncMock())
+    monkeypatch.setattr(
+        rss,
+        "user_has_room_plugin_grant",
+        AsyncMock(return_value=False),
+    )
     msg = {
-        "from": SimpleNamespace(bare=sender, resource="desktop"),
+        "from": SimpleNamespace(bare="alice@example.org", resource="desk"),
         "type": "chat",
     }
 
     await rss.rss_command(
         bot,
-        sender,
-        None,
-        ["add", "https://example.org/feed.rss", room],
+        "alice@example.org",
+        "alice",
+        ["add", url, room],
         msg,
         False,
     )
 
-    fetch_feed.assert_not_called()
-    assert "owner/admin affiliation" in bot.replies[-1][1]
-
-
-@pytest.mark.asyncio
-async def test_rss_plugin_grant_lists_only_managed_room(make_bot):
-    bot = make_bot()
-    bot.get_user_role = AsyncMock(return_value=rss.Role.USER)
-    sender = "alice@example.org"
-    room = "team@conference.example.org"
-    other_room = "other@conference.example.org"
-    bot.users_store[sender] = {"plugin_grants": ["rss"]}
-    core_plugins.rooms.JOINED_ROOMS[room] = {
-        "nicks": {
-            "Alice": {"jid": sender, "affiliation": "admin", "role": "moderator"},
-        }
-    }
-    bot.plugin_store[rss.RSS_KEY] = {
-        "https://example.org/a.rss": {
-            "title": "A",
-            "period": 1200,
-            "rooms": [room, other_room],
-        },
-        "https://example.org/b.rss": {
-            "title": "B",
-            "period": 1200,
-            "rooms": [other_room],
-        },
-    }
-    msg = {
-        "from": SimpleNamespace(bare=sender, resource="desktop"),
-        "type": "chat",
-    }
-
-    await rss.rss_command(bot, sender, None, ["list", room], msg, False)
-
-    output = "\n".join(bot.replies[-1][1])
-    assert "https://example.org/a.rss" in output
-    assert "https://example.org/b.rss" not in output
-    assert f"Rooms: {room}" in output
+    assert rss.RSS_KEY not in bot.plugin_store
+    rss.fetch_feed.assert_not_awaited()
+    assert "RSS plugin grant" in bot.replies[-1][1]

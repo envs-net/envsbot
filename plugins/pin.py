@@ -29,9 +29,11 @@ from typing import Any
 
 from utils.command import command, Role
 from utils.config import config
+from core_plugins.users import user_has_room_plugin_grant
 from core_plugins._core import (
     JOINED_ROOMS,
     is_room_moderator_or_admin,
+    get_real_jid,
     _is_enabled_for_room,
     get_cached_messages,
     extract_reply_quote,
@@ -209,12 +211,26 @@ def _room_bucket(state: dict[str, Any], room: str) -> dict[str, Any]:
 
 
 async def _sender_can_manage_pins_in_room(bot, msg, room_jid: str) -> bool:
-    """
-    True if sender is moderator/admin/owner in this room
-    (affiliation or role fallback).
+    """True if sender can manage pins in this room.
+
+    Existing room moderators/admins/owners keep their permissions. Users with
+    a ``pin`` plugin grant may also manage pins, but only when a live MUC
+    affiliation query or cache confirms they are owner/admin in the room.
     """
     nick = msg.get("mucnick") or msg["from"].resource or ""
-    return await is_room_moderator_or_admin(bot, room_jid, str(nick))
+    if await is_room_moderator_or_admin(bot, room_jid, str(nick)):
+        return True
+
+    sender_jid, _, _ = await get_real_jid(bot, msg)
+    if not sender_jid:
+        return False
+
+    return await user_has_room_plugin_grant(
+        bot,
+        sender_jid,
+        "pin",
+        room_jid,
+    )
 
 
 def _format_timestamp(ts: int | float | None) -> str:
