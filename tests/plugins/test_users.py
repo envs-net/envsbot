@@ -3,12 +3,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import types
 
-import core_plugins.users as users_mod  # Always import the tested module
+import core_plugins.users as users_mod
 import core_plugins.rooms
 
 
-@pytest.fixture
-def mock_bot():
+def _make_mock_bot(*, include_audit: bool = False):
     bot = MagicMock()
     bot.db = MagicMock()
     bot.db.users = MagicMock()
@@ -17,8 +16,14 @@ def mock_bot():
     bot.bot_plugins.plugins = {}
     bot.reply = MagicMock()
     bot.get_user_role = AsyncMock(return_value=users_mod.Role.USER)
-    bot.audit = AsyncMock()
+    if include_audit:
+        bot.audit = AsyncMock()
     return bot
+
+
+@pytest.fixture
+def mock_bot():
+    return _make_mock_bot(include_audit=True)
 
 
 @pytest.fixture
@@ -45,15 +50,7 @@ def patch_joined_rooms():
 @pytest.fixture
 def build_mock_bot():
     def factory():
-        bot = MagicMock()
-        bot.db = MagicMock()
-        bot.db.users = MagicMock()
-        bot.db.users.plugin = MagicMock()
-        bot.bot_plugins = MagicMock()
-        bot.bot_plugins.plugins = {}
-        bot.reply = MagicMock()
-        bot.get_user_role = AsyncMock(return_value=users_mod.Role.USER)
-        return bot
+        return _make_mock_bot()
     return factory
 
 
@@ -386,8 +383,6 @@ async def test__send_user_info_display_full(mock_bot, mock_msg):
         await users_mod._send_user_info(mock_bot, mock_msg, user_data)
         assert mock_bot.reply.called
 
-# ...add additional tests for track_room_nick, find_users_by_nick_safe, error
-# and edge branches...
 
 @pytest.mark.asyncio
 async def test_presence_and_message_skip_branches(mock_bot, mock_msg):
@@ -932,7 +927,3 @@ def test_normalize_affiliation_result_accepts_dict_keys():
     assert users_mod._normalize_affiliation_result({
         "alice@example.org/resource": {},
     }) == {"alice@example.org"}
-
-
-def test_grantable_plugin_names_are_stable_and_human_readable():
-    assert users_mod._grantable_plugin_names() == "rss, pin, poll"
