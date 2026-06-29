@@ -53,6 +53,55 @@ ASSIGNABLE_ROLES = (
 )
 
 ROLE_NAMES = {role.name.lower(): role for role in ASSIGNABLE_ROLES}
+PLUGIN_GRANTS_KEY = "plugin_grants"
+
+
+def _normalize_plugin_name(value: object) -> str:
+    """Return a safe, lowercase plugin name or an empty string."""
+    name = str(value or "").strip().lower()
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-.")
+    if not name or any(char not in allowed for char in name):
+        return ""
+    return name
+
+
+def _normalize_plugin_grants(value) -> list[str]:
+    """Return sorted unique plugin grants from stored runtime data."""
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    grants = {_normalize_plugin_name(item) for item in value}
+    return sorted(item for item in grants if item)
+
+
+async def get_plugin_grants(bot, jid: str) -> list[str]:
+    """Return plugin-specific grants assigned to one user."""
+    target = _parse_user_jid(jid)
+    if not target:
+        return []
+
+    try:
+        store = bot.db.users.plugin("users")
+        return _normalize_plugin_grants(
+            await store.get(target, PLUGIN_GRANTS_KEY)
+        )
+    except Exception:
+        log.debug("[USERS] Could not load plugin grants for %s", jid, exc_info=True)
+        return []
+
+
+async def user_has_plugin_grant(bot, jid: str, plugin: str) -> bool:
+    """Return True when a user has an explicit grant for one plugin."""
+    plugin_name = _normalize_plugin_name(plugin)
+    if not plugin_name:
+        return False
+    return plugin_name in await get_plugin_grants(bot, jid)
+
+
+async def _set_plugin_grants(bot, jid: str, grants: list[str]) -> None:
+    """Persist sorted plugin grants for one user."""
+    store = bot.db.users.plugin("users")
+    await store.set(jid, PLUGIN_GRANTS_KEY, _normalize_plugin_grants(grants))
+
 
 PLUGIN_META = {
     "name": "users",
@@ -430,6 +479,82 @@ async def _can_delete_user(bot, actor: str, target: str, target_role: Role) -> t
         return False, "⛔ You cannot delete users with equal or higher role."
     return True, ""
 
+async def _can_manage_plugin_grants(
+    bot,
+    actor: str,
+    target: str,
+    target_role: Role,
+) -> tuple[bool, str]:
+    """Validate plugin grant changes with the normal role hierarchy."""
+    actor_role = await _actor_role(bot, actor)
+    if not _can_manage_roles(actor_role):
+        return False, "⛔ You are not allowed to manage plugin grants."
+    if _is_config_owner(target):
+        return False, "⛔ The configured owner does not need plugin grants."
+    if target == actor:
+        return False, "⛔ You cannot change your own plugin grants."
+    if target_role == Role.SUPERADMIN and actor_role != Role.OWNER:
+        return False, "⛔ Only the owner can modify superadmin users."
+    if target_role.value <= actor_role.value:
+        return False, "⛔ You cannot modify users with equal or higher role."
+    return True, ""
+
+
+async def _change_plugin_grant(bot, msg, actor, target_arg, plugin_arg, *, add: bool):
+    """Add or remove a plugin grant for one user."""
+    actor_jid = _parse_user_jid(actor)
+    target = _parse_user_jid(target_arg)
+    plugin_name = _normalize_plugin_name(plugin_arg)
+
+    if not actor_jid or not target:
+        bot.reply(msg, "🟡️ Invalid user JID.")
+        return
+    if not plugin_name:
+        bot.reply(msg, "🟡️ Invalid plugin name.")
+        return
+
+    target_user = await bot.db.users.get(target)
+    if not target_user:
+        bot.reply(msg, f"🟡️ User not found: {target}")
+        return
+
+    target_role = _role_from_user(target_user)
+    allowed, reason = await _can_manage_plugin_grants(
+        bot, actor_jid, target, target_role
+    )
+    if not allowed:
+        bot.reply(msg, reason)
+        return
+
+    grants = await get_plugin_grants(bot, target)
+    grant_set = set(grants)
+
+    if add:
+        if plugin_name in grant_set:
+            bot.reply(msg, f"ℹ️ {target} already has plugin grant: {plugin_name}")
+            return
+        grant_set.add(plugin_name)
+        event = "user_plugin_grant_added"
+        reply = f"✅ Added plugin grant for {target}: {plugin_name}"
+    else:
+        if plugin_name not in grant_set:
+            bot.reply(msg, f"ℹ️ {target} does not have plugin grant: {plugin_name}")
+            return
+        grant_set.remove(plugin_name)
+        event = "user_plugin_grant_removed"
+        reply = f"🗑 Removed plugin grant for {target}: {plugin_name}"
+
+    await _set_plugin_grants(bot, target, sorted(grant_set))
+    await _write_user_audit(
+        bot,
+        event,
+        actor=actor_jid,
+        target=target,
+        details={"grant": plugin_name, "grants": sorted(grant_set)},
+    )
+    bot.reply(msg, reply)
+
+
 # ---------------------------------------------------------------------------
 # COMMANDS
 # ---------------------------------------------------------------------------
@@ -705,6 +830,72 @@ async def users_roles(bot, sender, nick, args, msg, is_room):
         "• users can only assign roles below their own role",
         "• users cannot modify/delete equal or higher roles",
     ]
+    bot.reply(msg, lines)
+
+
+@command(
+    "users grant",
+    role=Role.ADMIN,
+    aliases=["user grant", "users plugin grant", "user plugin grant"],
+)
+async def users_grant(bot, sender, nick, args, msg, is_room):
+    """Grant a user room-scoped permission for one plugin."""
+    if len(args) != 2:
+        bot.reply_usage(msg, f"{_command_prefix(bot)}users grant <jid> <plugin>")
+        return
+    await _change_plugin_grant(
+        bot, msg, sender, args[0], args[1], add=True
+    )
+
+
+@command(
+    "users revoke",
+    role=Role.ADMIN,
+    aliases=["user revoke", "users plugin revoke", "user plugin revoke"],
+)
+async def users_revoke(bot, sender, nick, args, msg, is_room):
+    """Remove a user's room-scoped plugin permission."""
+    if len(args) != 2:
+        bot.reply_usage(msg, f"{_command_prefix(bot)}users revoke <jid> <plugin>")
+        return
+    await _change_plugin_grant(
+        bot, msg, sender, args[0], args[1], add=False
+    )
+
+
+@command(
+    "users grants",
+    role=Role.ADMIN,
+    aliases=["user grants", "users plugin grants", "user plugin grants"],
+)
+async def users_grants(bot, sender, nick, args, msg, is_room):
+    """List plugin grants for one user."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{_command_prefix(bot)}users grants <jid>")
+        return
+
+    target = _parse_user_jid(args[0])
+    if not target:
+        bot.reply(msg, "🟡️ Invalid user JID.")
+        return
+
+    target_user = await bot.db.users.get(target)
+    if not target_user:
+        bot.reply(msg, f"🟡️ User not found: {target}")
+        return
+
+    grants = await get_plugin_grants(bot, target)
+    if not grants:
+        bot.reply(msg, f"ℹ️ No plugin grants for {target}.")
+        return
+
+    lines = [f"🔐 Plugin grants for {target}:"]
+    lines.extend(f"• {grant}" for grant in grants)
+    lines.extend([
+        "",
+        "These grants are room-scoped: the user must still be visible as",
+        "admin or owner in the target room.",
+    ])
     bot.reply(msg, lines)
 
 

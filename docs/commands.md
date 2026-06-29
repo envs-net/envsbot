@@ -172,7 +172,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms set_plugin_defaults` | `user` | `room / MUC PM / private chat with <room_jid>` | Restore room plugin toggles for a room; requires room admin/owner or bot moderator. |
 | `,rooms sync` | `admin` | `private chat / MUC PM` | Synchronize joined rooms with stored autojoin settings. |
 | `,rooms update` | `admin` | `private chat / MUC PM` | Update one field of a stored room. |
-| `,rss` | `moderator` | `any` | Manage RSS feed subscriptions for rooms. |
+| `,rss` | `user` | `room / MUC PM / private chat with explicit room` | Manage RSS feed subscriptions for rooms. |
 
 ### Users
 
@@ -180,8 +180,11 @@ Lower role values have more privileges. A command is visible when your role is s
 | --- | --- | --- | --- |
 | `,users admins` | `admin` | `private chat / MUC PM` | List users with admin-level roles. |
 | `,users delete` | `admin` | `private chat / MUC PM` | Delete one non-privileged user record and its runtime data. |
+| `,users grant` | `admin` | `private chat / MUC PM` | Grant a user room-scoped permission for one plugin. |
+| `,users grants` | `admin` | `private chat / MUC PM` | List room-scoped plugin grants for one user. |
 | `,users info` | `admin` | `private chat / MUC PM` | Show user info by JID or known nickname. |
 | `,users list` | `admin` | `private chat only` | List users currently known in one joined room. |
+| `,users revoke` | `admin` | `private chat / MUC PM` | Remove a room-scoped plugin grant from a user. |
 | `,users role` | `admin` | `private chat / MUC PM` | Change a user's global bot role with hierarchy checks. |
 | `,users roles` | `admin` | `private chat / MUC PM` | Show available roles and their ordering. |
 
@@ -492,7 +495,7 @@ Show help for plugins and commands.
 Role: `none`<br>
 Context: `any`<br>
 Category: `core`<br>
-Usage: `,help [all|commands|plugins|roles|categories|category <name>|<command>|<plugin> [<subcommand>]]`
+Usage: `,help [all|commands|plugins|roles|categories|category <name>|<plugin>|<command>]`
 
 Aliases: `,h`
 
@@ -901,6 +904,36 @@ Examples:
 
 - `,users delete alice@example.org`
 
+#### `,users grant`
+
+Grant a user room-scoped permission for one plugin.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
+Usage: `,users grant <jid> <plugin>`
+
+Aliases: `,user grant`, `,user plugin grant`, `,users plugin grant`
+
+Examples:
+
+- `,users grant alice@example.org rss`
+
+#### `,users grants`
+
+List room-scoped plugin grants for one user.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
+Usage: `,users grants <jid>`
+
+Aliases: `,user grants`, `,user plugin grants`, `,users plugin grants`
+
+Examples:
+
+- `,users grants alice@example.org`
+
 #### `,users info`
 
 Show user info by JID or known nickname.
@@ -930,6 +963,21 @@ Aliases: `,user list`
 Examples:
 
 - `,users list test@conference.example.org`
+
+#### `,users revoke`
+
+Remove a room-scoped plugin grant from a user.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
+Usage: `,users revoke <jid> <plugin>`
+
+Aliases: `,user plugin revoke`, `,user revoke`, `,users plugin revoke`
+
+Examples:
+
+- `,users revoke alice@example.org rss`
 
 #### `,users role`
 
@@ -1342,16 +1390,17 @@ RSS/Atom feed watcher and poster
 
 Manage RSS feed subscriptions for rooms.
 
-Role: `moderator`<br>
-Context: `any`<br>
+Role: `user`<br>
+Context: `room / MUC PM / private chat with explicit room`<br>
 Category: `rooms`<br>
 Usage: `,rss <add|delete|remove|del|rm|retry|reset|list> ...`
 
 Examples:
 
 - `,rss list`
+- `,rss list room@conference.example.org`
 - `,rss list 2`
-- `,rss list all`
+- `,rss add https://example.org/feed.rss room@conference.example.org`
 - `,rss retry https://example.org/feed.rss`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`

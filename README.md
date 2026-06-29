@@ -236,8 +236,13 @@ Examples assume the default command prefix `,`.
 | `,users roles` | Show available user roles |
 | `,users admins [all/page/last]` | List privileged users |
 | `,users role <jid> <role>` | Change a user's role |
+| `,users grant <jid> <plugin>` | Grant room-scoped access to one plugin |
+| `,users revoke <jid> <plugin>` | Remove a room-scoped plugin grant |
+| `,users grants <jid>` | Show a user's plugin grants |
 
 Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or operational notification room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role.
+
+Plugin grants are more limited than global roles. For example, `,users grant alice@example.org rss` allows Alice to manage RSS subscriptions only for rooms where she is visible as admin or owner. It does not grant global moderator access.
 
 EnvsBot has no separate fixed `ADMIN_ROOM` setting. Global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles. Update and invite notification targets are configured separately with `VERSION_CHECK_NOTIFY_JID` and `ROOM_INVITE_NOTIFY_JID`.
 

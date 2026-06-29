@@ -336,6 +336,27 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "context": "private chat / MUC PM",
         "category": "users",
     },
+    "users grant": {
+        "short": "Grant a user room-scoped permission for one plugin.",
+        "usage": "{prefix}users grant <jid> <plugin>",
+        "examples": ["{prefix}users grant alice@example.org rss"],
+        "context": "private chat / MUC PM",
+        "category": "users",
+    },
+    "users revoke": {
+        "short": "Remove a room-scoped plugin grant from a user.",
+        "usage": "{prefix}users revoke <jid> <plugin>",
+        "examples": ["{prefix}users revoke alice@example.org rss"],
+        "context": "private chat / MUC PM",
+        "category": "users",
+    },
+    "users grants": {
+        "short": "List room-scoped plugin grants for one user.",
+        "usage": "{prefix}users grants <jid>",
+        "examples": ["{prefix}users grants alice@example.org"],
+        "context": "private chat / MUC PM",
+        "category": "users",
+    },
     "users admins": {
         "short": "List users with admin-level roles.",
         "usage": "{prefix}users admins [all|page|last]",
@@ -495,12 +516,14 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "usage": "{prefix}rss <add|delete|remove|del|rm|retry|reset|list> ...",
         "examples": [
             "{prefix}rss list",
+            "{prefix}rss list room@conference.example.org",
             "{prefix}rss list 2",
-            "{prefix}rss list all",
+            "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
             "{prefix}rss retry https://example.org/feed.rss",
             "{prefix}rss delete https://example.org/feed.rss",
             "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",
         ],
+        "context": "room / MUC PM / private chat with explicit room",
         "category": "rooms",
     },
     "sed": {

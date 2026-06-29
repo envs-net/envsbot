@@ -722,3 +722,90 @@ async def test_user_audit_helper_is_best_effort(monkeypatch, mock_bot):
         target="target@example.org",
         details={"reason": "test"},
     )
+
+
+@pytest.mark.asyncio
+async def test_plugin_grants_helpers_and_commands(build_mock_bot, mock_msg):
+    bot = build_mock_bot()
+    sender = "admin@example.org"
+    target = "alice@example.org"
+    store_data = {}
+
+    class GrantStore:
+        async def get(self, jid, key=None):
+            data = store_data.get(jid, {})
+            return data if key is None else data.get(key)
+
+        async def set(self, jid, key, value):
+            store_data.setdefault(jid, {})[key] = value
+
+    bot.db.users.plugin.return_value = GrantStore()
+    bot.db.users.get = AsyncMock(return_value={
+        "jid": target,
+        "role": users_mod.Role.USER.value,
+    })
+    bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+
+    await users_mod.users_grant(
+        bot, sender, None, [target, "RSS"], mock_msg, False
+    )
+
+    assert store_data[target][users_mod.PLUGIN_GRANTS_KEY] == ["rss"]
+    assert await users_mod.user_has_plugin_grant(bot, target, "rss") is True
+    bot.reply.assert_called_with(mock_msg, f"✅ Added plugin grant for {target}: rss")
+
+    bot.reply.reset_mock()
+    await users_mod.users_grants(bot, sender, None, [target], mock_msg, False)
+    grants_reply = bot.reply.call_args.args[1]
+    assert grants_reply[0] == f"🔐 Plugin grants for {target}:"
+    assert "• rss" in grants_reply
+
+    bot.reply.reset_mock()
+    await users_mod.users_revoke(
+        bot, sender, None, [target, "rss"], mock_msg, False
+    )
+
+    assert store_data[target][users_mod.PLUGIN_GRANTS_KEY] == []
+    bot.reply.assert_called_with(mock_msg, f"🗑 Removed plugin grant for {target}: rss")
+
+
+@pytest.mark.asyncio
+async def test_plugin_grants_reject_invalid_or_privileged_targets(build_mock_bot, mock_msg):
+    bot = build_mock_bot()
+
+    class GrantStore:
+        async def get(self, jid, key=None):
+            return []
+
+        async def set(self, jid, key, value):
+            raise AssertionError("grant store should not be written")
+
+    bot.db.users.plugin.return_value = GrantStore()
+    bot.db.users.get = AsyncMock(return_value={
+        "jid": "root@example.org",
+        "role": users_mod.Role.ADMIN.value,
+    })
+    bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+
+    await users_mod.users_grant(
+        bot,
+        "admin@example.org",
+        None,
+        ["root@example.org", "rss"],
+        mock_msg,
+        False,
+    )
+
+    assert "equal or higher role" in bot.reply.call_args.args[1]
+
+    bot.reply.reset_mock()
+    await users_mod.users_grant(
+        bot,
+        "admin@example.org",
+        None,
+        ["alice@example.org", "bad/plugin"],
+        mock_msg,
+        False,
+    )
+
+    assert bot.reply.call_args.args[1] == "🟡️ Invalid plugin name."

@@ -19,6 +19,7 @@ import logging
 import time
 import html
 import hashlib
+import inspect
 from difflib import SequenceMatcher
 from urllib.parse import urljoin, urlparse
 
@@ -109,6 +110,129 @@ def _room_for_feed_command(msg, is_room: bool) -> str | None:
         return str(room_jid)
 
     return None
+
+
+def _jid_bare(value) -> str:
+    """Return a best-effort lower-case bare JID string."""
+    if value is None:
+        return ""
+    bare = getattr(value, "bare", None)
+    if bare:
+        return str(bare).lower()
+    return str(value).split("/", 1)[0].lower()
+
+
+def _looks_like_room_jid(value: object) -> bool:
+    """Return True if a value looks like a bare MUC JID."""
+    raw = str(value or "").strip()
+    room_jid = _jid_bare(raw)
+    if not raw or "/" in raw or "@" not in room_jid:
+        return False
+    node, domain = room_jid.split("@", 1)
+    return bool(node and domain)
+
+
+def _sender_has_room_admin_affiliation(sender_jid: str, room: str) -> bool:
+    """Return True if sender is visible as owner/admin in a joined room."""
+    sender_bare = _jid_bare(sender_jid)
+    room_data = JOINED_ROOMS.get(_normalize_room_jid(room)) or {}
+    nicks = room_data.get("nicks") or {}
+
+    if not sender_bare or not isinstance(nicks, dict):
+        return False
+
+    for occupant in tuple(nicks.values()):
+        if not isinstance(occupant, dict):
+            continue
+        occupant_jid = _jid_bare(occupant.get("jid"))
+        affiliation = str(occupant.get("affiliation") or "").lower()
+        if occupant_jid == sender_bare and affiliation in {"admin", "owner"}:
+            return True
+
+    return False
+
+
+async def _global_user_role(bot, sender_jid: str) -> Role:
+    """Return a sender's global bot role without room-affiliation elevation."""
+    get_user_role = getattr(bot, "get_user_role", None)
+    if not callable(get_user_role):
+        return Role.NONE
+    try:
+        result = get_user_role(sender_jid, None)
+        if inspect.isawaitable(result):
+            result = await result
+        return result if isinstance(result, Role) else Role.NONE
+    except Exception:
+        log.debug("[RSS] Could not resolve global role for %s", sender_jid, exc_info=True)
+        return Role.NONE
+
+
+async def _has_rss_plugin_grant(bot, sender_jid: str) -> bool:
+    """Return True when the user has the room-scoped RSS plugin grant."""
+    try:
+        from core_plugins.users import user_has_plugin_grant
+
+        return await user_has_plugin_grant(bot, sender_jid, "rss")
+    except Exception:
+        log.debug("[RSS] Could not inspect RSS plugin grant", exc_info=True)
+        return False
+
+
+async def _can_manage_rss_room(bot, sender_jid: str, room: str) -> bool:
+    """Return True if sender may manage RSS subscriptions for a room."""
+    if not room:
+        return False
+
+    role = await _global_user_role(bot, sender_jid)
+    if role <= Role.MODERATOR:
+        return True
+
+    if not await _has_rss_plugin_grant(bot, sender_jid):
+        return False
+
+    return _sender_has_room_admin_affiliation(sender_jid, room)
+
+
+async def _can_manage_rss_globally(bot, sender_jid: str) -> bool:
+    """Return True when sender may manage global RSS state."""
+    return await _global_user_role(bot, sender_jid) <= Role.MODERATOR
+
+
+def _room_target_from_args(args, *, index: int, context_room: str | None) -> str | None:
+    """Return an explicit room target from args or the implicit room context."""
+    if len(args) > index and args[index].lower() != "all":
+        return _normalize_room_jid(args[index])
+    if context_room:
+        return _normalize_room_jid(context_room)
+    return None
+
+
+def _rss_permission_denied(room: str | None = None) -> str:
+    """Return a consistent RSS permission error."""
+    if room:
+        return (
+            "🔴 You need a global moderator role, or an RSS plugin grant "
+            f"and owner/admin affiliation in {room}."
+        )
+    return "🔴 You are not allowed to manage RSS feeds."
+
+
+def _filter_feeds_for_room(feeds: dict, room: str) -> dict:
+    """Return only feed subscriptions for one room."""
+    room_norm = _normalize_room_jid(room)
+    filtered = {}
+    for url, data in feeds.items():
+        rooms = data.get("rooms", [])
+        matching_rooms = [
+            item for item in rooms
+            if _normalize_room_jid(item) == room_norm
+        ]
+        if not matching_rooms:
+            continue
+        item = dict(data)
+        item["rooms"] = matching_rooms
+        filtered[url] = item
+    return filtered
 
 
 def entry_get(entry, key, default=None):
@@ -910,21 +1034,22 @@ async def burst_recent_entries(bot, feed, room, burst_num):
     return last_id
 
 
-@command("rss", role=Role.MODERATOR)
+@command("rss", role=Role.USER)
 async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Manage RSS feeds.
 
-    Add/delete/list Feed URLs to your room. The feeds are checked every
-    20 minutes globally (configurable).
+    Global moderators can manage all RSS feeds. Users with an explicit
+    ``users grant <jid> rss`` grant may manage RSS subscriptions only for
+    rooms where they are visible as owner/admin.
 
     Usage:
-    {prefix}rss add <feedurl>
+    {prefix}rss add <feedurl> [room]
     {prefix}rss delete <feedurl> [room|all]
     {prefix}rss remove <feedurl> [room|all]
-    {prefix}rss retry <feedurl>
-    {prefix}rss reset <feedurl>
-    {prefix}rss list [page|all|last]
+    {prefix}rss retry <feedurl> [room]
+    {prefix}rss reset <feedurl> [room]
+    {prefix}rss list [room] [page|all|last]
     """
     store = bot.db.users.plugin("rss")
 
@@ -932,30 +1057,35 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(
             msg,
             f"Usage: {_command_prefix(bot)}rss "
-            "<add|delete|remove|retry|reset|list> ...",
+            "<add|delete|remove|del|rm|retry|reset|list> ...",
         )
         return
 
     sub = args[0].lower()
-    room = None
-
     room = _room_for_feed_command(msg, is_room)
 
     # Add feed to room
     if sub == "add":
-        if len(args) != 2:
+        if len(args) not in (2, 3):
             bot.reply(
                 msg,
-                f"Usage: {_command_prefix(bot)}rss add <feedurl> "
-                "(in a room or MUC DM only)",
+                f"Usage: {_command_prefix(bot)}rss add <feedurl> [room]",
             )
             return
 
-        if not room:
-            bot.reply(msg, "🔴 RSS add can only be used in a room or MUC DM.")
+        target_room = _room_target_from_args(args, index=2, context_room=room)
+        if not target_room:
+            bot.reply(
+                msg,
+                "🔴 RSS add needs a room context or explicit room JID.",
+            )
             return
 
-        await _add_feed(bot, msg, args[1], store, room)
+        if not await _can_manage_rss_room(bot, sender_jid, target_room):
+            bot.reply(msg, _rss_permission_denied(target_room))
+            return
+
+        await _add_feed(bot, msg, args[1], store, target_room)
         return
 
     # Delete feed from a room, or remove it completely from direct/admin PMs.
@@ -968,21 +1098,54 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             return
 
         delete_target = args[2] if len(args) == 3 else None
+        target = str(delete_target or "").strip()
+
+        if target.lower() == "all" or (not room and not target):
+            if not await _can_manage_rss_globally(bot, sender_jid):
+                bot.reply(msg, _rss_permission_denied())
+                return
+        else:
+            target_room = _room_target_from_args(
+                args,
+                index=2,
+                context_room=room,
+            )
+            if not target_room:
+                bot.reply(
+                    msg,
+                    "🔴 RSS delete needs a room context or explicit room JID.",
+                )
+                return
+            if not await _can_manage_rss_room(bot, sender_jid, target_room):
+                bot.reply(msg, _rss_permission_denied(target_room))
+                return
+            delete_target = target_room
+
         await _del_feed(bot, msg, args[1], store, room, delete_target)
         return
 
     elif sub in {"retry", "reset"}:
-        if len(args) != 2:
+        if len(args) not in (2, 3):
             bot.reply(
                 msg,
-                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl>",
+                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl> [room]",
             )
+            return
+
+        target_room = _room_target_from_args(args, index=2, context_room=room)
+        if target_room:
+            if not await _can_manage_rss_room(bot, sender_jid, target_room):
+                bot.reply(msg, _rss_permission_denied(target_room))
+                return
+        elif not await _can_manage_rss_globally(bot, sender_jid):
+            bot.reply(msg, _rss_permission_denied())
             return
 
         await _reset_feed_retry(bot, msg, args[1], store)
         return
 
-    # List all rooms
+    # List feeds. Global moderators see all feeds; plugin-granted users see
+    # feeds for a room they administer.
     elif sub == "list":
         feeds = await get_feeds(store)
 
@@ -990,7 +1153,30 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             bot.reply(msg, "No feeds configured.")
             return
 
-        lines = _format_feed_list(feeds, args, bot=bot)
+        list_args = list(args)
+        target_room = None
+        if len(args) >= 2 and _looks_like_room_jid(args[1]):
+            target_room = _normalize_room_jid(args[1])
+            list_args = [args[0], *args[2:]]
+        elif room and not await _can_manage_rss_globally(bot, sender_jid):
+            target_room = _normalize_room_jid(room)
+
+        if target_room:
+            if not await _can_manage_rss_room(bot, sender_jid, target_room):
+                bot.reply(msg, _rss_permission_denied(target_room))
+                return
+            feeds = _filter_feeds_for_room(feeds, target_room)
+            if not feeds:
+                bot.reply(msg, f"No feeds configured for {target_room}.")
+                return
+        elif not await _can_manage_rss_globally(bot, sender_jid):
+            bot.reply(
+                msg,
+                f"Usage: {_command_prefix(bot)}rss list <room> [page|all|last]",
+            )
+            return
+
+        lines = _format_feed_list(feeds, list_args, bot=bot)
 
         if lines is None:
             bot.reply(msg, _rss_list_usage(bot))
