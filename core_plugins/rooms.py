@@ -1532,7 +1532,11 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
     rows = await bot.db.rooms.list()
     page = parse_page_args(args)
 
-    details = []
+    joined_rooms_copy = dict(JOINED_ROOMS)
+    details = [
+        f"Counts: stored={len(rows)} | joined={len(joined_rooms_copy)}",
+        "",
+    ]
     if rows:
         details.append("Stored rooms:")
         for room_jid, nick_name, autojoin, status in rows:
@@ -1548,7 +1552,6 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
 
     details.append("")
     details.append("Joined rooms:")
-    joined_rooms_copy = dict(JOINED_ROOMS)
     if joined_rooms_copy:
         for room, data in sorted(tuple(joined_rooms_copy.items())):
             try:
@@ -1796,11 +1799,14 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             for invite_id in sorted(getattr(bot, "pending_room_invites", {}))
         ]
         lines = []
-        for invite in invites:
-            reason = f" — {invite['reason']}" if invite.get("reason") else ""
-            lines.append(
-                f"#{invite['id']} {invite['room_jid']} — invited by {invite['inviter']}{reason}"
-            )
+        if invites:
+            for invite in invites:
+                reason = f" — {invite['reason']}" if invite.get("reason") else ""
+                lines.append(
+                    f"#{invite['id']} {invite['room_jid']} — invited by {invite['inviter']}{reason}"
+                )
+        else:
+            lines.append("None")
         bot.reply(
             msg,
             format_page(

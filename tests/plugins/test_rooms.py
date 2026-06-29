@@ -377,9 +377,18 @@ async def test_rooms_list(fake_bot):
         "autojoin": True, "status": "stat1"
     }
     await rooms.rooms_list(fake_bot, "jid", "nick", [], MagicMock(), False)
-    # Test with no rows
+    listing = fake_bot.reply.call_args.args[1]
+    assert "Counts: stored=2 | joined=1" in listing
+    assert any("room@conference.a" in line for line in listing)
+
+    # Test with no rows and no joined rooms.
     fake_bot.db.rooms.list = AsyncMock(return_value=[])
+    rooms.JOINED_ROOMS.clear()
     await rooms.rooms_list(fake_bot, "jid", "nick", [], MagicMock(), False)
+    listing = fake_bot.reply.call_args.args[1]
+    assert "Counts: stored=0 | joined=0" in listing
+    assert "Stored rooms: —" in listing
+    assert "Joined rooms: —" in listing
 
 
 @pytest.mark.asyncio
@@ -990,6 +999,22 @@ async def test_on_ready_loads_and_cleans_invites(fake_bot, monkeypatch):
 
     load.assert_awaited_once_with(fake_bot)
     cleanup.assert_awaited_once_with(fake_bot)
+
+
+@pytest.mark.asyncio
+async def test_rooms_invite_list_empty_shows_none(fake_bot, fake_msg, monkeypatch):
+    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
+    fake_bot.pending_room_invites = {}
+    monkeypatch.setattr(
+        rooms,
+        "load_pending_room_invites",
+        AsyncMock(return_value=fake_bot.pending_room_invites),
+    )
+    monkeypatch.setattr(rooms, "cleanup_expired_room_invites", AsyncMock(return_value=0))
+
+    await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["list"], fake_msg, False)
+
+    assert fake_bot.reply.call_args.args[1] == ["📨 Pending Room Invites", "None"]
 
 
 @pytest.mark.asyncio
