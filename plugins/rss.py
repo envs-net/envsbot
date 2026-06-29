@@ -7,8 +7,8 @@ Commands:
 • {prefix}rss add <feedurl>
 • {prefix}rss delete <feedurl> [room|all]
 • {prefix}rss remove <feedurl> [room|all]
-• {prefix}rss retry <feedurl>
-• {prefix}rss reset <feedurl>
+• {prefix}rss retry <feedurl>|all
+• {prefix}rss reset <feedurl>|all
 • {prefix}rss list [page|all|last]
 
 Feed configuration is stored in the plugin runtime store under the key "RSS".
@@ -971,7 +971,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     Usage:
     {prefix}rss add <feedurl> [room_jid]
     {prefix}rss delete|remove|del|rm <feedurl> [room_jid|all]
-    {prefix}rss retry|reset <feedurl> [room_jid]
+    {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss list [room_jid] [page|all|last]
     """
     store = bot.db.users.plugin("rss")
@@ -1061,8 +1061,22 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         if len(args) not in (2, 3):
             bot.reply(
                 msg,
-                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl> [room_jid]",
+                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl>|all [room_jid]",
             )
+            return
+
+        retry_target = str(args[1]).strip()
+        if retry_target.lower() == "all":
+            if len(args) != 2:
+                bot.reply(
+                    msg,
+                    f"Usage: {_command_prefix(bot)}rss {sub} <feedurl>|all [room_jid]",
+                )
+                return
+            if not await _sender_can_manage_rss_globally(bot, sender_jid):
+                bot.reply(msg, "🔴 Only global moderators can reset all RSS retries.")
+                return
+            await _reset_all_feed_retries(bot, msg, store)
             return
 
         target_room = _room_for_feed_command(
@@ -1086,7 +1100,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             )
             return
 
-        await _reset_feed_retry(bot, msg, args[1], store)
+        await _reset_feed_retry(bot, msg, retry_target, store)
         return
 
     # List rooms or one explicitly targeted room.
@@ -1308,6 +1322,34 @@ async def _reset_feed_retry(bot, msg, url, store):
     )
 
     bot.reply(msg, f"🔁 Retry state reset and RSS check scheduled: {url}")
+
+
+async def _reset_all_feed_retries(bot, msg, store):
+    """Clear retry state for every configured RSS feed and restart checks."""
+    feeds = await get_feeds(store)
+
+    if not feeds:
+        bot.reply(msg, "No feeds configured.")
+        return
+
+    for url, feed in feeds.items():
+        _apply_retry_state(feed, 0, 0)
+
+    await save_feeds(store, feeds)
+
+    for url, feed in feeds.items():
+        _cancel_feed_task(url)
+        await ensure_task(
+            bot,
+            store,
+            url,
+            feed.get("period", DEFAULT_POLL_INTERVAL),
+        )
+
+    bot.reply(
+        msg,
+        f"🔁 Retry state reset and RSS checks scheduled for all feeds ({len(feeds)}).",
+    )
 
 
 async def _del_feed(bot, msg, url, store, room=None, delete_target=None):

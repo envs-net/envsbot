@@ -1401,6 +1401,8 @@ Examples:
 - `,rss list room@conference.example.org`
 - `,rss list 2`
 - `,rss list all`
+- `,rss retry all`
+- `,rss reset all`
 - `,rss retry https://example.org/feed.rss room@conference.example.org`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`

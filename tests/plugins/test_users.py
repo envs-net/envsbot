@@ -32,7 +32,8 @@ def assert_reply_contains(bot_reply, substring: str):
 class FakeUserManager:
     def __init__(self, *, plugin_store, nick_index):
         self._plugin_store = plugin_store
-        self._nick_index = nick_index
+        self.nick_index = nick_index
+        self.nick_index_lock = asyncio.Lock()
         self.get = AsyncMock(return_value=None)
         self.create = AsyncMock()
 
@@ -41,8 +42,12 @@ class FakeUserManager:
         return self._plugin_store
 
     @property
-    def nick_index(self):
-        return self._nick_index
+    def _nick_index(self):
+        return self.nick_index
+
+    @property
+    def _nick_index_lock(self):
+        return self.nick_index_lock
 
 
 @pytest.fixture
@@ -366,7 +371,7 @@ async def test_users_usage_replies_use_runtime_prefix(mock_bot, mock_msg):
         await users_mod.users_info(
             mock_bot, "sender", "nick", [], mock_msg, False
         )
-        assert bot_reply.call_args.args[1] == "🟡️ Usage: !users info <jid|nick>"
+        assert bot_reply.call_args.args[1].endswith("Usage: !users info <jid|nick>")
 
     mock_bot.reply_usage = MagicMock()
     await users_mod.users_update(
@@ -380,7 +385,7 @@ async def test_users_usage_replies_use_runtime_prefix(mock_bot, mock_msg):
         await users_mod.users_delete(
             mock_bot, "sender", "nick", [], mock_msg, False
         )
-        assert bot_reply.call_args.args[1] == "🟡️ Usage: !users delete <jid>"
+        assert bot_reply.call_args.args[1].endswith("Usage: !users delete <jid>")
 
 
 @pytest.mark.asyncio

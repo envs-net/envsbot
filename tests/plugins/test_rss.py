@@ -1033,12 +1033,101 @@ async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
 
 
 @pytest.mark.asyncio
+async def test_rss_reset_all_retry_states_restarts_all_tasks(monkeypatch, make_bot):
+    bot = make_bot()
+    feeds = {
+        "https://example.org/a.xml": {
+            "title": "A",
+            "period": 42,
+            "rooms": ["room@conference.example.org"],
+            "error_count": 2,
+            "next_retry": 1234,
+        },
+        "https://example.org/b.xml": {
+            "title": "B",
+            "period": 84,
+            "rooms": ["room@conference.example.org"],
+            "error_count": 3,
+            "next_retry": 5678,
+        },
+    }
+    bot.plugin_store[rss.RSS_KEY] = feeds
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    class RunningTask:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    old_tasks = {url: RunningTask() for url in feeds}
+    rss.CHECK_TASKS.update(old_tasks)
+    ensure = AsyncMock()
+    monkeypatch.setattr(rss, "ensure_task", ensure)
+
+    await rss.rss_command(bot, "jid", "nick", ["retry", "all"], msg, False)
+
+    for url, feed in bot.plugin_store[rss.RSS_KEY].items():
+        assert feed["error_count"] == 0
+        assert feed["next_retry"] == 0
+        assert old_tasks[url].cancelled is True
+
+    ensure.assert_any_await(bot, bot.plugin_store, "https://example.org/a.xml", 42)
+    ensure.assert_any_await(bot, bot.plugin_store, "https://example.org/b.xml", 84)
+    assert ensure.await_count == 2
+    assert bot.replies[-1][1] == (
+        "🔁 Retry state reset and RSS checks scheduled for all feeds (2)."
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_reset_all_retry_states_requires_global_manager(make_bot):
+    bot = make_bot()
+    bot.get_user_role = AsyncMock(return_value=Role.USER)
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/a.xml": {
+            "title": "A",
+            "period": 42,
+            "rooms": ["room@conference.example.org"],
+            "error_count": 2,
+            "next_retry": 1234,
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="user@example.org"), "type": "chat"}
+
+    await rss.rss_command(bot, "jid", "nick", ["reset", "all"], msg, False)
+
+    feed = bot.plugin_store[rss.RSS_KEY]["https://example.org/a.xml"]
+    assert feed["error_count"] == 2
+    assert feed["next_retry"] == 1234
+    assert bot.replies[-1][1] == "🔴 Only global moderators can reset all RSS retries."
+
+
+@pytest.mark.asyncio
+async def test_rss_reset_all_rejects_extra_room_argument(make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["reset", "all", "room@conference.example.org"],
+        msg,
+        False,
+    )
+
+    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl>|all [room_jid]"
+
+
+@pytest.mark.asyncio
 async def test_rss_reset_retry_state_usage_and_missing_feed(make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
 
     await rss.rss_command(bot, "jid", "nick", ["reset"], msg, False)
-    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl> [room_jid]"
+    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl>|all [room_jid]"
 
     await rss.rss_command(
         bot,

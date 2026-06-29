@@ -519,6 +519,8 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
             "{prefix}rss list room@conference.example.org",
             "{prefix}rss list 2",
             "{prefix}rss list all",
+            "{prefix}rss retry all",
+            "{prefix}rss reset all",
             "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
             "{prefix}rss delete https://example.org/feed.rss",
             "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",
