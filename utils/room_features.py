@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Protocol, TypedDict
 
@@ -72,7 +73,10 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
             return False
     if value is None:
         return fallback
-    return bool(value)
+    raise TypeError(
+        "Unsupported feature flag value type: "
+        f"{type(value).__name__}"
+    )
 
 
 def _raw_plugin_store_config() -> object:
@@ -148,6 +152,8 @@ async def _room_feature_map(
     state = await store.get_global(conf["key"], default={})
     if not isinstance(state, dict):
         return {}
+    # Return a shallow copy intentionally: callers mutate this mapping before
+    # persisting it, and we do not want to mutate backend-owned state in place.
     return dict(state)
 
 
@@ -192,10 +198,9 @@ async def list_room_features(
     bot: BotProtocol,
     room_jid: str,
 ) -> list[RoomFeatureState]:
-    return [
-        await _state_for(bot, room_jid, name)
-        for name in available_features()
-    ]
+    names = available_features()
+    coros = [_state_for(bot, room_jid, name) for name in names]
+    return list(await asyncio.gather(*coros))
 
 
 def format_room_feature_line(state: RoomFeatureState) -> str:

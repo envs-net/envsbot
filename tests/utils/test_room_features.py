@@ -146,7 +146,12 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
         is False
     )
     assert room_features._coerce_feature_flag(None, fallback=True) is True
-    assert room_features._coerce_feature_flag(object()) is True
+    with pytest.raises(TypeError, match="Unsupported feature flag"):
+        room_features._coerce_feature_flag([])
+    with pytest.raises(TypeError, match="Unsupported feature flag"):
+        room_features._coerce_feature_flag({})
+    with pytest.raises(TypeError, match="Unsupported feature flag"):
+        room_features._coerce_feature_flag(object())
 
     line = room_features.format_room_feature_line(
         room_features.RoomFeatureState(
