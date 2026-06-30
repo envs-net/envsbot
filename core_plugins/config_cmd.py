@@ -65,7 +65,10 @@ def _format_dict_lines(value: dict, *, indent: str = "  ") -> list[str]:
     return lines
 
 
-def _section_lines(title: str, items: Iterable[tuple[str, object]]) -> list[str]:
+def _section_lines(
+    title: str,
+    items: Iterable[tuple[str, object]],
+) -> list[str]:
     section = [f"{title}:"]
     for name, value in items:
         if isinstance(value, dict):
@@ -142,7 +145,10 @@ async def config_diff(bot, sender, nick, args, msg, is_room):
 async def config_validate(bot, sender, nick, args, msg, is_room):
     """Validate config.py."""
     try:
-        validate_config(load_config(require_required_keys=True), require_required_keys=True)
+        validate_config(
+            load_config(require_required_keys=True),
+            require_required_keys=True,
+        )
     except ConfigError as exc:
         bot.reply_error(msg, f"Invalid config.py:\n{exc}")
         return
@@ -169,6 +175,9 @@ async def config_reload(bot, sender, nick, args, msg, is_room):
     notes = ["config.py reloaded."]
     if bot.prefix != old_prefix:
         notes.append(f"Prefix changed from {old_prefix!r} to {bot.prefix!r}.")
-    notes.append("Connection credentials and DB path require a bot restart to fully apply.")
+    notes.append(
+        "Connection credentials and DB path require a bot restart "
+        "to fully apply."
+    )
     await audit_event(bot, "config_reloaded", actor=sender, target="config")
     bot.reply_ok(msg, "\n".join(notes))

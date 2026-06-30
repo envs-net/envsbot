@@ -6,7 +6,7 @@ import asyncio
 import types
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Protocol, TypedDict
+from typing import Mapping, Protocol, TypedDict
 
 from utils.formatting import bool_label
 
@@ -109,10 +109,14 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
             return True
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
+        try:
+            return bool(float(normalized))
+        except ValueError:
+            pass
     raise TypeError(
         f"Unsupported feature flag value: {value!r} "
         f"(type: {type(value).__name__}). "
-        "Expected bool, int, float, or one of: "
+        "Expected bool, int, float, numeric string, or one of: "
         "true/false, yes/no, on/off, enabled/disabled, 1/0."
     )
 
@@ -219,7 +223,9 @@ def _is_supported_feature_value(value: object) -> bool:
     return value is None or isinstance(value, (bool, int, float, str))
 
 
-def _safe_room_feature_state(state: dict[object, object]) -> dict[str, object]:
+def _safe_room_feature_state(
+    state: Mapping[object, object],
+) -> dict[str, object]:
     """Return a sanitized room-feature state mapping.
 
     Plugin stores may contain arbitrary keys or values from older versions,

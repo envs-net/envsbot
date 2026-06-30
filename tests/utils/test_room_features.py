@@ -182,6 +182,8 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
     assert room_features._coerce_feature_flag(None, fallback=True) is True
     assert room_features._coerce_feature_flag("") is False
     assert room_features._coerce_feature_flag("   ") is False
+    assert room_features._coerce_feature_flag("1.5") is True
+    assert room_features._coerce_feature_flag("0.0") is False
     with pytest.raises(TypeError, match="Unsupported feature flag"):
         room_features._coerce_feature_flag([])
     with pytest.raises(TypeError, match="Unsupported feature flag"):
@@ -192,7 +194,7 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
         room_features._coerce_feature_flag("maybe")
     assert str(exc_info.value) == (
         "Unsupported feature flag value: 'maybe' (type: str). "
-        "Expected bool, int, float, or one of: "
+        "Expected bool, int, float, numeric string, or one of: "
         "true/false, yes/no, on/off, enabled/disabled, 1/0."
     )
 
