@@ -134,6 +134,40 @@ async def test_room_feature_defaults_handle_missing_defaults(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_room_feature_ignores_invalid_defaults(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={
+                "information": {"type": "dict", "key": "INFO"},
+                "pin": {"type": "dict", "key": "PIN"},
+            },
+            get_room_plugin_defaults=lambda: {
+                "information": "yes",
+                "pin": object(),
+            },
+        ),
+    )
+
+    info_state = await room_features.get_room_feature(
+        _bot_with_store(DummyStore()),
+        "room@conf",
+        "information",
+    )
+    pin_state = await room_features.get_room_feature(
+        _bot_with_store(DummyStore()),
+        "room@conf",
+        "pin",
+    )
+
+    assert info_state.enabled is True
+    assert info_state.default is True
+    assert pin_state.enabled is False
+    assert pin_state.default is False
+
+
+@pytest.mark.asyncio
 async def test_room_feature_uses_effective_defaults(monkeypatch):
     monkeypatch.setattr(
         room_features,

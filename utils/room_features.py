@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import types
 from dataclasses import dataclass
 from functools import lru_cache
@@ -33,10 +34,10 @@ class BotProtocol(Protocol):
 
 
 _FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
-_FEATURE_LOCKS_GUARD: asyncio.Lock | None = None
+_FEATURE_LOCKS_GUARD = threading.Lock()
 
 
-async def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
+def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     """Return the shared lock for one plugin storage key.
 
     Room feature updates use read-modify-write storage. A lock per
@@ -50,11 +51,7 @@ async def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     if lock is not None:
         return lock
 
-    global _FEATURE_LOCKS_GUARD
-    if _FEATURE_LOCKS_GUARD is None:
-        _FEATURE_LOCKS_GUARD = asyncio.Lock()
-
-    async with _FEATURE_LOCKS_GUARD:
+    with _FEATURE_LOCKS_GUARD:
         lock = _FEATURE_LOCKS.get(lock_id)
         if lock is None:
             lock = asyncio.Lock()
@@ -214,10 +211,17 @@ def _cached_plugin_defaults() -> dict[str, bool]:
         defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
     if not isinstance(defaults, dict):
         return {}
-    return {
-        _normalize_plugin_name(str(name)): _coerce_feature_flag(value)
-        for name, value in defaults.items()
-    }
+
+    validated: dict[str, bool] = {}
+    for name, value in defaults.items():
+        normalized_name = _normalize_plugin_name(str(name))
+        if not normalized_name:
+            continue
+        try:
+            validated[normalized_name] = _coerce_feature_flag(value)
+        except TypeError:
+            continue
+    return validated
 
 
 def _plugin_defaults() -> dict[str, bool]:
@@ -325,7 +329,7 @@ async def set_room_feature(
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
 
-    async with await _feature_lock(plugin, conf["key"]):
+    async with _feature_lock(plugin, conf["key"]):
         current_state = await _room_feature_map(bot, plugin, conf)
         current_state[room_jid] = bool(enabled)
 
