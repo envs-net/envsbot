@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import types
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Protocol, TypedDict
@@ -59,7 +60,7 @@ class RoomFeatureState:
 
 
 @lru_cache(maxsize=1)
-def _rooms_module():
+def _rooms_module() -> types.ModuleType:
     """Lazily import and cache the rooms module.
 
     Importing ``core_plugins.rooms`` only when room feature metadata is needed
@@ -177,7 +178,8 @@ def _cached_plugin_defaults() -> dict[str, bool]:
     rooms = _rooms_module()
     defaults_fn = getattr(rooms, "get_room_plugin_defaults", None)
     if callable(defaults_fn):
-        defaults = defaults_fn()
+        raw_defaults = defaults_fn()
+        defaults = raw_defaults if isinstance(raw_defaults, dict) else None
     else:
         defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
     if not isinstance(defaults, dict):
@@ -288,7 +290,8 @@ async def set_room_feature(
     conf = _feature_config(plugin)
 
     async with _feature_lock(plugin, conf["key"]):
-        state = await _room_feature_map(bot, plugin, conf)
+        current_state = await _room_feature_map(bot, plugin, conf)
+        state = dict(current_state)
         state[room_jid] = bool(enabled)
 
         store = bot.db.users.plugin(plugin)
