@@ -161,6 +161,13 @@ def _is_supported_feature_value(value: object) -> bool:
 
 
 def _safe_room_feature_state(state: dict[object, object]) -> dict[str, object]:
+    """Return a sanitized room-feature state mapping.
+
+    Plugin stores may contain arbitrary keys or values from older versions,
+    manual edits, or corrupted data. Keep only string room IDs with scalar
+    feature-flag values accepted by ``_coerce_feature_flag`` and ignore
+    everything else.
+    """
     safe_state: dict[str, object] = {}
     for key, value in state.items():
         if not isinstance(key, str):
@@ -176,6 +183,13 @@ async def _room_feature_map(
     plugin: str,
     conf: RoomFeatureConfig,
 ) -> dict[str, object]:
+    """Fetch and sanitize the stored room-feature map for a plugin.
+
+    The configured store key is expected to contain a dictionary mapping
+    room JIDs to raw feature-flag values. Missing, non-dictionary, or
+    malformed state is treated as empty so callers can safely fall back to
+    configured defaults.
+    """
     store = bot.db.users.plugin(plugin)
     state = await store.get_global(conf["key"], default={})
     if not isinstance(state, dict):
@@ -189,6 +203,13 @@ async def _state_for(
     plugin: str,
     defaults: dict[str, bool],
 ) -> RoomFeatureState:
+    """Compute the effective feature state for one plugin in one room.
+
+    ``defaults`` contains the already-resolved plugin defaults for this
+    request. The returned state combines the stored room-specific override
+    with that default and marks whether the effective value differs from the
+    default.
+    """
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
     state = await _room_feature_map(bot, plugin, conf)
