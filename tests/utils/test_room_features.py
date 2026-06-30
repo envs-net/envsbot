@@ -240,6 +240,7 @@ async def test_room_feature_ignores_malformed_backend_state(monkeypatch):
                 "room@conf": {"enabled": False},
                 "other@conf": [],
                 "bad@conf": object(),
+                "invalid@conf": "maybe",
                 42: False,
             }
         }

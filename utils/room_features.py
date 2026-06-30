@@ -42,8 +42,14 @@ async def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     Room feature updates use read-modify-write storage. A lock per
     ``plugin:key`` pair prevents concurrent writers from losing room-specific
     updates while still allowing unrelated plugin stores to update in parallel.
+    Existing locks are returned without acquiring the registry guard; the guard
+    is only needed when a lock might have to be created.
     """
     lock_id = f"{plugin}:{key}"
+    lock = _FEATURE_LOCKS.get(lock_id)
+    if lock is not None:
+        return lock
+
     async with _FEATURE_LOCKS_GUARD:
         lock = _FEATURE_LOCKS.get(lock_id)
         if lock is None:
@@ -95,6 +101,16 @@ def _normalize_plugin_name(name: str) -> str:
 
 
 def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
+    """Coerce a stored feature flag value to ``bool``.
+
+    ``fallback`` is returned only when ``value`` is ``None``. Accepted inputs
+    are booleans, numeric values, numeric strings, empty strings, and common
+    truthy/falsy string literals such as ``yes/no`` or ``enabled/disabled``.
+
+    Raises:
+        TypeError: If ``value`` cannot be interpreted as a supported feature
+            flag value.
+    """
     if value is None:
         return fallback
     if isinstance(value, bool):
@@ -220,7 +236,11 @@ def is_known_feature(plugin: str) -> bool:
 
 
 def _is_supported_feature_value(value: object) -> bool:
-    return value is None or isinstance(value, (bool, int, float, str))
+    try:
+        _coerce_feature_flag(value)
+    except TypeError:
+        return False
+    return True
 
 
 def _safe_room_feature_state(
