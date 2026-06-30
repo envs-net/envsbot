@@ -33,7 +33,7 @@ class BotProtocol(Protocol):
 
 
 _FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
-_FEATURE_LOCKS_GUARD = asyncio.Lock()
+_FEATURE_LOCKS_GUARD: asyncio.Lock | None = None
 
 
 async def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
@@ -49,6 +49,10 @@ async def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     lock = _FEATURE_LOCKS.get(lock_id)
     if lock is not None:
         return lock
+
+    global _FEATURE_LOCKS_GUARD
+    if _FEATURE_LOCKS_GUARD is None:
+        _FEATURE_LOCKS_GUARD = asyncio.Lock()
 
     async with _FEATURE_LOCKS_GUARD:
         lock = _FEATURE_LOCKS.get(lock_id)
@@ -217,7 +221,7 @@ def _cached_plugin_defaults() -> dict[str, bool]:
 
 
 def _plugin_defaults() -> dict[str, bool]:
-    # Return a copy so callers can not mutate cached defaults.
+    # Return a copy so callers cannot mutate cached defaults.
     return dict(_cached_plugin_defaults())
 
 
