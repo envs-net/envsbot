@@ -33,9 +33,10 @@ class BotProtocol(Protocol):
 
 
 _FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
+_FEATURE_LOCKS_GUARD = asyncio.Lock()
 
 
-def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
+async def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     """Return the shared lock for one plugin storage key.
 
     Room feature updates use read-modify-write storage. A lock per
@@ -43,7 +44,12 @@ def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     updates while still allowing unrelated plugin stores to update in parallel.
     """
     lock_id = f"{plugin}:{key}"
-    return _FEATURE_LOCKS.setdefault(lock_id, asyncio.Lock())
+    async with _FEATURE_LOCKS_GUARD:
+        lock = _FEATURE_LOCKS.get(lock_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _FEATURE_LOCKS[lock_id] = lock
+        return lock
 
 
 class RoomFeatureConfig(TypedDict):
@@ -289,13 +295,12 @@ async def set_room_feature(
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
 
-    async with _feature_lock(plugin, conf["key"]):
+    async with await _feature_lock(plugin, conf["key"]):
         current_state = await _room_feature_map(bot, plugin, conf)
-        state = dict(current_state)
-        state[room_jid] = bool(enabled)
+        current_state[room_jid] = bool(enabled)
 
         store = bot.db.users.plugin(plugin)
-        await store.set_global(conf["key"], state)
+        await store.set_global(conf["key"], current_state)
 
     defaults = _plugin_defaults()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
