@@ -315,6 +315,20 @@ def _format_command_line(cmd_obj, prefix: str) -> str:
     )
 
 
+def _format_plugin_command_line(cmd_obj, prefix: str) -> str:
+    """Return a plugin-help command line with usage and aliases."""
+    aliases = sorted(set(a for a in (cmd_obj.aliases or []) if a != cmd_obj.name))
+    alias_text = ""
+    if aliases:
+        alias_text = f" / aliases: {', '.join(prefix + a for a in aliases)}"
+
+    usage = _command_usage(cmd_obj, prefix)[0]
+    return (
+        f"• {usage} [{_role_label(cmd_obj.role)}] — "
+        f"{_command_short(cmd_obj, prefix)}{alias_text}"
+    )
+
+
 def _format_command_detail(cmd_obj, prefix: str) -> list[str]:
     lines = [
         f"📖 Command: {prefix}{cmd_obj.name}",
@@ -757,7 +771,12 @@ async def _plugin(bot, query: str, role: Role) -> list[str]:
         lines.append("No commands available for your role.")
     else:
         for cmd in commands:
-            lines.append(_format_command_line(cmd, bot.prefix))
+            lines.append(_format_plugin_command_line(cmd, bot.prefix))
+
+        lines += [
+            "",
+            f"Use {bot.prefix}help {bot.prefix}<command> for full examples.",
+        ]
 
     return lines
 

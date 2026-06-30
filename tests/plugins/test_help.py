@@ -202,6 +202,8 @@ async def test_plugin_help_happy_path(basic_plugins_and_commands):
     assert "Foo plugin doc" in reply
     # Command list
     assert "foo" in reply
+    assert ",foo [user]" in reply
+    assert "Use ,help ,<command> for full examples." in reply
 
 
 @pytest.mark.asyncio
@@ -726,6 +728,51 @@ def test_command_help_metadata_is_complete():
                         )
 
     assert command_names
+    assert not incomplete
+
+
+def test_command_help_metadata_has_usage_and_examples():
+    root = Path(help_plugin.__file__).resolve().parents[1]
+    incomplete = []
+
+    for rel in ("plugins", "core_plugins"):
+        for path in sorted((root / rel).glob("*.py")):
+            tree = ast.parse(path.read_text())
+            for node in tree.body:
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for decorator in node.decorator_list:
+                    if not isinstance(decorator, ast.Call):
+                        continue
+                    func = decorator.func
+                    is_command = (
+                        isinstance(func, ast.Name) and func.id == "command"
+                    ) or (
+                        isinstance(func, ast.Attribute) and func.attr == "command"
+                    )
+                    if not is_command:
+                        continue
+                    if (
+                        not decorator.args
+                        or not isinstance(decorator.args[0], ast.Constant)
+                    ):
+                        continue
+
+                    name = str(decorator.args[0].value).lower()
+                    keywords = {kw.arg: kw.value for kw in decorator.keywords}
+                    metadata = command_help.COMMAND_HELP.get(name, {})
+
+                    has_usage = bool(metadata.get("usage")) or "usage" in keywords
+                    has_examples = (
+                        bool(metadata.get("examples"))
+                        or "examples" in keywords
+                    )
+                    has_short = bool(metadata.get("short")) or "short" in keywords
+                    if not (has_usage and has_examples and has_short):
+                        incomplete.append(
+                            f"{path.relative_to(root)}:{node.name}:{name}"
+                        )
+
     assert not incomplete
 
 
