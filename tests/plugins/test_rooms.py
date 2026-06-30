@@ -391,6 +391,66 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg):
 
 
 @pytest.mark.asyncio
+async def test_rooms_delete_reports_not_used_without_delete_log(fake_bot, fake_msg):
+    room_jid = "room@conference.domain"
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+    fake_bot.db.rooms.delete = AsyncMock()
+
+    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)), \
+            patch("core_plugins.rooms.audit_event", AsyncMock()) as audit, \
+            patch("core_plugins.rooms.log.info") as log_info:
+        await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
+
+    fake_bot.db.rooms.delete.assert_not_called()
+    audit.assert_not_awaited()
+    fake_bot.reply_info.assert_called_once_with(
+        fake_msg,
+        f"Room is not used by this bot: {room_jid}",
+    )
+    assert not any(
+        "Deleted room" in str(call.args[0])
+        for call in log_info.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_rooms_delete_cleans_stale_plugin_state_without_db_room(fake_bot, fake_msg):
+    room_jid = "room@conference.domain"
+    other_room = "other@conference.domain"
+    stores = {
+        "xkcd": DummyPluginStore({"XKCD": {room_jid: True, other_room: True}}),
+    }
+    fake_bot.db.users.plugin.side_effect = lambda name: stores.setdefault(
+        name,
+        DummyPluginStore(),
+    )
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+    fake_bot.db.rooms.delete = AsyncMock()
+
+    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)), \
+            patch("core_plugins.rooms.audit_event", AsyncMock()) as audit, \
+            patch("core_plugins.rooms.log.info") as log_info:
+        await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
+
+    assert stores["xkcd"]["XKCD"] == {other_room: True}
+    fake_bot.db.rooms.delete.assert_not_called()
+    audit.assert_awaited_once()
+    assert audit.await_args.args[1] == "room_plugin_state_cleaned"
+    fake_bot.reply.assert_called_once_with(
+        fake_msg,
+        f"🧹 Room was not stored, but stale plugin state was cleaned: {room_jid}",
+    )
+    assert any(
+        "Cleaned stale plugin state" in str(call.args[0])
+        for call in log_info.call_args_list
+    )
+    assert not any(
+        "Deleted room" in str(call.args[0])
+        for call in log_info.call_args_list
+    )
+
+
+@pytest.mark.asyncio
 async def test_rooms_delete_suppresses_delayed_presence_until_rejoin(fake_bot, fake_msg):
     room_jid = "room@conference.domain"
     fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))

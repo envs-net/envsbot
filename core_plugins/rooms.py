@@ -1051,6 +1051,17 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict[str, int]:
     return summary
 
 
+def _plugin_cleanup_changed(summary: dict[str, int]) -> bool:
+    """Return True when a plugin cleanup summary removed anything."""
+    return any(int(value or 0) > 0 for value in summary.values())
+
+
+def _room_in_runtime_state(bot, room_jid: str) -> bool:
+    """Return True if the room is currently tracked as joined at runtime."""
+    presence_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", {})
+    return room_jid in JOINED_ROOMS or room_jid in presence_rooms
+
+
 async def _leave_runtime_room(bot, room_jid: str) -> bool:
     """Leave a room and remove all runtime state for it.
 
@@ -1766,6 +1777,35 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         db_room = await bot.db.rooms.get(room_jid)
+        runtime_room = _room_in_runtime_state(bot, room_jid)
+
+        if not db_room and not runtime_room:
+            plugin_cleanup = await _cleanup_room_plugin_state(bot, room_jid)
+            if _plugin_cleanup_changed(plugin_cleanup):
+                log.info(
+                    "[ROOMS] 🧹 Cleaned stale plugin state for %s: %s",
+                    room_jid,
+                    plugin_cleanup,
+                )
+                await audit_event(
+                    bot,
+                    "room_plugin_state_cleaned",
+                    actor=sender_jid,
+                    target=room_jid,
+                    details={"plugin_cleanup": plugin_cleanup},
+                )
+                bot.reply(
+                    msg,
+                    f"🧹 Room was not stored, but stale plugin state was cleaned: {room_jid}",
+                )
+                return
+
+            bot.reply_info(
+                msg,
+                f"Room is not used by this bot: {room_jid}",
+            )
+            return
+
         plugin_cleanup = await _cleanup_room_plugin_state(bot, room_jid)
         if db_room:
             await bot.db.rooms.delete(room_jid)
@@ -1775,11 +1815,12 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         if joined:
             log.info("[ROOMS] 🚶 Left room %s", room_jid)
 
-        log.info(
-            "[ROOMS] 🧹 Cleaned plugin state for %s: %s",
-            room_jid,
-            plugin_cleanup,
-        )
+        if _plugin_cleanup_changed(plugin_cleanup):
+            log.info(
+                "[ROOMS] 🧹 Cleaned plugin state for %s: %s",
+                room_jid,
+                plugin_cleanup,
+            )
         log.info("[ROOMS] 🗑️ Deleted room %s", room_jid)
         await audit_event(
             bot,
