@@ -81,13 +81,24 @@ async def test_get_room_feature_rejects_unknown_feature(monkeypatch):
     monkeypatch.setattr(
         room_features,
         "_rooms_module",
-        lambda: SimpleNamespace(PLUGIN_STORE_CONFIG={}),
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={
+                "information": {"type": "dict", "key": "INFO_ENABLED"},
+                "pin": {"type": "dict", "key": "PIN_ENABLED"},
+            },
+            PLUGIN_DEFAULTS={},
+        ),
     )
 
-    with pytest.raises(KeyError, match="urlcheck"):
+    with pytest.raises(KeyError) as exc_info:
         await room_features.get_room_feature(
             _bot_with_store(DummyStore()), "room@conf", "urlcheck"
         )
+
+    message = str(exc_info.value)
+    assert "Unknown plugin feature: urlcheck" in message
+    assert "Available features: information, pin" in message
+    assert "available_features()" in message
 
 
 @pytest.mark.asyncio
@@ -173,7 +184,9 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
     with pytest.raises(TypeError) as exc_info:
         room_features._coerce_feature_flag("maybe")
     assert str(exc_info.value) == (
-        "Unsupported feature flag value: 'maybe' (type: str)"
+        "Unsupported feature flag value: 'maybe' (type: str). "
+        "Expected bool, int, float, or one of: "
+        "true/false, yes/no, on/off, enabled/disabled, 1/0."
     )
 
     line = room_features.format_room_feature_line(
@@ -338,15 +351,19 @@ async def test_room_feature_set_list_and_unsupported_storage(monkeypatch):
             PLUGIN_DEFAULTS={},
         ),
     )
-    unsupported_storage = "Unsupported room feature storage type"
-    with pytest.raises(ValueError, match=unsupported_storage) as exc_info:
+    unsupported_storage = (
+        "Unsupported room feature storage type: list. "
+        "Only 'dict' is currently supported."
+    )
+    with pytest.raises(ValueError) as exc_info:
         await room_features.get_room_feature(bot, "room@conf", "legacy")
-    assert "Only 'dict' is currently supported." in str(exc_info.value)
+    assert str(exc_info.value) == unsupported_storage
 
-    with pytest.raises(ValueError, match=unsupported_storage):
+    with pytest.raises(ValueError) as exc_info:
         await room_features.set_room_feature(
             bot,
             "room@conf",
             "legacy",
             True,
         )
+    assert str(exc_info.value) == unsupported_storage

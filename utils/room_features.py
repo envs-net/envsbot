@@ -85,7 +85,9 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
             return False
     raise TypeError(
         f"Unsupported feature flag value: {value!r} "
-        f"(type: {type(value).__name__})"
+        f"(type: {type(value).__name__}). "
+        "Expected bool, int, float, or one of: "
+        "true/false, yes/no, on/off, enabled/disabled, 1/0."
     )
 
 
@@ -121,7 +123,13 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     plugin = _normalize_plugin_name(plugin)
     config = _plugin_store_config()
     if plugin not in config:
-        raise KeyError(f"Unknown plugin feature: {plugin}")
+        available = sorted(config)
+        options = ", ".join(available) if available else "<none configured>"
+        raise KeyError(
+            f"Unknown plugin feature: {plugin}. "
+            f"Available features: {options}. "
+            "Use available_features() to inspect configured options."
+        )
 
     conf = config[plugin]
     typ = conf["type"]
@@ -253,11 +261,11 @@ async def list_room_features(
 ) -> list[RoomFeatureState]:
     names = available_features()
     defaults = _plugin_defaults()
-    coros = [
+    coroutines = [
         _state_for(bot, room_jid, name, defaults=defaults)
         for name in names
     ]
-    return list(await asyncio.gather(*coros))
+    return list(await asyncio.gather(*coroutines))
 
 
 def format_room_feature_line(state: RoomFeatureState) -> str:
