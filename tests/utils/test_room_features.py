@@ -146,6 +146,8 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
         is False
     )
     assert room_features._coerce_feature_flag(None, fallback=True) is True
+    assert room_features._coerce_feature_flag("") is False
+    assert room_features._coerce_feature_flag("   ") is False
     with pytest.raises(TypeError, match="Unsupported feature flag"):
         room_features._coerce_feature_flag([])
     with pytest.raises(TypeError, match="Unsupported feature flag"):
@@ -162,6 +164,68 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
         )
     )
     assert line == "• karma: enabled | default: off (modified)"
+
+
+@pytest.mark.asyncio
+async def test_room_feature_ignores_malformed_backend_state(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={"pin": {"type": "dict", "key": "PIN"}},
+            PLUGIN_DEFAULTS={"pin": True},
+        ),
+    )
+    store = DummyStore(
+        {
+            "PIN": {
+                "room@conf": {"enabled": False},
+                "other@conf": [],
+                "bad@conf": object(),
+                42: False,
+            }
+        }
+    )
+
+    state = await room_features.get_room_feature(
+        _bot_with_store(store),
+        "room@conf",
+        "pin",
+    )
+
+    assert state.enabled is True
+    assert state.default is True
+    assert state.modified is False
+
+
+@pytest.mark.asyncio
+async def test_list_room_features_reuses_defaults(monkeypatch):
+    calls = 0
+
+    def defaults():
+        nonlocal calls
+        calls += 1
+        return {"information": True, "karma": False}
+
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={
+                "information": {"type": "dict", "key": "INFO_ENABLED"},
+                "karma": {"type": "dict", "key": "KARMA_ENABLED"},
+            },
+            get_room_plugin_defaults=defaults,
+        ),
+    )
+
+    listed = await room_features.list_room_features(
+        _bot_with_store(DummyStore()),
+        "room@conf",
+    )
+
+    assert [item.name for item in listed] == ["information", "karma"]
+    assert calls == 1
 
 
 @pytest.mark.asyncio

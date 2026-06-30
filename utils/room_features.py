@@ -61,18 +61,20 @@ def _normalize_plugin_name(name: str) -> str:
 
 
 def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
+    if value is None:
+        return fallback
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
         return value != 0
     if isinstance(value, str):
         normalized = value.strip().lower()
+        if not normalized:
+            return False
         if normalized in {"1", "true", "yes", "on", "enabled"}:
             return True
-        if normalized in {"0", "false", "no", "off", "disabled", ""}:
+        if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
-    if value is None:
-        return fallback
     raise TypeError(
         "Unsupported feature flag value type: "
         f"{type(value).__name__}"
@@ -143,6 +145,21 @@ def is_known_feature(plugin: str) -> bool:
     return _normalize_plugin_name(plugin) in available_features()
 
 
+def _is_supported_feature_value(value: object) -> bool:
+    return value is None or isinstance(value, (bool, int, float, str))
+
+
+def _safe_room_feature_state(state: dict[object, object]) -> dict[str, object]:
+    safe_state: dict[str, object] = {}
+    for key, value in state.items():
+        if not isinstance(key, str):
+            continue
+        if not _is_supported_feature_value(value):
+            continue
+        safe_state[key] = value
+    return safe_state
+
+
 async def _room_feature_map(
     bot: BotProtocol,
     plugin: str,
@@ -152,20 +169,21 @@ async def _room_feature_map(
     state = await store.get_global(conf["key"], default={})
     if not isinstance(state, dict):
         return {}
-    # Return a shallow copy intentionally: callers mutate this mapping before
-    # persisting it, and we do not want to mutate backend-owned state in place.
-    return dict(state)
+    return _safe_room_feature_state(state)
 
 
 async def _state_for(
     bot: BotProtocol,
     room_jid: str,
     plugin: str,
+    defaults: dict[str, bool] | None = None,
 ) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
     state = await _room_feature_map(bot, plugin, conf)
-    default = _plugin_defaults().get(plugin, False)
+    if defaults is None:
+        defaults = _plugin_defaults()
+    default = defaults.get(plugin, False)
     enabled = _coerce_feature_flag(state.get(room_jid), fallback=default)
     return RoomFeatureState(
         name=plugin,
@@ -199,7 +217,11 @@ async def list_room_features(
     room_jid: str,
 ) -> list[RoomFeatureState]:
     names = available_features()
-    coros = [_state_for(bot, room_jid, name) for name in names]
+    defaults = _plugin_defaults()
+    coros = [
+        _state_for(bot, room_jid, name, defaults=defaults)
+        for name in names
+    ]
     return list(await asyncio.gather(*coros))
 
 
