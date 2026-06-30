@@ -12,15 +12,15 @@ from utils.formatting import bool_label
 
 class PluginStore(Protocol):
     async def get_global(self, key: str, default: object = None) -> object:
-        ...
+        pass
 
     async def set_global(self, key: str, value: object) -> None:
-        ...
+        pass
 
 
 class PluginUsers(Protocol):
     def plugin(self, name: str) -> PluginStore:
-        ...
+        pass
 
 
 class RoomFeatureDatabase(Protocol):
@@ -35,6 +35,12 @@ _FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
+    """Return the shared lock for one plugin storage key.
+
+    Room feature updates use read-modify-write storage. A lock per
+    ``plugin:key`` pair prevents concurrent writers from losing room-specific
+    updates while still allowing unrelated plugin stores to update in parallel.
+    """
     lock_id = f"{plugin}:{key}"
     return _FEATURE_LOCKS.setdefault(lock_id, asyncio.Lock())
 
@@ -54,13 +60,24 @@ class RoomFeatureState:
 
 @lru_cache(maxsize=1)
 def _rooms_module():
-    # Imported lazily to avoid circular imports during plugin discovery.
+    """Lazily import and cache the rooms module.
+
+    Importing ``core_plugins.rooms`` only when room feature metadata is needed
+    avoids circular imports during plugin discovery. The cache ensures all
+    later lookups reuse the same module object.
+    """
     from core_plugins import rooms
 
     return rooms
 
 
 def _normalize_plugin_name(name: str) -> str:
+    """Return the canonical feature name for user or config input.
+
+    Names are lowercased, stripped, and mapped through known aliases so callers
+    can use legacy names such as ``info`` or ``roominfo`` interchangeably with
+    the canonical plugin name.
+    """
     value = str(name).strip().lower()
     aliases = {
         "info": "information",
@@ -94,10 +111,22 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
 
 
 def _raw_plugin_store_config() -> object:
+    """Return raw room plugin storage config from the rooms module.
+
+    ``None`` is returned when the rooms module does not expose
+    ``PLUGIN_STORE_CONFIG`` so validation can treat missing configuration as an
+    empty feature list.
+    """
     return getattr(_rooms_module(), "PLUGIN_STORE_CONFIG", None)
 
 
 def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
+    """Validate and normalize the raw plugin store configuration.
+
+    Invalid entries are ignored. Valid entries must use a string plugin name, a
+    mapping config, a non-empty string ``key``, and a string ``type``. The
+    returned mapping is keyed by canonical plugin names.
+    """
     config = _raw_plugin_store_config()
     if not isinstance(config, dict):
         return {}
