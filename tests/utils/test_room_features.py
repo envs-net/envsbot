@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,21 @@ class DummyStore:
 
     async def set_global(self, key, value):
         self.data[key] = value
+
+
+class CopyingSlowStore(DummyStore):
+    async def get_global(self, key, default=None):
+        value = self.data.get(key, default)
+        if isinstance(value, dict):
+            return dict(value)
+        return value
+
+    async def set_global(self, key, value):
+        await asyncio.sleep(0)
+        if isinstance(value, dict):
+            self.data[key] = dict(value)
+        else:
+            self.data[key] = value
 
 
 class DummyUsers:
@@ -226,6 +242,30 @@ async def test_list_room_features_reuses_defaults(monkeypatch):
 
     assert [item.name for item in listed] == ["information", "karma"]
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_set_room_feature_serializes_concurrent_updates(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={"pin": {"type": "dict", "key": "PIN"}},
+            PLUGIN_DEFAULTS={"pin": False},
+        ),
+    )
+    store = CopyingSlowStore({"PIN": {}})
+    bot = _bot_with_store(store)
+
+    await asyncio.gather(
+        room_features.set_room_feature(bot, "room-a@conf", "pin", True),
+        room_features.set_room_feature(bot, "room-b@conf", "pin", True),
+    )
+
+    assert store.data["PIN"] == {
+        "room-a@conf": True,
+        "room-b@conf": True,
+    }
 
 
 @pytest.mark.asyncio

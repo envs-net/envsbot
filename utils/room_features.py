@@ -11,15 +11,15 @@ from utils.formatting import bool_label
 
 class PluginStore(Protocol):
     async def get_global(self, key: str, default: object = None) -> object:
-        raise NotImplementedError
+        ...
 
     async def set_global(self, key: str, value: object) -> None:
-        raise NotImplementedError
+        ...
 
 
 class PluginUsers(Protocol):
     def plugin(self, name: str) -> PluginStore:
-        raise NotImplementedError
+        ...
 
 
 class RoomFeatureDatabase(Protocol):
@@ -28,6 +28,18 @@ class RoomFeatureDatabase(Protocol):
 
 class BotProtocol(Protocol):
     db: RoomFeatureDatabase
+
+
+_FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
+    lock_id = f"{plugin}:{key}"
+    lock = _FEATURE_LOCKS.get(lock_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _FEATURE_LOCKS[lock_id] = lock
+    return lock
 
 
 class RoomFeatureConfig(TypedDict):
@@ -204,11 +216,14 @@ async def set_room_feature(
 ) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
-    state = await _room_feature_map(bot, plugin, conf)
-    state[room_jid] = bool(enabled)
 
-    store = bot.db.users.plugin(plugin)
-    await store.set_global(conf["key"], state)
+    async with _feature_lock(plugin, conf["key"]):
+        state = await _room_feature_map(bot, plugin, conf)
+        state[room_jid] = bool(enabled)
+
+        store = bot.db.users.plugin(plugin)
+        await store.set_global(conf["key"], state)
+
     return await _state_for(bot, room_jid, plugin)
 
 
