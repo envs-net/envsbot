@@ -30,7 +30,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "short": "Show help for plugins and commands.",
         "usage": (
             "{prefix}help [all|commands|plugins|roles|categories|category <name>|"
-            "room settings|<command>|<plugin> [<subcommand>]]"
+            "room settings|<plugin>|{prefix}<command>]"
         ),
         "examples": [
             "{prefix}help",
@@ -38,6 +38,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
             "{prefix}help rooms settings",
             "{prefix}help ducks",
             "{prefix}help rooms enable",
+            "{prefix}help {prefix}rooms enable",
             "{prefix}help category admin",
         ],
         "category": "core",

@@ -15,8 +15,8 @@ Usage
   {prefix}help category <name>
   {prefix}help room settings
   {prefix}help <plugin>
-  {prefix}help <command>
   {prefix}help {prefix}<command>
+  {prefix}help <command>
   {prefix}help inroom <on|off|status>
 
 Examples
@@ -353,6 +353,34 @@ def _format_command_detail(cmd_obj, prefix: str) -> list[str]:
     return lines
 
 
+def _command_context_plugin(bot, cmd_obj) -> str | None:
+    """Return the plugin name matching a focused command, if any."""
+    first_token = str(cmd_obj.name).split(maxsplit=1)[0].lower()
+    if first_token in getattr(bot.bot_plugins, "plugins", {}):
+        return first_token
+    return None
+
+
+def _format_plugin_context_lines(bot, plugin: str) -> list[str]:
+    """Return compact plugin context for focused command help."""
+    module = bot.bot_plugins.plugins[plugin]
+    meta = _plugin_meta(bot, plugin)
+    lines = ["", "Plugin context:", f"• Plugin: {plugin}"]
+
+    if meta.get("version"):
+        lines.append(f"• Version: {meta['version']}")
+    if meta.get("category"):
+        lines.append(f"• Category: {meta['category']}")
+
+    lines.append(f"• Description: {_plugin_description(bot, plugin, module)}")
+
+    feature_lines = _plugin_room_feature_lines(bot, plugin)
+    if feature_lines:
+        lines.extend(feature_lines)
+
+    return lines
+
+
 def _command_query_tokens(query: str, prefix: str) -> tuple[str, ...]:
     """Return normalized command tokens for a help query."""
     query = query.strip().lower()
@@ -480,7 +508,7 @@ async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
     short="Show help for plugins and commands.",
     usage=(
         "{prefix}help [all|commands|plugins|roles|categories|"
-        "category <name>|room settings|<plugin>|<command>]"
+        "category <name>|room settings|<plugin>|{prefix}<command>]"
     ),
     examples=[
         "{prefix}help",
@@ -574,8 +602,8 @@ async def _general(bot, role: Role) -> list[str]:
         "Start here:",
         f"• {bot.prefix}help commands — list commands visible to you",
         f"• {bot.prefix}help plugins — list loaded plugins",
-        f"• {bot.prefix}help <plugin> — plugin-specific help",
-        f"• {bot.prefix}help <command> — focused command help",
+        f"• {bot.prefix}help <plugin> — plugin help with related commands",
+        f"• {bot.prefix}help {bot.prefix}<command> — focused command help",
         f"• {bot.prefix}help room settings — how to enable/disable plugins per room",
         f"• {bot.prefix}help roles — role overview",
         f"• {bot.prefix}help categories — list command categories",
@@ -732,10 +760,22 @@ async def _all(bot, role: Role) -> list[str]:
 # --------------------------------------------------
 # COMMAND HELP
 # --------------------------------------------------
-async def _command(bot, cmd_obj, role: Role) -> list[str]:
+async def _command(
+    bot,
+    cmd_obj,
+    role: Role,
+    *,
+    include_plugin_context: bool = True,
+) -> list[str]:
     if not check_permission(role, cmd_obj):
         return ["⛔ You do not have permission to use this command."]
-    return _format_command_detail(cmd_obj, bot.prefix)
+
+    lines = _format_command_detail(cmd_obj, bot.prefix)
+    if include_plugin_context:
+        plugin = _command_context_plugin(bot, cmd_obj)
+        if plugin is not None:
+            lines.extend(_format_plugin_context_lines(bot, plugin))
+    return lines
 
 
 # --------------------------------------------------
@@ -773,10 +813,26 @@ async def _plugin(bot, query: str, role: Role) -> list[str]:
         for cmd in commands:
             lines.append(_format_plugin_command_line(cmd, bot.prefix))
 
-        lines += [
-            "",
-            f"Use {bot.prefix}help {bot.prefix}<command> for full examples.",
-        ]
+        same_name_command, _matched = resolve_command(plugin)
+        if (
+            same_name_command
+            and same_name_command.name == plugin
+            and check_permission(role, same_name_command)
+        ):
+            lines += ["", "Command details:"]
+            lines.extend(
+                await _command(
+                    bot,
+                    same_name_command,
+                    role,
+                    include_plugin_context=False,
+                )
+            )
+        else:
+            lines += [
+                "",
+                f"Use {bot.prefix}help {bot.prefix}<command> for full examples.",
+            ]
 
     return lines
 

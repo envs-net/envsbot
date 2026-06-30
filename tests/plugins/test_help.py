@@ -138,6 +138,8 @@ async def test_general_help_lists_plugins_and_commands(
     # Hidden and no-cmd plugin filtered (because user is admin-permitted)
     assert "_hidden" in reply  # visible to admin (command_utils.Role.ADMIN)
     assert "Foo plugin doc" in reply
+    assert ",help ,<command>" in reply
+    assert ",help <command> — focused command help" not in reply
 
 
 @pytest.mark.asyncio
@@ -166,6 +168,22 @@ async def test_command_help_happy_path(basic_plugins_and_commands):
     assert "Command:" in reply
     assert "foo" in reply
     assert "Foo command docstring" in reply
+
+
+@pytest.mark.asyncio
+async def test_prefixed_command_help_includes_plugin_context(
+        basic_plugins_and_commands):
+    plugins, _reg = basic_plugins_and_commands
+    bot = DummyBot(plugins=plugins)
+    msg = DummyMsg(body=",help ,foo")
+
+    await help_plugin.cmd_help(bot, "user@host", "Test", [",foo"], msg, True)
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Command: ,foo" in reply
+    assert "Plugin context:" in reply
+    assert "Plugin: foo" in reply
+    assert "Foo plugin doc" in reply
 
 
 @pytest.mark.asyncio
@@ -203,7 +221,9 @@ async def test_plugin_help_happy_path(basic_plugins_and_commands):
     # Command list
     assert "foo" in reply
     assert ",foo [user]" in reply
-    assert "Use ,help ,<command> for full examples." in reply
+    assert "Command details:" in reply
+    assert "Command: ,foo" in reply
+    assert "Usage:" in reply
 
 
 @pytest.mark.asyncio

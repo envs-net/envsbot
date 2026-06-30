@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import threading
 import types
+import weakref
 from dataclasses import dataclass
-from functools import lru_cache
-from typing import Mapping, Protocol, TypedDict
+from functools import cache
+from typing import Any, Mapping, Protocol, TypedDict
 
 from utils.formatting import bool_label
 
@@ -33,7 +34,9 @@ class BotProtocol(Protocol):
     db: RoomFeatureDatabase
 
 
-_FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
+_FEATURE_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
 _FEATURE_LOCKS_GUARD = threading.Lock()
 
 
@@ -72,7 +75,7 @@ class RoomFeatureState:
     modified: bool
 
 
-@lru_cache(maxsize=1)
+@cache
 def _rooms_module() -> types.ModuleType:
     """Lazily import and cache the rooms module.
 
@@ -138,14 +141,17 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
     )
 
 
-def _raw_plugin_store_config() -> object:
+def _raw_plugin_store_config() -> dict[str, Any] | None:
     """Return raw room plugin storage config from the rooms module.
 
-    ``None`` is returned when the rooms module does not expose
-    ``PLUGIN_STORE_CONFIG`` so validation can treat missing configuration as an
-    empty feature list.
+    ``None`` is returned when the rooms module does not expose a dictionary
+    named ``PLUGIN_STORE_CONFIG`` so validation can treat missing or malformed
+    configuration as an empty feature list.
     """
-    return getattr(_rooms_module(), "PLUGIN_STORE_CONFIG", None)
+    raw_config = getattr(_rooms_module(), "PLUGIN_STORE_CONFIG", None)
+    if not isinstance(raw_config, dict):
+        return None
+    return raw_config
 
 
 def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
@@ -156,7 +162,7 @@ def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
     returned mapping is keyed by canonical plugin names.
     """
     config = _raw_plugin_store_config()
-    if not isinstance(config, dict):
+    if config is None:
         return {}
 
     validated: dict[str, RoomFeatureConfig] = {}
@@ -200,8 +206,15 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     return conf
 
 
-@lru_cache(maxsize=1)
+@cache
 def _cached_plugin_defaults() -> dict[str, bool]:
+    """Return validated room plugin defaults from the rooms module.
+
+    ``get_room_plugin_defaults()`` is preferred because it can merge
+    config.py overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
+    supported for older room modules. Values are normalized to booleans and
+    malformed entries are skipped instead of invalidating the whole mapping.
+    """
     rooms = _rooms_module()
     defaults_fn = getattr(rooms, "get_room_plugin_defaults", None)
     if callable(defaults_fn):
@@ -330,7 +343,10 @@ async def set_room_feature(
     conf = _feature_config(plugin)
 
     async with _feature_lock(plugin, conf["key"]):
-        current_state = await _room_feature_map(bot, plugin, conf)
+        stored_state = await _room_feature_map(bot, plugin, conf)
+        # Work on an explicit copy so future store implementations can safely
+        # return cached/shared mappings without caller-side mutation.
+        current_state = dict(stored_state)
         current_state[room_jid] = bool(enabled)
 
         store = bot.db.users.plugin(plugin)
