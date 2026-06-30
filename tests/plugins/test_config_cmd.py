@@ -102,9 +102,13 @@ async def test_config_show_validate_and_reload(monkeypatch):
     load_config = MagicMock(return_value=valid_config)
     validate_config = MagicMock()
     audit = AsyncMock()
+    clear_room_feature_caches = MagicMock()
     monkeypatch.setattr(config_cmd, "load_config", load_config)
     monkeypatch.setattr(config_cmd, "validate_config", validate_config)
     monkeypatch.setattr(config_cmd, "audit_event", audit)
+    monkeypatch.setattr(
+        config_cmd, "clear_room_feature_caches", clear_room_feature_caches
+    )
 
     await config_cmd.config_validate(bot, "admin@example.org", "admin", [], msg, False)
     load_config.assert_called_with(require_required_keys=True)
@@ -117,6 +121,7 @@ async def test_config_show_validate_and_reload(monkeypatch):
         config_cmd.config.update({"prefix": ",", "nick": "oldnick"})
         await config_cmd.config_reload(bot, "admin@example.org", "admin", [], msg, False)
         assert config_cmd.config == valid_config
+        clear_room_feature_caches.assert_called_once_with()
         assert bot.prefix == ";"
         assert bot.nick == "newnick"
         audit.assert_awaited_once_with(bot, "config_reloaded", actor="admin@example.org", target="config")

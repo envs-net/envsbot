@@ -15,6 +15,7 @@ from utils.config import (
 )
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
+from utils.room_features import clear_room_feature_caches
 
 PLUGIN_META = {
     "name": "config_cmd",
@@ -160,6 +161,7 @@ async def config_reload(bot, sender, nick, args, msg, is_room):
     old_prefix = config.get("prefix", ",")
     config.clear()
     config.update(new_config)
+    clear_room_feature_caches()
 
     bot.prefix = config.get("prefix", bot.prefix)
     bot.nick = config.get("nick", bot.nick)
