@@ -387,18 +387,22 @@ async def test_help_categories_plugins_and_all_empty_or_grouped(monkeypatch):
         """Public command."""
 
     public_cmd = command_utils.Command(
-        name="foo now",
+        name="foo_now",
         handler=public_handler,
         role=command_utils.Role.USER,
         category="misc-tools",
     )
-    registry.register("foo now", public_cmd, "foo")
-    bot.bot_plugins.plugins = {"foo": SimpleNamespace(__doc__="Doc", PLUGIN_META={"category": "misc"})}
+    registry.register("foo_now", public_cmd, "foo")
+    bot.bot_plugins.plugins = {
+        "foo": SimpleNamespace(__doc__="Doc", PLUGIN_META={"category": "misc"})
+    }
 
     categories = "\n".join(await help_plugin._categories(bot, command_utils.Role.USER))
     assert "misc-tools" in categories
-    category = "\n".join(await help_plugin._category(bot, command_utils.Role.USER, "misc-tools"))
-    assert ",foo now" in category
+    category = "\n".join(
+        await help_plugin._category(bot, command_utils.Role.USER, "misc-tools")
+    )
+    assert ",foo_now" in category
     all_text = "\n".join(await help_plugin._all(bot, command_utils.Role.USER))
     assert "Loaded plugins" in all_text
     assert "Commands by category" in all_text
@@ -430,7 +434,12 @@ async def test_sender_role_room_resolution_fallbacks(monkeypatch, basic_plugins_
     assert role == command_utils.Role.USER
     assert ("real@example.org", "room@conf.test") in seen
 
-    bot.plugin = {"xep_0045": SimpleNamespace(get_jid_property=lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))}
+    def raising_get_jid_property(*_args):
+        raise RuntimeError("boom")
+
+    bot.plugin = {
+        "xep_0045": SimpleNamespace(get_jid_property=raising_get_jid_property)
+    }
     role, room = await help_plugin._sender_role(bot, "fallback@example.org/res", group_msg)
     assert role == command_utils.Role.USER
 
@@ -452,7 +461,6 @@ async def test_cmd_help_dispatches_special_queries(basic_plugins_and_commands):
         bot.replies.clear()
         await help_plugin.cmd_help(bot, "user@host", "Nick", args, DummyMsg(",help"), True)
         assert expected in flatten_lines(bot.replies[-1])
-
 
 
 @pytest.mark.asyncio

@@ -413,10 +413,11 @@ async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
     examples=[
         "{prefix}help",
         "{prefix}help room settings",
+        "{prefix}help rooms settings",
         "{prefix}help ducks",
         "{prefix}help rooms enable",
         "{prefix}help {prefix}users role",
-        "{prefix}help category rooms",
+        "{prefix}help category admin",
     ],
 )
 async def cmd_help(bot, sender_jid, nick, args, msg, is_room):

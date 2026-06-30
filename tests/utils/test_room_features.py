@@ -74,7 +74,6 @@ async def test_room_feature_defaults_handle_missing_defaults(monkeypatch):
     assert state.modified is False
 
 
-
 @pytest.mark.asyncio
 async def test_room_feature_defaults_use_effective_defaults_function(monkeypatch):
     monkeypatch.setattr(
@@ -97,6 +96,7 @@ async def test_room_feature_defaults_use_effective_defaults_function(monkeypatch
     assert state.enabled is True
     assert state.default is False
     assert state.modified is True
+
 
 def test_room_feature_name_aliases_flags_and_format(monkeypatch):
     monkeypatch.setattr(
