@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Protocol, TypedDict
 
 from utils.formatting import bool_label
@@ -51,6 +52,7 @@ class RoomFeatureState:
     modified: bool
 
 
+@lru_cache(maxsize=1)
 def _rooms_module():
     # Imported lazily to avoid circular imports during plugin discovery.
     from core_plugins import rooms
@@ -141,7 +143,8 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     return conf
 
 
-def _plugin_defaults() -> dict[str, bool]:
+@lru_cache(maxsize=1)
+def _cached_plugin_defaults() -> dict[str, bool]:
     rooms = _rooms_module()
     defaults_fn = getattr(rooms, "get_room_plugin_defaults", None)
     if callable(defaults_fn):
@@ -154,6 +157,17 @@ def _plugin_defaults() -> dict[str, bool]:
         _normalize_plugin_name(str(name)): _coerce_feature_flag(value)
         for name, value in defaults.items()
     }
+
+
+def _plugin_defaults() -> dict[str, bool]:
+    # Return a copy so callers can not mutate cached defaults.
+    return dict(_cached_plugin_defaults())
+
+
+def clear_room_feature_caches() -> None:
+    """Clear cached room feature module/default lookups."""
+    _rooms_module.cache_clear()
+    _cached_plugin_defaults.cache_clear()
 
 
 def available_features() -> list[str]:

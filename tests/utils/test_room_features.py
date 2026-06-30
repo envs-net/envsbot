@@ -6,6 +6,13 @@ import pytest
 from utils import room_features
 
 
+@pytest.fixture(autouse=True)
+def clear_room_feature_caches():
+    room_features.clear_room_feature_caches()
+    yield
+    room_features.clear_room_feature_caches()
+
+
 class DummyStore:
     def __init__(self, data=None):
         self.data = data if data is not None else {}
