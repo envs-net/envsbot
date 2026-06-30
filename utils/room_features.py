@@ -35,11 +35,7 @@ _FEATURE_LOCKS: dict[str, asyncio.Lock] = {}
 
 def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     lock_id = f"{plugin}:{key}"
-    lock = _FEATURE_LOCKS.get(lock_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _FEATURE_LOCKS[lock_id] = lock
-    return lock
+    return _FEATURE_LOCKS.setdefault(lock_id, asyncio.Lock())
 
 
 class RoomFeatureConfig(TypedDict):
@@ -188,13 +184,11 @@ async def _state_for(
     bot: BotProtocol,
     room_jid: str,
     plugin: str,
-    defaults: dict[str, bool] | None = None,
+    defaults: dict[str, bool],
 ) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
     state = await _room_feature_map(bot, plugin, conf)
-    if defaults is None:
-        defaults = _plugin_defaults()
     default = defaults.get(plugin, False)
     enabled = _coerce_feature_flag(state.get(room_jid), fallback=default)
     return RoomFeatureState(
@@ -208,7 +202,8 @@ async def _state_for(
 async def get_room_feature(
     bot: BotProtocol, room_jid: str, plugin: str
 ) -> RoomFeatureState:
-    return await _state_for(bot, room_jid, plugin)
+    defaults = _plugin_defaults()
+    return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
 async def set_room_feature(
@@ -224,7 +219,8 @@ async def set_room_feature(
         store = bot.db.users.plugin(plugin)
         await store.set_global(conf["key"], state)
 
-    return await _state_for(bot, room_jid, plugin)
+    defaults = _plugin_defaults()
+    return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
 async def list_room_features(
