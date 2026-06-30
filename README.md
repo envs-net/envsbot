@@ -240,7 +240,7 @@ Examples assume the default command prefix `,`.
 | `,users revoke <jid> <plugin> [plugin ...]` | Revoke room-scoped plugin permissions |
 | `,users grants <jid>` | Show room-scoped plugin permissions |
 
-Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or operational notification room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role. Selected plugins can also be delegated per user with `,users grant <jid> rss pin poll`; these grants are room-scoped and still require the user to be owner/admin in the target room.
+Room plugin settings can be changed in multiple contexts. In a MUC PM or directly in the room, the bot infers the room automatically. In a normal private chat or operational notification room, pass the target room explicitly, for example `,rooms disable room@conference.example.org xkcd`. The sender must be a room admin/owner in the target room or have a bot moderator/admin role. Selected plugins can also be delegated per user with `,users grant <jid> rss pin poll`; these grants are room-scoped and still require the user to be owner/admin in the target room. The global defaults used for new rooms and `,rooms set_plugin_defaults` are configured with `ROOM_PLUGIN_DEFAULTS` in `config.py`; per-room changes remain stored in the database.
 
 EnvsBot has no separate fixed `ADMIN_ROOM` setting. Global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles. Update and invite notification targets are configured separately with `VERSION_CHECK_NOTIFY_JID` and `ROOM_INVITE_NOTIFY_JID`.
 

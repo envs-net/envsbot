@@ -125,6 +125,34 @@ ROOM_INVITE_NOTIFY_JID = ""  # empty = VERSION_CHECK_NOTIFY_JID, then OWNER
 ROOM_INVITE_MAX_AGE_DAYS = 30
 
 
+# ================= ROOM PLUGIN DEFAULTS =================
+
+# Default room feature state used for newly added rooms and for
+# ,rooms set_plugin_defaults. Missing keys keep their internal fallback.
+# Unknown keys are ignored with a warning. Per-room changes are still stored
+# in the database and can be managed with ,rooms enable/disable.
+ROOM_PLUGIN_DEFAULTS = {
+    "birthday_notify": False,
+    "dice": True,
+    "ducks": False,
+    "help": False,
+    "information": True,
+    "karma": False,
+    "pin": True,
+    "poll": False,
+    "presence": True,
+    "reminder": True,
+    "sed": True,
+    "tell": True,
+    "tools": True,
+    "urlcheck": True,
+    "vcard": True,
+    "weather": True,
+    "xkcd": False,
+    "xmpp": True,
+}
+
+
 # ================= URL CHECK =================
 
 # Suppress repeated output for the same URL in the same room for this many seconds.

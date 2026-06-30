@@ -575,6 +575,7 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'KARMA_DELAY_SECONDS = 10',
             'TELL_DELIVERY_DELAY_SECONDS = 2',
             'XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.2',
+            'ROOM_PLUGIN_DEFAULTS = {"pin": False, "xkcd": True}',
             'BACKUP_DIR = "data/backups"',
             'BACKUP_KEEP = 8',
             'BACKUP_ON_START = False',
@@ -595,10 +596,27 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["karma_delay_seconds"] == 10
     assert result["tell_delivery_delay_seconds"] == 2
     assert result["xkcd_index_request_delay_seconds"] == 0.2
+    assert result["room_plugin_defaults"]["pin"] is False
+    assert result["room_plugin_defaults"]["xkcd"] is True
+    assert result["room_plugin_defaults"]["dice"] is True
     assert result["backup_dir"] == "data/backups"
     assert result["backup_keep"] == 8
     assert result["backup_on_start"] is False
 
+
+def test_load_config_merges_partial_room_plugin_defaults(tmp_path, monkeypatch):
+    (tmp_path / "config.py").write_text(
+        "\n".join([
+            'ROOM_PLUGIN_DEFAULTS = {"pin": False}',
+        ])
+    )
+    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+
+    result = config_mod.load_config()
+
+    assert result["room_plugin_defaults"]["pin"] is False
+    assert result["room_plugin_defaults"]["xkcd"] is False
+    assert result["room_plugin_defaults"]["dice"] is True
 
 def test_validate_config_rejects_invalid_plugin_tuning_values():
     cfg = {
@@ -612,6 +630,7 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
         "tell_delivery_delay_seconds": 0,
         "xkcd_index_request_delay_seconds": 0,
         "backup_keep": 0,
+        "room_plugin_defaults": {"pin": "yes"},
     }
 
     with pytest.raises(config_mod.ConfigError) as exc:
@@ -628,6 +647,7 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     assert "tell_delivery_delay_seconds: must be greater than 0" in msg
     assert "xkcd_index_request_delay_seconds: must be greater than 0" in msg
     assert "backup_keep: must be greater than 0" in msg
+    assert "room_plugin_defaults.pin: expected bool, got str" in msg
 
 
 def test_config_display_sections_follow_sample_order_and_names():
@@ -643,6 +663,7 @@ def test_config_display_sections_follow_sample_order_and_names():
         "backup_keep": 15,
         "backup_on_start": True,
         "ducks": {"spawn_chance": 20},
+        "room_plugin_defaults": {"pin": True, "xkcd": False},
     }
 
     sections = config_mod.get_config_display_sections(cfg)
@@ -667,6 +688,10 @@ def test_config_display_sections_follow_sample_order_and_names():
     ) in sections
     assert ("URL Check", [("URLCHECK_WAIT_SECONDS", 120)]) in sections
     assert ("Duck Game", [("DUCKS", {"spawn_chance": 20})]) in sections
+    assert (
+        "Room Plugin Defaults",
+        [("ROOM_PLUGIN_DEFAULTS", {"pin": True, "xkcd": False})],
+    ) in sections
 
 
 def test_config_display_sections_put_unknown_values_in_other():
@@ -683,12 +708,14 @@ def test_get_config_diff_sections_groups_differences_by_sample_sections():
         "jid": "bot@example.org",
         "prefix": "!",
         "ducks": {"spawn_chance": 10, "max_messages": 500},
+        "room_plugin_defaults": {"pin": False, "xkcd": False},
     })
     defaults = config_mod.DEFAULT_CONFIG.copy()
     defaults.update({
         "jid": "envsbot@domain.tld",
         "prefix": ",",
         "ducks": {"spawn_chance": 20, "max_messages": 500},
+        "room_plugin_defaults": {"pin": True, "xkcd": False},
     })
 
     sections = config_mod.get_config_diff_sections(current, defaults)
@@ -698,6 +725,11 @@ def test_get_config_diff_sections_groups_differences_by_sample_sections():
     assert ("COMMAND_PREFIX", "!", ",") in by_title["Bot Runtime"]
     assert ("DUCKS.spawn_chance", 10, 20) in by_title["Duck Game"]
     assert all(entry[0] != "DUCKS.max_messages" for entry in by_title["Duck Game"])
+    assert (
+        "ROOM_PLUGIN_DEFAULTS.pin",
+        False,
+        True,
+    ) in by_title["Room Plugin Defaults"]
 
 
 def test_get_config_diff_sections_returns_empty_for_matching_defaults():

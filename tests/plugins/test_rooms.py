@@ -220,6 +220,57 @@ async def test_set_room_control_defaults(fake_bot):
 
 
 @pytest.mark.asyncio
+async def test_set_room_control_defaults_uses_configured_defaults(fake_bot, monkeypatch):
+    room = "test@conf"
+    stores = {}
+
+    def plugin_store(plugin):
+        store = stores.setdefault(
+            plugin,
+            types.SimpleNamespace(data={}),
+        )
+
+        async def get_global(key, default=None):
+            return store.data.get(key, default)
+
+        async def set_global(key, value):
+            store.data[key] = value
+
+        return types.SimpleNamespace(get_global=get_global, set_global=set_global)
+
+    fake_bot.db.users.plugin = plugin_store
+    monkeypatch.setitem(
+        rooms.config,
+        "room_plugin_defaults",
+        {"pin": False, "xkcd": True, "info": False, "missing": True},
+    )
+
+    await rooms.set_room_control_defaults(fake_bot, room)
+
+    assert stores["pin"].data["PIN"] == {}
+    assert stores["xkcd"].data["XKCD"] == {room: True}
+    assert stores["dice"].data["DICE"] == {room: True}
+    assert stores["information"].data["INFORMATION"] == {}
+    assert stores["birthday_notify"].data["birthday_notify"] == {}
+
+
+def test_get_room_plugin_defaults_merges_and_ignores_bad_keys(monkeypatch):
+    monkeypatch.setitem(
+        rooms.config,
+        "room_plugin_defaults",
+        {"xkcd": True, "INFO": False, "unknown": True},
+    )
+    rooms._WARNED_ROOM_PLUGIN_DEFAULT_KEYS.clear()
+
+    defaults = rooms.get_room_plugin_defaults()
+
+    assert defaults["xkcd"] is True
+    assert defaults["information"] is False
+    assert defaults["pin"] is True
+    assert "unknown" not in defaults
+
+
+@pytest.mark.asyncio
 async def test_cmd_room_setdefaults(fake_bot, fake_msg):
     # Not in joined rooms
     await rooms.cmd_room_setdefaults(fake_bot, "jid", "nick", [],

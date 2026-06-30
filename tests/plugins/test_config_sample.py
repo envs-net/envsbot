@@ -23,3 +23,23 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.DUCKS["min_messages"] < sample.DUCKS["max_messages"]
     assert sample.PIN_PAGE_SIZE > 0
     assert sample.XKCD_CHECK_INTERVAL > 0
+    assert sample.ROOM_PLUGIN_DEFAULTS == {
+        "birthday_notify": False,
+        "dice": True,
+        "ducks": False,
+        "help": False,
+        "information": True,
+        "karma": False,
+        "pin": True,
+        "poll": False,
+        "presence": True,
+        "reminder": True,
+        "sed": True,
+        "tell": True,
+        "tools": True,
+        "urlcheck": True,
+        "vcard": True,
+        "weather": True,
+        "xkcd": False,
+        "xmpp": True,
+    }

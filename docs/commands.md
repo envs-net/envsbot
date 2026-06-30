@@ -808,7 +808,7 @@ Examples:
 
 #### `,rooms plugins`
 
-Show room plugin toggles; requires room admin/owner or bot moderator.
+Show room plugin toggles; requires room admin/owner or bot moderator. The displayed `default` values come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks.
 
 Role: `user`<br>
 Context: `room / MUC PM / private chat with <room_jid>`<br>
@@ -826,7 +826,7 @@ Examples:
 
 #### `,rooms set_plugin_defaults`
 
-Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
+Restore room plugin toggles for a room; requires room admin/owner or bot moderator. The restored values come from `ROOM_PLUGIN_DEFAULTS` in `config.py`; missing keys keep their internal fallback.
 
 Role: `user`<br>
 Context: `room / MUC PM / private chat with <room_jid>`<br>

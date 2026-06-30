@@ -82,7 +82,11 @@ def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
 
 def _plugin_defaults() -> dict[str, bool]:
     rooms = _rooms_module()
-    defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
+    defaults_fn = getattr(rooms, "get_room_plugin_defaults", None)
+    if callable(defaults_fn):
+        defaults = defaults_fn()
+    else:
+        defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
     if not isinstance(defaults, dict):
         return {}
     return cast(dict[str, bool], defaults)

@@ -66,7 +66,7 @@ _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 #
 # IMPORTANT NOTE: This only works for "type": "dict"
 # ------------------------------------------------
-PLUGIN_DEFAULTS = {
+INTERNAL_PLUGIN_DEFAULTS = {
     "help": False,
     "birthday_notify": False,
     "ducks": False,
@@ -86,6 +86,9 @@ PLUGIN_DEFAULTS = {
     "xkcd": False,
     "xmpp": True,
 }
+# Backwards-compatible name for tests/imports. Runtime code should use
+# get_room_plugin_defaults() so config.py overrides are applied.
+PLUGIN_DEFAULTS = INTERNAL_PLUGIN_DEFAULTS
 PLUGIN_STORE_CONFIG = {
     "help": {"type": "dict", "key": "HELP"},
     "birthday_notify": {"type": "dict", "key": "birthday_notify"},
@@ -111,6 +114,74 @@ ROOM_TOGGLE_STORES = tuple(
     for plugin_name, spec in PLUGIN_STORE_CONFIG.items()
     if spec.get("type") == "dict"
 )
+_WARNED_ROOM_PLUGIN_DEFAULT_KEYS: set[str] = set()
+
+
+def _normalize_room_plugin_default_name(name: object) -> str:
+    """Return the canonical room plugin default name used internally."""
+    value = str(name).strip().lower()
+    aliases = {
+        "info": "information",
+        "infos": "information",
+        "roominfo": "information",
+    }
+    return aliases.get(value, value)
+
+
+def _coerce_room_plugin_default(value: object, fallback: bool) -> bool:
+    """Return a boolean room default with a safe fallback for bad values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled", ""}:
+            return False
+
+    log.warning(
+        "[ROOMS] Ignoring invalid ROOM_PLUGIN_DEFAULTS value %r; "
+        "using fallback %s",
+        value,
+        fallback,
+    )
+    return fallback
+
+
+def get_room_plugin_defaults() -> dict[str, bool]:
+    """Return effective room plugin defaults with config.py overrides merged in.
+
+    INTERNAL_PLUGIN_DEFAULTS keeps the historic behavior. config.py may override
+    selected values through ROOM_PLUGIN_DEFAULTS. Missing keys keep their
+    internal defaults and unknown keys are ignored with a warning.
+    """
+    defaults = INTERNAL_PLUGIN_DEFAULTS.copy()
+    configured = config.get("room_plugin_defaults", {})
+    if configured in (None, ""):
+        return defaults
+    if not isinstance(configured, dict):
+        log.warning(
+            "[ROOMS] Ignoring ROOM_PLUGIN_DEFAULTS because it is %s, not dict",
+            type(configured).__name__,
+        )
+        return defaults
+
+    for raw_name, raw_value in configured.items():
+        plugin = _normalize_room_plugin_default_name(raw_name)
+        if plugin not in defaults:
+            warning_key = str(raw_name)
+            if warning_key not in _WARNED_ROOM_PLUGIN_DEFAULT_KEYS:
+                _WARNED_ROOM_PLUGIN_DEFAULT_KEYS.add(warning_key)
+                log.warning(
+                    "[ROOMS] Ignoring unknown ROOM_PLUGIN_DEFAULTS entry: %s",
+                    raw_name,
+                )
+            continue
+        defaults[plugin] = _coerce_room_plugin_default(raw_value, defaults[plugin])
+
+    return defaults
 ROOM_DIRECT_DATA_STORES = (
     ("pin", "PIN_DATA"),
     ("ducks", "DUCKS_ROOM_INDEX"),
@@ -1410,9 +1481,13 @@ async def set_room_control_defaults(bot, room_jid, defaults=None):
     PLUGIN_STORE_CONFIG[plugin]["key"] for get_global/set_global.
     """
     if defaults is None:
-        defaults = PLUGIN_DEFAULTS
+        defaults = get_room_plugin_defaults()
 
     for plugin, should_enable in defaults.items():
+        plugin = _normalize_room_plugin_default_name(plugin)
+        if plugin not in PLUGIN_STORE_CONFIG:
+            log.warning("[ROOMS] Ignoring unknown room plugin default: %s", plugin)
+            continue
         conf = PLUGIN_STORE_CONFIG[plugin]
         typ = conf["type"]
         key = conf["key"]

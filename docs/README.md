@@ -58,4 +58,4 @@ Examples:
 ,rooms set_plugin_defaults room@conference.example.org
 ```
 
-The sender must be a room admin/owner in the target room or have a bot moderator/admin role. This allows clients without MUC-PM support to manage room settings safely. If you use a notification room as an operational/admin room, pass the target room JID explicitly in room-setting commands.
+The sender must be a room admin/owner in the target room or have a bot moderator/admin role. This allows clients without MUC-PM support to manage room settings safely. If you use a notification room as an operational/admin room, pass the target room JID explicitly in room-setting commands. `ROOM_PLUGIN_DEFAULTS` in `config.py` defines the defaults for newly added rooms and for `,rooms set_plugin_defaults`; existing per-room settings are not changed until that command is used.

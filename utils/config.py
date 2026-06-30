@@ -54,6 +54,26 @@ DEFAULT_CONFIG = {
     "room_invites_enabled": True,
     "room_invite_notify_jid": "",
     "room_invite_max_age_days": 30,
+    "room_plugin_defaults": {
+        "birthday_notify": False,
+        "dice": True,
+        "ducks": False,
+        "help": False,
+        "information": True,
+        "karma": False,
+        "pin": True,
+        "poll": False,
+        "presence": True,
+        "reminder": True,
+        "sed": True,
+        "tell": True,
+        "tools": True,
+        "urlcheck": True,
+        "vcard": True,
+        "weather": True,
+        "xkcd": False,
+        "xmpp": True,
+    },
     "urlcheck_wait_seconds": 120,
     "urlcheck_fetch_timeout_seconds": 8,
     "urlcheck_max_redirects": 5,
@@ -166,6 +186,7 @@ OPTIONAL_CONFIG_TYPES = {
     "room_invites_enabled": bool,
     "room_invite_notify_jid": str,
     "room_invite_max_age_days": int,
+    "room_plugin_defaults": dict,
     "ducks": dict,
     "users": dict,
 }
@@ -242,6 +263,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "ROOM_INVITES_ENABLED": "room_invites_enabled",
     "ROOM_INVITE_NOTIFY_JID": "room_invite_notify_jid",
     "ROOM_INVITE_MAX_AGE_DAYS": "room_invite_max_age_days",
+    "ROOM_PLUGIN_DEFAULTS": "room_plugin_defaults",
     "DUCKS": "ducks",
     "USERS": "users",
 }
@@ -307,6 +329,10 @@ CONFIG_DISPLAY_SECTIONS = (
             "ROOM_INVITE_NOTIFY_JID",
             "ROOM_INVITE_MAX_AGE_DAYS",
         ),
+    ),
+    (
+        "Room Plugin Defaults",
+        ("ROOM_PLUGIN_DEFAULTS",),
     ),
     (
         "URL Check",
@@ -439,7 +465,11 @@ def load_default_config_for_diff() -> dict:
     defaults = DEFAULT_CONFIG.copy()
     sample_path = _sample_config_path()
     if sample_path.exists():
-        defaults.update(_load_python_config(sample_path))
+        loaded = _merge_room_plugin_default_config(
+            DEFAULT_CONFIG,
+            _load_python_config(sample_path),
+        )
+        defaults.update(loaded)
     validate_config(defaults, require_required_keys=False)
     return defaults
 
@@ -599,6 +629,20 @@ def _load_python_config(path: Path) -> dict:
             loaded[name.lower()] = value
 
     return loaded
+
+
+def _merge_room_plugin_default_config(base: dict, loaded: dict) -> dict:
+    """Merge partial ROOM_PLUGIN_DEFAULTS over documented fallbacks."""
+    configured = loaded.get("room_plugin_defaults")
+    fallback = base.get("room_plugin_defaults")
+    if not isinstance(configured, dict) or not isinstance(fallback, dict):
+        return loaded
+
+    merged = fallback.copy()
+    merged.update(configured)
+    result = loaded.copy()
+    result["room_plugin_defaults"] = merged
+    return result
 
 
 def _load_legacy_json_config(path: Path) -> dict:
@@ -831,6 +875,24 @@ def check_optional_keys(cfg):
     return errors
 
 
+def _validate_room_plugin_defaults(cfg, errors):
+    defaults = cfg.get("room_plugin_defaults")
+    if defaults is None:
+        return
+    if not isinstance(defaults, dict):
+        return
+
+    for plugin, enabled in defaults.items():
+        if not isinstance(plugin, str) or not plugin.strip():
+            errors.append("room_plugin_defaults: plugin names must be non-empty strings")
+            continue
+        if not isinstance(enabled, bool):
+            errors.append(
+                f"room_plugin_defaults.{plugin}: expected bool, "
+                f"got {type(enabled).__name__}"
+            )
+
+
 def validate_config(cfg, require_required_keys=False):
     """
     Validate envsbot configuration.
@@ -888,6 +950,7 @@ def validate_config(cfg, require_required_keys=False):
     _validate_timezone(cfg, errors)
     _validate_avatar(cfg, errors, [])
     _validate_numeric_ranges(cfg, errors)
+    _validate_room_plugin_defaults(cfg, errors)
 
     if cfg.get("version_check_enabled") and not str(
         cfg.get("version_check_url", "")
@@ -936,6 +999,7 @@ def load_config(require_required_keys=False):
                 return cfg
             loaded = _load_legacy_json_config(legacy_path)
 
+    loaded = _merge_room_plugin_default_config(cfg, loaded)
     cfg.update(loaded)
     validate_config(cfg, require_required_keys=require_required_keys)
     return cfg
