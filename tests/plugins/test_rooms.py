@@ -313,6 +313,83 @@ async def test_rooms_delete(fake_bot, fake_msg):
                                  fake_msg, False)
 
 
+class DummyPluginStore(dict):
+    async def get_global(self, key, default=None):
+        return self.get(key, default)
+
+    async def set_global(self, key, value):
+        self[key] = value
+
+
+@pytest.mark.asyncio
+async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg):
+    room_jid = "room@conference.domain"
+    other_room = "other@conference.domain"
+    feed_keep = "https://example.org/keep.xml"
+    feed_drop = "https://example.org/drop.xml"
+
+    stores = {
+        "rss": DummyPluginStore({
+            "RSS": {
+                feed_keep: {"rooms": [room_jid, other_room], "period": 42},
+                feed_drop: {"rooms": [room_jid], "period": 84},
+                "https://example.org/other.xml": {"rooms": [other_room]},
+            }
+        }),
+        "xkcd": DummyPluginStore({
+            "XKCD": {
+                room_jid: True,
+                other_room: True,
+                "rooms": [room_jid, other_room],
+            }
+        }),
+        "pin": DummyPluginStore({
+            "PIN": {room_jid: True, other_room: True},
+            "PIN_DATA": {room_jid: {"pins": [1]}, other_room: {"pins": [2]}},
+        }),
+        "poll": DummyPluginStore({
+            "POLL": {room_jid: False, other_room: True},
+            "POLL_DATA": {
+                "rooms": {
+                    room_jid: {"polls": {"1": {}}},
+                    other_room: {"polls": {"2": {}}},
+                }
+            },
+        }),
+    }
+    fake_bot.db.users.plugin.side_effect = lambda name: stores.setdefault(
+        name,
+        DummyPluginStore(),
+    )
+    cancel_feed_task = MagicMock()
+    fake_bot.bot_plugins.plugins = {
+        "rss": types.SimpleNamespace(_cancel_feed_task=cancel_feed_task)
+    }
+    fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))
+    fake_bot.db.rooms.delete = AsyncMock()
+
+    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+        await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
+
+    assert stores["rss"]["RSS"] == {
+        feed_keep: {"rooms": [other_room], "period": 42},
+        "https://example.org/other.xml": {"rooms": [other_room]},
+    }
+    cancel_feed_task.assert_called_once_with(feed_drop)
+
+    assert stores["xkcd"]["XKCD"] == {
+        other_room: True,
+        "rooms": [other_room],
+    }
+    assert stores["pin"]["PIN"] == {other_room: True}
+    assert stores["pin"]["PIN_DATA"] == {other_room: {"pins": [2]}}
+    assert stores["poll"]["POLL"] == {other_room: True}
+    assert stores["poll"]["POLL_DATA"]["rooms"] == {
+        other_room: {"polls": {"2": {}}},
+    }
+    fake_bot.db.rooms.delete.assert_awaited_once_with(room_jid)
+
+
 @pytest.mark.asyncio
 async def test_rooms_delete_suppresses_delayed_presence_until_rejoin(fake_bot, fake_msg):
     room_jid = "room@conference.domain"
