@@ -375,6 +375,111 @@ def test_docstring_and_formatting_helpers():
 
 
 @pytest.mark.asyncio
+async def test_help_command_group_prefers_subcommands_over_base_alias(
+    monkeypatch,
+):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    config_show = command_utils.Command(
+        name="config show",
+        handler=handler,
+        role=command_utils.Role.ADMIN,
+        aliases=["config"],
+        short="Show config.",
+        usage="{prefix}config show [all|page|last]",
+    )
+    config_diff = command_utils.Command(
+        name="config diff",
+        handler=handler,
+        role=command_utils.Role.ADMIN,
+        short="Show changed config values.",
+        usage="{prefix}config diff [all|page|last]",
+    )
+    config_validate = command_utils.Command(
+        name="config validate",
+        handler=handler,
+        role=command_utils.Role.ADMIN,
+        short="Validate config.py.",
+        usage="{prefix}config validate",
+    )
+    config_reload = command_utils.Command(
+        name="config reload",
+        handler=handler,
+        role=command_utils.Role.ADMIN,
+        short="Reload config.py.",
+        usage="{prefix}config reload",
+    )
+
+    registry.register("config show", config_show, "config_cmd")
+    registry.register("config", config_show, "config_cmd")
+    registry.register("config diff", config_diff, "config_cmd")
+    registry.register("config validate", config_validate, "config_cmd")
+    registry.register("config reload", config_reload, "config_cmd")
+
+    bot = DummyBot(
+        plugins={"config_cmd": SimpleNamespace(__doc__="Config commands")},
+        role=command_utils.Role.ADMIN,
+    )
+    msg = DummyMsg(body=",help config")
+
+    await help_plugin.cmd_help(
+        bot, "admin@host", "Admin", ["config"], msg, True
+    )
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Command group: ,config" in reply
+    assert ",config show [all|page|last]" in reply
+    assert ",config diff [all|page|last]" in reply
+    assert ",config validate" in reply
+    assert ",config reload" in reply
+    assert "Command: ,config show" not in reply
+
+
+@pytest.mark.asyncio
+async def test_help_prefixed_command_group_query(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    for name in ("backup create", "backup list", "backup show"):
+        registry.register(
+            name,
+            command_utils.Command(
+                name=name,
+                handler=handler,
+                role=command_utils.Role.ADMIN,
+                short=f"{name} short.",
+                usage="{prefix}" + name,
+            ),
+            "backups",
+        )
+
+    bot = DummyBot(
+        plugins={"backups": SimpleNamespace(__doc__="Backup commands")},
+        role=command_utils.Role.ADMIN,
+    )
+    msg = DummyMsg(body=",help ,backup")
+
+    await help_plugin.cmd_help(
+        bot, "admin@host", "Admin", [",backup"], msg, True
+    )
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Command group: ,backup" in reply
+    assert ",backup create" in reply
+    assert ",backup list" in reply
+    assert ",backup show" in reply
+
+
+@pytest.mark.asyncio
 async def test_help_categories_plugins_and_all_empty_or_grouped(monkeypatch):
     registry = command_utils.CommandRegistry()
     monkeypatch.setattr(help_plugin, "COMMANDS", registry)

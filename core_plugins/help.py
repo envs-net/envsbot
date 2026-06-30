@@ -339,6 +339,64 @@ def _format_command_detail(cmd_obj, prefix: str) -> list[str]:
     return lines
 
 
+def _command_query_tokens(query: str, prefix: str) -> tuple[str, ...]:
+    """Return normalized command tokens for a help query."""
+    query = query.strip().lower()
+    if prefix and query.startswith(prefix):
+        query = query[len(prefix):].strip()
+    return tuple(part for part in query.split() if part)
+
+
+def _commands_matching_prefix(
+    tokens: tuple[str, ...],
+    role: Role,
+) -> list[object]:
+    """Return visible commands matching a registered name or alias prefix."""
+    if not tokens:
+        return []
+
+    commands = []
+    seen = set()
+    for registered_tokens, cmd in COMMANDS.items():
+        if len(registered_tokens) < len(tokens):
+            continue
+        if registered_tokens[:len(tokens)] != tokens:
+            continue
+        if id(cmd) in seen:
+            continue
+        if not check_permission(role, cmd):
+            continue
+        seen.add(id(cmd))
+        commands.append(cmd)
+
+    return commands
+
+
+def _format_command_group(bot, query: str, role: Role) -> list[str] | None:
+    """Return an overview for command families such as `config` or `rooms`."""
+    tokens = _command_query_tokens(query, bot.prefix)
+    commands = _commands_matching_prefix(tokens, role)
+    if len(commands) <= 1:
+        return None
+
+    group = " ".join(tokens)
+    lines = [
+        f"📖 Command group: {bot.prefix}{group}",
+        "",
+        "Subcommands:",
+    ]
+    for cmd in commands:
+        usage = _command_usage(cmd, bot.prefix)[0]
+        lines.append(f"• {usage} — {_command_short(cmd, bot.prefix)}")
+
+    lines += [
+        "",
+        f"Use {bot.prefix}help {bot.prefix}<command> for detailed help.",
+        f"Example: {bot.prefix}help {bot.prefix}{commands[0].name}",
+    ]
+    return lines
+
+
 def _plugin_is_visible(bot, name: str, role: Role) -> bool:
     if name.startswith("_") and role > Role.ADMIN:
         return False
@@ -463,6 +521,11 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
     # names keep plugin-help priority for backwards compatibility.
     if query.startswith(bot.prefix):
         command_query = query[len(bot.prefix):].strip()
+        command_group = _format_command_group(bot, command_query, role)
+        if command_group:
+            bot.reply(msg, command_group)
+            return
+
         cmd_obj, _ = resolve_command(command_query)
         if cmd_obj:
             bot.reply(msg, await _command(bot, cmd_obj, role))
@@ -472,6 +535,11 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 
     if query_lc in bot.bot_plugins.plugins:
         bot.reply(msg, await _plugin(bot, query, role))
+        return
+
+    command_group = _format_command_group(bot, query, role)
+    if command_group:
+        bot.reply(msg, command_group)
         return
 
     cmd_obj, _ = resolve_command(query)
