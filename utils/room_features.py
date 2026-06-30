@@ -66,7 +66,7 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
-        return value != 0
+        return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
         if not normalized:
