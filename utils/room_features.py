@@ -84,8 +84,8 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
     raise TypeError(
-        "Unsupported feature flag value type: "
-        f"{type(value).__name__}"
+        f"Unsupported feature flag value: {value!r} "
+        f"(type: {type(value).__name__})"
     )
 
 
@@ -126,7 +126,10 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     conf = config[plugin]
     typ = conf["type"]
     if typ != "dict":
-        raise ValueError(f"Unsupported room feature storage type: {typ}")
+        raise ValueError(
+            f"Unsupported room feature storage type: {typ}. "
+            "Only 'dict' is currently supported."
+        )
     return conf
 
 
@@ -150,7 +153,7 @@ def available_features() -> list[str]:
 
 
 def is_known_feature(plugin: str) -> bool:
-    return _normalize_plugin_name(plugin) in available_features()
+    return _normalize_plugin_name(plugin) in _plugin_store_config()
 
 
 def _is_supported_feature_value(value: object) -> bool:

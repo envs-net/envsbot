@@ -170,6 +170,11 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
         room_features._coerce_feature_flag({})
     with pytest.raises(TypeError, match="Unsupported feature flag"):
         room_features._coerce_feature_flag(object())
+    with pytest.raises(TypeError) as exc_info:
+        room_features._coerce_feature_flag("maybe")
+    assert str(exc_info.value) == (
+        "Unsupported feature flag value: 'maybe' (type: str)"
+    )
 
     line = room_features.format_room_feature_line(
         room_features.RoomFeatureState(
@@ -180,6 +185,21 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
         )
     )
     assert line == "• karma: enabled | default: off (modified)"
+
+
+def test_is_known_feature_uses_unsorted_config(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_plugin_store_config",
+        lambda: {"information": {"type": "dict", "key": "INFO_ENABLED"}},
+    )
+    monkeypatch.setattr(
+        room_features,
+        "available_features",
+        lambda: pytest.fail("available_features should not be called"),
+    )
+
+    assert room_features.is_known_feature("info")
 
 
 @pytest.mark.asyncio
@@ -319,8 +339,9 @@ async def test_room_feature_set_list_and_unsupported_storage(monkeypatch):
         ),
     )
     unsupported_storage = "Unsupported room feature storage type"
-    with pytest.raises(ValueError, match=unsupported_storage):
+    with pytest.raises(ValueError, match=unsupported_storage) as exc_info:
         await room_features.get_room_feature(bot, "room@conf", "legacy")
+    assert "Only 'dict' is currently supported." in str(exc_info.value)
 
     with pytest.raises(ValueError, match=unsupported_storage):
         await room_features.set_room_feature(
