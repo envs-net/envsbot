@@ -251,31 +251,34 @@ def is_known_feature(plugin: str) -> bool:
     return _normalize_plugin_name(plugin) in _plugin_store_config()
 
 
-def _is_supported_feature_value(value: object) -> bool:
+def _coerce_supported_feature_value(value: object) -> bool | None:
+    """Return a normalized feature flag, or ``None`` for invalid values."""
     try:
-        _coerce_feature_flag(value)
+        return _coerce_feature_flag(value)
     except TypeError:
-        return False
-    return True
+        return None
 
 
 def _safe_room_feature_state(
-    state: Mapping[object, object],
+    state: Mapping[str, Any],
 ) -> dict[str, object]:
     """Return a sanitized room-feature state mapping.
 
     Plugin stores may contain arbitrary keys or values from older versions,
-    manual edits, or corrupted data. Keep only string room IDs with scalar
-    feature-flag values accepted by ``_coerce_feature_flag`` and ignore
-    everything else.
+    manual edits, or corrupted data. Keep only string room IDs with values that
+    can be normalized by ``_coerce_feature_flag`` and ignore everything else.
+    Accepted values are stored as booleans so downstream callers work with a
+    consistent representation. Non-string keys are silently ignored if a
+    malformed mapping reaches this helper at runtime.
     """
     safe_state: dict[str, object] = {}
     for key, value in state.items():
         if not isinstance(key, str):
             continue
-        if not _is_supported_feature_value(value):
+        coerced = _coerce_supported_feature_value(value)
+        if coerced is None:
             continue
-        safe_state[key] = value
+        safe_state[key] = coerced
     return safe_state
 
 
@@ -332,7 +335,7 @@ async def get_room_feature(
 
 
 def _updated_feature_state(
-    current: object, *, room_jid: str, enabled: bool
+    current: Mapping[str, object] | None, *, room_jid: str, enabled: bool
 ) -> dict[str, object]:
     """Return feature state with one room flag updated.
 

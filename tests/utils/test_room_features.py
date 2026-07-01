@@ -391,7 +391,7 @@ def test_updated_feature_state_sanitizes_current_state():
     )
 
     assert updated == {
-        "old@conf": "yes",
+        "old@conf": True,
         "new@conf": True,
     }
 
