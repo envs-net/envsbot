@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import types
 from dataclasses import dataclass
-from functools import cache
+from functools import partial
 from typing import Any, Callable, Mapping, Protocol, TypedDict
 
 from utils.formatting import bool_label
@@ -53,21 +54,28 @@ class RoomFeatureState:
     modified: bool
 
 
-@cache
+_ROOMS_MODULE: types.ModuleType | None = None
+_ROOMS_MODULE_LOCK = threading.Lock()
+
+
 def _rooms_module() -> types.ModuleType:
     """Lazily import and cache the rooms module.
 
     Importing ``core_plugins.rooms`` only when room feature metadata is needed
     avoids circular imports during plugin discovery and initialization, where
-    the rooms plugin imports room-feature helpers from this module. The cache
-    ensures later lookups reuse the same module object. Call
-    ``clear_room_feature_caches()`` when the rooms module is reloaded or its
-    feature metadata changes at runtime, for example during tests, hot reloads,
-    or config reloads.
+    the rooms plugin imports room-feature helpers from this module. The
+    explicit lock keeps the lazy cache safe if multiple threads ask for the
+    module at the same time. Call ``clear_room_feature_caches()`` when the
+    rooms module is reloaded or its feature metadata changes at runtime, for
+    example during tests, hot reloads, or config reloads.
     """
-    from core_plugins import rooms
+    global _ROOMS_MODULE
+    with _ROOMS_MODULE_LOCK:
+        if _ROOMS_MODULE is None:
+            from core_plugins import rooms
 
-    return rooms
+            _ROOMS_MODULE = rooms
+        return _ROOMS_MODULE
 
 
 def _normalize_plugin_name(name: str) -> str:
@@ -230,7 +238,9 @@ def _plugin_defaults() -> dict[str, bool]:
 
 def clear_room_feature_caches() -> None:
     """Clear cached room feature module lookups."""
-    _rooms_module.cache_clear()
+    global _ROOMS_MODULE
+    with _ROOMS_MODULE_LOCK:
+        _ROOMS_MODULE = None
 
 
 def available_features() -> list[str]:
@@ -321,26 +331,56 @@ async def get_room_feature(
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
+def _updated_feature_state(
+    current: object, *, room_jid: str, enabled: bool
+) -> dict[str, object]:
+    """Return feature state with one room flag updated.
+
+    ``update_global`` passes the current stored value into this helper. The
+    value may be missing or malformed, so it is sanitized before the requested
+    room flag is written. ``room_jid`` and ``enabled`` are keyword-only so
+    callers can bind them explicitly with ``functools.partial``.
+    """
+    current_state = (
+        _safe_room_feature_state(current)
+        if isinstance(current, Mapping)
+        else {}
+    )
+    current_state[room_jid] = bool(enabled)
+    return current_state
+
+
 async def set_room_feature(
     bot: BotProtocol, room_jid: str, plugin: str, enabled: bool
 ) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
     store = bot.db.users.plugin(plugin)
+    updater = partial(
+        _updated_feature_state,
+        room_jid=room_jid,
+        enabled=enabled,
+    )
 
-    def update_state(current: object) -> dict[str, object]:
-        current_state = (
-            _safe_room_feature_state(current)
-            if isinstance(current, Mapping)
-            else {}
-        )
-        current_state[room_jid] = bool(enabled)
-        return current_state
-
-    await store.update_global(conf["key"], update_state, default={})
+    await store.update_global(conf["key"], updater, default={})
 
     defaults = _plugin_defaults()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
+
+
+async def _state_for_list_entry(
+    bot: BotProtocol,
+    room_jid: str,
+    plugin: str,
+    defaults: dict[str, bool],
+) -> RoomFeatureState:
+    """Return one listed feature state with contextual error reporting."""
+    try:
+        return await _state_for(bot, room_jid, plugin, defaults=defaults)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to fetch room feature state for {plugin!r}"
+        ) from exc
 
 
 async def list_room_features(
@@ -350,7 +390,7 @@ async def list_room_features(
     names = available_features()
     defaults = _plugin_defaults()
     coroutines = [
-        _state_for(bot, room_jid, name, defaults=defaults)
+        _state_for_list_entry(bot, room_jid, name, defaults=defaults)
         for name in names
     ]
     return list(await asyncio.gather(*coroutines))

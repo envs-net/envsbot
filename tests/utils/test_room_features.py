@@ -354,6 +354,49 @@ async def test_set_room_feature_serializes_concurrent_updates(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_room_features_reports_failing_feature(monkeypatch):
+    monkeypatch.setattr(
+        room_features,
+        "_rooms_module",
+        lambda: SimpleNamespace(
+            PLUGIN_STORE_CONFIG={
+                "information": {"type": "dict", "key": "INFO_ENABLED"},
+                "legacy": {"type": "list", "key": "LEGACY_ENABLED"},
+            },
+            PLUGIN_DEFAULTS={},
+        ),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await room_features.list_room_features(
+            _bot_with_store(DummyStore()),
+            "room@conf",
+        )
+
+    assert str(exc_info.value) == (
+        "Failed to fetch room feature state for 'legacy'"
+    )
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_updated_feature_state_sanitizes_current_state():
+    updated = room_features._updated_feature_state(
+        {
+            "old@conf": "yes",
+            "bad@conf": [],
+            42: True,
+        },
+        room_jid="new@conf",
+        enabled=True,
+    )
+
+    assert updated == {
+        "old@conf": "yes",
+        "new@conf": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_room_feature_set_list_and_unsupported_storage(monkeypatch):
     monkeypatch.setattr(
         room_features,
