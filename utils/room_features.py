@@ -68,7 +68,6 @@ class RoomFeatureState:
 
 _ROOMS_MODULE: types.ModuleType | None = None
 _ROOMS_MODULE_LOCK = threading.Lock()
-_ROOMS_MODULE_ASYNC_LOCK: asyncio.Lock | None = None
 
 
 def _rooms_module() -> types.ModuleType:
@@ -79,8 +78,8 @@ def _rooms_module() -> types.ModuleType:
     the rooms plugin imports room-feature helpers from this module. The
     synchronous lock keeps the cache safe for CLI/docs helpers that call this
     module outside an async task. Async room-feature operations use
-    ``_rooms_module_async()`` so concurrent coroutines also wait on an
-    ``asyncio.Lock``.
+    ``_rooms_module_async()``, which delegates to the same thread-safe cache
+    without keeping event-loop-specific locks at module scope.
 
     Call ``clear_room_feature_caches()`` when the rooms module is reloaded or
     its feature metadata changes at runtime, for example during tests, hot
@@ -99,24 +98,12 @@ def _rooms_module() -> types.ModuleType:
 async def _rooms_module_async() -> types.ModuleType:
     """Lazily import and cache the rooms module for async callers.
 
-    Multiple room-feature coroutines may request metadata at the same time.
-    This helper uses an ``asyncio.Lock`` in addition to the synchronous cache
-    lock so those coroutines do not race while the rooms module is imported or
-    the cached reference is initialized. The async lock itself is created
-    lazily under the synchronous lock to avoid module-level event-loop state.
+    The cache is owned by ``_rooms_module()`` and guarded by a normal
+    ``threading.Lock``. Running that lookup via ``asyncio.to_thread()`` keeps
+    async callers from blocking the event loop without storing event-loop-bound
+    ``asyncio.Lock`` instances at module scope.
     """
-    module = _ROOMS_MODULE
-    if module is not None:
-        return module
-
-    global _ROOMS_MODULE_ASYNC_LOCK
-    with _ROOMS_MODULE_LOCK:
-        if _ROOMS_MODULE_ASYNC_LOCK is None:
-            _ROOMS_MODULE_ASYNC_LOCK = asyncio.Lock()
-        async_lock = _ROOMS_MODULE_ASYNC_LOCK
-
-    async with async_lock:
-        return _rooms_module()
+    return await asyncio.to_thread(_rooms_module)
 
 
 def _normalize_plugin_name(name: str) -> str:
@@ -330,7 +317,14 @@ def _defaults_from_rooms_module(
     """Return raw default mapping exposed by a rooms module instance."""
     defaults_provider = getattr(rooms, "get_room_plugin_defaults", None)
     if callable(defaults_provider):
-        raw_defaults = defaults_provider()
+        try:
+            raw_defaults = defaults_provider()
+        except Exception:
+            log.exception(
+                "[ROOM_FEATURES] get_room_plugin_defaults() failed while "
+                "resolving room plugin defaults"
+            )
+            return None
         if isinstance(raw_defaults, Mapping):
             return raw_defaults
         log.warning(
@@ -425,13 +419,13 @@ def clear_room_feature_caches() -> None:
     This function is thread-safe: it acquires ``_ROOMS_MODULE_LOCK`` before
     resetting cached module state. Call this when the rooms module or its
     feature metadata may have changed at runtime, for example in tests, bot
-    reloads, or config reloads. The async cache lock is also reset so the next
-    async lookup creates a lock bound to the currently running event loop.
+    reloads, or config reloads. Async callers share the same cached
+    reference through ``_rooms_module_async()``, so clearing this value is
+    enough for both sync and async lookups.
     """
-    global _ROOMS_MODULE, _ROOMS_MODULE_ASYNC_LOCK
+    global _ROOMS_MODULE
     with _ROOMS_MODULE_LOCK:
         _ROOMS_MODULE = None
-        _ROOMS_MODULE_ASYNC_LOCK = None
 
 
 def available_features() -> list[str]:
@@ -501,7 +495,9 @@ async def _room_feature_map(
     defaults.
     """
     store = bot.db.users.plugin(plugin)
-    state = await store.get_global(conf["key"], default={})
+    state = await store.get_global(conf["key"], default=None)
+    if state is None:
+        return {}
     if not isinstance(state, Mapping):
         if state is not None:
             log.warning(
