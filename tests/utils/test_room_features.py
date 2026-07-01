@@ -17,12 +17,7 @@ def clear_room_feature_caches():
 class DummyStore:
     def __init__(self, data=None):
         self.data = data if data is not None else {}
-        self._lock = None
-
-    def _update_lock(self):
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+        self._lock = asyncio.Lock()
 
     async def get_global(self, key, default=None):
         return self.data.get(key, default)
@@ -31,7 +26,7 @@ class DummyStore:
         self.data[key] = value
 
     async def update_global(self, key, updater, default=None):
-        async with self._update_lock():
+        async with self._lock:
             current = await self.get_global(key, default)
             value = updater(current)
             await self.set_global(key, value)
@@ -103,7 +98,7 @@ def test_available_features_validates_store_config_shape(monkeypatch):
         store_config={
             "info": {"type": "dict", "key": "INFO_ENABLED"},
             "missing_key": {"type": "dict"},
-            "empty_key": {"type": "dict", "key": ""},
+            "empty_key_value": {"type": "dict", "key": ""},
             "bad_type": {"type": object(), "key": "BAD_ENABLED"},
             "not_a_mapping": "bad",
             42: {"type": "dict", "key": "NUMERIC_ENABLED"},
