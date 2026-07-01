@@ -156,7 +156,7 @@ def _coerce_feature_flag(
     raise TypeError(
         f"Unsupported feature flag value: {value!r} "
         f"(type: {type(value).__name__}). "
-        "Expected bool, int, float, numeric string, or one of: "
+        "Expected bool, int, float, parseable numeric string, or one of: "
         "true/false, yes/no, on/off, enabled/disabled, 1/0."
     )
 
@@ -277,7 +277,7 @@ def _validate_feature_config(
     """Return validated storage config for one normalized plugin."""
     plugin = _normalize_plugin_name(plugin)
     if plugin not in config:
-        available = sorted(config)
+        available = list(config)
         options = ", ".join(available) if available else "<none configured>"
         raise KeyError(
             f"Unknown plugin feature: {plugin}. "
@@ -529,11 +529,12 @@ async def _state_for(
     state = await _room_feature_map(bot, plugin, conf)
     default = defaults.get(plugin, False)
     enabled = _coerce_feature_flag(state.get(room_jid), fallback=default)
+    modified = enabled != default
     return RoomFeatureState(
         name=plugin,
         enabled=enabled,
         default=default,
-        modified=enabled != default,
+        modified=modified,
     )
 
 
