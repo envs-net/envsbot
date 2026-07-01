@@ -16,7 +16,7 @@ Runtime help is available through:
 - `,help categories`
 - `,help category <name>`
 - `,help <plugin>`
-- `,help <command>`
+- `,help ,<command>`
 
 For paginated commands, `all` disables paging and `last` jumps to the final page.
 
@@ -44,6 +44,7 @@ Examples:
 - `,rooms plugins room@conference.example.org all`
 
 In a room or MUC PM the target room can usually be inferred. In a normal private chat, pass `<room_jid>` explicitly. The sender must be room owner/admin or have a bot moderator/admin role.
+Defaults shown by these commands come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks. Existing per-room overrides stay in the database until `,rooms set_plugin_defaults` is used for that room.
 
 Known room feature names:
 
@@ -141,7 +142,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,dice` | `user` | `any` | Roll dice using common dice notation. |
 | `,duck` | `user` | `room / MUC PM; use rooms enable with <room_jid> from private chat` | Start or interact with the duck game. |
 | `,duckstats` | `user` | `any` | Show duck game stats. |
-| `,karma` | `user` | `any` | Show or update karma for a term. |
+| `,karma` | `user` | `any` | Show room-local karma scores and rankings. |
 | `,trap` | `user` | `any` | Set a trap in the duck game. |
 | `,xkcd` | `user` | `any` | Show an XKCD comic or control room access to XKCD. |
 
@@ -150,12 +151,12 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,acronyms` | `user` | `any` | Look up stored acronym definitions. |
-| `,acronyms add` | `user` | `any` | Add a definition to an acronym. |
-| `,acronyms delete` | `admin` | `any` | Delete an acronym completely. |
-| `,acronyms list` | `admin` | `any` | List known acronyms. |
-| `,acronyms merge` | `admin` | `any` | Merge one acronym into another. |
-| `,acronyms remove` | `user` | `any` | Remove one acronym definition. |
-| `,fediverse` | `user` | `any` | Look up Fediverse account or instance information. |
+| `,acronyms add` | `user` | `any` | Suggest a new acronym definition for admin review. |
+| `,acronyms delete` | `admin` | `any` | Delete pending acronym suggestions by nick or definition. |
+| `,acronyms list` | `admin` | `any` | List pending acronym additions and removals. |
+| `,acronyms merge` | `admin` | `any` | Apply pending acronym additions and removals. |
+| `,acronyms remove` | `user` | `any` | Suggest removing one acronym definition for admin review. |
+| `,fediverse` | `user` | `any` | Show the latest public post from a Fediverse account. |
 | `,info` | `moderator` | `room or MUC PM` | Enable, disable or show room access to information commands. |
 | `,presence` | `none` | `any` | Show or control per-room access to presence lookup. |
 | `,presence set` | `admin` | `private chat / MUC PM` | Set the bot presence state and status text. |
@@ -166,15 +167,15 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
-| `,birthday` | `user` | `any` | Show or set your birthday. |
-| `,emails` | `user` | `any` | Show or set profile emails. |
-| `,fullname` | `user` | `any` | Show or set your full name. |
-| `,nicknames` | `user` | `any` | Show or set profile nicknames. |
-| `,notes` | `user` | `any` | Show or set profile notes. |
-| `,organisations` | `user` | `any` | Show or set organisations in your profile. |
+| `,birthday` | `user` | `any` | Show birthday data from a user's vCard. |
+| `,emails` | `user` | `any` | Show email addresses from a user's vCard. |
+| `,fullname` | `user` | `any` | Show the full name from a user's vCard. |
+| `,nicknames` | `user` | `any` | Show nicknames from a user's vCard. |
+| `,notes` | `user` | `any` | Show notes from a user's vCard. |
+| `,organisations` | `user` | `any` | Show organisations from a user's vCard. |
 | `,timezone` | `user` | `any` | Show your configured timezone. |
 | `,timezone set` | `user` | `any` | Set your timezone in the bot profile. |
-| `,urls` | `user` | `any` | Show or set profile URLs. |
+| `,urls` | `user` | `any` | Show URLs from a user's vCard. |
 | `,vcard` | `user` | `any` | Show vCard data or control room access to vCard lookups. |
 
 ### Rooms
@@ -216,7 +217,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
-| `,date` | `user` | `any` | Show the current date. |
+| `,date` | `user` | `any` | Show the current date from a stored profile timezone. |
 | `,echo` | `user` | `any` | Echo text back to you. |
 | `,ping` | `user` | `any` | Check whether the bot is alive. |
 | `,remind` | `user` | `any` | Create a reminder. |
@@ -225,12 +226,12 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,sed` | `user` | `any` | Apply sed-style corrections or control room access to sed. |
 | `,seen` | `user` | `any` | Show when a user was last seen. |
 | `,tell` | `user` | `any` | Leave a message for another user. |
-| `,time` | `user` | `any` | Show the current time. |
+| `,time` | `user` | `any` | Show the current time from a stored profile timezone. |
 | `,tools` | `moderator` | `room or MUC PM` | Enable, disable or show room access to utility commands. |
-| `,ts` | `user` | `any` | Convert or show Unix timestamps. |
+| `,ts` | `user` | `any` | Convert a Unix timestamp to your configured timezone. |
 | `,urlcheck` | `user` | `room or MUC PM` | Enable, disable or show automatic URL checks in a room. |
 | `,utc` | `user` | `any` | Show current UTC time. |
-| `,weather` | `user` | `any` | Show weather or control room access to weather lookups. |
+| `,weather` | `user` | `any` | Show weather from a user's vCard location or control room access. |
 
 ### Xmpp
 
@@ -519,7 +520,7 @@ Show help for plugins and commands.
 Role: `none`<br>
 Context: `any`<br>
 Category: `core`<br>
-Usage: `,help [all|commands|plugins|roles|categories|category <name>|room settings|<plugin>|<command>]`
+Usage: `,help [all|commands|plugins|roles|categories|category <name>|room settings|<plugin>|,<command>]`
 
 Aliases: `,h`
 
@@ -527,10 +528,11 @@ Examples:
 
 - `,help`
 - `,help room settings`
+- `,help rooms settings`
 - `,help ducks`
 - `,help rooms enable`
 - `,help ,users role`
-- `,help category rooms`
+- `,help category admin`
 
 #### `,help inroom`
 
@@ -808,7 +810,7 @@ Examples:
 
 #### `,rooms plugins`
 
-Show room plugin toggles; requires room admin/owner or bot moderator. The displayed `default` values come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks.
+Show room plugin toggles; requires room admin/owner or bot moderator.
 
 Role: `user`<br>
 Context: `room / MUC PM / private chat with <room_jid>`<br>
@@ -823,10 +825,11 @@ Examples:
 - `,rooms plugins all`
 - `,rooms plugins room@conference.example.org all`
 - `,help room settings`
+- `,help rooms settings`
 
 #### `,rooms set_plugin_defaults`
 
-Restore room plugin toggles for a room; requires room admin/owner or bot moderator. The restored values come from `ROOM_PLUGIN_DEFAULTS` in `config.py`; missing keys keep their internal fallback.
+Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
 
 Role: `user`<br>
 Context: `room / MUC PM / private chat with <room_jid>`<br>
@@ -1160,7 +1163,7 @@ Look up stored acronym definitions.
 Role: `user`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms <term>`
+Usage: `,acronyms <acronym>`
 
 Aliases: `,acro`, `,acronym`
 
@@ -1170,12 +1173,12 @@ Examples:
 
 #### `,acronyms add`
 
-Add a definition to an acronym.
+Suggest a new acronym definition for admin review.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms add <term> <definition>`
+Usage: `,acronyms add <acronym> <description>`
 
 Aliases: `,acro add`, `,acronym add`
 
@@ -1185,27 +1188,28 @@ Examples:
 
 #### `,acronyms delete`
 
-Delete an acronym completely.
+Delete pending acronym suggestions by nick or definition.
 
 Role: `admin`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms delete <term>`
+Usage: `,acronyms delete <nick|acronym description>`
 
 Aliases: `,acro delete`, `,acronym delete`
 
 Examples:
 
-- `,acro delete XMPP`
+- `,acro delete Alice`
+- `,acro delete XMPP old definition`
 
 #### `,acronyms list`
 
-List known acronyms.
+List pending acronym additions and removals.
 
 Role: `admin`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms list [all|page|last]`
+Usage: `,acronyms list`
 
 Aliases: `,acro list`, `,acronym list`
 
@@ -1215,42 +1219,42 @@ Examples:
 
 #### `,acronyms merge`
 
-Merge one acronym into another.
+Apply pending acronym additions and removals.
 
 Role: `admin`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms merge <source> <target>`
+Usage: `,acronyms merge`
 
 Aliases: `,acro merge`, `,acronym merge`
 
 Examples:
 
-- `,acro merge xmpp XMPP`
+- `,acro merge`
 
 #### `,acronyms remove`
 
-Remove one acronym definition.
+Suggest removing one acronym definition for admin review.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms remove <term> <number>`
+Usage: `,acronyms remove <acronym> <description>`
 
 Aliases: `,acro remove`, `,acronym remove`
 
 Examples:
 
-- `,acro remove XMPP 1`
+- `,acro remove XMPP old definition`
 
 #### `,fediverse`
 
-Look up Fediverse account or instance information.
+Show the latest public post from a Fediverse account.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,fediverse <account|instance>`
+Usage: `,fediverse <@user@instance>`
 
 Aliases: `,fedi`
 
@@ -1310,17 +1314,17 @@ Room-local karma tracking with nick++ / nick--
 
 #### `,karma`
 
-Show or update karma for a term.
+Show room-local karma scores and rankings.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `fun`<br>
-Usage: `,karma [on|off|status|term|term++|term--]`
+Usage: `,karma <on|off|status|top|bottom|nick>`
 
 Examples:
 
 - `,karma status`
-- `,karma xmpp++`
+- `,karma top`
 - `,karma xmpp`
 
 ### pin
@@ -1359,11 +1363,12 @@ Create and manage polls.
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,poll <new|vote|list|show|close|cancel|delete|on|off|status> ...`
+Usage: `,poll <on|off|status|create|list|show|result|history|vote|close|cancel|delete> ...`
 
 Examples:
 
 - `,poll status`
+- `,poll create Tea? | yes | no`
 - `,poll list`
 - `,rooms enable poll`
 
@@ -1485,12 +1490,12 @@ Leave a message for another user.
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,tell <on|off|status|nick> [message]`
+Usage: `,tell <on|off|status|nick: message>`
 
 Examples:
 
 - `,tell status`
-- `,tell alice I fixed it`
+- `,tell alice: I fixed it`
 
 ### tools
 
@@ -1501,16 +1506,17 @@ Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and
 
 #### `,date`
 
-Show the current date.
+Show the current date from a stored profile timezone.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,date [timezone]`
+Usage: `,date [nick]`
 
 Examples:
 
 - `,date`
+- `,date Alice`
 
 #### `,echo`
 
@@ -1557,18 +1563,19 @@ Examples:
 
 #### `,time`
 
-Show the current time.
+Show the current time from a stored profile timezone.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,time [timezone]`
+Usage: `,time [nick]`
 
 Aliases: `,t`
 
 Examples:
 
-- `,time Europe/Berlin`
+- `,time`
+- `,time Alice`
 
 #### `,tools`
 
@@ -1585,16 +1592,16 @@ Examples:
 
 #### `,ts`
 
-Convert or show Unix timestamps.
+Convert a Unix timestamp to your configured timezone.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,ts [timestamp]`
+Usage: `,ts <unix_timestamp>`
 
 Examples:
 
-- `,ts`
+- `,ts 1704067200`
 
 #### `,utc`
 
@@ -1639,91 +1646,91 @@ Lookup and display vCard of a MUC occupant by MUC JID only
 
 #### `,birthday`
 
-Show or set your birthday.
+Show birthday data from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,birthday [YYYY-MM-DD]`
+Usage: `,birthday [nick]`
 
 Aliases: `,b`
 
 Examples:
 
-- `,birthday 1989-01-01`
+- `,birthday Alice`
 
 #### `,emails`
 
-Show or set profile emails.
+Show email addresses from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,emails [email]`
+Usage: `,emails [nick]`
 
 Aliases: `,e`
 
 Examples:
 
-- `,emails me@example.org`
+- `,emails Alice`
 
 #### `,fullname`
 
-Show or set your full name.
+Show the full name from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,fullname [name]`
+Usage: `,fullname [nick]`
 
 Aliases: `,f`
 
 Examples:
 
-- `,fullname Sven`
+- `,fullname Alice`
 
 #### `,nicknames`
 
-Show or set profile nicknames.
+Show nicknames from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,nicknames [names]`
+Usage: `,nicknames [nick]`
 
 Aliases: `,nicks`
 
 Examples:
 
-- `,nicks Sven, creme`
+- `,nicks Alice`
 
 #### `,notes`
 
-Show or set profile notes.
+Show notes from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,notes [text]`
+Usage: `,notes [nick]`
 
 Examples:
 
-- `,notes likes boring tech`
+- `,notes Alice`
 
 #### `,organisations`
 
-Show or set organisations in your profile.
+Show organisations from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,organisations [text]`
+Usage: `,organisations [nick]`
 
 Aliases: `,orgs`
 
 Examples:
 
-- `,orgs envs.net`
+- `,orgs Alice`
 
 #### `,timezone`
 
@@ -1757,18 +1764,18 @@ Examples:
 
 #### `,urls`
 
-Show or set profile URLs.
+Show URLs from a user's vCard.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `profile`<br>
-Usage: `,urls [url]`
+Usage: `,urls [nick]`
 
 Aliases: `,u`
 
 Examples:
 
-- `,urls https://envs.net`
+- `,urls Alice`
 
 #### `,vcard`
 
@@ -1796,19 +1803,19 @@ Gives weather according to users location (supports MUCs and MUC DMs)
 
 #### `,weather`
 
-Show weather or control room access to weather lookups.
+Show weather from a user's vCard location or control room access.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,weather [on|off|status|location|nick]`
+Usage: `,weather [on|off|status|nick]`
 
 Aliases: `,w`
 
 Examples:
 
 - `,weather status`
-- `,weather Berlin`
+- `,weather Alice`
 - `,rooms enable weather`
 
 ### xkcd
@@ -1825,12 +1832,13 @@ Show an XKCD comic or control room access to XKCD.
 Role: `user`<br>
 Context: `any`<br>
 Category: `fun`<br>
-Usage: `,xkcd [on|off|status|latest|random|number|search <term>]`
+Usage: `,xkcd [on|off|status|random|number|search <term> [page]]`
 
 Examples:
 
-- `,xkcd status`
+- `,xkcd`
 - `,xkcd random`
+- `,xkcd search python 2`
 - `,rooms enable xkcd`
 
 ### xmpp

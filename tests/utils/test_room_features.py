@@ -248,7 +248,7 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
             modified=True,
         )
     )
-    assert line == "• karma: enabled | default: off (modified)"
+    assert line == "• karma: enabled | default: disabled (modified)"
 
 
 def test_is_known_feature_uses_unsorted_config(monkeypatch):

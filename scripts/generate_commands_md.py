@@ -126,6 +126,7 @@ def _room_feature_section() -> list[str]:
         f"- `{PREFIX}rooms plugins room@conference.example.org all`",
         "",
         "In a room or MUC PM the target room can usually be inferred. In a normal private chat, pass `<room_jid>` explicitly. The sender must be room owner/admin or have a bot moderator/admin role.",
+        f"Defaults shown by these commands come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks. Existing per-room overrides stay in the database until `{PREFIX}rooms set_plugin_defaults` is used for that room.",
     ]
     if features:
         lines += [
@@ -177,7 +178,7 @@ def generate() -> str:
         f"- `{PREFIX}help categories`",
         f"- `{PREFIX}help category <name>`",
         f"- `{PREFIX}help <plugin>`",
-        f"- `{PREFIX}help <command>`",
+        f"- `{PREFIX}help {PREFIX}<command>`",
         "",
         "For paginated commands, `all` disables paging and `last` jumps to the final page.",
         "",

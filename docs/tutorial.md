@@ -76,10 +76,10 @@ Add a room to the bot's persistent room list:
 ,rooms list
 ```
 
-Show or change a stored room later:
+Show or change stored rooms later:
 
 ```text
-,rooms info room@conference.example.org
+,rooms list
 ,rooms update room@conference.example.org nick EnvsBot
 ,rooms leave room@conference.example.org
 ,rooms delete room@conference.example.org
@@ -103,7 +103,7 @@ Start broad, then narrow down:
 ,help categories
 ,help category rooms
 ,help rooms
-,help rooms add
+,help ,rooms add
 ```
 
 For room plugin toggles, use the dedicated help entry:
@@ -144,7 +144,7 @@ Some plugins also have shortcut commands in MUC PM:
 ,duck status
 ```
 
-The sender must be owner/admin in the target room or have a global bot moderator/admin role.
+The sender must be owner/admin in the target room or have a global bot moderator/admin role. Defaults for new rooms and for `,rooms set_plugin_defaults` come from `ROOM_PLUGIN_DEFAULTS` in `config.py`; existing room-specific changes remain stored until reset explicitly.
 
 ## 6. Example: enable ducks in one room
 

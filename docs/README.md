@@ -15,6 +15,7 @@ Operational notes:
 - Core/admin plugins live in `core_plugins/`; optional feature plugins live in `plugins/`. Core plugins keep stable public names but cannot be unloaded at runtime.
 - Production installations should use the latest tagged release, not the moving `main` branch.
 - New operators should start with [`tutorial.md`](tutorial.md) before using the full command reference.
+- Runtime help should use `,help <plugin>` for plugin help and `,help ,<command>` for unambiguous command help.
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
 - Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.

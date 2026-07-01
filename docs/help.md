@@ -15,23 +15,23 @@ Examples use the default prefix `,`.
 ,help roles
 ,help room settings
 ,help <plugin>
-,help <command>
 ,help ,<command>
 ,help all
 ```
 
 ## Focused help
 
-Use focused help when you already know the plugin or command name:
+Use focused help when you already know the plugin or command name. Prefer the prefixed form for command help because it is unambiguous; the unprefixed command form remains accepted as a convenience shortcut when it does not collide with a plugin name:
 
 ```text
 ,help rooms
 ,help room settings
 ,help rooms enable
 ,help ducks
+,help ,rooms add
+,help ,users role
 ,help rooms add
 ,help users role
-,help ,users role
 ```
 
 Plugin help shows the plugin description, category, requirements and visible commands. Command help shows role, context, aliases, usage and examples.
@@ -122,7 +122,7 @@ birthday_notify, dice, ducks, help, information, karma, pin, poll,
 presence, reminder, sed, tell, tools, urlcheck, vcard, weather, xkcd, xmpp
 ```
 
-`information` can also be addressed as `info`.
+`information` can also be addressed as `info`. The displayed defaults come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks. Existing per-room changes stay stored in the database until `,rooms set_plugin_defaults` is used for that room.
 
 ## Notification rooms
 

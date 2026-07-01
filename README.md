@@ -205,7 +205,7 @@ Examples assume the default command prefix `,`.
 | `,help` | Show available help topics and commands |
 | `,help all` | Show the full visible help output |
 | `,help <plugin>` | Show focused help for one plugin |
-| `,help <command>` | Show focused help for one command |
+| `,help ,<command>` | Show focused help for one command |
 | `,bot status [full]` / `,status [full]` | Show compact or detailed bot, runtime, XMPP, plugin and database status |
 | `,tasks [full] [plugin <name>] [status]` | Show supervised background task status |
 | `,bot version` / `,version` | Show the running bot version and latest checked release |
@@ -244,7 +244,7 @@ Room plugin settings can be changed in multiple contexts. In a MUC PM or directl
 
 EnvsBot has no separate fixed `ADMIN_ROOM` setting. Global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles. Update and invite notification targets are configured separately with `VERSION_CHECK_NOTIFY_JID` and `ROOM_INVITE_NOTIFY_JID`.
 
-For paginated commands, `all` disables paging and prints the full result set. New operators should start with [`docs/tutorial.md`](docs/tutorial.md); full reference: [`docs/commands.md`](docs/commands.md).
+For paginated commands, `all` disables paging and prints the full result set. New operators should start with [`docs/tutorial.md`](docs/tutorial.md); full reference: [`docs/commands.md`](docs/commands.md). `,help <command>` without the command prefix remains accepted as a convenience shortcut when it is not ambiguous with a plugin name.
 
 ---
 
