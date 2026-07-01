@@ -619,7 +619,7 @@ def _updated_feature_state(
         if isinstance(current, Mapping)
         else {}
     )
-    current_state[room_jid] = bool(enabled)
+    current_state[room_jid] = enabled
     return current_state
 
 
@@ -633,6 +633,9 @@ async def set_room_feature(
     The returned state reflects the persisted override combined with the
     current resolved defaults.
     """
+    if not isinstance(enabled, bool):
+        raise TypeError("enabled must be a bool")
+
     plugin = _normalize_plugin_name(plugin)
     conf = await _feature_config_async(plugin)
     store = bot.db.users.plugin(plugin)
@@ -685,7 +688,7 @@ async def list_room_features(
 
 
 def format_room_feature_line(state: RoomFeatureState) -> str:
-    default = "on" if state.default else "off"
+    default = bool_label(state.default)
     modified = " (modified)" if state.modified else ""
     return (
         f"• {state.name}: {bool_label(state.enabled)} "
