@@ -254,7 +254,7 @@ def test_room_feature_name_aliases_flags_and_format(monkeypatch):
 def test_is_known_feature_uses_unsorted_config(monkeypatch):
     monkeypatch.setattr(
         room_features,
-        "_plugin_store_config",
+        "_validated_plugin_store_config",
         lambda: {"information": {"type": "dict", "key": "INFO_ENABLED"}},
     )
     monkeypatch.setattr(

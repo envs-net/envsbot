@@ -3,28 +3,40 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import types
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Mapping, Protocol, TypedDict
+from typing import Any, Callable, Mapping, Protocol, TypeAlias, TypedDict
 
 from utils.formatting import bool_label
 
+log = logging.getLogger(__name__)
+
+FeatureFlagValue: TypeAlias = bool | int | float | str | None
+FeatureFlagMap: TypeAlias = Mapping[str, FeatureFlagValue]
+FeatureFlagState: TypeAlias = dict[str, bool]
+StoreValue: TypeAlias = FeatureFlagMap | FeatureFlagState | None
+StoreUpdater: TypeAlias = Callable[[StoreValue], FeatureFlagState]
+RawPluginStoreConfig: TypeAlias = Mapping[str, Any]
+
 
 class PluginStore(Protocol):
-    async def get_global(self, key: str, default: object = None) -> object:
+    async def get_global(
+        self, key: str, default: StoreValue = None
+    ) -> StoreValue:
         pass
 
-    async def set_global(self, key: str, value: object) -> None:
+    async def set_global(self, key: str, value: FeatureFlagState) -> None:
         pass
 
     async def update_global(
         self,
         key: str,
-        updater: Callable[[object], object],
-        default: object = None,
-    ) -> object:
+        updater: StoreUpdater,
+        default: StoreValue = None,
+    ) -> FeatureFlagState:
         pass
 
 
@@ -94,7 +106,9 @@ def _normalize_plugin_name(name: str) -> str:
     return aliases.get(value, value)
 
 
-def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
+def _coerce_feature_flag(
+    value: FeatureFlagValue, fallback: bool = False
+) -> bool:
     """Coerce a stored feature flag value to ``bool``.
 
     ``fallback`` is returned only when ``value`` is ``None``. Accepted inputs
@@ -131,44 +145,79 @@ def _coerce_feature_flag(value: object, fallback: bool = False) -> bool:
     )
 
 
-def _raw_plugin_store_config() -> dict[str, Any] | None:
+def _load_raw_plugin_store_config() -> RawPluginStoreConfig | None:
     """Return raw room plugin storage config from the rooms module.
 
-    ``None`` is returned when the rooms module does not expose a dictionary
-    named ``PLUGIN_STORE_CONFIG`` so validation can treat missing or malformed
-    configuration as an empty feature list.
+    ``None`` is returned when the rooms module does not expose a mapping named
+    ``PLUGIN_STORE_CONFIG``. The returned value is intentionally still raw;
+    validation and normalization are handled by
+    ``_validated_plugin_store_config()``.
     """
     raw_config = getattr(_rooms_module(), "PLUGIN_STORE_CONFIG", None)
-    if not isinstance(raw_config, dict):
-        return None
-    return raw_config
+    if isinstance(raw_config, Mapping):
+        return raw_config
+    if raw_config is not None:
+        log.warning(
+            "[ROOM_FEATURES] Ignoring PLUGIN_STORE_CONFIG with invalid type: "
+            "%s",
+            type(raw_config).__name__,
+        )
+    return None
 
 
-def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
-    """Validate and normalize the raw plugin store configuration.
+def _validated_plugin_store_config() -> dict[str, RoomFeatureConfig]:
+    """Validate and normalize plugin storage configuration.
 
-    Invalid entries are ignored. Valid entries must use a string plugin name, a
-    mapping config, a non-empty string ``key``, and a string ``type``. The
-    returned mapping is keyed by canonical plugin names.
+    Invalid entries are ignored after logging a warning. Valid entries must use
+    a string plugin name, a mapping config, a non-empty string ``key``, and a
+    string ``type``. The returned mapping is keyed by canonical plugin names.
     """
-    config = _raw_plugin_store_config()
+    config = _load_raw_plugin_store_config()
     if config is None:
         return {}
 
     validated: dict[str, RoomFeatureConfig] = {}
     for raw_name, raw_conf in config.items():
-        if not isinstance(raw_name, str) or not isinstance(raw_conf, dict):
+        if not isinstance(raw_name, str):
+            log.warning(
+                "[ROOM_FEATURES] Ignoring feature config with non-string "
+                "plugin name: %r",
+                raw_name,
+            )
+            continue
+        if not isinstance(raw_conf, Mapping):
+            log.warning(
+                "[ROOM_FEATURES] Ignoring feature config for %r because "
+                "the config is not a mapping: %r",
+                raw_name,
+                raw_conf,
+            )
             continue
         storage_type = raw_conf.get("type")
         key = raw_conf.get("key")
-        if (
-            not isinstance(storage_type, str)
-            or not isinstance(key, str)
-            or not key
-        ):
+        if not isinstance(storage_type, str):
+            log.warning(
+                "[ROOM_FEATURES] Ignoring feature config for %r because "
+                "storage type is invalid: %r",
+                raw_name,
+                storage_type,
+            )
+            continue
+        if not isinstance(key, str) or not key:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring feature config for %r because "
+                "storage key is missing or invalid: %r",
+                raw_name,
+                key,
+            )
             continue
         name = _normalize_plugin_name(raw_name)
         if not name:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring feature config with empty "
+                "normalized plugin name from %r",
+                raw_name,
+            )
             continue
         validated[name] = {"type": storage_type, "key": key}
     return validated
@@ -176,7 +225,7 @@ def _plugin_store_config() -> dict[str, RoomFeatureConfig]:
 
 def _feature_config(plugin: str) -> RoomFeatureConfig:
     plugin = _normalize_plugin_name(plugin)
-    config = _plugin_store_config()
+    config = _validated_plugin_store_config()
     if plugin not in config:
         available = sorted(config)
         options = ", ".join(available) if available else "<none configured>"
@@ -196,38 +245,72 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     return conf
 
 
-def _resolved_plugin_defaults() -> dict[str, bool]:
-    """Return validated room plugin defaults from the rooms module.
+def _room_plugin_defaults_source() -> Mapping[str, FeatureFlagValue] | None:
+    """Return raw default mapping from the rooms module.
 
     ``get_room_plugin_defaults()`` is preferred because it can merge
-    config.py overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
-    supported for older room modules. Values are normalized to booleans and
-    malformed entries are skipped instead of invalidating the whole mapping.
-
-    The result is intentionally not cached here because the underlying defaults
-    can change at runtime after ``config reload``. Callers that need to reuse
-    defaults across multiple feature lookups should pass one resolved mapping
-    through the current operation.
+    ``config.py`` overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
+    supported for older rooms modules. Non-mapping providers are logged and
+    treated as missing defaults.
     """
     rooms = _rooms_module()
-    defaults_fn = getattr(rooms, "get_room_plugin_defaults", None)
-    if callable(defaults_fn):
-        raw_defaults = defaults_fn()
-        defaults = raw_defaults if isinstance(raw_defaults, dict) else None
-    else:
-        defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
-    if not isinstance(defaults, dict):
+    defaults_provider = getattr(rooms, "get_room_plugin_defaults", None)
+    if callable(defaults_provider):
+        raw_defaults = defaults_provider()
+        if isinstance(raw_defaults, Mapping):
+            return raw_defaults
+        log.warning(
+            "[ROOM_FEATURES] Ignoring get_room_plugin_defaults() result "
+            "with invalid type: %s",
+            type(raw_defaults).__name__,
+        )
+        return None
+
+    raw_defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
+    if isinstance(raw_defaults, Mapping):
+        return raw_defaults
+    if raw_defaults is not None:
+        log.warning(
+            "[ROOM_FEATURES] Ignoring PLUGIN_DEFAULTS with invalid type: %s",
+            type(raw_defaults).__name__,
+        )
+    return None
+
+
+def _resolved_plugin_defaults() -> FeatureFlagState:
+    """Return validated room plugin defaults from the rooms module.
+
+    Values are normalized to booleans and malformed entries are skipped with a
+    warning instead of invalidating the whole mapping. The result is
+    intentionally not cached here because the underlying defaults can change at
+    runtime after ``config reload``. Callers that need to reuse defaults across
+    multiple feature lookups should pass one resolved mapping through the
+    current operation.
+    """
+    defaults = _room_plugin_defaults_source()
+    if defaults is None:
         return {}
 
-    validated: dict[str, bool] = {}
+    validated: FeatureFlagState = {}
     for name, value in defaults.items():
         normalized_name = _normalize_plugin_name(str(name))
         if not normalized_name:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring default for empty plugin name "
+                "from %r",
+                name,
+            )
             continue
         try:
             validated[normalized_name] = _coerce_feature_flag(value)
-        except TypeError:
-            continue
+        except TypeError as exc:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring invalid default for plugin %r: "
+                "%r (%s)",
+                normalized_name,
+                value,
+                exc,
+            )
     return validated
 
 
@@ -239,14 +322,16 @@ def clear_room_feature_caches() -> None:
 
 
 def available_features() -> list[str]:
-    return sorted(_plugin_store_config())
+    return sorted(_validated_plugin_store_config())
 
 
 def is_known_feature(plugin: str) -> bool:
-    return _normalize_plugin_name(plugin) in _plugin_store_config()
+    return _normalize_plugin_name(plugin) in _validated_plugin_store_config()
 
 
-def _coerce_supported_feature_value(value: object) -> bool | None:
+def _coerce_supported_feature_value(
+    value: FeatureFlagValue,
+) -> bool | None:
     """Return a normalized feature flag, or ``None`` for invalid values."""
     try:
         return _coerce_feature_flag(value)
@@ -255,23 +340,34 @@ def _coerce_supported_feature_value(value: object) -> bool | None:
 
 
 def _safe_room_feature_state(
-    state: Mapping[str, Any],
-) -> dict[str, object]:
+    state: FeatureFlagMap,
+) -> FeatureFlagState:
     """Return a sanitized room-feature state mapping.
 
     Plugin stores may contain arbitrary keys or values from older versions,
     manual edits, or corrupted data. Keep only string room IDs with values that
     can be normalized by ``_coerce_feature_flag`` and ignore everything else.
     Accepted values are stored as booleans so downstream callers work with a
-    consistent representation. Non-string keys are silently ignored if a
-    malformed mapping reaches this helper at runtime.
+    consistent representation. Malformed keys or values are logged with their
+    offending key so operators can clean up damaged runtime state.
     """
-    safe_state: dict[str, object] = {}
+    safe_state: FeatureFlagState = {}
     for key, value in state.items():
         if not isinstance(key, str):
+            log.warning(
+                "[ROOM_FEATURES] Ignoring room feature state with "
+                "non-string room id: %r",
+                key,
+            )
             continue
         coerced = _coerce_supported_feature_value(value)
         if coerced is None:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring invalid room feature state for "
+                "room %r: %r",
+                key,
+                value,
+            )
             continue
         safe_state[key] = coerced
     return safe_state
@@ -281,17 +377,25 @@ async def _room_feature_map(
     bot: BotProtocol,
     plugin: str,
     conf: RoomFeatureConfig,
-) -> dict[str, object]:
+) -> FeatureFlagState:
     """Fetch and sanitize the stored room-feature map for a plugin.
 
     The configured store key is expected to contain a dictionary mapping
-    room JIDs to raw feature-flag values. Missing, non-dictionary, or
-    malformed state is treated as empty so callers can safely fall back to
-    configured defaults.
+    room JIDs to raw feature-flag values. Missing, non-mapping, or malformed
+    state is treated as empty so callers can safely fall back to configured
+    defaults.
     """
     store = bot.db.users.plugin(plugin)
     state = await store.get_global(conf["key"], default={})
-    if not isinstance(state, dict):
+    if not isinstance(state, Mapping):
+        if state is not None:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring non-mapping feature state for "
+                "plugin %r key %r: %r",
+                plugin,
+                conf["key"],
+                state,
+            )
         return {}
     return _safe_room_feature_state(state)
 
@@ -300,7 +404,7 @@ async def _state_for(
     bot: BotProtocol,
     room_jid: str,
     plugin: str,
-    defaults: dict[str, bool],
+    defaults: FeatureFlagState,
 ) -> RoomFeatureState:
     """Compute the effective feature state for one plugin in one room.
 
@@ -339,8 +443,8 @@ async def get_room_feature(
 
 
 def _updated_feature_state(
-    current: Mapping[str, object] | None, *, room_jid: str, enabled: bool
-) -> dict[str, object]:
+    current: FeatureFlagMap | None, *, room_jid: str, enabled: bool
+) -> FeatureFlagState:
     """Return feature state with one room flag updated.
 
     ``update_global`` passes the current stored value into this helper. The
@@ -379,7 +483,7 @@ async def _state_for_list_entry(
     bot: BotProtocol,
     room_jid: str,
     plugin: str,
-    defaults: dict[str, bool],
+    defaults: FeatureFlagState,
 ) -> RoomFeatureState:
     """Return one listed feature state with contextual error reporting."""
     try:
