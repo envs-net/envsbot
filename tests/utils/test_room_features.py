@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -463,3 +464,61 @@ async def test_room_feature_set_list_and_unsupported_storage(monkeypatch):
             True,
         )
     assert str(exc_info.value) == unsupported_storage
+
+
+def test_sync_feature_config_and_defaults_helpers(monkeypatch, caplog):
+    """Cover sync helpers used by docs/CLI paths and mutmut stats."""
+    provider_calls = 0
+
+    def defaults_provider():
+        nonlocal provider_calls
+        provider_calls += 1
+        return {"info": "yes", "karma": "0", "bad": object()}
+
+    module = SimpleNamespace(
+        PLUGIN_STORE_CONFIG={
+            "info": {"type": "dict", "key": "INFO_ENABLED"},
+            "karma": {"type": "dict", "key": "KARMA_ENABLED"},
+        },
+        PLUGIN_DEFAULTS={"info": False},
+        get_room_plugin_defaults=defaults_provider,
+    )
+    monkeypatch.setattr(room_features, "_rooms_module", lambda: module)
+
+    assert room_features._feature_config("roominfo") == {
+        "type": "dict",
+        "key": "INFO_ENABLED",
+    }
+    raw_defaults = room_features._room_plugin_defaults_source()
+    assert raw_defaults is not None
+    assert raw_defaults["info"] == "yes"
+    assert raw_defaults["karma"] == "0"
+    assert "bad" in raw_defaults
+    assert provider_calls == 1
+
+    with caplog.at_level(logging.WARNING):
+        resolved = room_features._resolved_plugin_defaults()
+    assert resolved == {"information": True, "karma": False}
+    assert "Ignoring invalid default for plugin 'bad'" in caplog.text
+    assert provider_calls == 2
+
+
+def test_sync_defaults_helpers_fallback_and_error(caplog):
+    fallback_module = SimpleNamespace(PLUGIN_DEFAULTS={"pin": 1})
+    assert room_features._defaults_from_rooms_module(fallback_module) == {
+        "pin": 1
+    }
+
+    bad_type_module = SimpleNamespace(PLUGIN_DEFAULTS=["pin"])
+    with caplog.at_level(logging.WARNING):
+        assert room_features._defaults_from_rooms_module(bad_type_module) is None
+    assert "Ignoring PLUGIN_DEFAULTS with invalid type: list" in caplog.text
+
+    def broken_defaults():
+        raise RuntimeError("boom")
+
+    broken_module = SimpleNamespace(get_room_plugin_defaults=broken_defaults)
+    with caplog.at_level(logging.ERROR):
+        assert room_features._defaults_from_rooms_module(broken_module) is None
+    assert "get_room_plugin_defaults() failed" in caplog.text
+

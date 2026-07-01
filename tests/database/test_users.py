@@ -1,4 +1,5 @@
 from database.users import PluginRuntimeStore
+import asyncio
 import json
 import logging
 import pytest
@@ -413,3 +414,49 @@ async def test_user_manager_flush_all_rolls_back_and_keeps_dirty_flags():
     queries = _queries(db)
     assert "ROLLBACK TO flush_checkpoint" in queries
     assert um._dirty_users == {"bad@jid"}
+
+
+@pytest.mark.asyncio
+async def test_runtime_store_update_global_applies_updater_atomically():
+    db = RichDummyDB()
+    um = UserManager(db)
+    store = um.plugin("features")
+    seen = []
+
+    def set_enabled(current):
+        seen.append(current)
+        assert current == {"room-a": True}
+        current = dict(current)
+        current["room-b"] = False
+        return current
+
+    await store.set_global("enabled", {"room-a": True})
+    result = await store.update_global("enabled", set_enabled, default={})
+
+    assert seen == [{"room-a": True}]
+    assert result == {"room-a": True, "room-b": False}
+    assert await store.get_global("enabled") == result
+    assert GLOBAL_JID in um._dirty_runtime
+
+
+@pytest.mark.asyncio
+async def test_runtime_store_update_global_uses_default_and_serializes():
+    db = RichDummyDB()
+    um = UserManager(db)
+    store = um.plugin("features")
+
+    async def write_room(room):
+        def updater(current):
+            current = dict(current or {})
+            current[room] = True
+            return current
+
+        return await store.update_global("enabled", updater, default={})
+
+    await asyncio.gather(write_room("room-a"), write_room("room-b"))
+
+    assert await store.get_global("enabled") == {
+        "room-a": True,
+        "room-b": True,
+    }
+
