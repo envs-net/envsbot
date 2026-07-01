@@ -46,14 +46,10 @@ def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
     Room feature updates use read-modify-write storage. A lock per
     ``plugin:key`` pair prevents concurrent writers from losing room-specific
     updates while still allowing unrelated plugin stores to update in parallel.
-    Existing locks are returned without acquiring the registry guard; the guard
-    is only needed when a lock might have to be created.
+    Access to the weak lock registry is always guarded so concurrent callers
+    cannot create different locks for the same ``plugin:key`` pair.
     """
     lock_id = f"{plugin}:{key}"
-    lock = _FEATURE_LOCKS.get(lock_id)
-    if lock is not None:
-        return lock
-
     with _FEATURE_LOCKS_GUARD:
         lock = _FEATURE_LOCKS.get(lock_id)
         if lock is None:
@@ -80,8 +76,12 @@ def _rooms_module() -> types.ModuleType:
     """Lazily import and cache the rooms module.
 
     Importing ``core_plugins.rooms`` only when room feature metadata is needed
-    avoids circular imports during plugin discovery. The cache ensures all
-    later lookups reuse the same module object.
+    avoids circular imports during plugin discovery and initialization, where
+    the rooms plugin imports room-feature helpers from this module. The cache
+    ensures later lookups reuse the same module object. Call
+    ``clear_room_feature_caches()`` when the rooms module is reloaded or its
+    feature metadata changes at runtime, for example during tests, hot reloads,
+    or config reloads.
     """
     from core_plugins import rooms
 
@@ -206,14 +206,18 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     return conf
 
 
-@cache
-def _cached_plugin_defaults() -> dict[str, bool]:
+def _resolved_plugin_defaults() -> dict[str, bool]:
     """Return validated room plugin defaults from the rooms module.
 
     ``get_room_plugin_defaults()`` is preferred because it can merge
     config.py overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
     supported for older room modules. Values are normalized to booleans and
     malformed entries are skipped instead of invalidating the whole mapping.
+
+    The result is intentionally not cached here because the underlying defaults
+    can change at runtime after ``config reload``. Callers that need to reuse
+    defaults across multiple feature lookups should pass one resolved mapping
+    through the current operation.
     """
     rooms = _rooms_module()
     defaults_fn = getattr(rooms, "get_room_plugin_defaults", None)
@@ -238,14 +242,13 @@ def _cached_plugin_defaults() -> dict[str, bool]:
 
 
 def _plugin_defaults() -> dict[str, bool]:
-    # Return a copy so callers cannot mutate cached defaults.
-    return dict(_cached_plugin_defaults())
+    # Return a copy so callers cannot mutate the resolved defaults.
+    return dict(_resolved_plugin_defaults())
 
 
 def clear_room_feature_caches() -> None:
-    """Clear cached room feature module/default lookups."""
+    """Clear cached room feature module lookups."""
     _rooms_module.cache_clear()
-    _cached_plugin_defaults.cache_clear()
 
 
 def available_features() -> list[str]:
