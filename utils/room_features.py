@@ -311,12 +311,48 @@ async def _feature_config_async(plugin: str) -> RoomFeatureConfig:
     )
 
 
+def _validate_raw_plugin_defaults(
+    raw_defaults: Any,
+    source_name: str,
+) -> Mapping[str, FeatureFlagValue] | None:
+    """Return raw plugin defaults only when the source exposes a mapping."""
+    if isinstance(raw_defaults, Mapping):
+        return raw_defaults
+    if raw_defaults is not None:
+        log.warning(
+            "[ROOM_FEATURES] Ignoring %s with invalid type: %s",
+            source_name,
+            type(raw_defaults).__name__,
+        )
+    return None
+
+
+def _plugin_defaults_provider(
+    rooms: types.ModuleType,
+) -> Callable[[], Any] | None:
+    """Return the dynamic room defaults provider when it is callable."""
+    defaults_provider = getattr(rooms, "get_room_plugin_defaults", None)
+    if callable(defaults_provider):
+        return defaults_provider
+    return None
+
+
+def _plugin_defaults_attribute(
+    rooms: types.ModuleType,
+) -> Mapping[str, FeatureFlagValue] | None:
+    """Return legacy static plugin defaults from the rooms module."""
+    return _validate_raw_plugin_defaults(
+        getattr(rooms, "PLUGIN_DEFAULTS", None),
+        "PLUGIN_DEFAULTS",
+    )
+
+
 def _defaults_from_rooms_module(
     rooms: types.ModuleType,
 ) -> Mapping[str, FeatureFlagValue] | None:
     """Return raw default mapping exposed by a rooms module instance."""
-    defaults_provider = getattr(rooms, "get_room_plugin_defaults", None)
-    if callable(defaults_provider):
+    defaults_provider = _plugin_defaults_provider(rooms)
+    if defaults_provider is not None:
         try:
             raw_defaults = defaults_provider()
         except Exception:
@@ -325,24 +361,34 @@ def _defaults_from_rooms_module(
                 "resolving room plugin defaults"
             )
             return None
-        if isinstance(raw_defaults, Mapping):
-            return raw_defaults
-        log.warning(
-            "[ROOM_FEATURES] Ignoring get_room_plugin_defaults() result "
-            "with invalid type: %s",
-            type(raw_defaults).__name__,
+        return _validate_raw_plugin_defaults(
+            raw_defaults,
+            "get_room_plugin_defaults() result",
         )
-        return None
 
-    raw_defaults = getattr(rooms, "PLUGIN_DEFAULTS", None)
-    if isinstance(raw_defaults, Mapping):
-        return raw_defaults
-    if raw_defaults is not None:
-        log.warning(
-            "[ROOM_FEATURES] Ignoring PLUGIN_DEFAULTS with invalid type: %s",
-            type(raw_defaults).__name__,
+    return _plugin_defaults_attribute(rooms)
+
+
+async def _defaults_from_rooms_module_async(
+    rooms: types.ModuleType,
+) -> Mapping[str, FeatureFlagValue] | None:
+    """Return raw defaults without blocking async callers."""
+    defaults_provider = _plugin_defaults_provider(rooms)
+    if defaults_provider is not None:
+        try:
+            raw_defaults = await asyncio.to_thread(defaults_provider)
+        except Exception:
+            log.exception(
+                "[ROOM_FEATURES] get_room_plugin_defaults() failed while "
+                "resolving room plugin defaults"
+            )
+            return None
+        return _validate_raw_plugin_defaults(
+            raw_defaults,
+            "get_room_plugin_defaults() result",
         )
-    return None
+
+    return _plugin_defaults_attribute(rooms)
 
 
 def _room_plugin_defaults_source() -> Mapping[str, FeatureFlagValue] | None:
@@ -360,7 +406,7 @@ async def _room_plugin_defaults_source_async() -> (
     Mapping[str, FeatureFlagValue] | None
 ):
     """Return raw default mapping from the rooms module in async code."""
-    return _defaults_from_rooms_module(await _rooms_module_async())
+    return await _defaults_from_rooms_module_async(await _rooms_module_async())
 
 
 def _validate_plugin_defaults(
@@ -499,14 +545,13 @@ async def _room_feature_map(
     if state is None:
         return {}
     if not isinstance(state, Mapping):
-        if state is not None:
-            log.warning(
-                "[ROOM_FEATURES] Ignoring non-mapping feature state for "
-                "plugin %r key %r: %r",
-                plugin,
-                conf["key"],
-                state,
-            )
+        log.warning(
+            "[ROOM_FEATURES] Ignoring non-mapping feature state for "
+            "plugin %r key %r: %r",
+            plugin,
+            conf["key"],
+            state,
+        )
         return {}
     return _safe_room_feature_state(state)
 
