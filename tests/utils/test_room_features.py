@@ -17,7 +17,12 @@ def clear_room_feature_caches():
 class DummyStore:
     def __init__(self, data=None):
         self.data = data if data is not None else {}
-        self._update_lock = asyncio.Lock()
+        self._lock = None
+
+    def _update_lock(self):
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def get_global(self, key, default=None):
         return self.data.get(key, default)
@@ -26,7 +31,7 @@ class DummyStore:
         self.data[key] = value
 
     async def update_global(self, key, updater, default=None):
-        async with self._update_lock:
+        async with self._update_lock():
             current = await self.get_global(key, default)
             value = updater(current)
             await self.set_global(key, value)
@@ -464,12 +469,11 @@ async def test_set_room_feature_sanitizes_current_state(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_room_feature_set_list_and_unsupported_storage(monkeypatch):
+async def test_room_feature_set_replaces_invalid_storage(monkeypatch):
     _install_room_features_module(
         monkeypatch,
         store_config={
             "information": {"type": "dict", "key": "INFO_ENABLED"},
-            "legacy": {"type": "list", "key": "LEGACY_ENABLED"},
         },
         plugin_defaults={"information": False},
     )
@@ -482,42 +486,76 @@ async def test_room_feature_set_list_and_unsupported_storage(monkeypatch):
         "info",
         True,
     )
+
     assert state.name == "information"
     assert state.enabled is True
     assert store.data["INFO_ENABLED"] == {"room@conf": True}
 
+
+@pytest.mark.asyncio
+async def test_room_feature_list_reads_existing_dict_storage(monkeypatch):
     _install_room_features_module(
         monkeypatch,
         store_config={
-            "information": {"type": "dict", "key": "INFO_ENABLED"}
+            "information": {"type": "dict", "key": "INFO_ENABLED"},
         },
         plugin_defaults={"information": False},
     )
+    bot = _bot_with_store(
+        DummyStore({"INFO_ENABLED": {"room@conf": True}})
+    )
+
     listed = await room_features.list_room_features(bot, "room@conf")
+
     assert [item.name for item in listed] == ["information"]
     assert listed[0].enabled is True
 
+
+@pytest.mark.asyncio
+async def test_room_feature_get_rejects_unsupported_list_storage(
+    monkeypatch,
+):
     _install_room_features_module(
         monkeypatch,
         store_config={"legacy": {"type": "list", "key": "LEGACY_ENABLED"}},
         plugin_defaults={},
     )
-    unsupported_storage = (
+
+    with pytest.raises(ValueError) as exc_info:
+        await room_features.get_room_feature(
+            _bot_with_store(DummyStore()),
+            "room@conf",
+            "legacy",
+        )
+
+    assert str(exc_info.value) == (
         "Unsupported room feature storage type: list. "
         "Only 'dict' is currently supported."
     )
-    with pytest.raises(ValueError) as exc_info:
-        await room_features.get_room_feature(bot, "room@conf", "legacy")
-    assert str(exc_info.value) == unsupported_storage
+
+
+@pytest.mark.asyncio
+async def test_room_feature_set_rejects_unsupported_list_storage(
+    monkeypatch,
+):
+    _install_room_features_module(
+        monkeypatch,
+        store_config={"legacy": {"type": "list", "key": "LEGACY_ENABLED"}},
+        plugin_defaults={},
+    )
 
     with pytest.raises(ValueError) as exc_info:
         await room_features.set_room_feature(
-            bot,
+            _bot_with_store(DummyStore()),
             "room@conf",
             "legacy",
             True,
         )
-    assert str(exc_info.value) == unsupported_storage
+
+    assert str(exc_info.value) == (
+        "Unsupported room feature storage type: list. "
+        "Only 'dict' is currently supported."
+    )
 
 
 @pytest.mark.asyncio
