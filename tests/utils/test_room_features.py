@@ -16,12 +16,20 @@ def clear_room_feature_caches():
 class DummyStore:
     def __init__(self, data=None):
         self.data = data if data is not None else {}
+        self._update_lock = asyncio.Lock()
 
     async def get_global(self, key, default=None):
         return self.data.get(key, default)
 
     async def set_global(self, key, value):
         self.data[key] = value
+
+    async def update_global(self, key, updater, default=None):
+        async with self._update_lock:
+            current = await self.get_global(key, default)
+            value = updater(current)
+            await self.set_global(key, value)
+            return value
 
 
 class CopyingSlowStore(DummyStore):

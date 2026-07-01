@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+from typing import Callable
 from datetime import datetime, timezone
 
 GLOBAL_JID = "__GLOBAL__"
@@ -112,6 +113,26 @@ class PluginRuntimeStore:
         Set plugin-global value.
         """
         await self.set(GLOBAL_JID, key, value)
+
+    async def update_global(
+        self,
+        key,
+        updater: Callable[[object], object],
+        default=None,
+    ):
+        """
+        Atomically update a plugin-global value in the runtime cache.
+
+        The updater receives the current value or ``default`` and returns the
+        replacement value.  A UserManager-level lock serializes these updates
+        so read-modify-write callers do not overwrite concurrent cache changes
+        within this bot process.
+        """
+        async with self.um._runtime_update_lock:
+            current = await self.get_global(key, default)
+            value = updater(current)
+            await self.set_global(key, value)
+            return value
 
     async def get(self, jid: str, key: str = None):
         """
@@ -228,6 +249,7 @@ class UserManager:
         self._runtime_cache = {}
 
         self._runtime_meta = {}
+        self._runtime_update_lock = asyncio.Lock()
 
         self._dirty_users = set()
         self._dirty_runtime = set()
@@ -334,7 +356,10 @@ class UserManager:
             else:
                 rows.append(user)
 
-        return sorted(rows, key=lambda row: (int(row.get("role", 80)), row.get("jid", "")))
+        return sorted(
+            rows,
+            key=lambda row: (int(row.get("role", 80)), row.get("jid", "")),
+        )
 
     async def update_last_seen(self, jid):
         now = datetime.now(timezone.utc).isoformat()
@@ -493,7 +518,10 @@ class UserManager:
             try:
                 await self.db.execute("ROLLBACK TO flush_checkpoint")
             except Exception as rollback_exc:
-                log.debug("[DB] Rollback after flush failure also failed: %s", rollback_exc)
+                log.debug(
+                    "[DB] Rollback after flush failure also failed: %s",
+                    rollback_exc,
+                )
             log.exception("[DB] FLUSH ALL FAILED!")
             raise
 

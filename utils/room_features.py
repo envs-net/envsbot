@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 import types
-import weakref
 from dataclasses import dataclass
 from functools import cache
-from typing import Any, Mapping, Protocol, TypedDict
+from typing import Any, Callable, Mapping, Protocol, TypedDict
 
 from utils.formatting import bool_label
 
@@ -18,6 +16,14 @@ class PluginStore(Protocol):
         pass
 
     async def set_global(self, key: str, value: object) -> None:
+        pass
+
+    async def update_global(
+        self,
+        key: str,
+        updater: Callable[[object], object],
+        default: object = None,
+    ) -> object:
         pass
 
 
@@ -32,30 +38,6 @@ class RoomFeatureDatabase(Protocol):
 
 class BotProtocol(Protocol):
     db: RoomFeatureDatabase
-
-
-_FEATURE_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = (
-    weakref.WeakValueDictionary()
-)
-_FEATURE_LOCKS_GUARD = threading.Lock()
-
-
-def _feature_lock(plugin: str, key: str) -> asyncio.Lock:
-    """Return the shared lock for one plugin storage key.
-
-    Room feature updates use read-modify-write storage. A lock per
-    ``plugin:key`` pair prevents concurrent writers from losing room-specific
-    updates while still allowing unrelated plugin stores to update in parallel.
-    Access to the weak lock registry is always guarded so concurrent callers
-    cannot create different locks for the same ``plugin:key`` pair.
-    """
-    lock_id = f"{plugin}:{key}"
-    with _FEATURE_LOCKS_GUARD:
-        lock = _FEATURE_LOCKS.get(lock_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _FEATURE_LOCKS[lock_id] = lock
-        return lock
 
 
 class RoomFeatureConfig(TypedDict):
@@ -344,16 +326,18 @@ async def set_room_feature(
 ) -> RoomFeatureState:
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
+    store = bot.db.users.plugin(plugin)
 
-    async with _feature_lock(plugin, conf["key"]):
-        stored_state = await _room_feature_map(bot, plugin, conf)
-        # Work on an explicit copy so future store implementations can safely
-        # return cached/shared mappings without caller-side mutation.
-        current_state = dict(stored_state)
+    def update_state(current: object) -> dict[str, object]:
+        current_state = (
+            _safe_room_feature_state(current)
+            if isinstance(current, Mapping)
+            else {}
+        )
         current_state[room_jid] = bool(enabled)
+        return current_state
 
-        store = bot.db.users.plugin(plugin)
-        await store.set_global(conf["key"], current_state)
+    await store.update_global(conf["key"], update_state, default={})
 
     defaults = _plugin_defaults()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
