@@ -68,18 +68,23 @@ class RoomFeatureState:
 
 _ROOMS_MODULE: types.ModuleType | None = None
 _ROOMS_MODULE_LOCK = threading.Lock()
+_ROOMS_MODULE_ASYNC_LOCK: asyncio.Lock | None = None
 
 
 def _rooms_module() -> types.ModuleType:
-    """Lazily import and cache the rooms module.
+    """Lazily import and cache the rooms module for synchronous callers.
 
     Importing ``core_plugins.rooms`` only when room feature metadata is needed
     avoids circular imports during plugin discovery and initialization, where
     the rooms plugin imports room-feature helpers from this module. The
-    explicit lock keeps the lazy cache safe if multiple threads ask for the
-    module at the same time. Call ``clear_room_feature_caches()`` when the
-    rooms module is reloaded or its feature metadata changes at runtime, for
-    example during tests, hot reloads, or config reloads.
+    synchronous lock keeps the cache safe for CLI/docs helpers that call this
+    module outside an async task. Async room-feature operations use
+    ``_rooms_module_async()`` so concurrent coroutines also wait on an
+    ``asyncio.Lock``.
+
+    Call ``clear_room_feature_caches()`` when the rooms module is reloaded or
+    its feature metadata changes at runtime, for example during tests, hot
+    reloads, or config reloads.
     """
     global _ROOMS_MODULE
     with _ROOMS_MODULE_LOCK:
@@ -89,6 +94,29 @@ def _rooms_module() -> types.ModuleType:
             _ROOMS_MODULE = rooms
         module = _ROOMS_MODULE
     return module
+
+
+async def _rooms_module_async() -> types.ModuleType:
+    """Lazily import and cache the rooms module for async callers.
+
+    Multiple room-feature coroutines may request metadata at the same time.
+    This helper uses an ``asyncio.Lock`` in addition to the synchronous cache
+    lock so those coroutines do not race while the rooms module is imported or
+    the cached reference is initialized. The async lock itself is created
+    lazily under the synchronous lock to avoid module-level event-loop state.
+    """
+    module = _ROOMS_MODULE
+    if module is not None:
+        return module
+
+    global _ROOMS_MODULE_ASYNC_LOCK
+    with _ROOMS_MODULE_LOCK:
+        if _ROOMS_MODULE_ASYNC_LOCK is None:
+            _ROOMS_MODULE_ASYNC_LOCK = asyncio.Lock()
+        async_lock = _ROOMS_MODULE_ASYNC_LOCK
+
+    async with async_lock:
+        return _rooms_module()
 
 
 def _normalize_plugin_name(name: str) -> str:
@@ -166,14 +194,26 @@ def _load_raw_plugin_store_config() -> RawPluginStoreConfig | None:
     return None
 
 
-def _validated_plugin_store_config() -> dict[str, RoomFeatureConfig]:
-    """Validate and normalize plugin storage configuration.
+async def _load_raw_plugin_store_config_async() -> RawPluginStoreConfig | None:
+    """Return raw room plugin storage config for async callers."""
+    raw_config = getattr(
+        await _rooms_module_async(), "PLUGIN_STORE_CONFIG", None
+    )
+    if isinstance(raw_config, Mapping):
+        return raw_config
+    if raw_config is not None:
+        log.warning(
+            "[ROOM_FEATURES] Ignoring PLUGIN_STORE_CONFIG with invalid type: "
+            "%s",
+            type(raw_config).__name__,
+        )
+    return None
 
-    Invalid entries are ignored after logging a warning. Valid entries must use
-    a string plugin name, a mapping config, a non-empty string ``key``, and a
-    string ``type``. The returned mapping is keyed by canonical plugin names.
-    """
-    config = _load_raw_plugin_store_config()
+
+def _validate_plugin_store_config(
+    config: RawPluginStoreConfig | None,
+) -> dict[str, RoomFeatureConfig]:
+    """Validate and normalize a raw plugin store config mapping."""
     if config is None:
         return {}
 
@@ -224,9 +264,31 @@ def _validated_plugin_store_config() -> dict[str, RoomFeatureConfig]:
     return validated
 
 
-def _feature_config(plugin: str) -> RoomFeatureConfig:
+def _validated_plugin_store_config() -> dict[str, RoomFeatureConfig]:
+    """Validate and normalize plugin storage configuration.
+
+    Invalid entries are ignored after logging a warning. Valid entries must use
+    a string plugin name, a mapping config, a non-empty string ``key``, and a
+    string ``type``. The returned mapping is keyed by canonical plugin names.
+    """
+    return _validate_plugin_store_config(_load_raw_plugin_store_config())
+
+
+async def _validated_plugin_store_config_async() -> (
+    dict[str, RoomFeatureConfig]
+):
+    """Validate and normalize plugin storage config for async callers."""
+    return _validate_plugin_store_config(
+        await _load_raw_plugin_store_config_async()
+    )
+
+
+def _validate_feature_config(
+    plugin: str,
+    config: Mapping[str, RoomFeatureConfig],
+) -> RoomFeatureConfig:
+    """Return validated storage config for one normalized plugin."""
     plugin = _normalize_plugin_name(plugin)
-    config = _validated_plugin_store_config()
     if plugin not in config:
         available = sorted(config)
         options = ", ".join(available) if available else "<none configured>"
@@ -246,15 +308,26 @@ def _feature_config(plugin: str) -> RoomFeatureConfig:
     return conf
 
 
-def _room_plugin_defaults_source() -> Mapping[str, FeatureFlagValue] | None:
-    """Return raw default mapping from the rooms module.
+def _feature_config(plugin: str) -> RoomFeatureConfig:
+    """Return validated storage config for one plugin feature."""
+    return _validate_feature_config(
+        plugin,
+        _validated_plugin_store_config(),
+    )
 
-    ``get_room_plugin_defaults()`` is preferred because it can merge
-    ``config.py`` overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
-    supported for older rooms modules. Non-mapping providers are logged and
-    treated as missing defaults.
-    """
-    rooms = _rooms_module()
+
+async def _feature_config_async(plugin: str) -> RoomFeatureConfig:
+    """Return validated storage config for one plugin in async code."""
+    return _validate_feature_config(
+        plugin,
+        await _validated_plugin_store_config_async(),
+    )
+
+
+def _defaults_from_rooms_module(
+    rooms: types.ModuleType,
+) -> Mapping[str, FeatureFlagValue] | None:
+    """Return raw default mapping exposed by a rooms module instance."""
     defaults_provider = getattr(rooms, "get_room_plugin_defaults", None)
     if callable(defaults_provider):
         raw_defaults = defaults_provider()
@@ -278,17 +351,28 @@ def _room_plugin_defaults_source() -> Mapping[str, FeatureFlagValue] | None:
     return None
 
 
-def _resolved_plugin_defaults() -> FeatureFlagState:
-    """Return validated room plugin defaults from the rooms module.
+def _room_plugin_defaults_source() -> Mapping[str, FeatureFlagValue] | None:
+    """Return raw default mapping from the rooms module.
 
-    Values are normalized to booleans and malformed entries are skipped with a
-    warning instead of invalidating the whole mapping. The result is
-    intentionally not cached here because the underlying defaults can change at
-    runtime after ``config reload``. Callers that need to reuse defaults across
-    multiple feature lookups should pass one resolved mapping through the
-    current operation.
+    ``get_room_plugin_defaults()`` is preferred because it can merge
+    ``config.py`` overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
+    supported for older rooms modules. Non-mapping providers are logged and
+    treated as missing defaults.
     """
-    defaults = _room_plugin_defaults_source()
+    return _defaults_from_rooms_module(_rooms_module())
+
+
+async def _room_plugin_defaults_source_async() -> (
+    Mapping[str, FeatureFlagValue] | None
+):
+    """Return raw default mapping from the rooms module in async code."""
+    return _defaults_from_rooms_module(await _rooms_module_async())
+
+
+def _validate_plugin_defaults(
+    defaults: Mapping[str, FeatureFlagValue] | None,
+) -> FeatureFlagState:
+    """Normalize a raw room plugin defaults mapping."""
     if defaults is None:
         return {}
 
@@ -315,18 +399,48 @@ def _resolved_plugin_defaults() -> FeatureFlagState:
     return validated
 
 
+def _resolved_plugin_defaults() -> FeatureFlagState:
+    """Return validated room plugin defaults from the rooms module.
+
+    Values are normalized to booleans and malformed entries are skipped with a
+    warning instead of invalidating the whole mapping. The result is
+    intentionally not cached here because the underlying defaults can change at
+    runtime after ``config reload``. Callers that need to reuse defaults across
+    multiple feature lookups should pass one resolved mapping through the
+    current operation.
+    """
+    return _validate_plugin_defaults(_room_plugin_defaults_source())
+
+
+async def _resolved_plugin_defaults_async() -> FeatureFlagState:
+    """Return validated room plugin defaults in async code."""
+    return _validate_plugin_defaults(
+        await _room_plugin_defaults_source_async()
+    )
+
+
 def clear_room_feature_caches() -> None:
-    """Clear cached room feature module lookups."""
-    global _ROOMS_MODULE
+    """Clear cached room feature module lookups.
+
+    This function is thread-safe: it acquires ``_ROOMS_MODULE_LOCK`` before
+    resetting cached module state. Call this when the rooms module or its
+    feature metadata may have changed at runtime, for example in tests, bot
+    reloads, or config reloads. The async cache lock is also reset so the next
+    async lookup creates a lock bound to the currently running event loop.
+    """
+    global _ROOMS_MODULE, _ROOMS_MODULE_ASYNC_LOCK
     with _ROOMS_MODULE_LOCK:
         _ROOMS_MODULE = None
+        _ROOMS_MODULE_ASYNC_LOCK = None
 
 
 def available_features() -> list[str]:
+    """Return all configured room-feature names in sorted order."""
     return sorted(_validated_plugin_store_config())
 
 
 def is_known_feature(plugin: str) -> bool:
+    """Return whether a plugin name or alias is a configured feature."""
     return _normalize_plugin_name(plugin) in _validated_plugin_store_config()
 
 
@@ -424,7 +538,7 @@ async def _state_for(
         that default.
     """
     plugin = _normalize_plugin_name(plugin)
-    conf = _feature_config(plugin)
+    conf = await _feature_config_async(plugin)
     state = await _room_feature_map(bot, plugin, conf)
     default = defaults.get(plugin, False)
     enabled = _coerce_feature_flag(state.get(room_jid), fallback=default)
@@ -439,7 +553,13 @@ async def _state_for(
 async def get_room_feature(
     bot: BotProtocol, room_jid: str, plugin: str
 ) -> RoomFeatureState:
-    defaults = _resolved_plugin_defaults()
+    """Return the effective state for one room-scoped plugin feature.
+
+    The plugin name is normalized, room-specific stored state is loaded from
+    the configured plugin runtime store, and the result is combined with the
+    current resolved defaults.
+    """
+    defaults = await _resolved_plugin_defaults_async()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
@@ -465,8 +585,15 @@ def _updated_feature_state(
 async def set_room_feature(
     bot: BotProtocol, room_jid: str, plugin: str, enabled: bool
 ) -> RoomFeatureState:
+    """Persist a room-specific plugin feature override.
+
+    Updates are delegated to the plugin runtime store via ``update_global`` so
+    the backend can serialize or atomically apply read-modify-write changes.
+    The returned state reflects the persisted override combined with the
+    current resolved defaults.
+    """
     plugin = _normalize_plugin_name(plugin)
-    conf = _feature_config(plugin)
+    conf = await _feature_config_async(plugin)
     store = bot.db.users.plugin(plugin)
     updater = partial(
         _updated_feature_state,
@@ -476,7 +603,7 @@ async def set_room_feature(
 
     await store.update_global(conf["key"], updater, default={})
 
-    defaults = _resolved_plugin_defaults()
+    defaults = await _resolved_plugin_defaults_async()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
@@ -500,8 +627,15 @@ async def list_room_features(
     bot: BotProtocol,
     room_jid: str,
 ) -> list[RoomFeatureState]:
-    names = available_features()
-    defaults = _resolved_plugin_defaults()
+    """Return all configured room-feature states for one room.
+
+    Plugin storage configuration and defaults are resolved once for this list
+    operation, then each feature state is fetched concurrently. Errors are
+    wrapped with the affected plugin and room to make broken feature metadata
+    easier to diagnose.
+    """
+    names = sorted(await _validated_plugin_store_config_async())
+    defaults = await _resolved_plugin_defaults_async()
     coroutines = [
         _state_for_list_entry(bot, room_jid, name, defaults=defaults)
         for name in names
