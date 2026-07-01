@@ -374,7 +374,8 @@ async def test_list_room_features_reports_failing_feature(monkeypatch):
         )
 
     assert str(exc_info.value) == (
-        "Failed to fetch room feature state for 'legacy'"
+        "Failed to fetch room feature state for 'legacy' "
+        "in room 'room@conf'"
     )
     assert isinstance(exc_info.value.__cause__, ValueError)
 

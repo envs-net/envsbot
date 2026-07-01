@@ -232,8 +232,7 @@ def _resolved_plugin_defaults() -> dict[str, bool]:
 
 
 def _plugin_defaults() -> dict[str, bool]:
-    # Return a copy so callers cannot mutate the resolved defaults.
-    return dict(_resolved_plugin_defaults())
+    return _resolved_plugin_defaults()
 
 
 def clear_room_feature_caches() -> None:
@@ -309,10 +308,19 @@ async def _state_for(
 ) -> RoomFeatureState:
     """Compute the effective feature state for one plugin in one room.
 
-    ``defaults`` contains the already-resolved plugin defaults for this
-    request. The returned state combines the stored room-specific override
-    with that default and marks whether the effective value differs from the
-    default.
+    Args:
+        bot: Bot instance providing access to the plugin runtime store.
+        room_jid: Room identifier whose stored override should be resolved.
+        plugin: Plugin feature name to resolve; aliases are normalized.
+        defaults: Pre-resolved per-plugin default flags for the current
+            request. Callers pass this mapping in so operations that resolve
+            multiple features can compute defaults once and use a consistent
+            snapshot across all returned states.
+
+    Returns:
+        A ``RoomFeatureState`` combining the stored room override with the
+        resolved default, including whether the effective value differs from
+        that default.
     """
     plugin = _normalize_plugin_name(plugin)
     conf = _feature_config(plugin)
@@ -382,7 +390,8 @@ async def _state_for_list_entry(
         return await _state_for(bot, room_jid, plugin, defaults=defaults)
     except Exception as exc:
         raise RuntimeError(
-            f"Failed to fetch room feature state for {plugin!r}"
+            f"Failed to fetch room feature state for {plugin!r} "
+            f"in room {room_jid!r}"
         ) from exc
 
 
