@@ -365,7 +365,7 @@ async def test_room_feature_ignores_malformed_backend_state(monkeypatch):
 async def test_list_room_features_reuses_defaults(monkeypatch):
     calls = 0
 
-    def defaults():
+    def counting_defaults_provider():
         nonlocal calls
         calls += 1
         return {"information": True, "karma": False}
@@ -376,7 +376,7 @@ async def test_list_room_features_reuses_defaults(monkeypatch):
             "information": {"type": "dict", "key": "INFO_ENABLED"},
             "karma": {"type": "dict", "key": "KARMA_ENABLED"},
         },
-        defaults_provider=defaults,
+        defaults_provider=counting_defaults_provider,
     )
 
     listed = await room_features.list_room_features(
@@ -559,7 +559,7 @@ async def test_defaults_provider_precedence_and_validation_via_public_api(
 ):
     provider_calls = 0
 
-    def defaults_provider():
+    def counting_defaults_provider():
         nonlocal provider_calls
         provider_calls += 1
         return {"info": "yes", "karma": "0", "bad": object()}
@@ -571,7 +571,7 @@ async def test_defaults_provider_precedence_and_validation_via_public_api(
             "karma": {"type": "dict", "key": "KARMA_ENABLED"},
         },
         plugin_defaults={"info": False},
-        defaults_provider=defaults_provider,
+        defaults_provider=counting_defaults_provider,
     )
 
     with caplog.at_level(logging.WARNING):
