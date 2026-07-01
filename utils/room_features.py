@@ -87,7 +87,8 @@ def _rooms_module() -> types.ModuleType:
             from core_plugins import rooms
 
             _ROOMS_MODULE = rooms
-        return _ROOMS_MODULE
+        module = _ROOMS_MODULE
+    return module
 
 
 def _normalize_plugin_name(name: str) -> str:
