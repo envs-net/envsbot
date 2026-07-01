@@ -48,6 +48,22 @@ class CopyingSlowStore(DummyStore):
             self.data[key] = value
 
 
+@pytest.mark.asyncio
+async def test_copying_slow_store_copies_dicts_on_set_and_get():
+    store = CopyingSlowStore()
+
+    original = {"enabled": True}
+    await store.set_global("PIN", original)
+    original["enabled"] = False
+
+    assert store.data["PIN"] == {"enabled": True}
+
+    read_value = await store.get_global("PIN")
+    read_value["enabled"] = False
+
+    assert store.data["PIN"] == {"enabled": True}
+
+
 class DummyUsers:
     def __init__(self, store):
         self.store = store
@@ -245,7 +261,7 @@ def test_room_feature_name_aliases_and_format(monkeypatch):
     ],
 )
 @pytest.mark.asyncio
-async def test_room_feature_flag_defaults_are_normalized_via_public_api(
+async def test_room_feature_flag_defaults_are_normalized(
     monkeypatch, raw_default, expected
 ):
     _install_room_features_module(
@@ -294,7 +310,7 @@ async def test_room_feature_missing_state_uses_default_fallback(monkeypatch):
     ],
 )
 @pytest.mark.asyncio
-async def test_invalid_room_feature_defaults_are_ignored_via_public_api(
+async def test_invalid_room_feature_defaults_are_ignored(
     monkeypatch, caplog, bad_default
 ):
     _install_room_features_module(
@@ -554,7 +570,7 @@ async def test_room_feature_set_rejects_unsupported_list_storage(
 
 
 @pytest.mark.asyncio
-async def test_defaults_provider_precedence_and_validation_via_public_api(
+async def test_defaults_provider_overrides_static_defaults_and_validates_types(
     monkeypatch, caplog
 ):
     provider_calls = 0
@@ -589,7 +605,7 @@ async def test_defaults_provider_precedence_and_validation_via_public_api(
 
 
 @pytest.mark.asyncio
-async def test_static_defaults_fallback_and_provider_errors_via_public_api(
+async def test_static_defaults_fallback_when_provider_invalid_or_fails(
     monkeypatch, caplog
 ):
     _install_room_features_module(

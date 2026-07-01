@@ -295,14 +295,6 @@ def _validate_feature_config(
     return conf
 
 
-def _feature_config(plugin: str) -> RoomFeatureConfig:
-    """Return validated storage config for one plugin feature."""
-    return _validate_feature_config(
-        plugin,
-        _validated_plugin_store_config(),
-    )
-
-
 async def _feature_config_async(plugin: str) -> RoomFeatureConfig:
     """Return validated storage config for one plugin in async code."""
     return _validate_feature_config(
@@ -347,28 +339,6 @@ def _plugin_defaults_attribute(
     )
 
 
-def _defaults_from_rooms_module(
-    rooms: types.ModuleType,
-) -> Mapping[str, FeatureFlagValue] | None:
-    """Return raw default mapping exposed by a rooms module instance."""
-    defaults_provider = _plugin_defaults_provider(rooms)
-    if defaults_provider is not None:
-        try:
-            raw_defaults = defaults_provider()
-        except Exception:
-            log.exception(
-                "[ROOM_FEATURES] get_room_plugin_defaults() failed while "
-                "resolving room plugin defaults"
-            )
-            return None
-        return _validate_raw_plugin_defaults(
-            raw_defaults,
-            "get_room_plugin_defaults() result",
-        )
-
-    return _plugin_defaults_attribute(rooms)
-
-
 async def _defaults_from_rooms_module_async(
     rooms: types.ModuleType,
 ) -> Mapping[str, FeatureFlagValue] | None:
@@ -389,17 +359,6 @@ async def _defaults_from_rooms_module_async(
         )
 
     return _plugin_defaults_attribute(rooms)
-
-
-def _room_plugin_defaults_source() -> Mapping[str, FeatureFlagValue] | None:
-    """Return raw default mapping from the rooms module.
-
-    ``get_room_plugin_defaults()`` is preferred because it can merge
-    ``config.py`` overrides with built-in defaults. ``PLUGIN_DEFAULTS`` remains
-    supported for older rooms modules. Non-mapping providers are logged and
-    treated as missing defaults.
-    """
-    return _defaults_from_rooms_module(_rooms_module())
 
 
 async def _room_plugin_defaults_source_async() -> (
@@ -437,19 +396,6 @@ def _validate_plugin_defaults(
                 exc,
             )
     return validated
-
-
-def _resolved_plugin_defaults() -> FeatureFlagState:
-    """Return validated room plugin defaults from the rooms module.
-
-    Values are normalized to booleans and malformed entries are skipped with a
-    warning instead of invalidating the whole mapping. The result is
-    intentionally not cached here because the underlying defaults can change at
-    runtime after ``config reload``. Callers that need to reuse defaults across
-    multiple feature lookups should pass one resolved mapping through the
-    current operation.
-    """
-    return _validate_plugin_defaults(_room_plugin_defaults_source())
 
 
 async def _resolved_plugin_defaults_async() -> FeatureFlagState:
