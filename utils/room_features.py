@@ -334,7 +334,7 @@ async def _state_for(
 async def get_room_feature(
     bot: BotProtocol, room_jid: str, plugin: str
 ) -> RoomFeatureState:
-    defaults = _plugin_defaults()
+    defaults = _resolved_plugin_defaults()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
@@ -371,7 +371,7 @@ async def set_room_feature(
 
     await store.update_global(conf["key"], updater, default={})
 
-    defaults = _plugin_defaults()
+    defaults = _resolved_plugin_defaults()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
 
 
@@ -396,7 +396,7 @@ async def list_room_features(
     room_jid: str,
 ) -> list[RoomFeatureState]:
     names = available_features()
-    defaults = _plugin_defaults()
+    defaults = _resolved_plugin_defaults()
     coroutines = [
         _state_for_list_entry(bot, room_jid, name, defaults=defaults)
         for name in names
