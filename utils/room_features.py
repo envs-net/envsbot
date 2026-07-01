@@ -231,10 +231,6 @@ def _resolved_plugin_defaults() -> dict[str, bool]:
     return validated
 
 
-def _plugin_defaults() -> dict[str, bool]:
-    return _resolved_plugin_defaults()
-
-
 def clear_room_feature_caches() -> None:
     """Clear cached room feature module lookups."""
     global _ROOMS_MODULE
