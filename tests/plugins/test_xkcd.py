@@ -301,9 +301,24 @@ def test_xkcd_index_and_search_helpers(monkeypatch):
         "11": {"title": "Other", "alt": "A python alt"},
         "12": "ignored",
     }
-    assert [item["id"] for item in xkcd._search_xkcd_index(index, "python")] == [10, 11]
-    assert xkcd._parse_xkcd_search_args(["search", "python", "3"]) == (3, "python")
-    assert xkcd._parse_xkcd_search_args(["search", "python", "comic"]) == (1, "python comic")
+    assert [item["id"] for item in xkcd._search_xkcd_index(index, "python")] == [
+        10,
+        11,
+    ]
+    assert xkcd._parse_xkcd_search_args(["search", "python", "3"]) == (
+        3,
+        "python",
+    )
+    assert xkcd._parse_xkcd_search_args(["search", "python", "comic"]) == (
+        1,
+        "python comic",
+    )
+    assert xkcd._parse_xkcd_search_args(["search", ""]) == (1, "")
+    assert xkcd._parse_xkcd_search_args(["search", "2"]) == (1, "2")
+    assert xkcd._parse_xkcd_search_args(["search", "python", "-2"]) == (
+        1,
+        "python -2",
+    )
     assert xkcd._truncate_alt_text("x" * 81).endswith("...")
     assert xkcd._truncate_alt_text("short") == "short"
 
@@ -373,8 +388,16 @@ async def test_broadcast_comic_only_sends_to_joined_rooms(monkeypatch, mock_bot)
 async def test_xkcd_command_handlers(monkeypatch, mock_bot):
     msg = {"from": "user@example.org/resource"}
 
-    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value={"num": 20, "img": "/a.png"}))
-    monkeypatch.setattr(xkcd, "get_xkcd", AsyncMock(return_value={"num": 4, "img": "/b.png"}))
+    monkeypatch.setattr(
+        xkcd,
+        "get_latest_xkcd",
+        AsyncMock(return_value={"num": 20, "img": "/a.png"}),
+    )
+    monkeypatch.setattr(
+        xkcd,
+        "get_xkcd",
+        AsyncMock(return_value={"num": 4, "img": "/b.png"}),
+    )
     send_room = AsyncMock()
     send_dm = AsyncMock()
     monkeypatch.setattr(xkcd, "send_xkcd_room", send_room)
@@ -394,11 +417,39 @@ async def test_xkcd_command_handlers(monkeypatch, mock_bot):
     await xkcd._handle_latest_xkcd(mock_bot, msg, "room@conf", "user@example.org", False)
     assert send_dm.await_count >= 2
 
-    assert await xkcd._handle_specific_xkcd(mock_bot, msg, ["not-a-number"], "room", "jid", False) is False
+    assert await xkcd._handle_specific_xkcd(
+        mock_bot,
+        msg,
+        ["not-a-number"],
+        "room",
+        "jid",
+        False,
+    ) is False
     assert await xkcd._handle_specific_xkcd(mock_bot, msg, ["404"], "room", "jid", False) is True
     assert "does not exist" in mock_bot.reply.call_args[0][1]
     assert await xkcd._handle_specific_xkcd(mock_bot, msg, ["0"], "room", "jid", False) is True
     assert "1 or greater" in mock_bot.reply.call_args[0][1]
+
+    send_dm.reset_mock()
+    mock_bot.reply.reset_mock()
+    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value=None))
+    await xkcd._handle_latest_xkcd(mock_bot, msg, "room@conf", "jid", False)
+    send_dm.assert_not_awaited()
+    assert "Failed to fetch latest XKCD" in mock_bot.reply.call_args[0][1]
+
+    send_dm.reset_mock()
+    mock_bot.reply.reset_mock()
+    monkeypatch.setattr(xkcd, "get_xkcd", AsyncMock(return_value=None))
+    assert await xkcd._handle_specific_xkcd(
+        mock_bot,
+        msg,
+        ["7"],
+        "room@conf",
+        "jid",
+        False,
+    ) is True
+    send_dm.assert_not_awaited()
+    assert "XKCD #7 not found" in mock_bot.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio
@@ -406,6 +457,15 @@ async def test_xkcd_search_handler_branches(monkeypatch, mock_bot):
     msg = {"from": "user@example.org/resource"}
 
     await xkcd._handle_xkcd_search(mock_bot, msg, ["search"], ["search"], ",")
+    assert "Usage" in mock_bot.reply.call_args[0][1]
+
+    await xkcd._handle_xkcd_search(
+        mock_bot,
+        msg,
+        ["search", ""],
+        ["search", ""],
+        ",",
+    )
     assert "Usage" in mock_bot.reply.call_args[0][1]
 
     store = DummyXkcdStore({xkcd.XKCD_INDEX_KEY: {}})
@@ -423,6 +483,24 @@ async def test_xkcd_search_handler_branches(monkeypatch, mock_bot):
 
     await xkcd._handle_xkcd_search(mock_bot, msg, ["search", "missing"], ["search", "missing"], ",")
     assert "No XKCDs found" in mock_bot.reply.call_args[0][1]
+
+    await xkcd._handle_xkcd_search(
+        mock_bot,
+        msg,
+        ["search", "2"],
+        ["search", "2"],
+        ",",
+    )
+    assert "No XKCDs found matching '2'" in mock_bot.reply.call_args[0][1]
+
+    await xkcd._handle_xkcd_search(
+        mock_bot,
+        msg,
+        ["search", "python", "-2"],
+        ["search", "python", "-2"],
+        ",",
+    )
+    assert "No XKCDs found matching 'python -2'" in mock_bot.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio
@@ -545,11 +623,31 @@ async def test_catch_up_missing_comics_skips_missing_fetches_and_persists(monkey
     assert fetched == [405, 406]
     assert indexed == [405]
     assert broadcasted == [405]
-    assert saved == [404, 405]
-    assert xkcd.LAST_COMIC_ID == 405
+    assert saved == [404, 405, 406]
+    assert xkcd.LAST_COMIC_ID == 406
 
     await xkcd.catch_up_missing_comics(bot, 10, 9)
     assert fetched == [405, 406]
+
+    fetched.clear()
+    indexed.clear()
+    broadcasted.clear()
+    saved.clear()
+    xkcd.LAST_COMIC_ID = 404
+
+    async def fake_get_with_consecutive_missing(comic_id, session=None):
+        fetched.append(comic_id)
+        if comic_id in {405, 406, 407}:
+            return None
+        return {"num": comic_id, "title": str(comic_id), "img": "/comic.png"}
+
+    monkeypatch.setattr(xkcd, "get_xkcd", fake_get_with_consecutive_missing)
+    await xkcd.catch_up_missing_comics(bot, 404, 408)
+    assert fetched == [405, 406, 407, 408]
+    assert indexed == [408]
+    assert broadcasted == [408]
+    assert saved == [404, 405, 406, 407, 408]
+    assert xkcd.LAST_COMIC_ID == 408
 
 
 @pytest.mark.asyncio
@@ -605,6 +703,11 @@ async def test_cancel_task_none_done_cancelled_and_error(caplog):
     error_task = xkcd.asyncio.create_task(failing_on_cancel())
     await xkcd.asyncio.sleep(0)
     await xkcd._cancel_task(error_task, "error")
+    assert error_task.done()
+    assert not error_task.cancelled()
+    task_exception = error_task.exception()
+    assert isinstance(task_exception, RuntimeError)
+    assert str(task_exception) == "boom"
     assert "Error while cancelling error task" in caplog.text
 
 

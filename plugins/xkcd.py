@@ -471,6 +471,10 @@ async def catch_up_missing_comics(bot, start_id: int, end_id: int):
             comic = await get_xkcd(comic_id, session=session)
             if not comic:
                 log.warning("[XKCD] Could not fetch comic #%s", comic_id)
+                # XKCD has permanent gaps; advance so catch-up cannot get
+                # stuck retrying missing IDs forever.
+                LAST_COMIC_ID = comic_id
+                await save_last_comic_id(bot, comic_id)
                 continue
 
             await add_comic_to_index(bot, comic)
