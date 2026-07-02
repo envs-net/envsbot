@@ -115,14 +115,15 @@ async def test_fetch_xkcd_exception(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_latest_xkcd(monkeypatch):
-    called = {}
+    fetch_call_info = {}
 
     async def fakefetch(url, session=None):
-        called['url'] = url
+        fetch_call_info['url'] = url
         return {"num": 2222}
     monkeypatch.setattr(xkcd, "fetch_xkcd", fakefetch)
     result = await xkcd.get_latest_xkcd()
-    assert "url" in called and xkcd.XKCD_LATEST_URL in called["url"]
+    assert "url" in fetch_call_info
+    assert xkcd.XKCD_LATEST_URL in fetch_call_info["url"]
     assert result["num"] == 2222
 
 
@@ -306,12 +307,12 @@ def test_xkcd_index_and_search_helpers(monkeypatch):
     assert xkcd._truncate_alt_text("x" * 81).endswith("...")
     assert xkcd._truncate_alt_text("short") == "short"
 
-    picks = iter([404, 5])
+    mocked_random_sequence = iter([404, 5])
 
     def fake_randint(start, end):
         assert start == 1
         assert end == 500
-        return next(picks)
+        return next(mocked_random_sequence)
 
     monkeypatch.setattr(xkcd.random, "randint", fake_randint)
     assert xkcd._pick_valid_random_xkcd_id(500) == 5
@@ -351,7 +352,7 @@ async def test_index_single_xkcd_comic_success_failure_and_cancel(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_broadcast_comic_only_sends_to_joined_rooms(monkeypatch, mock_bot):
-    sent = []
+    sent_rooms = []
     monkeypatch.setattr(xkcd, "get_subscribed_rooms", AsyncMock(return_value=[
         "joined@conf",
         "missing@conf",
@@ -359,13 +360,13 @@ async def test_broadcast_comic_only_sends_to_joined_rooms(monkeypatch, mock_bot)
     def record_sent_room(bot, room, comic):
         assert bot is mock_bot
         assert comic == {"num": 9}
-        sent.append(room)
+        sent_rooms.append(room)
 
     monkeypatch.setattr(xkcd, "send_xkcd_room", AsyncMock(side_effect=record_sent_room))
     monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock())
     monkeypatch.setitem(xkcd.JOINED_ROOMS, "joined@conf", {"nicks": {}})
     await xkcd.broadcast_comic_to_subscribed_rooms(mock_bot, {"num": 9})
-    assert sent == ["joined@conf"]
+    assert sent_rooms == ["joined@conf"]
 
 
 @pytest.mark.asyncio
@@ -496,16 +497,16 @@ async def test_build_full_index_handles_missing_up_to_date_and_indexes(monkeypat
     index_mock.assert_not_awaited()
 
     store._globals[xkcd.XKCD_INDEX_KEY] = {"1": {"title": "one", "alt": ""}}
-    calls = []
+    indexed_comic_ids = []
 
     async def fake_index_single(comic_id, session, store_arg, search_index, indexed, failed):
-        calls.append(comic_id)
+        indexed_comic_ids.append(comic_id)
         search_index[str(comic_id)] = {"title": str(comic_id), "alt": ""}
         return indexed + 1, failed
 
     monkeypatch.setattr(xkcd, "_index_single_xkcd_comic", fake_index_single)
     await xkcd.build_full_index(bot)
-    assert calls == [2, 3]
+    assert indexed_comic_ids == [2, 3]
     assert store._globals[xkcd.XKCD_INDEX_KEY]["2"] == {"title": "2", "alt": ""}
     assert store._globals[xkcd.XKCD_INDEX_KEY]["3"] == {"title": "3", "alt": ""}
 
