@@ -1202,3 +1202,21 @@ async def on_unload(bot):
 
     except Exception as exc:
         log.exception("[REMINDER] Error during plugin unload: %s", exc)
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Cancel and delete pending reminders for a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    await _init_reminder_db(bot)
+    pending = await _get_all_pending_reminders(bot)
+    room_ids = [
+        int(reminder["id"])
+        for reminder in pending
+        if str(reminder.get("room_jid") or "").split("/", 1)[0].strip().lower() == target
+    ]
+
+    cancelled = await _cancel_active_tasks_for_room(bot, room_jid)
+    for reminder_id in room_ids:
+        await _delete_reminder(bot, reminder_id)
+
+    return {"reminders": len(room_ids), "tasks": cancelled}

@@ -970,6 +970,119 @@ async def _validate_grant_change(bot, actor: str, target: str) -> tuple[bool, st
     return True, "", {"actor": actor_jid, "target": target_jid, "user": user}
 
 
+
+async def _resolve_permission_target(bot, query: str) -> tuple[str | None, str]:
+    """Resolve a permission target from bare JID or known nickname."""
+    jid = _parse_user_jid(query)
+    if jid:
+        return jid, "jid"
+
+    matches = await find_users_by_nick_safe(bot, query)
+    if len(matches) == 1:
+        return matches[0], "nick"
+    if len(matches) > 1:
+        return None, "ambiguous"
+    return None, "missing"
+
+
+def _yes_no(value: bool | None) -> str:
+    """Return a compact yes/no/unknown label."""
+    if value is None:
+        return "unknown"
+    return "yes" if value else "no"
+
+
+async def _room_affiliation_status(bot, jid: str, room_jid: str) -> tuple[bool | None, str]:
+    """Return room admin/owner status plus source label."""
+    live = await _live_room_affiliation_allows(bot, jid, room_jid)
+    if live is not None:
+        return live, "live"
+    cached = _cached_room_affiliation_allows(jid, room_jid)
+    if cached:
+        return True, "cache"
+    return None, "unavailable"
+
+
+def _can_manage_plugin_from_diagnostics(
+    role: Role,
+    grants: list[str],
+    room_affiliation: bool | None,
+    plugin: str,
+) -> bool:
+    """Return whether diagnostics predict room-scoped plugin access."""
+    if role <= Role.MODERATOR:
+        return True
+    return bool(room_affiliation and plugin in grants)
+
+
+@command(
+    "users permissions",
+    role=Role.ADMIN,
+    aliases=["user permissions", "users perms", "user perms"],
+)
+async def users_permissions(bot, sender, nick, args, msg, is_room):
+    """Show a user's effective bot and room-scoped plugin permissions."""
+    if not args or len(args) > 2:
+        bot.reply(
+            msg,
+            f"🟡️ Usage: {_command_prefix(bot)}users permissions <jid|nick> [room_jid]",
+        )
+        return
+
+    target, source = await _resolve_permission_target(bot, args[0])
+    if source == "ambiguous":
+        bot.reply(msg, f"🟡️ Nick is ambiguous: {args[0]}")
+        return
+    if not target:
+        bot.reply(msg, f"🟡️ User not found: {args[0]}")
+        return
+
+    user = await bot.db.users.get(target)
+    role = Role.OWNER if _is_config_owner(target) else _role_from_user(user)
+    grants = await get_user_plugin_grants(bot, target)
+    grants_text = ", ".join(grants) if grants else "none"
+
+    lines = [
+        "🔎 Permission diagnostics",
+        f"User: {target}",
+        f"Resolved by: {source}",
+        f"Bot role: {_role_label(role)}",
+        f"Plugin grants: {grants_text}",
+    ]
+
+    if len(args) == 2:
+        room_jid = str(args[1]).strip().lower()
+        room_affiliation, source_label = await _room_affiliation_status(
+            bot,
+            target,
+            room_jid,
+        )
+        room_manage = bool(role <= Role.MODERATOR or room_affiliation)
+        lines.extend([
+            f"Room: {room_jid}",
+            f"Room admin/owner: {_yes_no(room_affiliation)} ({source_label})",
+            f"Can manage room settings: {_yes_no(room_manage)}",
+            "Plugin access:",
+        ])
+        for plugin in GRANTABLE_PLUGINS:
+            allowed = _can_manage_plugin_from_diagnostics(
+                role,
+                grants,
+                room_affiliation,
+                plugin,
+            )
+            reason = "global role" if role <= Role.MODERATOR else (
+                "grant + room admin/owner" if allowed else "missing grant or room affiliation"
+            )
+            lines.append(f"• {plugin}: {_yes_no(allowed)} ({reason})")
+    else:
+        lines.extend([
+            "Room: —",
+            "Pass a room JID to include room affiliation and plugin access.",
+        ])
+
+    bot.reply(msg, "\n".join(lines))
+
 @command(
     "users grant",
     role=Role.ADMIN,

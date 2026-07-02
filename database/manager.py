@@ -5,6 +5,7 @@ import aiosqlite
 from .users import UserManager
 from .rooms import Rooms
 from .audit import AuditLog
+from .migrations import available_migrations
 
 # logger for this module
 log = logging.getLogger(__name__)
@@ -55,11 +56,7 @@ class DatabaseManager:
         self.audit = AuditLog(self.conn)
 
         await self._init_schema_migrations()
-        await self.users.init()
-        await self.rooms.init()
-        await self.audit.init()
-        await self.mark_migration_applied("0001_initial_runtime_tables")
-        await self.mark_migration_applied("0002_audit_log")
+        await self.run_migrations()
 
         # add asyncio sqlite3 stop event
         self._stop_event = asyncio.Event()
@@ -99,6 +96,27 @@ class DatabaseManager:
             "SELECT version, applied_at FROM schema_migrations ORDER BY version"
         )
         return await cursor.fetchall()
+
+
+    async def applied_migration_versions(self) -> set[str]:
+        """Return migration versions that have already been applied."""
+        rows = await self.list_migrations()
+        return {row["version"] for row in rows}
+
+    async def run_migrations(self):
+        """Run all pending database migrations in order."""
+        applied = await self.applied_migration_versions()
+        for migration in available_migrations():
+            if migration.version in applied:
+                continue
+            log.info(
+                "[DatabaseManager] Applying migration %s: %s",
+                migration.version,
+                migration.description,
+            )
+            await migration.run(self)
+            await self.mark_migration_applied(migration.version)
+            applied.add(migration.version)
 
     async def _flush_loop(self):
         """Background loop that flushes data periodically with retry logic."""

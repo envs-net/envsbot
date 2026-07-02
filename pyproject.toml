@@ -52,6 +52,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.scripts]
+envsbot = "envsbot:cli"
+
 [project.optional-dependencies]
 dev = [
     "black>=24.0",

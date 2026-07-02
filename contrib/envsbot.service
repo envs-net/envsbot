@@ -1,0 +1,25 @@
+[Unit]
+Description=EnvsBot XMPP bot
+Documentation=https://github.com/envs-net/envsbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=envsbot
+Group=envsbot
+WorkingDirectory=/srv/envsbot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/srv/envsbot/.venv/bin/envsbot
+Restart=on-failure
+RestartSec=10
+
+# Basic hardening. Adjust ReadWritePaths when using a different data/log path.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/envsbot
+
+[Install]
+WantedBy=multi-user.target

@@ -938,6 +938,51 @@ async def test_room_plugin_grant_falls_back_to_cache_on_partial_query_failure():
         core_plugins.rooms.JOINED_ROOMS.update(old_rooms)
 
 
+@pytest.mark.asyncio
+async def test_users_permissions_reports_role_grants_and_room_access(mock_msg):
+    class Store:
+        async def get(self, jid, key):
+            assert jid == "alice@example.org"
+            assert key == users_mod.GRANTS_FIELD
+            return ["rss"]
+
+    class MucPlugin:
+        async def get_affiliation_list(self, room, affiliation):
+            assert room == "room@conference.example.org"
+            if affiliation == "owner":
+                return []
+            if affiliation == "admin":
+                return [{"jid": "alice@example.org/resource"}]
+            return []
+
+    bot = MagicMock()
+    bot.db.users.get = AsyncMock(return_value={
+        "jid": "alice@example.org",
+        "role": users_mod.Role.USER.value,
+    })
+    bot.db.users.plugin.return_value = Store()
+    bot.plugin = {"xep_0045": MucPlugin()}
+    bot.prefix = ","
+    bot.reply = MagicMock()
+
+    await users_mod.users_permissions(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["alice@example.org", "room@conference.example.org"],
+        mock_msg,
+        False,
+    )
+
+    reply = bot.reply.call_args.args[1]
+    assert "Permission diagnostics" in reply
+    assert "Bot role: user" in reply
+    assert "Plugin grants: rss" in reply
+    assert "Room admin/owner: yes (live)" in reply
+    assert "• rss: yes (grant + room admin/owner)" in reply
+    assert "• pin: no (missing grant or room affiliation)" in reply
+
+
 def test_normalize_affiliation_result_accepts_dict_keys():
     assert users_mod._normalize_affiliation_result({
         "alice@example.org/resource": {},

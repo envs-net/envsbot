@@ -182,16 +182,6 @@ def get_room_plugin_defaults() -> dict[str, bool]:
         defaults[plugin] = _coerce_room_plugin_default(raw_value, defaults[plugin])
 
     return defaults
-ROOM_DIRECT_DATA_STORES = (
-    ("pin", "PIN_DATA"),
-    ("ducks", "DUCKS_ROOM_INDEX"),
-    ("ducks", "DUCKS_STATE"),
-    ("ducks", "DUCKS_DAILY"),
-    ("ducks", "DUCKS_LAST"),
-)
-ROOM_NESTED_ROOM_MAP_STORES = (
-    ("poll", "POLL_DATA", "rooms"),
-)
 # ------------------------------------------------
 
 
@@ -933,186 +923,32 @@ async def _cleanup_room_toggle_state(bot, room_jid: str) -> int:
     return removed
 
 
-async def _cleanup_direct_room_data(bot, room_jid: str) -> int:
-    """Remove plugin data maps that are keyed directly by room JID."""
-    removed = 0
-    for plugin_name, key in ROOM_DIRECT_DATA_STORES:
-        store = _get_plugin_store(bot, plugin_name)
-        if store is None:
-            continue
-        try:
-            state = await _store_get_global(store, key, default={})
-            if not isinstance(state, dict):
-                continue
-            matching_key = next(
-                (item for item in state if _room_matches(item, room_jid)),
-                None,
-            )
-            if matching_key is None:
-                continue
-            state.pop(matching_key, None)
-            await _store_set_global(store, key, state)
-            removed += 1
-        except Exception:
-            log.warning(
-                "[ROOMS] Could not clean %s data key %s for %s",
-                plugin_name,
-                key,
-                room_jid,
-                exc_info=True,
-            )
-    return removed
+async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
+    """Remove persistent plugin state that targets a deleted room.
 
-
-async def _cleanup_nested_room_maps(bot, room_jid: str) -> int:
-    """Remove plugin data maps that store rooms under a nested field."""
-    removed = 0
-    for plugin_name, key, rooms_field in ROOM_NESTED_ROOM_MAP_STORES:
-        store = _get_plugin_store(bot, plugin_name)
-        if store is None:
-            continue
-        try:
-            state = await _store_get_global(store, key, default={})
-            if not isinstance(state, dict):
-                continue
-            room_map = state.get(rooms_field)
-            if not isinstance(room_map, dict):
-                continue
-            matching_key = next(
-                (item for item in room_map if _room_matches(item, room_jid)),
-                None,
-            )
-            if matching_key is None:
-                continue
-            room_map.pop(matching_key, None)
-            await _store_set_global(store, key, state)
-            removed += 1
-        except Exception:
-            log.warning(
-                "[ROOMS] Could not clean %s nested data %s.%s for %s",
-                plugin_name,
-                key,
-                rooms_field,
-                room_jid,
-                exc_info=True,
-            )
-    return removed
-
-
-def _loaded_plugin_module(bot, plugin_name: str):
-    """Return an already loaded plugin module if the manager exposes one."""
-    manager = getattr(bot, "bot_plugins", None)
-    plugins = getattr(manager, "plugins", None)
-    if isinstance(plugins, dict):
-        return plugins.get(plugin_name)
-    return None
-
-
-async def _cleanup_rss_room_subscriptions(bot, room_jid: str) -> dict[str, int]:
-    """Remove a room from all RSS feed subscriptions."""
-    result = {"rooms": 0, "feeds": 0}
-    store = _get_plugin_store(bot, "rss")
-    if store is None:
-        return result
-
-    feeds = await _store_get_global(store, "RSS", default={})
-    if not isinstance(feeds, dict):
-        return result
-
-    changed = False
-    removed_feed_urls = []
-    for url, feed in tuple(feeds.items()):
-        if not isinstance(feed, dict):
-            continue
-        subscribed_rooms = feed.get("rooms")
-        if not isinstance(subscribed_rooms, list):
-            continue
-
-        remaining_rooms = [
-            item for item in subscribed_rooms
-            if not _room_matches(item, room_jid)
-        ]
-        removed_rooms = len(subscribed_rooms) - len(remaining_rooms)
-        if removed_rooms <= 0:
-            continue
-
-        changed = True
-        result["rooms"] += removed_rooms
-        if remaining_rooms:
-            feed["rooms"] = remaining_rooms
-            continue
-
-        feeds.pop(url, None)
-        removed_feed_urls.append(url)
-        result["feeds"] += 1
-
-    if not changed:
-        return result
-
-    await _store_set_global(store, "RSS", feeds)
-
-    rss_plugin = _loaded_plugin_module(bot, "rss")
-    cancel_feed_task = getattr(rss_plugin, "_cancel_feed_task", None)
-    if callable(cancel_feed_task):
-        for url in removed_feed_urls:
-            try:
-                cancel_feed_task(url)
-            except Exception:
-                log.debug("[ROOMS] Could not cancel RSS task %s", url,
-                          exc_info=True)
-
-    return result
-
-
-async def _cleanup_xkcd_legacy_rooms(bot, room_jid: str) -> int:
-    """Remove room from the legacy XKCD {'rooms': [...]} storage format."""
-    store = _get_plugin_store(bot, "xkcd")
-    if store is None:
-        return 0
-
-    state = await _store_get_global(store, "XKCD", default={})
-    if not isinstance(state, dict):
-        return 0
-    subscribed_rooms = state.get("rooms")
-    if not isinstance(subscribed_rooms, list):
-        return 0
-
-    remaining_rooms = [
-        item for item in subscribed_rooms
-        if not _room_matches(item, room_jid)
-    ]
-    removed = len(subscribed_rooms) - len(remaining_rooms)
-    if removed <= 0:
-        return 0
-
-    if remaining_rooms:
-        state["rooms"] = remaining_rooms
-    else:
-        state.pop("rooms", None)
-    await _store_set_global(store, "XKCD", state)
-    return removed
-
-
-async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict[str, int]:
-    """Remove persistent plugin state that targets a deleted room."""
+    Room toggle state is still owned by the rooms plugin because it is backed
+    by the shared ``PLUGIN_STORE_CONFIG`` table.  Plugin-specific state is
+    delegated to loaded plugin lifecycle hooks via
+    ``PluginManager.cleanup_room_state()``.
+    """
     summary = {
         "toggles": 0,
         "data": 0,
         "rss_subscriptions": 0,
         "rss_feeds": 0,
         "xkcd_legacy_rooms": 0,
+        "plugin_hooks": {},
     }
     try:
         summary["toggles"] = await _cleanup_room_toggle_state(bot, room_jid)
-        summary["data"] += await _cleanup_direct_room_data(bot, room_jid)
-        summary["data"] += await _cleanup_nested_room_maps(bot, room_jid)
-        rss_summary = await _cleanup_rss_room_subscriptions(bot, room_jid)
-        summary["rss_subscriptions"] = rss_summary["rooms"]
-        summary["rss_feeds"] = rss_summary["feeds"]
-        summary["xkcd_legacy_rooms"] = await _cleanup_xkcd_legacy_rooms(
-            bot,
-            room_jid,
-        )
+
+        manager = getattr(bot, "bot_plugins", None)
+        cleanup = getattr(manager, "cleanup_room_state", None)
+        if callable(cleanup):
+            plugin_summary = await _maybe_await_result(cleanup(room_jid))
+            if isinstance(plugin_summary, dict):
+                summary["plugin_hooks"] = plugin_summary
+                _merge_plugin_cleanup_summary(summary, plugin_summary)
     except Exception:
         log.warning(
             "[ROOMS] Plugin cleanup failed for deleted room %s",
@@ -1122,9 +958,54 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict[str, int]:
     return summary
 
 
-def _plugin_cleanup_changed(summary: dict[str, int]) -> bool:
+def _merge_plugin_cleanup_summary(summary: dict, plugin_summary: dict) -> None:
+    """Update legacy summary counters from plugin cleanup hook output."""
+    rss = plugin_summary.get("rss")
+    if isinstance(rss, dict):
+        summary["rss_subscriptions"] = int(rss.get("subscriptions") or 0)
+        summary["rss_feeds"] = int(rss.get("feeds") or 0)
+
+    xkcd = plugin_summary.get("xkcd")
+    if isinstance(xkcd, dict):
+        summary["xkcd_legacy_rooms"] = int(xkcd.get("legacy_rooms") or 0)
+
+    for plugin_name, values in plugin_summary.items():
+        if not isinstance(values, dict) or plugin_name in {"rss", "xkcd"}:
+            continue
+        for key in ("rooms", "data", "reminders"):
+            try:
+                summary["data"] += int(values.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+
+
+def _plugin_cleanup_changed(summary: dict) -> bool:
     """Return True when a plugin cleanup summary removed anything."""
-    return any(int(value or 0) > 0 for value in summary.values())
+    for key, value in summary.items():
+        if key == "plugin_hooks":
+            continue
+        try:
+            if int(value or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return _plugin_hook_cleanup_changed(summary.get("plugin_hooks"))
+
+
+def _plugin_hook_cleanup_changed(plugin_hooks) -> bool:
+    """Return True if any plugin hook summary contains a positive counter."""
+    if not isinstance(plugin_hooks, dict):
+        return False
+    for values in plugin_hooks.values():
+        if not isinstance(values, dict):
+            continue
+        for value in values.values():
+            try:
+                if int(value or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
 
 
 def _room_in_runtime_state(bot, room_jid: str) -> bool:
@@ -2153,7 +2034,8 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
     if not room_invites_enabled():
         bot.reply_error(
             msg,
-            f"Room invite workflow is disabled. Enable ROOM_INVITES_ENABLED in config.py.",
+            "Room invite workflow is disabled. "
+            "Enable ROOM_INVITES_ENABLED in config.py.",
         )
         return
 

@@ -823,3 +823,32 @@ async def on_unload(bot):
         task.cancel()
     AUTO_CLOSE_TASKS.clear()
     log.info("[POLL] Plugin unloaded")
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove poll state and auto-close tasks for a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    cancelled = 0
+    for key, task in list(AUTO_CLOSE_TASKS.items()):
+        task_room = str(key[0]).split("/", 1)[0].strip().lower()
+        if task_room != target:
+            continue
+        AUTO_CLOSE_TASKS.pop(key, None)
+        if task and not task.done():
+            task.cancel()
+            cancelled += 1
+
+    data = await _get_data(bot)
+    rooms = data.get("rooms")
+    removed = 0
+    if isinstance(rooms, dict):
+        matching = next(
+            (room for room in rooms if str(room).split("/", 1)[0].strip().lower() == target),
+            None,
+        )
+        if matching is not None:
+            rooms.pop(matching, None)
+            removed = 1
+            await _set_data(bot, data)
+
+    return {"rooms": removed, "auto_close_tasks": cancelled}

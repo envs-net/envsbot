@@ -746,6 +746,46 @@ class PluginManager:
             if len(failed) > 0:
                 log.warning("[PLUGIN] failed: %s", ", ".join(sorted(failed)))
 
+    async def cleanup_room_state(self, room_jid: str) -> dict[str, dict]:
+        """Ask loaded plugins to clean state for a deleted room.
+
+        Plugins may expose either ``cleanup_room_state(bot, room_jid)`` or the
+        older-compatible ``on_room_delete(bot, room_jid)`` hook.  The hook may
+        be sync or async and should return a dict with cleanup counters.
+        Failures are logged per plugin and returned to the caller instead of
+        aborting the whole room deletion.
+        """
+        summaries = {}
+        for name, module in tuple(self.plugins.items()):
+            hook = getattr(module, "cleanup_room_state", None)
+            if hook is None:
+                hook = getattr(module, "on_room_delete", None)
+            if hook is None:
+                continue
+            if not callable(hook):
+                log.warning(
+                    "[PLUGIN] cleanup_room_state on %s is not callable",
+                    name,
+                )
+                continue
+            try:
+                result = hook(self.bot, room_jid)
+                if inspect.isawaitable(result):
+                    result = await result
+                if result is None:
+                    result = {}
+                if not isinstance(result, dict):
+                    result = {"result": result}
+                summaries[name] = result
+            except Exception as exc:
+                log.exception(
+                    "[PLUGIN] cleanup_room_state failed for %s in %s",
+                    name,
+                    room_jid,
+                )
+                summaries[name] = {"error": str(exc)}
+        return summaries
+
     async def call_on_ready(self):
         """
         Call on_ready() hook for all loaded plugins.

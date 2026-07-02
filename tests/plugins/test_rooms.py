@@ -3,6 +3,11 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import types
 
+import plugins.rss as rss_plugin
+import plugins.xkcd as xkcd_plugin
+import plugins.pin as pin_plugin
+import plugins.poll as poll_plugin
+
 from tests.helpers import PresenceStub, make_presence_stub
 
 # Patch the logging to avoid noisy output
@@ -66,6 +71,7 @@ def fake_bot():
     bot.presence.joined_rooms = {}
     # plugins registry, used by on_load
     bot.bot_plugins = MagicMock()
+    bot.bot_plugins.cleanup_room_state = AsyncMock(return_value={})
     # plugin system
     bot.plugin = {"xep_0045": MagicMock()}
     # DB interface
@@ -373,7 +379,7 @@ class DummyPluginStore(dict):
 
 
 @pytest.mark.asyncio
-async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg):
+async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg, monkeypatch):
     room_jid = "room@conference.domain"
     other_room = "other@conference.domain"
     feed_keep = "https://example.org/keep.xml"
@@ -413,9 +419,19 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg):
         DummyPluginStore(),
     )
     cancel_feed_task = MagicMock()
-    fake_bot.bot_plugins.plugins = {
-        "rss": types.SimpleNamespace(_cancel_feed_task=cancel_feed_task)
-    }
+    monkeypatch.setattr(rss_plugin, "_cancel_feed_task", cancel_feed_task)
+
+    async def cleanup_room_state(room_jid):
+        return {
+            "rss": await rss_plugin.cleanup_room_state(fake_bot, room_jid),
+            "xkcd": await xkcd_plugin.cleanup_room_state(fake_bot, room_jid),
+            "pin": await pin_plugin.cleanup_room_state(fake_bot, room_jid),
+            "poll": await poll_plugin.cleanup_room_state(fake_bot, room_jid),
+        }
+
+    fake_bot.bot_plugins.cleanup_room_state = AsyncMock(
+        side_effect=cleanup_room_state
+    )
     fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))
     fake_bot.db.rooms.delete = AsyncMock()
 
@@ -477,6 +493,15 @@ async def test_rooms_delete_cleans_stale_plugin_state_without_db_room(fake_bot, 
     )
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.db.rooms.delete = AsyncMock()
+
+    async def cleanup_room_state(room_jid):
+        return {
+            "xkcd": await xkcd_plugin.cleanup_room_state(fake_bot, room_jid),
+        }
+
+    fake_bot.bot_plugins.cleanup_room_state = AsyncMock(
+        side_effect=cleanup_room_state
+    )
 
     with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)), \
             patch("core_plugins.rooms.audit_event", AsyncMock()) as audit, \

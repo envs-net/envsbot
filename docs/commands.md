@@ -209,6 +209,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,users grants` | `admin` | `private chat / MUC PM` | Show a user's room-scoped plugin permissions. |
 | `,users info` | `admin` | `private chat / MUC PM` | Show user info by JID or known nickname. |
 | `,users list` | `admin` | `private chat only` | List users currently known in one joined room. |
+| `,users permissions` | `admin` | `private chat / MUC PM` | Diagnose global, room and room-scoped plugin permissions. |
 | `,users revoke` | `admin` | `private chat / MUC PM` | Revoke room-scoped plugin permissions from a user. |
 | `,users role` | `admin` | `private chat / MUC PM` | Change a user's global bot role with hierarchy checks. |
 | `,users roles` | `admin` | `private chat / MUC PM` | Show available roles and their ordering. |
@@ -995,6 +996,23 @@ Aliases: `,user list`
 Examples:
 
 - `,users list test@conference.example.org`
+
+#### `,users permissions`
+
+Diagnose global, room and room-scoped plugin permissions.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `users`<br>
+Usage: `,users permissions <jid|nick> [room_jid]`
+
+Aliases: `,user permissions`, `,user perms`, `,users perms`
+
+Examples:
+
+- `,users permissions alice@example.org`
+- `,users permissions alice@example.org room@conference.example.org`
+- `,users perms alice room@conference.example.org`
 
 #### `,users revoke`
 

@@ -398,6 +398,11 @@ def _now():
     return int(time.time())
 
 
+async def get_rss_store(bot):
+    """Return the runtime store for RSS feed state."""
+    return bot.db.users.plugin("rss")
+
+
 async def get_feeds(store):
     feeds = await store.get_global(RSS_KEY, default={})
     return feeds if isinstance(feeds, dict) else {}
@@ -1413,3 +1418,39 @@ async def on_unload(bot):
             log.exception(f"[RSS] Error cancelling task for {url}: {e}")
 
     log.info("[RSS] ✅ All RSS tasks cleaned up")
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove a deleted room from all RSS subscriptions."""
+    target = _normalize_room_jid(room_jid)
+    store = await get_rss_store(bot)
+    feeds = await get_feeds(store)
+    summary = {"subscriptions": 0, "feeds": 0}
+    changed = False
+    removed_urls = []
+
+    for url, feed in tuple(feeds.items()):
+        if not isinstance(feed, dict):
+            continue
+        rooms = feed.get("rooms")
+        if not isinstance(rooms, list):
+            continue
+        remaining = [room for room in rooms if _normalize_room_jid(room) != target]
+        removed = len(rooms) - len(remaining)
+        if removed <= 0:
+            continue
+        summary["subscriptions"] += removed
+        changed = True
+        if remaining:
+            feed["rooms"] = remaining
+        else:
+            feeds.pop(url, None)
+            removed_urls.append(url)
+            summary["feeds"] += 1
+
+    if changed:
+        await save_feeds(store, feeds)
+        for url in removed_urls:
+            _cancel_feed_task(url)
+
+    return summary

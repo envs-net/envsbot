@@ -280,6 +280,47 @@ async def test_event_task_on_ready_and_detailed_info(monkeypatch):
     assert detailed["core"]["loaded"] == ["help"]
     assert sorted(detailed["plugins"]["available"]) == ["weather", "xkcd"]
 
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_calls_plugin_lifecycle_hooks(caplog):
+    bot = FakeBot()
+    pm = PluginManager(bot)
+
+    async def async_cleanup(bot_arg, room_jid):
+        assert bot_arg is bot
+        assert room_jid == "room@example.org"
+        return {"rooms": 1}
+
+    def legacy_cleanup(bot_arg, room_jid):
+        assert bot_arg is bot
+        assert room_jid == "room@example.org"
+        return {"legacy_rooms": 2}
+
+    def invalid_cleanup(_bot, _room_jid):
+        return "cleaned"
+
+    def broken_cleanup(_bot, _room_jid):
+        raise RuntimeError("boom")
+
+    pm.plugins = {
+        "modern": types.SimpleNamespace(cleanup_room_state=async_cleanup),
+        "legacy": types.SimpleNamespace(on_room_delete=legacy_cleanup),
+        "invalid": types.SimpleNamespace(cleanup_room_state=invalid_cleanup),
+        "broken": types.SimpleNamespace(cleanup_room_state=broken_cleanup),
+        "skipped": types.SimpleNamespace(cleanup_room_state="not-callable"),
+    }
+
+    with caplog.at_level("WARNING"):
+        summary = await pm.cleanup_room_state("room@example.org")
+
+    assert summary["modern"] == {"rooms": 1}
+    assert summary["legacy"] == {"legacy_rooms": 2}
+    assert summary["invalid"] == {"result": "cleaned"}
+    assert summary["broken"] == {"error": "boom"}
+    assert "skipped" not in summary
+    assert "not callable" in caplog.text
+
+
 def test_plugin_manager_list_and_available_use_loaded_and_discovered(monkeypatch):
     pm = PluginManager(FakeBot())
     pm.plugins = {"weather": object(), "help": object()}

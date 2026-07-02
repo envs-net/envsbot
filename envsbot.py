@@ -927,21 +927,30 @@ async def main():
             log.exception(f"[XMPP] Error closing database: {e}")
         log.info("[XMPP] ✅ Database closed! End!")
 
-if __name__ == "__main__":
-    SOURCE = "init_chat_slang.csv"
-    TARGET = "chat_slang.csv"
-    if os.path.exists(SOURCE) and not os.path.exists(TARGET):
+
+
+def copy_initial_chat_slang(source="init_chat_slang.csv", target="chat_slang.csv") -> None:
+    """Copy the default chat slang file into place on first startup."""
+    if os.path.exists(source) and not os.path.exists(target):
         try:
-            shutil.copyfile(SOURCE, TARGET)
-            log.info(f"[INIT] ✅ Copied {SOURCE} to {TARGET}")
+            shutil.copyfile(source, target)
+            log.info("[INIT] ✅ Copied %s to %s", source, target)
         except Exception as e:
-            log.error(f"[INIT] 🔴 Failed to copy {SOURCE} to {TARGET}: {e}")
-    elif not os.path.exists(SOURCE):
-        log.warning(f"[INIT] 🔴 Source file {SOURCE} not found."
-                    "Skipping copy.")
+            log.error("[INIT] 🔴 Failed to copy %s to %s: %s", source, target, e)
+    elif not os.path.exists(source):
+        log.warning("[INIT] 🔴 Source file %s not found. Skipping copy.", source)
     else:
-        log.info("[INIT] ✅ Target file %s already exists. Skipping copy.", TARGET)
+        log.info("[INIT] ✅ Target file %s already exists. Skipping copy.", target)
+
+
+def cli() -> None:
+    """Console-script entrypoint for running envsbot."""
+    copy_initial_chat_slang()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("[INIT] Shutdown requested by keyboard interrupt")
+
+
+if __name__ == "__main__":
+    cli()

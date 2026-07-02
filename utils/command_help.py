@@ -368,6 +368,17 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "context": "private chat / MUC PM",
         "category": "users",
     },
+    "users permissions": {
+        "short": "Diagnose global, room and room-scoped plugin permissions.",
+        "usage": "{prefix}users permissions <jid|nick> [room_jid]",
+        "examples": [
+            "{prefix}users permissions alice@example.org",
+            "{prefix}users permissions alice@example.org room@conference.example.org",
+            "{prefix}users perms alice room@conference.example.org",
+        ],
+        "context": "private chat / MUC PM",
+        "category": "users",
+    },
     "users admins": {
         "short": "List users with admin-level roles.",
         "usage": "{prefix}users admins [all|page|last]",

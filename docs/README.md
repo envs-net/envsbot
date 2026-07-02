@@ -8,6 +8,7 @@ This directory contains the operator and command documentation for EnvsBot.
 - [`help.md`](help.md) - runtime help behavior and usage examples
 - [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, RSS and grants
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
+- [`deployment.md`](deployment.md) - install layout, console entrypoint and systemd unit
 - [`release-checklist.md`](release-checklist.md) - release preparation and tagging checklist
 
 Operational notes:

@@ -793,3 +793,43 @@ async def on_unload(bot):
     NEXT_DUCK_THRESHOLDS.clear()
 
     log.info("[DUCKS] Plugin unloaded")
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove duck runtime and stored room state for a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    summary = {"data": 0, "tasks": 0, "runtime": 0}
+
+    for mapping_name, mapping in (
+        ("spawn", SPAWN_TASKS),
+        ("expire", EXPIRE_TASKS),
+    ):
+        task = mapping.pop(room_jid, None)
+        if task and not task.done():
+            task.cancel()
+            summary["tasks"] += 1
+
+    for mapping in (ACTIVE_DUCKS, MESSAGE_COUNTS, NEXT_DUCK_THRESHOLDS):
+        if room_jid in mapping:
+            mapping.pop(room_jid, None)
+            summary["runtime"] += 1
+    if room_jid in PENDING_DUCKS:
+        PENDING_DUCKS.discard(room_jid)
+        summary["runtime"] += 1
+
+    store = await get_ducks_store(bot)
+    for key in (DUCKS_INDEX_KEY, DUCKS_LAST_KEY, DUCKS_DAILY_KEY, DUCKS_STATE_KEY):
+        state = await store.get_global(key, default={})
+        if not isinstance(state, dict):
+            continue
+        matching = next(
+            (room for room in state if str(room).split("/", 1)[0].strip().lower() == target),
+            None,
+        )
+        if matching is None:
+            continue
+        state.pop(matching, None)
+        await store.set_global(key, state)
+        summary["data"] += 1
+
+    return summary

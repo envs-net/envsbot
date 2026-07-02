@@ -850,3 +850,25 @@ async def on_unload(bot):
     CHECK_TASK = None
 
     log.info("[XKCD] Plugin unloaded")
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove a deleted room from legacy XKCD room-list state."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    store = await get_xkcd_store(bot)
+    state = await store.get_global(XKCD_KEY, default={})
+    if not isinstance(state, dict):
+        return {"legacy_rooms": 0}
+    rooms = state.get("rooms")
+    if not isinstance(rooms, list):
+        return {"legacy_rooms": 0}
+    remaining = [room for room in rooms if str(room).split("/", 1)[0].strip().lower() != target]
+    removed = len(rooms) - len(remaining)
+    if removed <= 0:
+        return {"legacy_rooms": 0}
+    if remaining:
+        state["rooms"] = remaining
+    else:
+        state.pop("rooms", None)
+    await store.set_global(XKCD_KEY, state)
+    return {"legacy_rooms": removed}

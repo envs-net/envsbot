@@ -336,6 +336,18 @@ async def _database_status_lines(bot, *, full: bool = False) -> list[str]:
             value = "unknown"
         lines.append(f"{label}: {value}")
 
+    list_migrations = getattr(db, "list_migrations", None)
+    if callable(list_migrations):
+        try:
+            rows = await list_migrations()
+            versions = [str(row["version"]) for row in rows]
+            lines.append(
+                "Migrations: " + (", ".join(versions) if versions else "none")
+            )
+        except Exception:
+            log.debug("[ADMIN] Could not list schema migrations", exc_info=True)
+            lines.append("Migrations: unknown")
+
     return lines
 
 

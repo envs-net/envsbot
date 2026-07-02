@@ -772,3 +772,18 @@ async def on_load(bot):
         "groupchat_message",
         partial(_on_groupchat_message, bot),
     )
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove all pin data for a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    state = await _load_pin_data(bot)
+    matching = next(
+        (room for room in state if str(room).split("/", 1)[0].strip().lower() == target),
+        None,
+    )
+    if matching is None:
+        return {"rooms": 0}
+    state.pop(matching, None)
+    await _save_pin_data(bot, state)
+    return {"rooms": 1}

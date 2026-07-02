@@ -450,3 +450,5 @@ python scripts/generate_commands_md.py
 ## License
 
 This project is licensed under the **GPL-3.0-only** license. See [`LICENSE`](LICENSE) for details. Future versions of the GPL license are explicitly excluded.
+
+See `docs/README.md` for the full documentation index, including deployment notes in `docs/deployment.md`.
