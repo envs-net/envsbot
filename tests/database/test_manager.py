@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import aiosqlite
 from unittest.mock import AsyncMock
@@ -94,7 +96,7 @@ async def test_database_manager_list_migrations():
 
 @pytest.mark.asyncio
 async def test_applied_versions_and_run_migrations_skip_existing(monkeypatch):
-    import database.manager as manager_mod
+    manager_mod = sys.modules[DatabaseManager.__module__]
 
     db = DatabaseManager(":memory:")
     db.list_migrations = AsyncMock(return_value=[{"version": "0001"}])
@@ -116,10 +118,13 @@ async def test_applied_versions_and_run_migrations_skip_existing(monkeypatch):
         calls.append(("mark", version))
 
     db.mark_migration_applied = AsyncMock(side_effect=mark_applied)
+    def fake_available_migrations():
+        return (Migration("0001"), Migration("0002"), Migration("0003"))
+
     monkeypatch.setattr(
         manager_mod,
         "available_migrations",
-        lambda: (Migration("0001"), Migration("0002"), Migration("0003")),
+        fake_available_migrations,
     )
 
     await db.run_migrations()

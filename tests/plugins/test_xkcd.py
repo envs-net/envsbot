@@ -1,5 +1,4 @@
-import asyncio
-
+import aiohttp
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +11,16 @@ def mock_bot():
     bot.make_message = MagicMock(return_value=MagicMock())
     bot.reply = MagicMock()
     return bot
+
+
+@pytest.fixture(autouse=True)
+def reset_joined_rooms():
+    original = dict(xkcd.JOINED_ROOMS)
+    try:
+        yield
+    finally:
+        xkcd.JOINED_ROOMS.clear()
+        xkcd.JOINED_ROOMS.update(original)
 
 #
 # --- normalize_image_url
@@ -69,7 +78,7 @@ async def test_fetch_xkcd_success(monkeypatch):
         async def __aexit__(self, *a): pass
         def get(self, url, timeout=None): return DummyResp()
 
-    monkeypatch.setattr("aiohttp.ClientSession", DummySession)
+    monkeypatch.setattr(aiohttp, "ClientSession", DummySession)
     url = "https://xkcd.com/1/info.0.json"
     data = await xkcd.fetch_xkcd(url)
     assert data["num"] == 1
@@ -88,7 +97,7 @@ async def test_fetch_xkcd_http_error(monkeypatch):
         async def __aexit__(self, *a): pass
         def get(self, url, timeout=None): return DummyResp()
 
-    monkeypatch.setattr("aiohttp.ClientSession", DummySession)
+    monkeypatch.setattr(aiohttp, "ClientSession", DummySession)
     data = await xkcd.fetch_xkcd("https://xkcd.com/404/info.0.json")
     assert data is None
 
@@ -99,7 +108,7 @@ async def test_fetch_xkcd_exception(monkeypatch):
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
         def get(self, url, timeout=None): raise Exception("fail")
-    monkeypatch.setattr("aiohttp.ClientSession", DummySession)
+    monkeypatch.setattr(aiohttp, "ClientSession", DummySession)
     data = await xkcd.fetch_xkcd("https://xkcd.com/1/info.0.json")
     assert data is None
 
@@ -298,7 +307,13 @@ def test_xkcd_index_and_search_helpers(monkeypatch):
     assert xkcd._truncate_alt_text("short") == "short"
 
     picks = iter([404, 5])
-    monkeypatch.setattr(xkcd.random, "randint", lambda _start, _end: next(picks))
+
+    def fake_randint(start, end):
+        assert start == 1
+        assert end == 500
+        return next(picks)
+
+    monkeypatch.setattr(xkcd.random, "randint", fake_randint)
     assert xkcd._pick_valid_random_xkcd_id(500) == 5
 
 
@@ -341,13 +356,15 @@ async def test_broadcast_comic_only_sends_to_joined_rooms(monkeypatch, mock_bot)
         "joined@conf",
         "missing@conf",
     ]))
-    monkeypatch.setattr(xkcd, "send_xkcd_room", AsyncMock(side_effect=lambda _bot, room, comic: sent.append(room)))
+    def record_sent_room(bot, room, comic):
+        assert bot is mock_bot
+        assert comic == {"num": 9}
+        sent.append(room)
+
+    monkeypatch.setattr(xkcd, "send_xkcd_room", AsyncMock(side_effect=record_sent_room))
     monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock())
     monkeypatch.setitem(xkcd.JOINED_ROOMS, "joined@conf", {"nicks": {}})
-    try:
-        await xkcd.broadcast_comic_to_subscribed_rooms(mock_bot, {"num": 9})
-    finally:
-        xkcd.JOINED_ROOMS.pop("joined@conf", None)
+    await xkcd.broadcast_comic_to_subscribed_rooms(mock_bot, {"num": 9})
     assert sent == ["joined@conf"]
 
 
@@ -361,7 +378,11 @@ async def test_xkcd_command_handlers(monkeypatch, mock_bot):
     send_dm = AsyncMock()
     monkeypatch.setattr(xkcd, "send_xkcd_room", send_room)
     monkeypatch.setattr(xkcd, "send_xkcd_dm", send_dm)
-    monkeypatch.setattr(xkcd, "_pick_valid_random_xkcd_id", lambda max_id: 4)
+    def fake_pick_valid_random_xkcd_id(max_id):
+        assert max_id == 20
+        return 4
+
+    monkeypatch.setattr(xkcd, "_pick_valid_random_xkcd_id", fake_pick_valid_random_xkcd_id)
 
     await xkcd._handle_xkcd_random(mock_bot, msg, "room@conf", "user@example.org", True)
     send_room.assert_awaited_with(mock_bot, "room@conf", {"num": 4, "img": "/b.png"})
@@ -545,16 +566,16 @@ async def test_xkcd_check_loop_initializes_catches_up_and_cancels(monkeypatch):
     monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value={"num": 10}))
     monkeypatch.setattr(xkcd, "get_last_comic_id", AsyncMock(return_value=0))
     monkeypatch.setattr(xkcd, "save_last_comic_id", fake_save)
-    monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError))
+    monkeypatch.setattr(xkcd.asyncio, "sleep", AsyncMock(side_effect=xkcd.asyncio.CancelledError))
 
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(xkcd.asyncio.CancelledError):
         await xkcd.xkcd_check_loop(bot)
     assert saved == [10]
     assert xkcd.LAST_COMIC_ID == 10
 
     monkeypatch.setattr(xkcd, "get_last_comic_id", AsyncMock(return_value=7))
     monkeypatch.setattr(xkcd, "catch_up_missing_comics", fake_catch_up)
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(xkcd.asyncio.CancelledError):
         await xkcd.xkcd_check_loop(bot)
     assert caught_up == [(8, 10)]
 
@@ -566,22 +587,22 @@ async def test_xkcd_check_loop_initializes_catches_up_and_cancels(monkeypatch):
 async def test_cancel_task_none_done_cancelled_and_error(caplog):
     await xkcd._cancel_task(None, "none")
 
-    done_task = asyncio.create_task(asyncio.sleep(0))
+    done_task = xkcd.asyncio.create_task(xkcd.asyncio.sleep(0))
     assert await done_task is None
     await xkcd._cancel_task(done_task, "done")
 
-    pending_task = asyncio.create_task(asyncio.sleep(60))
+    pending_task = xkcd.asyncio.create_task(xkcd.asyncio.sleep(60))
     await xkcd._cancel_task(pending_task, "pending")
     assert pending_task.cancelled()
 
     async def failing_on_cancel():
         try:
-            await asyncio.sleep(60)
-        except asyncio.CancelledError as exc:
+            await xkcd.asyncio.sleep(60)
+        except xkcd.asyncio.CancelledError as exc:
             raise RuntimeError("boom") from exc
 
-    error_task = asyncio.create_task(failing_on_cancel())
-    await asyncio.sleep(0)
+    error_task = xkcd.asyncio.create_task(failing_on_cancel())
+    await xkcd.asyncio.sleep(0)
     await xkcd._cancel_task(error_task, "error")
     assert "Error while cancelling error task" in caplog.text
 
