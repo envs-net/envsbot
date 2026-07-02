@@ -463,3 +463,34 @@ async def test_pin_management_allows_plugin_grant_fallback(monkeypatch, bot, mak
         "pin",
         room_jid,
     )
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_pin_room_data(bot):
+    store = {
+        pin.PIN_DATA_KEY: {
+            "Room@Conference.Example.Com": {"pins": [{"id": 1}]},
+            "other@conference.example.com": {"pins": [{"id": 2}]},
+        }
+    }
+
+    class Store:
+        async def get_global(self, key, default=None):
+            return store.get(key, default)
+
+        async def set_global(self, key, value):
+            store[key] = value
+
+    bot.db.users.plugin.return_value = Store()
+
+    assert await pin.cleanup_room_state(
+        bot,
+        "room@conference.example.com/nick",
+    ) == {"rooms": 1}
+    assert store[pin.PIN_DATA_KEY] == {
+        "other@conference.example.com": {"pins": [{"id": 2}]},
+    }
+    assert await pin.cleanup_room_state(
+        bot,
+        "missing@conference.example.com",
+    ) == {"rooms": 0}

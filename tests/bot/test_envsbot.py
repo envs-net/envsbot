@@ -1090,3 +1090,62 @@ async def test_main_shutdown_timeout_and_close_error(monkeypatch):
         ("wait_for", fake_xmpp.disconnected, 2.0),
         "db.close",
     ]
+
+
+def test_copy_initial_chat_slang_paths(tmp_path, monkeypatch):
+    source = tmp_path / "init_chat_slang.csv"
+    target = tmp_path / "chat_slang.csv"
+    source.write_text("hello,world\n", encoding="utf-8")
+
+    envsbot.copy_initial_chat_slang(str(source), str(target))
+    assert target.read_text(encoding="utf-8") == "hello,world\n"
+
+    source.write_text("changed\n", encoding="utf-8")
+    envsbot.copy_initial_chat_slang(str(source), str(target))
+    assert target.read_text(encoding="utf-8") == "hello,world\n"
+
+    missing_target = tmp_path / "missing_chat_slang.csv"
+    envsbot.copy_initial_chat_slang(
+        str(tmp_path / "missing.csv"),
+        str(missing_target),
+    )
+    assert not missing_target.exists()
+
+    error_target = tmp_path / "error_chat_slang.csv"
+
+    def fail_copy(_source, _target):
+        raise OSError("nope")
+
+    monkeypatch.setattr(envsbot.shutil, "copyfile", fail_copy)
+    envsbot.copy_initial_chat_slang(str(source), str(error_target))
+    assert not error_target.exists()
+
+
+def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
+    calls = []
+
+    async def fake_main():
+        calls.append("main")
+
+    def fake_copy():
+        calls.append("copy")
+
+    def run_success(coro):
+        calls.append("run")
+        coro.close()
+
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", fake_copy)
+    monkeypatch.setattr(envsbot, "main", fake_main)
+    monkeypatch.setattr(envsbot.asyncio, "run", run_success)
+
+    envsbot.cli()
+    assert calls == ["copy", "run"]
+
+    def run_interrupted(coro):
+        calls.append("run-interrupted")
+        coro.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(envsbot.asyncio, "run", run_interrupted)
+    envsbot.cli()
+    assert calls[-2:] == ["copy", "run-interrupted"]

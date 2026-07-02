@@ -524,3 +524,48 @@ async def test_poll_manage_allows_plugin_grant_fallback(monkeypatch, dummy_bot):
     )
 
     assert await poll._can_manage_poll(dummy_bot, msg, True, poll_obj) is True
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_poll_data_and_tasks(dummy_bot):
+    await reset_poll_data(dummy_bot)
+    room = "room@conf"
+    other = "other@conf"
+    data = {
+        "rooms": {
+            "Room@Conf": {"polls": {"1": {"status": "open"}}},
+            other: {"polls": {"2": {"status": "open"}}},
+        }
+    }
+    await poll._set_data(dummy_bot, data)
+
+    class Task:
+        def __init__(self, done=False):
+            self.cancelled = False
+            self._done = done
+
+        def done(self):
+            return self._done
+
+        def cancel(self):
+            self.cancelled = True
+
+    matching_task = Task()
+    done_task = Task(done=True)
+    other_task = Task()
+    poll.AUTO_CLOSE_TASKS.clear()
+    poll.AUTO_CLOSE_TASKS.update({
+        (room, 1): matching_task,
+        (room, 2): done_task,
+        (other, 3): other_task,
+    })
+
+    summary = await poll.cleanup_room_state(dummy_bot, "room@conf/nick")
+
+    assert summary == {"rooms": 1, "auto_close_tasks": 1}
+    assert matching_task.cancelled is True
+    assert done_task.cancelled is False
+    assert other_task.cancelled is False
+    assert list(poll.AUTO_CLOSE_TASKS) == [(other, 3)]
+    saved = await poll._get_data(dummy_bot)
+    assert saved["rooms"] == {other: {"polls": {"2": {"status": "open"}}}}

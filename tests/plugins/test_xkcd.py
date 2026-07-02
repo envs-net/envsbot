@@ -584,3 +584,35 @@ async def test_cancel_task_none_done_cancelled_and_error(caplog):
     await asyncio.sleep(0)
     await xkcd._cancel_task(error_task, "error")
     assert "Error while cancelling error task" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_legacy_room_entries():
+    store = DummyXkcdStore({
+        xkcd.XKCD_KEY: {
+            "rooms": ["Room@Conference.Example.Org", "other@conf"],
+            "other": True,
+        }
+    })
+    bot = xkcd_bot_with_store(store)
+
+    summary = await xkcd.cleanup_room_state(
+        bot,
+        "room@conference.example.org/nick",
+    )
+
+    assert summary == {"legacy_rooms": 1}
+    assert store._globals[xkcd.XKCD_KEY]["rooms"] == ["other@conf"]
+
+    summary = await xkcd.cleanup_room_state(bot, "missing@conf")
+    assert summary == {"legacy_rooms": 0}
+
+    store = DummyXkcdStore({xkcd.XKCD_KEY: {"rooms": ["room@conf"]}})
+    bot = xkcd_bot_with_store(store)
+    summary = await xkcd.cleanup_room_state(bot, "room@conf")
+    assert summary == {"legacy_rooms": 1}
+    assert "rooms" not in store._globals[xkcd.XKCD_KEY]
+
+    store = DummyXkcdStore({xkcd.XKCD_KEY: []})
+    bot = xkcd_bot_with_store(store)
+    assert await xkcd.cleanup_room_state(bot, "room@conf") == {"legacy_rooms": 0}

@@ -1484,3 +1484,33 @@ async def test_room_setdefaults_explicit_target_from_dm(fake_bot, fake_msg, monk
 
     defaults.assert_awaited_once_with(fake_bot, target_room)
     assert f"Restored plugin defaults for room '{target_room}'" in fake_bot.reply_ok.call_args.args[1]
+
+
+def test_plugin_cleanup_summary_helpers_cover_plugin_hook_shapes():
+    summary = {
+        "toggles": 0,
+        "data": 0,
+        "rss_subscriptions": 0,
+        "rss_feeds": 0,
+        "xkcd_legacy_rooms": 0,
+        "plugin_hooks": {},
+    }
+    plugin_summary = {
+        "rss": {"subscriptions": "2", "feeds": 1},
+        "xkcd": {"legacy_rooms": "3"},
+        "pin": {"rooms": 1, "data": "4"},
+        "reminder": {"reminders": 2, "tasks": "ignored"},
+        "bad": {"rooms": "nope"},
+        "plain": "ignored",
+    }
+
+    rooms._merge_plugin_cleanup_summary(summary, plugin_summary)
+
+    assert summary["rss_subscriptions"] == 2
+    assert summary["rss_feeds"] == 1
+    assert summary["xkcd_legacy_rooms"] == 3
+    assert summary["data"] == 7
+    assert rooms._plugin_cleanup_changed(summary) is True
+    assert rooms._plugin_hook_cleanup_changed({"pin": {"rooms": "1"}}) is True
+    assert rooms._plugin_hook_cleanup_changed({"pin": {"rooms": "bad"}}) is False
+    assert rooms._plugin_hook_cleanup_changed(None) is False

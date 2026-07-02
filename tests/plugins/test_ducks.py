@@ -543,3 +543,51 @@ async def test_spawn_duck_after_delay_limit_success_and_cleanup(monkeypatch):
     assert bot._replies[-1][0] == ducks.SPAWN_MESSAGES[0]
     assert room not in ducks.PENDING_DUCKS
     assert room not in ducks.SPAWN_TASKS
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_duck_runtime_tasks_and_store():
+    bot = DummyBot()
+    room = "room@conf"
+    other = "other@conf"
+
+    class Task:
+        def __init__(self, done=False):
+            self.cancelled = False
+            self._done = done
+
+        def done(self):
+            return self._done
+
+        def cancel(self):
+            self.cancelled = True
+
+    spawn_task = Task()
+    expire_task = Task(done=True)
+    ducks.SPAWN_TASKS[room] = spawn_task
+    ducks.EXPIRE_TASKS[room] = expire_task
+    ducks.ACTIVE_DUCKS[room] = {"nick": "duck"}
+    ducks.PENDING_DUCKS.add(room)
+    ducks.MESSAGE_COUNTS[room] = 5
+    ducks.NEXT_DUCK_THRESHOLDS[room] = 10
+    ducks.MESSAGE_COUNTS[other] = 1
+
+    for key in (ducks.DUCKS_INDEX_KEY, ducks.DUCKS_LAST_KEY,
+                ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY):
+        bot.ducks_store._globals[key] = {"Room@Conf": {"value": key}, other: {}}
+
+    summary = await ducks.cleanup_room_state(bot, room)
+
+    assert summary == {"data": 4, "tasks": 1, "runtime": 4}
+    assert spawn_task.cancelled is True
+    assert expire_task.cancelled is False
+    assert room not in ducks.SPAWN_TASKS
+    assert room not in ducks.EXPIRE_TASKS
+    assert room not in ducks.ACTIVE_DUCKS
+    assert room not in ducks.PENDING_DUCKS
+    assert room not in ducks.MESSAGE_COUNTS
+    assert room not in ducks.NEXT_DUCK_THRESHOLDS
+    assert ducks.MESSAGE_COUNTS[other] == 1
+    for key in (ducks.DUCKS_INDEX_KEY, ducks.DUCKS_LAST_KEY,
+                ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY):
+        assert bot.ducks_store._globals[key] == {other: {}}

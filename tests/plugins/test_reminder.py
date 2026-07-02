@@ -456,3 +456,28 @@ async def test_reminder_store_getter_uses_plugin_store():
     bot.db.users.plugin.return_value = marker
     assert await reminder.get_reminder_store(bot) is marker
     bot.db.users.plugin.assert_called_once_with("reminder")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_deletes_room_reminders(monkeypatch, dummy_bot):
+    pending = [
+        {"id": 1, "room_jid": "Room@Conf"},
+        {"id": 2, "room_jid": "room@conf/resource"},
+        {"id": 3, "room_jid": "other@conf"},
+        {"id": 4, "room_jid": None},
+    ]
+    monkeypatch.setattr(reminder, "_init_reminder_db", AsyncMock())
+    monkeypatch.setattr(
+        reminder,
+        "_get_all_pending_reminders",
+        AsyncMock(return_value=pending),
+    )
+    monkeypatch.setattr(reminder, "_cancel_active_tasks_for_room", AsyncMock(return_value=2))
+    monkeypatch.setattr(reminder, "_delete_reminder", AsyncMock())
+
+    summary = await reminder.cleanup_room_state(dummy_bot, "room@conf/nick")
+
+    assert summary == {"reminders": 2, "tasks": 2}
+    reminder._delete_reminder.assert_any_await(dummy_bot, 1)
+    reminder._delete_reminder.assert_any_await(dummy_bot, 2)
+    assert reminder._delete_reminder.await_count == 2

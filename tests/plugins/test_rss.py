@@ -1273,3 +1273,41 @@ def test_filter_feeds_for_room_matches_normalized_room_and_skips_missing_rooms()
     assert rss._filter_feeds_for_room(feeds, "room@conference.example.org") == {
         "https://example.org/match.xml": matching_feed,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_rss_store_uses_plugin_store(make_bot):
+    marker = object()
+    bot = make_bot()
+    def plugin_store(_name):
+        return marker
+
+    bot.db.users.plugin = plugin_store
+
+    assert await rss.get_rss_store(bot) is marker
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_bot):
+    bot = make_bot()
+    keep_url = "https://example.org/keep.xml"
+    drop_url = "https://example.org/drop.xml"
+    other_url = "https://example.org/other.xml"
+    ignored_url = "https://example.org/ignored.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        keep_url: {"rooms": ["Room@Conference.Example.Org", "other@conf"]},
+        drop_url: {"rooms": ["room@conference.example.org"]},
+        other_url: {"rooms": ["other@conf"]},
+        ignored_url: {"title": "missing rooms"},
+        "broken": "not a feed",
+    }
+    cancelled = []
+    monkeypatch.setattr(rss, "_cancel_feed_task", lambda url: cancelled.append(url))
+
+    summary = await rss.cleanup_room_state(bot, "room@conference.example.org")
+
+    assert summary == {"subscriptions": 2, "feeds": 1}
+    assert bot.plugin_store[rss.RSS_KEY][keep_url]["rooms"] == ["other@conf"]
+    assert drop_url not in bot.plugin_store[rss.RSS_KEY]
+    assert bot.plugin_store[rss.RSS_KEY][other_url]["rooms"] == ["other@conf"]
+    assert cancelled == [drop_url]
