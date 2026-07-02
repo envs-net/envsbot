@@ -33,6 +33,26 @@ async def _audit_log(db) -> None:
     await db.audit.init()
 
 
+async def _room_invites(db) -> None:
+    """Create the pending room invite table and indexes."""
+    await db.conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS room_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_jid TEXT NOT NULL,
+            inviter TEXT NOT NULL,
+            reason TEXT,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            UNIQUE(room_jid, inviter)
+        )
+        """
+    )
+    await db.conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at "
+        "ON room_invites(created_at)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "0001_initial_runtime_tables",
@@ -43,6 +63,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0002_audit_log",
         "Create audit_log table",
         _audit_log,
+    ),
+    Migration(
+        "0003_room_invites",
+        "Create room_invites table and index",
+        _room_invites,
     ),
 )
 
