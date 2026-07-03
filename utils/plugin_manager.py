@@ -18,6 +18,7 @@ import pkgutil
 import sys
 import inspect
 import logging
+from collections import deque
 
 from utils.command import COMMANDS, Role
 
@@ -111,10 +112,10 @@ class PluginManager:
         Find ALL plugins that depend on the given plugin (recursively).
         """
         dependents = set()
-        to_process = [name]
+        to_process = deque([name])
 
         while to_process:
-            current = to_process.pop(0)
+            current = to_process.popleft()
 
             for plugin_name, meta in self.meta.items():
                 if plugin_name in dependents:
@@ -562,7 +563,7 @@ class PluginManager:
 
         async with self._lock:
             module = self.plugins.pop(name, None)
-            if not module:
+            if module is None:
                 return False, f"Plugin {name} is not loaded"
 
             try:
