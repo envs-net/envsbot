@@ -124,6 +124,36 @@ async def test_register_status_and_lists():
 
 
 @pytest.mark.asyncio
+async def test_enabled_is_room_feature_status_and_status_stays_player_status(monkeypatch):
+    bot = DummyBot()
+
+    async def noop_sync(_bot):
+        return None
+
+    monkeypatch.setattr(idlerpg, "_sync_tasks_to_enabled_rooms", noop_sync)
+
+    admin_pm = DummyMsg(bare="room@conf", resource="Mod", mtype="chat")
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["enabled"], admin_pm, False)
+    assert "IdleRPG is **enabled**" in bot.replies[-1][0]
+
+    public_msg = DummyMsg()
+    await idlerpg.idlerpg_command(
+        bot,
+        "alice@envs.net",
+        "Alice",
+        ["register", "Alice", "sysadmin"],
+        public_msg,
+        True,
+    )
+
+    alice_pm = DummyMsg(bare="room@conf", resource="Alice", mtype="chat")
+    await idlerpg.idlerpg_command(
+        bot, "alice@envs.net", "Alice", ["status", "Alice"], alice_pm, False
+    )
+    assert "level 0 sysadmin" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
 async def test_message_penalty_and_logout_login(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()

@@ -5,7 +5,7 @@ This is inspired by the classic IRC IdleRPG idea: players level up by staying
 online and idle. Talking in the game room adds time to the player's timer.
 
 Commands:
-    {prefix}idlerpg on|off|status
+    {prefix}idlerpg on|off|enabled
     {prefix}idlerpg register <character> <class>
     {prefix}idlerpg login|logout
     {prefix}idlerpg status [character]
@@ -922,6 +922,7 @@ def _usage(bot) -> str:
     prefix = _command_prefix(bot)
     return (
         "🎲 IdleRPG usage:\n"
+        f"{prefix}idlerpg on|off|enabled\n"
         f"{prefix}idlerpg register <character> <class>\n"
         f"{prefix}idlerpg status [character]\n"
         f"{prefix}idlerpg top [page|last|all]\n"
@@ -938,9 +939,10 @@ def _usage(bot) -> str:
     role=Role.USER,
     aliases=["irpg", "idle"],
     short="Play IdleRPG in a MUC",
-    usage="{prefix}idlerpg <on|off|status|register|top|players|quest|...>",
+    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|quest|...>",
     examples=[
         "{prefix}idlerpg register Sven sysadmin",
+        "{prefix}idlerpg enabled",
         "{prefix}idlerpg status",
         "{prefix}idlerpg top",
         "{prefix}idlerpg quest",
@@ -950,15 +952,16 @@ def _usage(bot) -> str:
 )
 async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
     subcmd = args[0].lower() if args else ""
-    # ``status`` is both a room-toggle word and a player-status command.
-    # Keep room-toggle status in MUC PMs, but let public-room ``status`` show
-    # the player's game status.
-    if subcmd in {"on", "off"} or (subcmd == "status" and not is_room):
+    # ``status`` is reserved for character status. Use ``enabled`` to inspect
+    # the room feature state so players do not get different meanings for the
+    # same subcommand in public rooms and MUC PMs.
+    if subcmd in {"on", "off", "enabled"}:
+        toggle_args = ["status"] + args[1:] if subcmd == "enabled" else args
         handled_toggle = await _core.handle_room_toggle_command(
             bot,
             msg,
             is_room,
-            args,
+            toggle_args,
             store_getter=get_idlerpg_store,
             key=IDLERPG_ENABLED_KEY,
             label="IdleRPG",

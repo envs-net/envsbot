@@ -1305,13 +1305,14 @@ Play IdleRPG in a MUC
 Role: `user`<br>
 Context: `groupchat / MUC PM`<br>
 Category: `fun`<br>
-Usage: `,idlerpg <on|off|status|register|top|players|quest|...>`
+Usage: `,idlerpg <on|off|enabled|register|status|top|players|quest|...>`
 
 Aliases: `,idle`, `,irpg`
 
 Examples:
 
 - `,idlerpg register Sven sysadmin`
+- `,idlerpg enabled`
 - `,idlerpg status`
 - `,idlerpg top`
 - `,idlerpg quest`

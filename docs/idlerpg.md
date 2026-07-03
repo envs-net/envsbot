@@ -21,7 +21,7 @@ From a MUC private message to the bot, room admins can also use:
 ```text
 ,idlerpg on
 ,idlerpg off
-,idlerpg status
+,idlerpg enabled
 ```
 
 By default, new rooms have IdleRPG disabled:
@@ -49,6 +49,9 @@ Use these in the game room or from a MUC private message to the bot:
 ,idlerpg logout
 ,idlerpg remove-me
 ```
+
+
+`status` always shows character progress. Use `,idlerpg enabled` to inspect whether the game is enabled in the current room.
 
 Aliases:
 
