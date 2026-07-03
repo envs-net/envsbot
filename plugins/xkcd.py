@@ -841,6 +841,11 @@ async def on_load(bot):
     log.info("[XKCD] Plugin loaded, background tasks started")
 
 
+async def restart_tasks(bot):
+    """Restart XKCD background tasks for diagnostics."""
+    await on_load(bot)
+
+
 async def on_unload(bot):
     """Unload the XKCD plugin and stop background tasks."""
     global CHECK_TASK, INDEX_TASK

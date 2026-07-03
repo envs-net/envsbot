@@ -859,6 +859,12 @@ async def on_load(bot):
     log.info("[POLL] Plugin loaded")
 
 
+async def restart_tasks(bot):
+    """Restart poll auto-close tasks for diagnostics."""
+    await on_unload(bot)
+    await on_load(bot)
+
+
 async def on_unload(bot):
     for task in list(AUTO_CLOSE_TASKS.values()):
         task.cancel()

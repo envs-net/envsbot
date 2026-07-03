@@ -362,3 +362,21 @@ async def test_plugin_state_and_restart_tasks_hooks(monkeypatch):
     assert "restarted" in message
     assert cancelled == 3
     assert bot.restarted is True
+
+
+@pytest.mark.asyncio
+async def test_restart_tasks_without_hook_does_not_cancel_existing_tasks():
+    class Bot:
+        def __init__(self):
+            self.tasks = MagicMock()
+            self.tasks.cancel_plugin = AsyncMock(return_value=2)
+
+    manager = PluginManager(Bot())
+    manager.plugins["passive"] = types.SimpleNamespace()
+
+    success, message, cancelled = await manager.restart_tasks("passive")
+
+    assert success is False
+    assert "no task restart hook" in message
+    assert cancelled == 0
+    manager.bot.tasks.cancel_plugin.assert_not_called()

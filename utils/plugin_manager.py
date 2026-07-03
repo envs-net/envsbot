@@ -824,18 +824,20 @@ class PluginManager:
         A plugin may provide ``restart_tasks(bot)`` for targeted restoration.
         Without that hook, the plugin's ``on_ready(bot)`` hook is reused because
         current task-owning plugins already restore/schedule their loops there.
+        Tasks are only cancelled after a usable restart hook is found; otherwise
+        a diagnostic restart attempt must not accidentally stop live workers.
         """
         module = self.plugins.get(name)
         if module is None:
             return False, f"Plugin {name} is not loaded", 0
 
-        cancelled = await self._cancel_plugin_tasks(name)
         hook = getattr(module, "restart_tasks", None) or getattr(module, "on_ready", None)
         if hook is None:
-            return True, f"Plugin {name} has no task restart hook", cancelled
+            return False, f"Plugin {name} has no task restart hook", 0
         if not callable(hook):
-            return False, f"Plugin {name} task restart hook is not callable", cancelled
+            return False, f"Plugin {name} task restart hook is not callable", 0
 
+        cancelled = await self._cancel_plugin_tasks(name)
         try:
             await self._run_hook(hook)
         except Exception as exc:

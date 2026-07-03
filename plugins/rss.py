@@ -1425,6 +1425,12 @@ async def on_load(bot):
     await restart_all_tasks(bot)
 
 
+async def restart_tasks(bot):
+    """Restart all RSS feed checker tasks for diagnostics."""
+    await on_unload(bot)
+    await on_load(bot)
+
+
 async def on_unload(bot):
     """
     Clean up all RSS tasks on unload.
