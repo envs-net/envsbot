@@ -46,7 +46,7 @@ except ImportError:
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms"],
@@ -92,6 +92,10 @@ RSS_MAX_READ_BYTES = max(
 )
 ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
 RSS_LIST_PAGE_SIZE = max(1, int(config.get("rss_list_page_size", 10) or 10))
+RSS_MAX_ENTRIES_PER_POLL = max(
+    1,
+    int(config.get("rss_max_entries_per_poll", 10) or 10),
+)
 
 
 def _command_prefix(bot=None) -> str:
@@ -885,7 +889,10 @@ async def _initialize_missing_last_id(bot, store, url, last_id, parsed):
     return False
 
 
-def _collect_new_entries(parsed, last_id):
+def _collect_new_entries(parsed, last_id, max_entries=None):
+    """Return newest unseen entries, capped to avoid feed burst floods."""
+    limit = RSS_MAX_ENTRIES_PER_POLL if max_entries is None else max_entries
+    limit = max(1, int(limit or RSS_MAX_ENTRIES_PER_POLL))
     new_entries = []
     for entry in parsed.entries:
         is_new, entry_id = _entry_is_new(last_id, entry)
@@ -894,6 +901,8 @@ def _collect_new_entries(parsed, last_id):
         if not is_new:
             break
         new_entries.append((entry, entry_id))
+        if len(new_entries) >= limit:
+            break
     return new_entries
 
 

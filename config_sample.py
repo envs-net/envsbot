@@ -200,6 +200,11 @@ RSS_GLOBAL_QUERY_INTERVAL = 1200
 # Number of existing entries to show when a feed is newly added.
 MAX_NEW_FEED_ENTRIES = 5
 
+# Maximum number of new entries posted per regular feed poll.
+# If a very active feed publishes more than this between two checks, older
+# unseen entries are skipped and the newest item is remembered as seen.
+RSS_MAX_ENTRIES_PER_POLL = 10
+
 # Retry/backoff behavior for failing feeds.
 # First failure retries after 5 minutes, second after 10 minutes, then grows
 # exponentially up to the maximum delay.

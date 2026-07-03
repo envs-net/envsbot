@@ -93,6 +93,7 @@ DEFAULT_CONFIG = {
     "urlcheck_user_agent": "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)",
     "rss_global_query_interval": 1200,
     "max_new_feed_entries": 5,
+    "rss_max_entries_per_poll": 10,
     "rss_retry_initial_delay": 300,
     "rss_retry_backoff_multiplier": 2.0,
     "rss_max_backoff_time": 3600,
@@ -168,6 +169,7 @@ OPTIONAL_CONFIG_TYPES = {
     "updatecheck_timeout_seconds": (int, float),
     "rss_global_query_interval": int,
     "max_new_feed_entries": int,
+    "rss_max_entries_per_poll": int,
     "rss_retry_initial_delay": int,
     "rss_retry_backoff_multiplier": (int, float),
     "rss_max_backoff_time": int,
@@ -261,6 +263,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "REMINDER_MAX_AGE_DAYS": "reminder_max_age_days",
     "RSS_GLOBAL_QUERY_INTERVAL": "rss_global_query_interval",
     "MAX_NEW_FEED_ENTRIES": "max_new_feed_entries",
+    "RSS_MAX_ENTRIES_PER_POLL": "rss_max_entries_per_poll",
     "RSS_RETRY_INITIAL_DELAY": "rss_retry_initial_delay",
     "RSS_RETRY_BACKOFF_MULTIPLIER": "rss_retry_backoff_multiplier",
     "RSS_MAX_BACKOFF_TIME": "rss_max_backoff_time",
@@ -760,6 +763,11 @@ def _validate_numeric_ranges(cfg, errors):
         value = cfg["max_new_feed_entries"]
         if isinstance(value, int) and value < 0:
             errors.append("max_new_feed_entries: must be 0 or greater")
+
+    if "rss_max_entries_per_poll" in cfg:
+        value = cfg["rss_max_entries_per_poll"]
+        if isinstance(value, int) and value <= 0:
+            errors.append("rss_max_entries_per_poll: must be greater than 0")
 
     if "port" in cfg:
         value = cfg["port"]

@@ -747,6 +747,108 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
 
 
 @pytest.mark.asyncio
+async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
+        monkeypatch, make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "http://f.com/rss"
+    room = "room@conference.example.org"
+
+    store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "link": url,
+            "period": 1,
+            "rooms": [room],
+            "last_id": "http://f.com/a1",
+            "error_count": 0,
+            "next_retry": 0,
+        }
+    }
+
+    core_plugins.rooms.JOINED_ROOMS[room] = True
+    monkeypatch.setattr(rss, "RSS_MAX_ENTRIES_PER_POLL", 2)
+
+    class Entry(dict):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+        def get(self, k, default=None):
+            if hasattr(self, k):
+                return getattr(self, k)
+            if k in self:
+                return self[k]
+            return default
+
+    entries = [
+        Entry(
+            title="ET4",
+            link="http://f.com/a4",
+            description="ED4",
+            id="http://f.com/a4",
+        ),
+        Entry(
+            title="ET3",
+            link="http://f.com/a3",
+            description="ED3",
+            id="http://f.com/a3",
+        ),
+        Entry(
+            title="ET2",
+            link="http://f.com/a2",
+            description="ED2",
+            id="http://f.com/a2",
+        ),
+        Entry(
+            title="ET1",
+            link="http://f.com/a1",
+            description="ED1",
+            id="http://f.com/a1",
+        ),
+    ]
+
+    class DummyFeed:
+        def __init__(self):
+            self.feed = {"title": "Feed", "link": url, "href": url, "id": url}
+            self.entries = entries
+
+        def __contains__(self, k):
+            return k == "feed"
+
+    async def fetch_feed(_):
+        return DummyFeed()
+
+    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "_now", lambda: 1000)
+
+    async def fake_sleep(_secs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    posts = []
+
+    def fake_reply(msg, txt, **kwargs):
+        posts.append(("reply", txt, kwargs))
+
+    bot.reply = fake_reply
+
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await rss.rss_check_loop(bot, store, url, 1)
+
+        assert len(posts) == 2
+        assert "ET3" in posts[0][1]
+        assert "ET4" in posts[1][1]
+        assert all("ET2" not in post[1] for post in posts)
+        assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a4"
+    finally:
+        core_plugins.rooms.JOINED_ROOMS.pop(room, None)
+
+
+@pytest.mark.asyncio
 async def test_rss_check_loop_backoff_flushes_state(monkeypatch, make_bot):
     bot = make_bot()
     store = bot.plugin_store

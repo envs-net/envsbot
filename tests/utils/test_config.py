@@ -242,6 +242,7 @@ def test_validate_config_rejects_wrong_optional_types():
         "nick": "envsbot",
         "rss_global_query_interval": "1200",
         "max_new_feed_entries": "5",
+        "rss_max_entries_per_poll": "10",
     }
 
     with pytest.raises(config_mod.ConfigError) as exc:
@@ -250,6 +251,7 @@ def test_validate_config_rejects_wrong_optional_types():
     msg = str(exc.value)
     assert "rss_global_query_interval: expected int" in msg
     assert "max_new_feed_entries: expected int" in msg
+    assert "rss_max_entries_per_poll: expected int" in msg
 
 
 def test_exit_on_config_error_exits(capsys):
@@ -502,6 +504,21 @@ def test_validate_config_accepts_zero_max_new_feed_entries():
     config_mod.validate_config(cfg, require_required_keys=True)
 
 
+def test_validate_config_rejects_non_positive_rss_max_entries_per_poll():
+    cfg = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+        "rss_max_entries_per_poll": 0,
+    }
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(cfg, require_required_keys=True)
+
+    assert "rss_max_entries_per_poll: must be greater than 0" in str(exc.value)
+
+
 def test_collect_config_warnings_for_missing_avatar(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
 
@@ -567,6 +584,7 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'HTTP_TIMEOUT_SECONDS = 12',
             'XMPP_QUERY_TIMEOUT_SECONDS = 9',
             'URLCHECK_WAIT_SECONDS = 30',
+            'RSS_MAX_ENTRIES_PER_POLL = 3',
             'RSS_SIMILARITY_THRESHOLD = 0.75',
             'BIRTHDAY_CACHE_TTL_SECONDS = 3600',
             'SED_CACHE_SIZE = 25',
@@ -588,6 +606,7 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["http_timeout_seconds"] == 12
     assert result["xmpp_query_timeout_seconds"] == 9
     assert result["urlcheck_wait_seconds"] == 30
+    assert result["rss_max_entries_per_poll"] == 3
     assert result["rss_similarity_threshold"] == 0.75
     assert result["birthday_cache_ttl_seconds"] == 3600
     assert result["sed_cache_size"] == 25
@@ -622,6 +641,7 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     cfg = {
         "http_timeout_seconds": 0,
         "urlcheck_max_redirects": 0,
+        "rss_max_entries_per_poll": 0,
         "rss_similarity_threshold": 1.5,
         "sed_cache_size": 0,
         "poll_max_options": 0,
@@ -639,6 +659,7 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     msg = str(exc.value)
     assert "http_timeout_seconds: must be greater than 0" in msg
     assert "urlcheck_max_redirects: must be greater than 0" in msg
+    assert "rss_max_entries_per_poll: must be greater than 0" in msg
     assert "rss_similarity_threshold: must be greater than 0 and at most 1" in msg
     assert "sed_cache_size: must be greater than 0" in msg
     assert "poll_max_options: must be greater than 0" in msg

@@ -137,7 +137,7 @@ CONNECT_DIRECT_TLS = True
 CONNECT_PORT = 5223
 ```
 
-`config_sample.py` also contains operator tuning sections for network timeouts, URL checks, RSS backoff, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
+`config_sample.py` also contains operator tuning sections for network timeouts, URL checks, RSS backoff and per-poll burst limits, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
 
 Runtime-safe configuration checks are available through:
 
