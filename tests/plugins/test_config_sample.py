@@ -22,6 +22,8 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.RSS_MAX_READ_BYTES > 0
     assert sample.DUCKS["min_messages"] < sample.DUCKS["max_messages"]
     assert sample.PIN_PAGE_SIZE > 0
+    assert sample.IDLERPG["tick_seconds"] > 0
+    assert sample.IDLERPG["rp_base"] > 0
     assert sample.XKCD_CHECK_INTERVAL > 0
     assert sample.ROOM_PLUGIN_DEFAULTS == {
         "birthday_notify": False,
@@ -30,6 +32,7 @@ def test_config_sample_imports_and_exposes_safe_defaults():
         "help": False,
         "information": True,
         "karma": False,
+        "idlerpg": False,
         "pin": True,
         "poll": False,
         "presence": True,

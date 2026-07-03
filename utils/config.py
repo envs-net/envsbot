@@ -73,6 +73,7 @@ DEFAULT_CONFIG = {
         "help": False,
         "information": True,
         "karma": False,
+        "idlerpg": False,
         "pin": True,
         "poll": False,
         "presence": True,
@@ -214,6 +215,7 @@ OPTIONAL_CONFIG_TYPES = {
     "room_invite_max_age_days": int,
     "room_plugin_defaults": dict,
     "ducks": dict,
+    "idlerpg": dict,
     "users": dict,
 }
 
@@ -304,6 +306,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "ROOM_INVITE_MAX_AGE_DAYS": "room_invite_max_age_days",
     "ROOM_PLUGIN_DEFAULTS": "room_plugin_defaults",
     "DUCKS": "ducks",
+    "IDLERPG": "idlerpg",
     "USERS": "users",
 }
 

@@ -10,6 +10,7 @@ This directory contains the operator and command documentation for EnvsBot.
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
 - [`deployment.md`](deployment.md) - install layout, console entrypoint and systemd unit
 - [`diagnostics.md`](diagnostics.md) - doctor checks, plugin state, task restart, audit filters and rate limits
+- [`idlerpg.md`](idlerpg.md) - IdleRPG game commands, configuration and diagnostics
 - [`plugin-development.md`](plugin-development.md) - plugin structure, hooks, stores, grants and diagnostics
 - [`release-checklist.md`](release-checklist.md) - release preparation and tagging checklist
 

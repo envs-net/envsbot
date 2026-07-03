@@ -161,6 +161,7 @@ ROOM_PLUGIN_DEFAULTS = {
     "help": False,
     "information": True,
     "karma": False,
+    "idlerpg": False,
     "pin": True,
     "poll": False,
     "presence": True,
@@ -245,6 +246,32 @@ DUCKS = {
     "timeout": 0,
     "count_commands": False,
     "state_save_every": 1,
+}
+
+
+# ================= IDLERPG =================
+
+# Classic IRC-style IdleRPG adapted for XMPP MUCs.
+# Players level up by staying online and idle. Normal room messages add
+# penalty time to the player's timer.
+IDLERPG = {
+    "tick_seconds": 60,
+    "rp_base": 600,
+    "rp_step": 1.16,
+    "penalty_step": 1.14,
+    "message_penalty": 1,
+    "logout_penalty": 20,
+    "max_penalty": 604800,
+    "page_size": 10,
+    "map_x": 500,
+    "map_y": 500,
+    "quest_min_level": 40,
+    "quest_interval": 21600,
+    "quest_min_duration": 43200,
+    "quest_max_duration": 86400,
+    "event_chance": 0.01,
+    "item_chance": 0.20,
+    "count_command_messages": False,
 }
 
 

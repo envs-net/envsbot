@@ -48,7 +48,7 @@ Defaults shown by these commands come from `ROOM_PLUGIN_DEFAULTS` in `config.py`
 
 Known room feature names:
 
-`birthday_notify`, `dice`, `ducks`, `help`, `information`, `karma`, `pin`, `poll`, `presence`, `reminder`, `sed`, `tell`, `tools`, `urlcheck`, `vcard`, `weather`, `xkcd`, `xmpp`
+`birthday_notify`, `dice`, `ducks`, `help`, `idlerpg`, `information`, `karma`, `pin`, `poll`, `presence`, `reminder`, `sed`, `tell`, `tools`, `urlcheck`, `vcard`, `weather`, `xkcd`, `xmpp`
 
 `information` can also be addressed as `info`.
 
@@ -85,6 +85,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `birthday_notify` | `plugins` | `fun` | Automatic birthday notifications in rooms (opt-in per room) |
 | `dice` | `plugins` | `games` | Roll dice with optional modifiers and success conditions. |
 | `ducks` | `plugins` | `fun` | Duck game for MUCs with room toggles and leaderboards |
+| `idlerpg` | `plugins` | `fun` | IdleRPG game for MUCs, inspired by the classic IRC game |
 | `info` | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. |
 | `karma` | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- |
 | `pin` | `plugins` | `utility` | Pin room messages with paging and non-reply fallback. |
@@ -149,6 +150,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,dice` | `user` | `any` | Roll dice using common dice notation. |
 | `,duck` | `user` | `room / MUC PM; use rooms enable with <room_jid> from private chat` | Start or interact with the duck game. |
 | `,duckstats` | `user` | `any` | Show duck game stats. |
+| `,idlerpg` | `user` | `groupchat / MUC PM` | Play IdleRPG in a MUC |
 | `,karma` | `user` | `any` | Show room-local karma scores and rankings. |
 | `,trap` | `user` | `any` | Set a trap in the duck game. |
 | `,xkcd` | `user` | `any` | Show an XKCD comic or control room access to XKCD. |
@@ -1288,6 +1290,31 @@ Usage: `,trap`
 Examples:
 
 - `,trap`
+
+### idlerpg
+
+Source: `plugins`
+Category: `fun`
+
+IdleRPG game for MUCs, inspired by the classic IRC game
+
+#### `,idlerpg`
+
+Play IdleRPG in a MUC
+
+Role: `user`<br>
+Context: `groupchat / MUC PM`<br>
+Category: `fun`<br>
+Usage: `,idlerpg <on|off|status|register|top|players|quest|...>`
+
+Aliases: `,idle`, `,irpg`
+
+Examples:
+
+- `,idlerpg register Sven sysadmin`
+- `,idlerpg status`
+- `,idlerpg top`
+- `,idlerpg quest`
 
 ### info
 

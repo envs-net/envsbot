@@ -25,7 +25,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * RSS/Atom feed watcher for room announcements
 * URL metadata checks for links, files and YouTube videos
 * Weather, vCard lookup, XMPP diagnostics, reminders, polls, pins, tell messages and utility commands
-* Community/fun plugins such as ducks, dice, karma, sed corrections and XKCD
+* Community/fun plugins such as IdleRPG, ducks, dice, karma, sed corrections and XKCD
 * Pytest-based test suite and Drone CI support
 
 ---
