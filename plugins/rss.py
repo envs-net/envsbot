@@ -470,6 +470,76 @@ async def _fetch_feed_bytes(url: str) -> tuple[bytes, str, str]:
     raise UnsafeFetchURL("too many redirects")
 
 
+def _parsed_value(parsed, key, default=None):
+    """Return a feedparser result value from mapping or attribute objects."""
+    if isinstance(parsed, dict):
+        return parsed.get(key, default)
+    return getattr(parsed, key, default)
+
+
+def _mapping_value(mapping, key, default=None):
+    """Return a value from feed metadata mapping or attribute objects."""
+    if isinstance(mapping, dict):
+        return mapping.get(key, default)
+    return getattr(mapping, key, default)
+
+
+def _set_mapping_value(mapping, key, value) -> None:
+    """Set a value on feed metadata mapping or attribute objects."""
+    if isinstance(mapping, dict):
+        mapping[key] = value
+    else:
+        setattr(mapping, key, value)
+
+
+def _has_feed_metadata(feed) -> bool:
+    """Return True when parsed feed metadata looks like RSS/Atom data."""
+    if not feed:
+        return False
+
+    metadata_keys = (
+        "title",
+        "link",
+        "description",
+        "subtitle",
+        "id",
+        "href",
+        "updated",
+    )
+    for key in metadata_keys:
+        value = _mapping_value(feed, key)
+        if isinstance(value, str):
+            if value.strip():
+                return True
+        elif value:
+            return True
+    return False
+
+
+def _validate_parsed_feed(parsed, url: str):
+    """Reject fetched content that does not look like an RSS/Atom feed.
+
+    Empty but otherwise valid feeds are accepted: some new feeds have metadata
+    but no entries yet. Plain HTML/error pages and unreadable feed bodies are
+    rejected before they can be stored via ``,rss add``.
+    """
+    feed = _parsed_value(parsed, "feed", {}) or {}
+    entries = _parsed_value(parsed, "entries", []) or []
+    has_entries = bool(entries)
+    has_metadata = _has_feed_metadata(feed)
+    is_bozo = bool(_parsed_value(parsed, "bozo", False))
+
+    if is_bozo and not has_entries and not has_metadata:
+        exc = _parsed_value(parsed, "bozo_exception", None)
+        detail = str(exc) if exc else "parse failed"
+        raise ValueError(f"Invalid RSS/Atom feed at {url}: {detail}")
+
+    if not has_entries and not has_metadata:
+        raise ValueError(f"URL does not look like an RSS/Atom feed: {url}")
+
+    return parsed
+
+
 async def fetch_feed(url):
     """
     Fetch and parse RSS feed with proper URL handling.
@@ -495,12 +565,14 @@ async def fetch_feed(url):
             {"content-type": content_type} if content_type else None
         ),
     )
+    result = _validate_parsed_feed(result, url)
 
     # Force the feed URL to be the original URL we requested.  This keeps
     # storage stable even when the server redirects the fetch request.
-    if "feed" in result:
-        result.feed["href"] = url
-        result.feed["id"] = url
+    feed = _parsed_value(result, "feed", None)
+    if feed is not None:
+        _set_mapping_value(feed, "href", url)
+        _set_mapping_value(feed, "id", url)
 
     return result
 
@@ -1317,6 +1389,7 @@ async def _cancel_feed_task(bot, url: str) -> bool:
         try:
             await task
         except asyncio.CancelledError:
+            # Expected when replacing or deleting an RSS feed worker.
             pass
 
     return True

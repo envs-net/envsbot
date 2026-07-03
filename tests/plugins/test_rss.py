@@ -1404,6 +1404,40 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
     assert bot.plugin_store[rss.RSS_KEY][other_url]["rooms"] == ["other@conf"]
     assert cancelled == [drop_url]
 
+
+@pytest.mark.asyncio
+async def test_fetch_feed_validates_parsed_feed_shape(monkeypatch):
+    async def fake_fetch_bytes(url):
+        return b"<html>not a feed</html>", url, "text/html"
+
+    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_bytes)
+
+    def parse_empty(*args, **kwargs):
+        return SimpleNamespace(feed={}, entries=[], bozo=False)
+
+    monkeypatch.setattr(rss, "feedparser", SimpleNamespace(parse=parse_empty))
+
+    with pytest.raises(ValueError, match="does not look like an RSS/Atom feed"):
+        await rss.fetch_feed("https://example.org/not-a-feed")
+
+
+def test_validate_parsed_feed_accepts_empty_feed_metadata():
+    parsed = SimpleNamespace(feed={"title": "Empty but valid"}, entries=[])
+
+    assert rss._validate_parsed_feed(parsed, "https://example.org/feed") is parsed
+
+
+def test_validate_parsed_feed_rejects_bozo_without_feed_data():
+    parsed = SimpleNamespace(
+        feed={},
+        entries=[],
+        bozo=True,
+        bozo_exception=ValueError("broken xml"),
+    )
+
+    with pytest.raises(ValueError, match="Invalid RSS/Atom feed"):
+        rss._validate_parsed_feed(parsed, "https://example.org/feed")
+
 class _RssPendingTask:
     def done(self):
         return False

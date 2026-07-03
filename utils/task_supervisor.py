@@ -206,8 +206,8 @@ class TaskSupervisor:
             if not plugin_tasks:
                 self._by_plugin.pop(meta["plugin"], None)
 
-    def _forget_cancelled_or_successful_task(self, task: asyncio.Task[Any]) -> None:
-        """Drop completed tasks that do not carry a failure diagnostic."""
+    def _prune_task_unless_failed(self, task: asyncio.Task[Any]) -> None:
+        """Remove task metadata unless it should be kept for failure diagnostics."""
         meta = self._tasks.get(task, {})
         has_error = meta.get("last_error") is not None
         keep_for_diagnostics = has_error and task.done() and not task.cancelled()
@@ -237,6 +237,12 @@ class TaskSupervisor:
                 results = await asyncio.wait_for(gather_future, timeout=timeout)
             except asyncio.TimeoutError:
                 gather_future.cancel()
+                try:
+                    await gather_future
+                except asyncio.CancelledError:
+                    log.debug(
+                        "[TASKS] Timed-out task future cancelled during cleanup"
+                    )
                 log.warning(
                     "[TASKS] Plugin task did not stop in time: %s",
                     task.get_name(),
@@ -252,7 +258,7 @@ class TaskSupervisor:
                         exc_info=result,
                     )
 
-        self._forget_cancelled_or_successful_task(task)
+        self._prune_task_unless_failed(task)
         return was_running
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
@@ -303,7 +309,7 @@ class TaskSupervisor:
                     )
 
             for task in tasks:
-                self._forget_cancelled_or_successful_task(task)
+                self._prune_task_unless_failed(task)
         return len(tasks)
 
     async def cancel_all(self, *, timeout: float = 5.0) -> int:
