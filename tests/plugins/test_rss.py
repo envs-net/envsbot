@@ -1499,3 +1499,62 @@ async def test_rss_restart_tasks_restarts_plugin_lifecycle(monkeypatch, make_bot
     await rss.restart_tasks(bot)
 
     assert calls == ["unload", "load"]
+
+
+def test_set_mapping_value_supports_dict_and_attribute_objects():
+    feed_dict = {}
+    rss._set_mapping_value(feed_dict, "href", "https://example.org/feed")
+    assert feed_dict == {"href": "https://example.org/feed"}
+
+    feed_object = SimpleNamespace()
+    rss._set_mapping_value(feed_object, "id", "urn:feed")
+    assert feed_object.id == "urn:feed"
+
+
+@pytest.mark.asyncio
+async def test_fetch_feed_sets_fallback_feed_identifiers(monkeypatch):
+    async def fake_fetch_bytes(url):
+        return b"<rss></rss>", url, "application/rss+xml"
+
+    parsed = SimpleNamespace(feed={"title": "Fallback Feed"}, entries=[])
+
+    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_bytes)
+    monkeypatch.setattr(
+        rss,
+        "feedparser",
+        SimpleNamespace(parse=lambda *_args, **_kwargs: parsed),
+    )
+
+    result = await rss.fetch_feed("https://example.org/feed")
+
+    assert result is parsed
+    assert parsed.feed["href"] == "https://example.org/feed"
+    assert parsed.feed["id"] == "https://example.org/feed"
+
+
+@pytest.mark.asyncio
+async def test_fetch_feed_overwrites_feed_identifiers_for_stable_storage(monkeypatch):
+    async def fake_fetch_bytes(url):
+        return b"<rss></rss>", url, "application/rss+xml"
+
+    parsed = SimpleNamespace(
+        feed={
+            "title": "Existing Feed",
+            "href": "https://feeds.example.org/original",
+            "id": "urn:original-feed",
+        },
+        entries=[],
+    )
+
+    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_bytes)
+    monkeypatch.setattr(
+        rss,
+        "feedparser",
+        SimpleNamespace(parse=lambda *_args, **_kwargs: parsed),
+    )
+
+    result = await rss.fetch_feed("https://example.org/feed")
+
+    assert result is parsed
+    assert parsed.feed["href"] == "https://example.org/feed"
+    assert parsed.feed["id"] == "https://example.org/feed"

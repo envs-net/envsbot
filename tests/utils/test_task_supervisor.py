@@ -223,3 +223,69 @@ async def test_task_supervisor_ignores_untracked_done_task_and_creator_shapes(ca
             return None
 
     assert ts._is_plugin_task_creator(CallableNoSignature()) is False
+
+
+@pytest.mark.asyncio
+async def test_prune_task_unless_failed_removes_success_and_cancelled_tasks():
+    supervisor = TaskSupervisor()
+
+    async def marker():
+        return "ok"
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    success_task = supervisor.create("example", marker(), name="success")
+    assert await success_task == "ok"
+    await asyncio.sleep(0)
+
+    supervisor._prune_task_unless_failed(success_task)
+    assert success_task not in supervisor._tasks
+    assert "example" not in supervisor._by_plugin
+
+    cancelled_task = supervisor.create("example", sleeper(), name="cancelled")
+    cancelled_task.cancel()
+    cancelled_result = await asyncio.gather(cancelled_task, return_exceptions=True)
+    assert isinstance(cancelled_result[0], asyncio.CancelledError)
+    await asyncio.sleep(0)
+
+    supervisor._prune_task_unless_failed(cancelled_task)
+    assert cancelled_task not in supervisor._tasks
+    assert "example" not in supervisor._by_plugin
+
+
+@pytest.mark.asyncio
+async def test_prune_task_unless_failed_keeps_failed_tasks_for_diagnostics():
+    supervisor = TaskSupervisor()
+
+    async def failing():
+        raise RuntimeError("boom")
+
+    failed_task = supervisor.create("example", failing(), name="failure")
+    failed_result = await asyncio.gather(failed_task, return_exceptions=True)
+    assert isinstance(failed_result[0], RuntimeError)
+    await asyncio.sleep(0)
+
+    supervisor._prune_task_unless_failed(failed_task)
+
+    assert failed_task in supervisor._tasks
+    assert supervisor._tasks[failed_task]["last_error"] == "RuntimeError: boom"
+    snapshot = supervisor.snapshot(include_done=False)
+    assert len(snapshot) == 1
+    assert snapshot[0].name == "failure"
+    assert snapshot[0].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_prune_task_unless_failed_ignores_unknown_tasks():
+    supervisor = TaskSupervisor()
+
+    async def marker():
+        return "ok"
+
+    unknown_task = asyncio.create_task(marker(), name="unknown")
+    assert await unknown_task == "ok"
+
+    supervisor._prune_task_unless_failed(unknown_task)
+    assert supervisor.snapshot() == []
