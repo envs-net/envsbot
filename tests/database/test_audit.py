@@ -34,3 +34,27 @@ async def test_audit_log_init_append_and_list_filters(tmp_path):
         assert filtered[0]["event"] == "config_reloaded"
         assert filtered[0]["actor"] == "admin@example.org"
         assert filtered[0]["target"] == "config"
+
+
+@pytest.mark.asyncio
+async def test_audit_log_list_filters_by_target_and_event(tmp_path):
+    import aiosqlite
+
+    db_path = tmp_path / "audit.db"
+    conn = await aiosqlite.connect(db_path)
+    conn.row_factory = aiosqlite.Row
+    try:
+        audit = AuditLog(conn)
+        await audit.init()
+        await audit.append("room_added", actor="admin@example.org", target="room@example.org")
+        await audit.append("plugin_loaded", actor="admin@example.org", target="rss")
+
+        rows = await audit.list(target="room@example.org")
+        assert len(rows) == 1
+        assert rows[0]["event"] == "room_added"
+
+        rows = await audit.list(event="plugin_loaded")
+        assert len(rows) == 1
+        assert rows[0]["target"] == "rss"
+    finally:
+        await conn.close()

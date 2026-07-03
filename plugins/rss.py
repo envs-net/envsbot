@@ -36,6 +36,7 @@ from utils.url_safety import (
 )
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins.users import user_has_room_plugin_grant
+from utils.audit import audit_event
 
 try:
     import feedparser
@@ -1021,6 +1022,13 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             return
 
         await _add_feed(bot, msg, args[1], store, room)
+        await audit_event(
+            bot,
+            "rss_feed_add_requested",
+            actor=sender_jid,
+            target=room,
+            details={"url": _normalize_url(args[1])},
+        )
         return
 
     # Delete feed from a room, or remove it completely from direct/admin PMs.
@@ -1060,6 +1068,13 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             return
 
         await _del_feed(bot, msg, args[1], store, room, delete_target)
+        await audit_event(
+            bot,
+            "rss_feed_delete_requested",
+            actor=sender_jid,
+            target=target_room or delete_target or room or "rss",
+            details={"url": _normalize_url(args[1]), "target": delete_target},
+        )
         return
 
     elif sub in {"retry", "reset"}:
@@ -1082,6 +1097,12 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
                 bot.reply(msg, "🔴 Only global moderators can reset all RSS retries.")
                 return
             await _reset_all_feed_retries(bot, msg, store)
+            await audit_event(
+                bot,
+                "rss_retry_reset",
+                actor=sender_jid,
+                target="all",
+            )
             return
 
         target_room = _room_for_feed_command(
@@ -1106,6 +1127,13 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             return
 
         await _reset_feed_retry(bot, msg, retry_target, store)
+        await audit_event(
+            bot,
+            "rss_retry_reset",
+            actor=sender_jid,
+            target=target_room or "rss",
+            details={"url": _normalize_url(retry_target)},
+        )
         return
 
     # List rooms or one explicitly targeted room.
@@ -1454,3 +1482,30 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
             _cancel_feed_task(url)
 
     return summary
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small RSS runtime counters for diagnostics."""
+    store = await get_rss_store(bot)
+    feeds = await get_feeds(store)
+    room_target = _normalize_room_jid(room_jid) if room_jid else None
+    retrying = sum(
+        1 for feed in feeds.values()
+        if isinstance(feed, dict) and int(feed.get("next_retry") or 0) > _now()
+    )
+    if room_target:
+        room_feeds = _filter_feeds_for_room(feeds, room_target)
+        return {
+            "feeds": len(room_feeds),
+            "active_tasks": sum(1 for url in room_feeds if url in CHECK_TASKS),
+            "retry_backoff": sum(
+                1 for feed in room_feeds.values()
+                if isinstance(feed, dict)
+                and int(feed.get("next_retry") or 0) > _now()
+            ),
+        }
+    return {
+        "feeds": len(feeds),
+        "active_tasks": sum(1 for task in CHECK_TASKS.values() if not task.done()),
+        "retry_backoff": retrying,
+    }

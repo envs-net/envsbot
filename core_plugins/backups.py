@@ -10,6 +10,8 @@ from utils.backups import (
     backup_details,
     create_backup,
     list_backups,
+    plan_backup_prune,
+    prune_old_backups,
     resolve_backup,
     restore_backup,
 )
@@ -42,6 +44,36 @@ def _backup_list_line(index: int, backup) -> str:
         f"{index}. {backup.name} · {backup.created_at} · "
         f"{backup.reason} · {_format_bytes(backup.size)} · {files}"
     )
+
+
+def _parse_prune_args(args: list[str]) -> tuple[bool, int | None, int | None, str | None]:
+    """Parse backup prune arguments.
+
+    Returns ``(dry_run, keep, days, error)``.
+    """
+    dry_run = False
+    keep = None
+    days = None
+    remaining = list(args)
+
+    if remaining and remaining[0].lower() in {"dry-run", "dryrun", "check"}:
+        dry_run = True
+        remaining.pop(0)
+
+    while remaining:
+        key = remaining.pop(0).lower()
+        if key not in {"keep", "days"} or not remaining:
+            return dry_run, keep, days, f"invalid argument: {key}"
+        try:
+            value = int(remaining.pop(0))
+        except ValueError:
+            return dry_run, keep, days, f"{key} must be a number"
+        if key == "keep":
+            keep = value
+        else:
+            days = value
+
+    return dry_run, keep, days, None
 
 
 @command("backup create", role=Role.ADMIN, aliases=["backup"])
@@ -120,6 +152,51 @@ async def backup_show(bot, sender, nick, args, msg, is_room):
         for item in missing:
             lines.append(f"• {item.get('name', '?')} from {item.get('source', '?')}")
     bot.reply(msg, lines)
+
+
+@command("backup prune", role=Role.ADMIN)
+async def backup_prune(bot, sender, nick, args, msg, is_room):
+    """Prune managed backup archives according to retention settings."""
+    dry_run, keep, days, error = _parse_prune_args(args)
+    if error:
+        bot.reply_usage(
+            msg,
+            f"{bot.prefix}backup prune [dry-run] [keep <n>] [days <n>]",
+        )
+        return
+
+    planned = plan_backup_prune(keep=keep, days=days)
+    if dry_run:
+        lines = [
+            "📦 Backup prune dry-run",
+            f"Would delete: {len(planned)} archive(s)",
+        ]
+        lines.extend(f"• {archive.name}" for archive in planned)
+        if len(lines) == 2:
+            lines.append("Nothing to prune.")
+        bot.reply(msg, lines)
+        return
+
+    removed = prune_old_backups(keep=keep, days=days)
+    await audit_event(
+        bot,
+        "backup_pruned",
+        actor=sender,
+        target="managed_backups",
+        details={
+            "deleted": len(removed),
+            "keep": keep,
+            "days": days,
+        },
+    )
+    lines = [
+        "📦 Backup prune completed",
+        f"Deleted: {len(removed)} archive(s)",
+    ]
+    lines.extend(f"• {path.name}" for path in removed)
+    if len(lines) == 2:
+        lines.append("Nothing to prune.")
+    bot.reply_ok(msg, "\n".join(lines))
 
 
 @command("restore", role=Role.OWNER, aliases=["backup restore"])

@@ -13,7 +13,7 @@ import sqlite3
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +75,14 @@ def backup_keep() -> int:
         return max(1, int(config.get("backup_keep", 15)))
     except Exception:
         return 15
+
+
+def backup_retention_days() -> int:
+    """Return age-based backup retention in days, or 0 when disabled."""
+    try:
+        return max(0, int(config.get("backup_retention_days", 0) or 0))
+    except Exception:
+        return 0
 
 
 def _sha256(path: Path) -> str:
@@ -235,13 +243,58 @@ def list_backups(*, directory: Path | None = None) -> list[BackupArchive]:
     return items
 
 
-def prune_old_backups(*, directory: Path | None = None, keep: int | None = None) -> list[Path]:
-    """Remove old managed backup archives and return deleted paths."""
+def _parse_archive_created_at(value: str) -> datetime | None:
+    """Parse a manifest timestamp into an aware UTC datetime if possible."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def plan_backup_prune(
+    *,
+    directory: Path | None = None,
+    keep: int | None = None,
+    days: int | None = None,
+) -> list[BackupArchive]:
+    """Return managed archives that would be removed by retention policy."""
     directory = directory or backup_dir()
     keep = backup_keep() if keep is None else max(1, int(keep))
+    days = backup_retention_days() if days is None else max(0, int(days))
     archives = list_backups(directory=directory)
-    removed: list[Path] = []
+
+    selected: dict[Path, BackupArchive] = {}
     for archive in archives[keep:]:
+        selected[archive.path] = archive
+
+    if days > 0:
+        cutoff = _now() - timedelta(days=days)
+        for archive in archives:
+            created_at = _parse_archive_created_at(archive.created_at)
+            if created_at is not None and created_at < cutoff:
+                selected[archive.path] = archive
+
+    # Preserve newest-first listing order from list_backups().
+    return [archive for archive in archives if archive.path in selected]
+
+
+def prune_old_backups(
+    *,
+    directory: Path | None = None,
+    keep: int | None = None,
+    days: int | None = None,
+    dry_run: bool = False,
+) -> list[Path]:
+    """Remove old managed backup archives and return affected paths."""
+    planned = plan_backup_prune(directory=directory, keep=keep, days=days)
+    if dry_run:
+        return [archive.path for archive in planned]
+
+    removed: list[Path] = []
+    for archive in planned:
         try:
             archive.path.unlink()
             removed.append(archive.path)

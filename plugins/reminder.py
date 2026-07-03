@@ -1220,3 +1220,31 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         await _delete_reminder(bot, reminder_id)
 
     return {"reminders": len(room_ids), "tasks": cancelled}
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small reminder counters for diagnostics."""
+    await _init_reminder_db(bot)
+    pending = await _get_all_pending_reminders(bot)
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        room_pending = [
+            reminder for reminder in pending
+            if str(reminder.get("room_jid") or "")
+            .split("/", 1)[0]
+            .strip()
+            .lower() == target
+        ]
+        room_ids = {int(reminder["id"]) for reminder in room_pending}
+        return {
+            "pending_reminders": len(room_pending),
+            "active_tasks": sum(
+                1 for reminder_id, task in ACTIVE_REMINDERS.items()
+                if reminder_id in room_ids and not task.done()
+            ),
+        }
+    return {
+        "pending_reminders": len(pending),
+        "active_tasks": sum(1 for task in ACTIVE_REMINDERS.values() if not task.done()),
+        "enabled": int(REMINDER_ENABLED),
+    }

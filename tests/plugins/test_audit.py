@@ -110,3 +110,51 @@ async def test_audit_user_usage_invalid_jid_empty_and_rows(bot, msg, monkeypatch
     monkeypatch.setattr(audit_mod, "_list_events", list_events)
     await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org"], msg, False)
     assert "#1 now | event" in bot.reply.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_audit_target_and_action_filters(msg):
+    bot = MagicMock()
+    bot.reply = MagicMock()
+    row = {
+        "id": 1,
+        "created_at": "now",
+        "event": "room_added",
+        "actor": "admin@example.org",
+        "target": "room@example.org",
+        "details": "{}",
+    }
+    audit_log = MagicMock()
+    audit_log.list = AsyncMock(return_value=[row])
+    bot.db = MagicMock(audit=audit_log)
+
+    await audit_mod.audit_target(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["room@example.org"],
+        msg,
+        False,
+    )
+    audit_log.list.assert_awaited_with(
+        limit=50,
+        actor=None,
+        target="room@example.org",
+        event=None,
+    )
+    assert "room_added" in bot.reply.call_args.args[1]
+
+    await audit_mod.audit_action(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["room_added"],
+        msg,
+        False,
+    )
+    audit_log.list.assert_awaited_with(
+        limit=50,
+        actor=None,
+        target=None,
+        event="room_added",
+    )

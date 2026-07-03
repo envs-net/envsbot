@@ -46,28 +46,38 @@ class AuditLog:
         )
         await self.conn.commit()
 
-    async def list(self, *, limit: int = 20, actor: str | None = None):
-        """Return latest audit events, optionally filtered by actor."""
+    async def list(
+        self,
+        *,
+        limit: int = 20,
+        actor: str | None = None,
+        target: str | None = None,
+        event: str | None = None,
+    ):
+        """Return latest audit events, optionally filtered."""
         limit = max(1, min(int(limit), 100))
+        where = []
+        params = []
         if actor:
-            cursor = await self.conn.execute(
-                """
-                SELECT id, created_at, event, actor, target, details
-                FROM audit_log
-                WHERE actor = ?
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (actor, limit),
-            )
-        else:
-            cursor = await self.conn.execute(
-                """
-                SELECT id, created_at, event, actor, target, details
-                FROM audit_log
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            where.append("actor = ?")
+            params.append(actor)
+        if target:
+            where.append("target = ?")
+            params.append(target)
+        if event:
+            where.append("event = ?")
+            params.append(event)
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
+        cursor = await self.conn.execute(
+            f"""
+            SELECT id, created_at, event, actor, target, details
+            FROM audit_log
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
         return await cursor.fetchall()

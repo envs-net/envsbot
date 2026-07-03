@@ -221,3 +221,47 @@ async def test_plugin_reload_all_auto_some_errors(bot, msg):
     out = bot.reply.call_args[0][1]
     assert "some errors" in out or "errors" in out
     assert "- info:" in out
+
+
+@pytest.mark.asyncio
+async def test_plugin_diagnose_and_state_commands(bot, msg):
+    state = {"feeds": 2, "active_tasks": 1}
+    bot.bot_plugins.plugins["rss"] = MagicMock()
+    bot.bot_plugins.get_plugin_info.side_effect = lambda name: {
+        "rss": {
+            "name": "rss",
+            "version": "1",
+            "source": "plugins",
+            "category": "info",
+            "description": "RSS feeds",
+            "requires": ["rooms"],
+        }
+    }.get(name)
+    bot.bot_plugins.plugin_state = AsyncMock(return_value={"loaded": True, **state})
+
+    await plugins_module.plugin_diagnose(
+        bot,
+        "adminjid",
+        "AdminNick",
+        ["rss"],
+        msg,
+        False,
+    )
+
+    diagnose = bot.reply.call_args.args[1]
+    assert "🔎 Plugin diagnostics: rss" in diagnose
+    assert any("runtime state hook" in line for line in diagnose)
+
+    await plugins_module.plugin_state(
+        bot,
+        "adminjid",
+        "AdminNick",
+        ["rss", "room@example.org"],
+        msg,
+        False,
+    )
+
+    reply = bot.reply.call_args.args[1]
+    assert reply[0] == "📦 Plugin state: rss (room@example.org)"
+    assert "feeds: 2" in reply
+    bot.bot_plugins.plugin_state.assert_awaited_with("rss", room_jid="room@example.org")

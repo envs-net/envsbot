@@ -177,3 +177,28 @@ async def test_backup_restore_reconnects_after_restore_error(backup_env, monkeyp
 
     assert bot.db.closed is True
     assert bot.db.connected is True
+
+
+def test_plan_backup_prune_supports_dry_run_and_age(backup_env):
+    backup_env.backup_dir.mkdir(parents=True)
+    old = backup_env.backup_dir / "envsbot-backup-20250101-000000-old.zip"
+    new = backup_env.backup_dir / "envsbot-backup-20260101-000000-new.zip"
+    for path, created_at in (
+        (old, "2025-01-01T00:00:00+00:00"),
+        (new, "2026-01-01T00:00:00+00:00"),
+    ):
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr(
+                "manifest.json",
+                json.dumps({"app": "envsbot", "created_at": created_at, "files": []}),
+            )
+
+    planned = backups.plan_backup_prune(directory=backup_env.backup_dir, keep=1)
+    assert [archive.name for archive in planned] == [old.name]
+    dry_run = backups.prune_old_backups(
+        directory=backup_env.backup_dir,
+        keep=1,
+        dry_run=True,
+    )
+    assert [path.name for path in dry_run] == [old.name]
+    assert old.exists()

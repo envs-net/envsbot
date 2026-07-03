@@ -34,6 +34,7 @@ CORE_PLUGIN_NAMES = {
     "audit",
     "backups",
     "config_cmd",
+    "doctor",
     "help",
     "plugins",
     "presence",
@@ -785,6 +786,62 @@ class PluginManager:
                 )
                 summaries[name] = {"error": str(exc)}
         return summaries
+
+    async def plugin_state(self, name: str, room_jid: str | None = None) -> dict:
+        """Return plugin-provided runtime state for diagnostics.
+
+        Plugins can expose ``get_runtime_state(bot, room_jid=None)``.  The hook
+        may be sync or async and should return a small dict with counts/status
+        values, not raw user data.  Missing hooks return an empty state rather
+        than failing diagnostics.
+        """
+        module = self.plugins.get(name)
+        if module is None:
+            return {"loaded": False}
+
+        hook = getattr(module, "get_runtime_state", None)
+        if hook is None:
+            return {"loaded": True}
+        if not callable(hook):
+            return {"loaded": True, "error": "get_runtime_state is not callable"}
+
+        try:
+            result = hook(self.bot, room_jid=room_jid)
+            if inspect.isawaitable(result):
+                result = await result
+            if result is None:
+                result = {}
+            if not isinstance(result, dict):
+                result = {"result": result}
+            return {"loaded": True, **result}
+        except Exception as exc:
+            log.exception("[PLUGIN] get_runtime_state failed for %s", name)
+            return {"loaded": True, "error": str(exc)}
+
+    async def restart_tasks(self, name: str) -> tuple[bool, str, int]:
+        """Restart supervised background tasks for one loaded plugin.
+
+        A plugin may provide ``restart_tasks(bot)`` for targeted restoration.
+        Without that hook, the plugin's ``on_ready(bot)`` hook is reused because
+        current task-owning plugins already restore/schedule their loops there.
+        """
+        module = self.plugins.get(name)
+        if module is None:
+            return False, f"Plugin {name} is not loaded", 0
+
+        cancelled = await self._cancel_plugin_tasks(name)
+        hook = getattr(module, "restart_tasks", None) or getattr(module, "on_ready", None)
+        if hook is None:
+            return True, f"Plugin {name} has no task restart hook", cancelled
+        if not callable(hook):
+            return False, f"Plugin {name} task restart hook is not callable", cancelled
+
+        try:
+            await self._run_hook(hook)
+        except Exception as exc:
+            log.exception("[PLUGIN] task restart failed for %s", name)
+            return False, f"Error restarting tasks for {name}: {exc}", cancelled
+        return True, f"Plugin {name} tasks restarted", cancelled
 
     async def call_on_ready(self):
         """

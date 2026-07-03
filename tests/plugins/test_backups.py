@@ -197,3 +197,52 @@ async def test_backup_restore_handles_backup_and_generic_errors(bot, msg, monkey
     monkeypatch.setattr(backups_plugin, "restore_backup", AsyncMock(side_effect=RuntimeError("boom")))
     await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last", "confirm"], msg, False)
     assert "Restore failed: boom" in bot.reply_error.call_args.args[1]
+
+
+def test_parse_prune_args():
+    assert backups_plugin._parse_prune_args(["dry-run", "keep", "20", "days", "30"]) == (
+        True,
+        20,
+        30,
+        None,
+    )
+    assert backups_plugin._parse_prune_args(["keep", "nope"])[3] == "keep must be a number"
+
+
+@pytest.mark.asyncio
+async def test_backup_prune_dry_run_and_delete(bot, msg, monkeypatch):
+    archive = MagicMock()
+    archive.name = "envsbot-backup-old.zip"
+    path = Path("envsbot-backup-old.zip")
+    plan = MagicMock(return_value=[archive])
+    prune = MagicMock(return_value=[path])
+    audit = AsyncMock()
+    monkeypatch.setattr(backups_plugin, "plan_backup_prune", plan)
+    monkeypatch.setattr(backups_plugin, "prune_old_backups", prune)
+    monkeypatch.setattr(backups_plugin, "audit_event", audit)
+
+    await backups_plugin.backup_prune(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["dry-run", "keep", "2"],
+        msg,
+        False,
+    )
+
+    plan.assert_called_once_with(keep=2, days=None)
+    assert "Would delete: 1" in "\n".join(bot.reply.call_args.args[1])
+    prune.assert_not_called()
+
+    await backups_plugin.backup_prune(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["days", "30"],
+        msg,
+        False,
+    )
+
+    prune.assert_called_once_with(keep=None, days=30)
+    audit.assert_awaited_once()
+    bot.reply_ok.assert_called()

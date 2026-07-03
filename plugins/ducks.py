@@ -833,3 +833,29 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         summary["data"] += 1
 
     return summary
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small duck-game counters for diagnostics."""
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+
+        def has_room(mapping):
+            return any(
+                str(room).split("/", 1)[0].strip().lower() == target
+                for room in mapping
+            )
+
+        return {
+            "active_ducks": int(has_room(ACTIVE_DUCKS)),
+            "pending_spawn": int(has_room(SPAWN_TASKS) or room_jid in PENDING_DUCKS),
+            "expire_tasks": int(has_room(EXPIRE_TASKS)),
+            "message_counts": int(has_room(MESSAGE_COUNTS)),
+        }
+    return {
+        "active_ducks": len(ACTIVE_DUCKS),
+        "pending_rooms": len(PENDING_DUCKS),
+        "spawn_tasks": sum(1 for task in SPAWN_TASKS.values() if not task.done()),
+        "expire_tasks": sum(1 for task in EXPIRE_TASKS.values() if not task.done()),
+        "tracked_rooms": len(MESSAGE_COUNTS),
+    }

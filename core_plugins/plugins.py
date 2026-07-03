@@ -25,6 +25,31 @@ PLUGIN_META = {
 prefix = config.get("prefix", ",")
 
 
+def _format_state_lines(state: dict) -> list[str]:
+    """Format a plugin state dict as stable diagnostic lines."""
+    if not state:
+        return ["State: no runtime state reported"]
+    lines = []
+    for key in sorted(state):
+        value = state[key]
+        if isinstance(value, (list, tuple, set)):
+            value = ", ".join(str(item) for item in value) or "none"
+        lines.append(f"{key}: {value}")
+    return lines
+
+
+def _plugin_command_names(name: str) -> list[str]:
+    """Return registered command names for one plugin."""
+    try:
+        from utils.command import COMMANDS
+
+        tokens = COMMANDS.by_plugin.get(name, set())
+        return sorted(" ".join(item) for item in tokens)
+    except Exception:
+        log.debug("[PLUGIN] Could not inspect command registry", exc_info=True)
+        return []
+
+
 @command("plugin list", role=Role.ADMIN, aliases=["plugins", "plugins list"])
 async def plugin_list(bot, sender, nick, args, msg, is_room):
     """List all plugins grouped by category."""
@@ -92,6 +117,74 @@ async def plugin_info(bot, sender, nick, args, msg, is_room):
         lines.append("Requires: " + ", ".join(meta["requires"]))
 
     bot.reply(msg, "\n".join(lines))
+
+
+@command("plugin diagnose", role=Role.ADMIN, aliases=["plugins diagnose"])
+async def plugin_diagnose(bot, sender, nick, args, msg, is_room):
+    """Show diagnostics for one plugin."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{bot.prefix}plugin diagnose <plugin>")
+        return
+
+    name = args[0].lower()
+    meta = await bot.bot_plugins.get_plugin_info(name)
+    if not meta:
+        bot.reply_error(msg, f"Plugin '{name}' not found.")
+        return
+
+    loaded = name in getattr(bot.bot_plugins, "plugins", {})
+    commands = _plugin_command_names(name)
+    tasks = []
+    supervisor = getattr(bot, "tasks", None)
+    if supervisor is not None:
+        tasks = [
+            task for task in supervisor.snapshot(include_done=True)
+            if task.plugin == name
+        ]
+
+    module = getattr(bot.bot_plugins, "plugins", {}).get(name)
+    lines = [
+        f"🔎 Plugin diagnostics: {name}",
+        f"Loaded: {'yes' if loaded else 'no'}",
+        f"Source: {meta.get('source', 'plugins')}",
+        f"Category: {meta.get('category', 'other')}",
+        f"Description: {meta.get('description', 'no description')}",
+        f"Requires: {', '.join(meta.get('requires', [])) if meta.get('requires') else 'none'}",
+        f"Commands: {len(commands)}",
+        f"Supervised tasks: {len(tasks)}",
+        f"cleanup_room_state hook: {'yes' if callable(getattr(module, 'cleanup_room_state', None)) else 'no'}",
+        f"runtime state hook: {'yes' if callable(getattr(module, 'get_runtime_state', None)) else 'no'}",
+    ]
+    if tasks:
+        lines.append("Tasks:")
+        lines.extend(f"• {task.name}: {task.status}" for task in tasks)
+    if commands:
+        lines.append("Commands:")
+        lines.extend(f"• {command_name}" for command_name in commands[:12])
+        if len(commands) > 12:
+            lines.append(f"• … {len(commands) - 12} more")
+
+    bot.reply(msg, lines)
+
+
+@command("plugin state", role=Role.ADMIN, aliases=["plugins state"])
+async def plugin_state(bot, sender, nick, args, msg, is_room):
+    """Show plugin-provided runtime state."""
+    if len(args) not in (1, 2):
+        bot.reply_usage(msg, f"{bot.prefix}plugin state <plugin> [room_jid]")
+        return
+
+    name = args[0].lower()
+    room_jid = args[1].lower() if len(args) == 2 else None
+    if name not in getattr(bot.bot_plugins, "plugins", {}):
+        bot.reply_error(msg, f"Plugin '{name}' is not loaded.")
+        return
+
+    state = await bot.bot_plugins.plugin_state(name, room_jid=room_jid)
+    title = f"📦 Plugin state: {name}"
+    if room_jid:
+        title += f" ({room_jid})"
+    bot.reply(msg, [title, *_format_state_lines(state)])
 
 
 @command("plugin load", role=Role.ADMIN, aliases=["plugins load"])

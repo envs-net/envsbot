@@ -70,9 +70,32 @@ BACKUP_DIR = "data/backups"
 # Keep this many managed backup archives after creating a new one.
 BACKUP_KEEP = 15
 
+# Also prune managed backup archives older than this many days.
+# Set to 0 to disable age-based pruning.
+BACKUP_RETENTION_DAYS = 0
+
 # Create a managed backup once during each bot process start. This also covers
 # service restarts, because a restart starts a fresh bot process.
 BACKUP_ON_START = True
+
+
+# ================= COMMAND RATE LIMITS =================
+
+# Protect the bot from command spam. Limits are in-memory and reset on restart.
+COMMAND_RATE_LIMIT_ENABLED = True
+COMMAND_RATE_LIMIT_CAPACITY = 4
+COMMAND_RATE_LIMIT_REFILL_AMOUNT = 1
+COMMAND_RATE_LIMIT_REFILL_INTERVAL_SECONDS = 0.5
+COMMAND_RATE_LIMIT_DENY_WINDOW_SECONDS = 10.0
+COMMAND_RATE_LIMIT_DENY_THRESHOLD = 6
+COMMAND_RATE_LIMIT_BASE_BLOCK_SECONDS = 30.0
+COMMAND_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
+COMMAND_RATE_LIMIT_MAX_BLOCK_SECONDS = 3600.0
+COMMAND_RATE_LIMIT_NOTIFY_COOLDOWN_SECONDS = 10.0
+
+# Users with this role or better bypass command rate limits.
+# Use one of: owner, superadmin, admin, moderator, trusted, user, new, none.
+COMMAND_RATE_LIMIT_BYPASS_ROLE = "moderator"
 
 
 # ================= HTTP DEFAULTS =================

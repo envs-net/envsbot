@@ -1,5 +1,5 @@
 import types
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -328,3 +328,37 @@ def test_plugin_manager_list_and_available_use_loaded_and_discovered(monkeypatch
 
     monkeypatch.setattr(pm, "discover", lambda: ["help", "weather", "xkcd", "rss"])
     assert pm.available() == ["rss", "xkcd"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_state_and_restart_tasks_hooks(monkeypatch):
+    class Bot:
+        def __init__(self):
+            self.tasks = MagicMock()
+            self.tasks.cancel_plugin = AsyncMock(return_value=3)
+
+    module = types.ModuleType("plugins.stateful")
+
+    async def get_runtime_state(bot, room_jid=None):
+        return {"room": room_jid or "all", "items": 2}
+
+    async def restart_tasks(bot):
+        bot.restarted = True
+
+    module.get_runtime_state = get_runtime_state
+    module.restart_tasks = restart_tasks
+
+    bot = Bot()
+    manager = PluginManager(bot)
+    manager.plugins["stateful"] = module
+
+    assert await manager.plugin_state("stateful", room_jid="room@example.org") == {
+        "loaded": True,
+        "room": "room@example.org",
+        "items": 2,
+    }
+    success, message, cancelled = await manager.restart_tasks("stateful")
+    assert success is True
+    assert "restarted" in message
+    assert cancelled == 3
+    assert bot.restarted is True

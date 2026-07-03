@@ -46,11 +46,31 @@ def _format_row(row) -> str:
     return f"#{event_id} {created_at} | {event} | actor={actor} | target={target}{suffix}"
 
 
-async def _list_events(bot, *, limit: int = 20, actor: str | None = None):
+async def _list_events(
+    bot,
+    *,
+    limit: int = 20,
+    actor: str | None = None,
+    target: str | None = None,
+    event: str | None = None,
+):
     audit_log = getattr(getattr(bot, "db", None), "audit", None)
     if audit_log is None:
         return []
-    return await audit_log.list(limit=limit, actor=actor)
+    return await audit_log.list(
+        limit=limit,
+        actor=actor,
+        target=target,
+        event=event,
+    )
+
+
+def _reply_audit_rows(bot, msg, title: str, rows, *, empty: str) -> None:
+    """Reply with formatted audit rows."""
+    lines = [_format_row(row) for row in rows]
+    if not lines:
+        lines = [empty]
+    bot.reply(msg, "\n".join([title, *lines]))
 
 
 @command(
@@ -110,7 +130,62 @@ async def audit_user(bot, sender, nick, args, msg, is_room):
         return
 
     rows = await _list_events(bot, limit=50, actor=actor)
-    lines = [_format_row(row) for row in rows]
-    if not lines:
-        lines = [f"No audit events found for {actor}."]
-    bot.reply(msg, "\n".join(["🧾 Audit log", *lines]))
+    _reply_audit_rows(
+        bot,
+        msg,
+        "🧾 Audit log",
+        rows,
+        empty=f"No audit events found for {actor}.",
+    )
+
+
+@command(
+    "audit target",
+    role=Role.ADMIN,
+    aliases=["audits target", "audit room", "audits room"],
+    short="Show recent audit events for one target value.",
+    usage="{prefix}audit target <target>",
+    examples=["{prefix}audit target room@conference.example.org"],
+    category="admin",
+    context="private recommended",
+)
+async def audit_target(bot, sender, nick, args, msg, is_room):
+    """Show audit events for one target."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit target <target>")
+        return
+    target = str(args[0])
+    rows = await _list_events(bot, limit=50, target=target)
+    _reply_audit_rows(
+        bot,
+        msg,
+        "🧾 Audit log",
+        rows,
+        empty=f"No audit events found for target {target}.",
+    )
+
+
+@command(
+    "audit action",
+    role=Role.ADMIN,
+    aliases=["audits action", "audit event", "audits event"],
+    short="Show recent audit events for one action/event type.",
+    usage="{prefix}audit action <event_type>",
+    examples=["{prefix}audit action room_feature_changed"],
+    category="admin",
+    context="private recommended",
+)
+async def audit_action(bot, sender, nick, args, msg, is_room):
+    """Show audit events for one event type."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit action <event_type>")
+        return
+    event = str(args[0])
+    rows = await _list_events(bot, limit=50, event=event)
+    _reply_audit_rows(
+        bot,
+        msg,
+        "🧾 Audit log",
+        rows,
+        empty=f"No audit events found for action {event}.",
+    )

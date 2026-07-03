@@ -75,6 +75,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `audit` | `core` | `core` | Admin audit log viewer |
 | `backups` | `core` | `core` | Managed ZIP backups and restore helpers. |
 | `config_cmd` | `core` | `core` | Safe config inspection, validation and reload commands. |
+| `doctor` | `core` | `core` | Operator health checks and runtime diagnostics. |
 | `help` | `core` | `core` | Dynamic help for plugins and commands. |
 | `plugins` | `core` | `core` | Runtime plugin management |
 | `presence` | `core` | `info` | Bot presence and status management |
@@ -105,10 +106,13 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
+| `,audit action` | `admin` | `private recommended` | Show recent audit events for one action/event type. |
 | `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
+| `,audit target` | `admin` | `private recommended` | Show recent audit events for one target value. |
 | `,audit user` | `admin` | `private recommended` | Show recent audit events for one actor JID. |
 | `,backup create` | `admin` | `private chat / MUC PM` | Create a managed ZIP backup archive. |
 | `,backup list` | `admin` | `private chat / MUC PM` | List managed backup archives. |
+| `,backup prune` | `admin` | `private chat / MUC PM` | Prune managed backup archives, with optional dry-run. |
 | `,backup show` | `admin` | `private chat / MUC PM` | Show manifest details for one managed backup archive. |
 | `,bot checkupdate` | `admin` | `private chat / MUC PM` | Check whether a newer EnvsBot release is available. |
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
@@ -118,6 +122,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config reload` | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
+| `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks and backups. |
+| `,plugin diagnose` | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
+| `,plugin state` | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
 | `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
 | `,tasks` | `admin` | `private chat / MUC PM` | Show supervised background task status. |
 
@@ -187,6 +194,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,poll` | `user` | `any` | Create and manage polls. |
 | `,rooms add` | `admin` | `private chat / MUC PM` | Add or update a stored room configuration. |
 | `,rooms delete` | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
+| `,rooms diagnose` | `admin` | `private chat / MUC PM` | Show operational diagnostics for one room. |
 | `,rooms disable` | `user` | `room / MUC PM / private chat with <room_jid>` | Disable a room plugin toggle; requires room admin/owner or bot moderator. |
 | `,rooms enable` | `user` | `room / MUC PM / private chat with <room_jid>` | Enable a room plugin toggle; requires room admin/owner or bot moderator. |
 | `,rooms invite` | `admin` | `private chat / MUC PM / invite notify room` | List, accept, decline or clean up pending room invites. |
@@ -345,6 +353,21 @@ Category: `core`
 
 Admin audit log viewer
 
+#### `,audit action`
+
+Show recent audit events for one action/event type.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,audit action <event_type>`
+
+Aliases: `,audit event`, `,audits action`, `,audits event`
+
+Examples:
+
+- `,audit action room_feature_changed`
+
 #### `,audit last`
 
 Show recent admin audit events.
@@ -360,6 +383,21 @@ Examples:
 
 - `,audit last`
 - `,audit last 2`
+
+#### `,audit target`
+
+Show recent audit events for one target value.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,audit target <target>`
+
+Aliases: `,audit room`, `,audits room`, `,audits target`
+
+Examples:
+
+- `,audit target room@conference.example.org`
 
 #### `,audit user`
 
@@ -415,6 +453,20 @@ Examples:
 
 - `,backup list`
 - `,backup list all`
+
+#### `,backup prune`
+
+Prune managed backup archives, with optional dry-run.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,backup prune [dry-run] [keep <n>] [days <n>]`
+
+Examples:
+
+- `,backup prune dry-run`
+- `,backup prune keep 20 days 30`
 
 #### `,backup show`
 
@@ -507,6 +559,29 @@ Examples:
 
 - `,config validate`
 
+### doctor
+
+Source: `core`
+Category: `core`
+
+Operator health checks and runtime diagnostics.
+
+#### `,doctor`
+
+Run operator health checks for config, DB, rooms, plugins, tasks and backups.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,doctor [full] [all|page|last]`
+
+Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
+
+Examples:
+
+- `,doctor`
+- `,doctor full`
+
 ### help
 
 Source: `core`
@@ -557,6 +632,21 @@ Source: `core`
 Category: `core`
 
 Runtime plugin management
+
+#### `,plugin diagnose`
+
+Show diagnostics for one plugin, including hooks, commands and tasks.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,plugin diagnose <plugin>`
+
+Aliases: `,plugins diagnose`
+
+Examples:
+
+- `,plugin diagnose rss`
 
 #### `,plugin info`
 
@@ -620,6 +710,22 @@ Examples:
 
 - `,plugin reload help`
 - `,plugin reload all auto`
+
+#### `,plugin state`
+
+Show plugin-provided runtime state counters.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,plugin state <plugin> [room_jid]`
+
+Aliases: `,plugins state`
+
+Examples:
+
+- `,plugin state rss`
+- `,plugin state poll room@conference.example.org`
 
 #### `,plugin unload`
 
@@ -706,6 +812,21 @@ Aliases: `,room delete`
 Examples:
 
 - `,rooms delete test@conference.example.org`
+
+#### `,rooms diagnose`
+
+Show operational diagnostics for one room.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `rooms`<br>
+Usage: `,rooms diagnose <room_jid>`
+
+Aliases: `,room debug`, `,room diagnose`, `,rooms debug`
+
+Examples:
+
+- `,rooms diagnose room@conference.example.org`
 
 #### `,rooms disable`
 
@@ -889,7 +1010,7 @@ Show supervised background task status.
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]`
+Usage: `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last] | ,tasks restart <plugin>`
 
 Aliases: `,bot tasks`
 
@@ -899,6 +1020,7 @@ Examples:
 - `,tasks full`
 - `,tasks plugin rss`
 - `,tasks failed`
+- `,tasks restart rss`
 
 ### users
 

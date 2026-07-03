@@ -28,6 +28,7 @@ from functools import partial
 from typing import Any
 
 from utils.command import command, Role
+from utils.audit import audit_event
 from utils.config import config
 from core_plugins.users import user_has_room_plugin_grant
 from core_plugins._core import (
@@ -393,6 +394,13 @@ async def _create_pin_entry(
 
     bucket[PINS_FIELD].append(entry)
     await _save_pin_data(bot, state)
+    await audit_event(
+        bot,
+        "pin_added",
+        actor=sender_real_jid,
+        target=room,
+        details={"pin_id": pin_id, "source": source},
+    )
 
     bot.reply(
         msg,
@@ -693,6 +701,13 @@ async def _pin_command_delete(bot, msg, room, args):
         return
 
     await _save_pin_data(bot, state)
+    await audit_event(
+        bot,
+        "pin_deleted",
+        actor=getattr(msg.get("from"), "bare", None),
+        target=room,
+        details={"pin_id": pin_id},
+    )
     bot.reply(msg, f"✅ Deleted pin #{pin_id}.", mention=False)
 
 
@@ -787,3 +802,23 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
     state.pop(matching, None)
     await _save_pin_data(bot, state)
     return {"rooms": 1}
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small pin counters for diagnostics."""
+    state = await _load_pin_data(bot)
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        matching = next(
+            (
+                room for room in state
+                if str(room).split("/", 1)[0].strip().lower() == target
+            ),
+            None,
+        )
+        bucket = state.get(matching, {}) if matching else {}
+        return {"rooms": 1 if matching else 0, "pins": len(bucket.get(PINS_FIELD, []))}
+    return {
+        "rooms": len(state),
+        "pins": sum(len(bucket.get(PINS_FIELD, [])) for bucket in state.values()),
+    }

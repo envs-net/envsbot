@@ -1487,6 +1487,86 @@ async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, lines)
 
 
+def _yes_no(value: object) -> str:
+    return "yes" if bool(value) else "no"
+
+
+async def _room_diagnose_lines(bot, room_jid: str) -> list[str]:
+    """Return operational diagnostics for one room."""
+    db_room = await bot.db.rooms.get(room_jid)
+    joined_info = JOINED_ROOMS.get(room_jid) or {}
+    presence_joined = room_jid in getattr(getattr(bot, "presence", None), "joined_rooms", {})
+    nicks = joined_info.get("nicks", {}) or {}
+    pending_invites = getattr(bot, "pending_room_invites", {}) or {}
+    invite_count = sum(
+        1 for invite in pending_invites.values()
+        if str(invite.get("room_jid", "")).lower() == room_jid.lower()
+    )
+    features = await list_room_features(bot, room_jid)
+    enabled = sorted(feature.name for feature in features if feature.enabled)
+    disabled = sorted(feature.name for feature in features if not feature.enabled)
+
+    lines = [
+        f"🔎 Room diagnostics: {room_jid}",
+        f"Known in DB: {_yes_no(db_room)}",
+        f"Currently joined: {_yes_no(bool(joined_info) or presence_joined)}",
+        f"Presence joined: {_yes_no(presence_joined)}",
+        f"Tracked occupants: {len(nicks)}",
+        f"Pending invites: {invite_count}",
+    ]
+    if db_room:
+        try:
+            lines.extend([
+                f"Configured nick: {db_room[1]}",
+                f"Autojoin: {_yes_no(db_room[2])}",
+                f"Status: {db_room[3] if len(db_room) > 3 else 'unknown'}",
+            ])
+        except Exception:
+            log.debug("[ROOMS] Could not format DB room row", exc_info=True)
+    if joined_info:
+        lines.extend([
+            f"Runtime nick: {joined_info.get('nick', 'unknown')}",
+            f"Runtime affiliation: {joined_info.get('affiliation', 'unknown')}",
+            f"Runtime role: {joined_info.get('role', 'unknown')}",
+        ])
+
+    lines.extend([
+        f"Enabled room plugins ({len(enabled)}): {', '.join(enabled) if enabled else 'none'}",
+        f"Disabled room plugins ({len(disabled)}): {', '.join(disabled) if disabled else 'none'}",
+    ])
+
+    manager = getattr(bot, "bot_plugins", None)
+    state_getter = getattr(manager, "plugin_state", None)
+    if callable(state_getter):
+        interesting = ["rss", "pin", "poll", "reminder", "ducks", "xkcd"]
+        lines.append("Plugin room state:")
+        for plugin in interesting:
+            if plugin not in getattr(manager, "plugins", {}):
+                continue
+            state = await state_getter(plugin, room_jid=room_jid)
+            summary = ", ".join(
+                f"{key}={value}"
+                for key, value in sorted(state.items())
+                if key not in {"loaded"}
+            ) or "no room state"
+            lines.append(f"• {plugin}: {summary}")
+    return lines
+
+
+@command("rooms diagnose", role=Role.ADMIN, aliases=["room diagnose", "rooms debug", "room debug"])
+async def cmd_room_diagnose(bot, sender_jid, nick, args, msg, is_room):
+    """Show diagnostics for one configured or joined room."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{bot.prefix}rooms diagnose <room_jid>")
+        return
+    room_jid = str(args[0]).lower()
+    if not _looks_like_room_jid(room_jid):
+        bot.reply_error(msg, f"Invalid room JID: {room_jid}")
+        return
+    lines = await _room_diagnose_lines(bot, room_jid)
+    bot.reply(msg, lines)
+
+
 async def _handle_room_feature_toggle(bot, sender_jid, msg, is_room, args, *, enabled: bool):
     """Shared implementation for rooms enable/disable."""
     action = "enable" if enabled else "disable"

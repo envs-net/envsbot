@@ -876,3 +876,28 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         state.pop("rooms", None)
     await store.set_global(XKCD_KEY, state)
     return {"legacy_rooms": removed}
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small XKCD counters for diagnostics."""
+    store = await get_xkcd_store(bot)
+    state = await store.get_global(XKCD_KEY, default={})
+    index = await store.get_global(XKCD_INDEX_KEY, default={})
+    rooms = state.get("rooms", []) if isinstance(state, dict) else []
+    if not isinstance(rooms, list):
+        rooms = []
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        return {
+            "legacy_rooms": sum(
+                1 for room in rooms
+                if str(room).split("/", 1)[0].strip().lower() == target
+            ),
+            "indexed_comics": len(index) if isinstance(index, dict) else 0,
+        }
+    return {
+        "legacy_rooms": len(rooms),
+        "indexed_comics": len(index) if isinstance(index, dict) else 0,
+        "check_task_running": int(CHECK_TASK is not None and not CHECK_TASK.done()),
+        "index_task_running": int(INDEX_TASK is not None and not INDEX_TASK.done()),
+    }

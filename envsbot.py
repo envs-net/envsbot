@@ -32,13 +32,32 @@ from utils.command import (
     resolve_command,
     check_permission,
     Role,
-    role_from_int
+    role_from_int,
 )
 from database.manager import DatabaseManager
 
 # === set up logging ===
 setup_logging()
 log = logging.getLogger(__name__)
+
+
+_RATE_LIMIT_ROLE_ALIASES = {
+    role.name.lower(): role for role in Role
+}
+
+
+def _configured_rate_limit_bypass_role() -> Role | None:
+    """Return the configured role threshold for rate-limit bypasses."""
+    value = config.get("command_rate_limit_bypass_role", "moderator")
+    if value is None or str(value).strip().lower() in {"", "none", "off", "false"}:
+        return None
+    return _RATE_LIMIT_ROLE_ALIASES.get(str(value).strip().lower(), Role.MODERATOR)
+
+
+def _role_bypasses_rate_limit(role: Role) -> bool:
+    """Return whether *role* is privileged enough to bypass command limits."""
+    threshold = _configured_rate_limit_bypass_role()
+    return threshold is not None and role <= threshold
 
 
 # -------------------------------------------------
@@ -168,17 +187,33 @@ class Bot(slixmpp.ClientXMPP):
         self._startup_backup_done = False
 
         # Rate limiter (in-memory, per process)
-        # capacity=4, refill 1 token every 0.5s
+        # The limits are intentionally in-memory and reset on process restart.
         self.rate_limiter = TokenBucketRateLimiter(
-            capacity=4,
-            refill_amount=1,
-            refill_interval=0.5,
-            deny_window=10.0,
-            deny_threshold=6,
-            base_block_seconds=30.0,
-            backoff_multiplier=2.0,
-            max_block_seconds=3600.0,
-            notify_cooldown=10.0,
+            capacity=int(config.get("command_rate_limit_capacity", 4)),
+            refill_amount=int(
+                config.get("command_rate_limit_refill_amount", 1)
+            ),
+            refill_interval=float(
+                config.get("command_rate_limit_refill_interval_seconds", 0.5)
+            ),
+            deny_window=float(
+                config.get("command_rate_limit_deny_window_seconds", 10.0)
+            ),
+            deny_threshold=int(
+                config.get("command_rate_limit_deny_threshold", 6)
+            ),
+            base_block_seconds=float(
+                config.get("command_rate_limit_base_block_seconds", 30.0)
+            ),
+            backoff_multiplier=float(
+                config.get("command_rate_limit_backoff_multiplier", 2.0)
+            ),
+            max_block_seconds=float(
+                config.get("command_rate_limit_max_block_seconds", 3600.0)
+            ),
+            notify_cooldown=float(
+                config.get("command_rate_limit_notify_cooldown_seconds", 10.0)
+            ),
         )
 
         # Presence Manager
@@ -834,22 +869,24 @@ class Bot(slixmpp.ClientXMPP):
             return
 
         jid, room = self._resolve_sender_jid(msg, sender_jid, nick)
-
-        # Apply rate limiting on ingress
-        allowed, retry_after = await self.rate_limiter.allow(jid)
-        if not allowed:
-            if self.rate_limiter.notify_allowed(jid):
-                log.info(("[BOT] 🟡️ Rate-limited %s "
-                          "in room %s (retry_after=%.1fs)"),
-                         jid, room, retry_after)
-            return
-
         cmd_obj, args = resolve_command(text)
         if not cmd_obj:
             return
 
         cmd_name = cmd_obj.name
         user_role = await self.get_user_role(jid, room)
+
+        # Apply configurable command rate limiting after command and role
+        # resolution so privileged operators can be exempted safely.
+        if (config.get("command_rate_limit_enabled", True)
+                and not _role_bypasses_rate_limit(user_role)):
+            allowed, retry_after = await self.rate_limiter.allow(jid)
+            if not allowed:
+                if self.rate_limiter.notify_allowed(jid):
+                    log.info(("[BOT] 🟡️ Rate-limited %s "
+                              "in room %s (retry_after=%.1fs)"),
+                             jid, room, retry_after)
+                return
 
         if not check_permission(user_role, cmd_obj):
             self.reply(msg, "🔴 You are not allowed to use this command.")

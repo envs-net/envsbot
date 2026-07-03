@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -114,3 +114,23 @@ async def test_tasks_without_supervisor_warns(msg):
     await tasks_plugin.tasks_command(bot, "admin@example.org", "admin", [], msg, False)
 
     bot.reply_warn.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_tasks_restart_delegates_to_plugin_manager(msg):
+    bot = MagicMock()
+    bot.reply = MagicMock()
+    bot.reply_usage = MagicMock()
+    bot.bot_plugins.restart_tasks = AsyncMock(return_value=(True, "Plugin rss tasks restarted", 2))
+
+    await tasks_plugin.tasks_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["restart", "rss"],
+        msg,
+        False,
+    )
+
+    bot.bot_plugins.restart_tasks.assert_awaited_once_with("rss")
+    assert "Cancelled before restart: 2" in bot.reply.call_args.args[1]

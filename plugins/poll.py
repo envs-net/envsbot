@@ -33,6 +33,7 @@ import logging
 import time
 
 from utils.command import command, Role
+from utils.audit import audit_event
 from utils.config import config
 from core_plugins.users import user_has_room_plugin_grant
 from core_plugins import _core
@@ -533,6 +534,13 @@ async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
         v += f" ({_format_remaining(poll['ends_at'])})"
         lines.append(f"Auto-close: {v}")
 
+    await audit_event(
+        bot,
+        "poll_created",
+        actor=creator_jid,
+        target=room_jid,
+        details={"poll_id": poll_id, "options": len(options)},
+    )
     _poll_reply(bot, msg, "\n".join(lines))
 
 
@@ -673,7 +681,16 @@ async def _poll_handle_vote(bot, msg, room_jid, room, data, args):
     )
 
 
-async def _poll_handle_manage(bot, msg, room_jid, room, is_room, args, sub):
+async def _poll_handle_manage(
+    bot,
+    sender_jid,
+    msg,
+    room_jid,
+    room,
+    is_room,
+    args,
+    sub,
+):
     if len(args) < 2 or not str(args[1]).isdigit():
         _poll_reply(bot, msg, f"Usage: {_command_prefix(bot)}poll {sub} <id>")
         return
@@ -697,6 +714,14 @@ async def _poll_handle_manage(bot, msg, room_jid, room, is_room, args, sub):
 
     if sub == "delete":
         success, text = await _delete_poll(bot, room_jid, poll_id)
+        if success:
+            await audit_event(
+                bot,
+                "poll_deleted",
+                actor=sender_jid,
+                target=room_jid,
+                details={"poll_id": poll_id},
+            )
         _poll_reply(bot, msg, ("✅ " if success else "❌ ") + text)
         return
 
@@ -707,6 +732,14 @@ async def _poll_handle_manage(bot, msg, room_jid, room, is_room, args, sub):
         cancelled=(sub == "cancel"),
         announce=True,
     )
+    if success:
+        await audit_event(
+            bot,
+            "poll_cancelled" if sub == "cancel" else "poll_closed",
+            actor=sender_jid,
+            target=room_jid,
+            details={"poll_id": poll_id},
+        )
     _poll_reply(bot, msg, ("✅ " if success else "❌ ") + text)
 
 
@@ -790,8 +823,16 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
             return
 
         if sub in {"close", "cancel", "delete"}:
-            await _poll_handle_manage(bot, msg, room_jid, room, is_room,
-                                      args, sub)
+            await _poll_handle_manage(
+                bot,
+                sender_jid,
+                msg,
+                room_jid,
+                room,
+                is_room,
+                args,
+                sub,
+            )
             return
 
         _poll_reply(
@@ -852,3 +893,48 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
             await _set_data(bot, data)
 
     return {"rooms": removed, "auto_close_tasks": cancelled}
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small poll counters for diagnostics."""
+    data = await _get_data(bot)
+    rooms = data.get("rooms") if isinstance(data, dict) else {}
+    if not isinstance(rooms, dict):
+        rooms = {}
+
+    def count_room(room_data: dict) -> tuple[int, int]:
+        polls = room_data.get("polls", {}) if isinstance(room_data, dict) else {}
+        if not isinstance(polls, dict):
+            return 0, 0
+        active = sum(1 for poll in polls.values() if poll.get("status") == "open")
+        return len(polls), active
+
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        matching = next(
+            (
+                room for room in rooms
+                if str(room).split("/", 1)[0].strip().lower() == target
+            ),
+            None,
+        )
+        total, active = count_room(rooms.get(matching, {}) if matching else {})
+        auto_close = sum(
+            1 for key, task in AUTO_CLOSE_TASKS.items()
+            if str(key[0]).split("/", 1)[0].strip().lower() == target
+            and not task.done()
+        )
+        return {"rooms": 1 if matching else 0, "polls": total, "active": active, "auto_close_tasks": auto_close}
+
+    total_polls = 0
+    active_polls = 0
+    for room_data in rooms.values():
+        total, active = count_room(room_data)
+        total_polls += total
+        active_polls += active
+    return {
+        "rooms": len(rooms),
+        "polls": total_polls,
+        "active": active_polls,
+        "auto_close_tasks": sum(1 for task in AUTO_CLOSE_TASKS.values() if not task.done()),
+    }

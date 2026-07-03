@@ -9,6 +9,7 @@ This directory contains the operator and command documentation for EnvsBot.
 - [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, RSS and grants
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
 - [`deployment.md`](deployment.md) - install layout, console entrypoint and systemd unit
+- [`diagnostics.md`](diagnostics.md) - doctor checks, plugin state, task restart, audit filters and rate limits
 - [`release-checklist.md`](release-checklist.md) - release preparation and tagging checklist
 
 Operational notes:
@@ -23,6 +24,9 @@ Operational notes:
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status full` includes supervised background-task state.
 - `,tasks` shows supervised background tasks without the rest of the status output.
+- `,doctor` runs a compact operator health check; `,doctor full` includes more runtime detail.
+- `,plugin state <plugin> [room_jid]` shows plugin-provided runtime counters.
+- `,rooms diagnose <room_jid>` shows room, invite, plugin-toggle and plugin-state diagnostics.
 - `,version` shows the running EnvsBot version and the latest checked release.
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.
   Automatic update notifications go to `VERSION_CHECK_NOTIFY_JID`, or to `OWNER` when unset.
@@ -31,6 +35,7 @@ Operational notes:
 - Incoming MUC invites are stored as pending room invites when `ROOM_INVITES_ENABLED` is enabled.
   They are announced to `ROOM_INVITE_NOTIFY_JID`, `VERSION_CHECK_NOTIFY_JID`, or `OWNER` and can be accepted or declined with `,rooms invite`.
 - `,audit last` shows recent administrative changes such as role updates, room changes, plugin reloads and config reloads.
+  Use `,audit user`, `,audit target` or `,audit action` to filter the log.
 - Role changes are guarded so the configured owner and superadmins cannot be modified by lower roles.
 
 ## Regenerate command reference

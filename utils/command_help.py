@@ -94,13 +94,21 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "tasks": {
         "short": "Show supervised background task status.",
-        "usage": "{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]",
+        "usage": "{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last] | {prefix}tasks restart <plugin>",
         "examples": [
             "{prefix}tasks",
             "{prefix}tasks full",
             "{prefix}tasks plugin rss",
             "{prefix}tasks failed",
+            "{prefix}tasks restart rss",
         ],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "doctor": {
+        "short": "Run operator health checks for config, DB, rooms, plugins, tasks and backups.",
+        "usage": "{prefix}doctor [full] [all|page|last]",
+        "examples": ["{prefix}doctor", "{prefix}doctor full"],
         "context": "private chat / MUC PM",
         "category": "admin",
     },
@@ -126,6 +134,16 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "short": "Show manifest details for one managed backup archive.",
         "usage": "{prefix}backup show <archive|last>",
         "examples": ["{prefix}backup show last"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "backup prune": {
+        "short": "Prune managed backup archives, with optional dry-run.",
+        "usage": "{prefix}backup prune [dry-run] [keep <n>] [days <n>]",
+        "examples": [
+            "{prefix}backup prune dry-run",
+            "{prefix}backup prune keep 20 days 30",
+        ],
         "context": "private chat / MUC PM",
         "category": "admin",
     },
@@ -182,6 +200,23 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "context": "private chat / MUC PM",
         "category": "core",
     },
+    "plugin diagnose": {
+        "short": "Show diagnostics for one plugin, including hooks, commands and tasks.",
+        "usage": "{prefix}plugin diagnose <plugin>",
+        "examples": ["{prefix}plugin diagnose rss"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "plugin state": {
+        "short": "Show plugin-provided runtime state counters.",
+        "usage": "{prefix}plugin state <plugin> [room_jid]",
+        "examples": [
+            "{prefix}plugin state rss",
+            "{prefix}plugin state poll room@conference.example.org",
+        ],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
     "plugin load": {
         "short": "Load one plugin or all plugins.",
         "usage": "{prefix}plugin load <plugin|all>",
@@ -225,6 +260,13 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
             "{prefix}help rooms settings",
         ],
         "context": "room / MUC PM / private chat with <room_jid>",
+        "category": "rooms",
+    },
+    "rooms diagnose": {
+        "short": "Show operational diagnostics for one room.",
+        "usage": "{prefix}rooms diagnose <room_jid>",
+        "examples": ["{prefix}rooms diagnose room@conference.example.org"],
+        "context": "private chat / MUC PM",
         "category": "rooms",
     },
     "rooms enable": {

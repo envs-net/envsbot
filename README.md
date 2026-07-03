@@ -14,13 +14,13 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 
 * Modular plugin architecture with dynamic load, unload and reload support
 * Decorator-based command registry with roles, aliases, usage metadata and generated help
-* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command reference in [`docs/commands.md`](docs/commands.md), and runtime help guide in [`docs/help.md`](docs/help.md)
+* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command reference in [`docs/commands.md`](docs/commands.md), runtime help guide in [`docs/help.md`](docs/help.md), and diagnostics guide in [`docs/diagnostics.md`](docs/diagnostics.md)
 * XMPP MUC and direct-message command handling
 * Room management with persistent autojoin rooms and per-room plugin toggles
 * User registration, hardened role management, last-seen tracking and nickname lookup
 * Safe runtime config inspection, validation and reload commands
 * Built-in version command and optional GitHub release update checks
-* SQLite-backed persistence with online status checks, audit log, managed ZIP backups and documented offline maintenance
+* SQLite-backed persistence with doctor checks, audit log, managed ZIP backups and documented offline maintenance
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
 * RSS/Atom feed watcher for room announcements
 * URL metadata checks for links, files and YouTube videos
@@ -425,6 +425,7 @@ Drone CI is configured in `.drone.yml`.
 * [`docs/tutorial.md`](docs/tutorial.md) - practical setup and operations walkthrough
 * [`docs/commands.md`](docs/commands.md) - generated command reference
 * [`docs/help.md`](docs/help.md) - runtime help guide
+* [`docs/diagnostics.md`](docs/diagnostics.md) - doctor checks, plugin state and operational diagnostics
 * [`docs/maintenance.md`](docs/maintenance.md) - offline SQLite maintenance
 * [`docs/release-checklist.md`](docs/release-checklist.md) - release preparation checklist
 

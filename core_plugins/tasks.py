@@ -139,6 +139,20 @@ def _parse_task_args(args: list[str]) -> tuple[bool, str | None, str | None, Pag
 @command("tasks", role=Role.ADMIN, aliases=["bot tasks"])
 async def tasks_command(bot, sender, nick, args, msg, is_room):
     """Show supervised background task status."""
+    if args and args[0].lower() == "restart":
+        if len(args) != 2:
+            bot.reply_usage(msg, f"{_prefix()}tasks restart <plugin>")
+            return
+        manager = getattr(bot, "bot_plugins", None)
+        restarter = getattr(manager, "restart_tasks", None)
+        if not callable(restarter):
+            bot.reply_warn(msg, "Plugin task restart support is not available.")
+            return
+        success, text, cancelled = await restarter(args[1].lower())
+        prefix = "✅" if success else "🔴"
+        bot.reply(msg, f"{prefix} {text}. Cancelled before restart: {cancelled}")
+        return
+
     supervisor = getattr(bot, "tasks", None)
     if supervisor is None:
         bot.reply_warn(msg, "Task supervisor is not available.")
