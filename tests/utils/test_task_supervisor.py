@@ -101,6 +101,25 @@ async def test_cancel_plugin_removes_cancelled_tasks_from_tracking():
 
 
 @pytest.mark.asyncio
+async def test_cancel_task_removes_single_cancelled_task_from_tracking():
+    supervisor = TaskSupervisor()
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    alpha = supervisor.create("example", sleeper(), name="alpha")
+    beta = supervisor.create("example", sleeper(), name="beta")
+
+    assert await supervisor.cancel_task(alpha, timeout=1.0) is True
+
+    snapshot = supervisor.snapshot(include_done=True)
+    assert [item.name for item in snapshot] == ["beta"]
+    assert snapshot[0].status == "running"
+
+    await supervisor.cancel_task(beta, timeout=1.0)
+
+@pytest.mark.asyncio
 async def test_snapshot_includes_completed_tasks_by_default():
     supervisor = TaskSupervisor()
 

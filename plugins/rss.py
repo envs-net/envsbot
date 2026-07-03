@@ -1281,18 +1281,41 @@ async def _add_feed(bot, msg, url, store, room):
 # -------------------------
 # DELETE RSS FEED FROM ROOM
 # -------------------------
-def _cancel_feed_task(url: str) -> None:
-    """Cancel the background check task for a feed URL when it exists."""
+async def _cancel_feed_task(bot, url: str) -> bool:
+    """Cancel the background check task for a feed URL when it exists.
+
+    RSS retry/delete operations restart individual feed workers.  When tasks are
+    supervised, cancel through the supervisor as well so deliberate restarts do
+    not leave stale ``cancelled`` entries in ``,tasks all`` output.
+    """
     task = CHECK_TASKS.pop(url, None)
-    if task is not None:
-        task.cancel()
+    if task is None:
+        return False
+
+    supervisor = getattr(bot, "tasks", None)
+    cancel_task = getattr(supervisor, "cancel_task", None)
+    if callable(cancel_task):
+        await cancel_task(task)
+        return True
+
+    cancel = getattr(task, "cancel", None)
+    if callable(cancel):
+        cancel()
+
+    if hasattr(task, "__await__"):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    return True
 
 
-def _delete_feed_everywhere(bot, msg, url, feeds):
+async def _delete_feed_everywhere(bot, msg, url, feeds):
     """Remove a feed and its task regardless of subscribed rooms."""
     rooms = list(feeds[url].get("rooms", []))
     feeds.pop(url)
-    _cancel_feed_task(url)
+    await _cancel_feed_task(bot, url)
 
     room_text = ", ".join(rooms) if rooms else "no rooms"
     bot.reply(msg, f"🗑 Deleted feed: {url} ({room_text})")
@@ -1318,7 +1341,7 @@ async def _delete_feed_room(bot, msg, url, store, feeds, room):
 
     if not rooms:
         feeds.pop(url)
-        _cancel_feed_task(url)
+        await _cancel_feed_task(bot, url)
         bot.reply(
             msg,
             f"🗑 Deleted feed: {url} (no rooms left, feed removed)",
@@ -1351,7 +1374,7 @@ async def _reset_feed_retry(bot, msg, url, store):
     _apply_retry_state(feed, 0, 0)
     await save_feeds(store, feeds)
 
-    _cancel_feed_task(url)
+    await _cancel_feed_task(bot, url)
     await ensure_task(
         bot,
         store,
@@ -1376,7 +1399,7 @@ async def _reset_all_feed_retries(bot, msg, store):
     await save_feeds(store, feeds)
 
     for url, feed in feeds.items():
-        _cancel_feed_task(url)
+        await _cancel_feed_task(bot, url)
         await ensure_task(
             bot,
             store,
@@ -1402,7 +1425,7 @@ async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     target = str(delete_target).strip() if delete_target else ""
 
     if target.lower() == "all":
-        _delete_feed_everywhere(bot, msg, url, feeds)
+        await _delete_feed_everywhere(bot, msg, url, feeds)
     elif target:
         await _delete_feed_room(
             bot, msg, url, store, feeds, _normalize_room_jid(target)
@@ -1412,7 +1435,7 @@ async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     else:
         # Direct/private cleanup path: useful for stale feeds whose room no
         # longer exists and cannot be addressed via a room or MUC PM anymore.
-        _delete_feed_everywhere(bot, msg, url, feeds)
+        await _delete_feed_everywhere(bot, msg, url, feeds)
 
     await save_feeds(store, feeds)
     # await _flush_user_store(bot)
@@ -1444,17 +1467,12 @@ async def on_unload(bot):
     log.info("[RSS] Cleaning up RSS feed tasks...")
 
     # Cancel all active tasks
-    for url, task in list(CHECK_TASKS.items()):
+    for url in list(CHECK_TASKS):
         try:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                log.debug(f"[RSS] Task for {url} cancelled")
-
-            CHECK_TASKS.pop(url, None)
+            await _cancel_feed_task(bot, url)
+            log.debug("[RSS] Task for %s cancelled", url)
         except Exception as e:
-            log.exception(f"[RSS] Error cancelling task for {url}: {e}")
+            log.exception("[RSS] Error cancelling task for %s: %s", url, e)
 
     log.info("[RSS] ✅ All RSS tasks cleaned up")
 
@@ -1490,7 +1508,7 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
     if changed:
         await save_feeds(store, feeds)
         for url in removed_urls:
-            _cancel_feed_task(url)
+            await _cancel_feed_task(bot, url)
 
     return summary
 

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import plugins.rss as rss
 import core_plugins.rooms
 from utils.command import Role
+from utils.task_supervisor import TaskSupervisor
 
 
 @pytest.fixture(autouse=True)
@@ -860,6 +861,47 @@ def test_rss_now_is_integer_timestamp(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reset_feed_retry_prunes_cancelled_supervised_task(monkeypatch, make_bot):
+    bot = make_bot()
+    bot.tasks = TaskSupervisor()
+    store = bot.plugin_store
+    url = "https://example.org/feed.xml"
+    await rss.save_feeds(
+        store,
+        {
+            url: {
+                "period": 30,
+                "rooms": ["room@conf"],
+                "error_count": 3,
+                "next_retry": 999,
+            }
+        },
+    )
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    old_task = bot.tasks.create("rss", sleeper(), name=f"rss-check-{url}")
+    rss.CHECK_TASKS[url] = old_task
+
+    scheduled = []
+
+    async def fake_ensure_task(bot_arg, store_arg, url_arg, period_arg):
+        scheduled.append((bot_arg, store_arg, url_arg, period_arg))
+
+    monkeypatch.setattr(rss, "ensure_task", fake_ensure_task)
+
+    await rss._reset_feed_retry(bot, {}, url, store)
+
+    assert scheduled == [(bot, store, url, 30)]
+    assert url not in rss.CHECK_TASKS
+    assert bot.tasks.snapshot(include_done=True) == []
+    assert store[rss.RSS_KEY][url]["error_count"] == 0
+    assert store[rss.RSS_KEY][url]["next_retry"] == 0
+
+
+@pytest.mark.asyncio
 async def test_reset_retry_state_updates_and_preserves_unchanged(make_bot):
     bot = make_bot()
     store = bot.plugin_store
@@ -1300,7 +1342,12 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
         "broken": "not a feed",
     }
     cancelled = []
-    monkeypatch.setattr(rss, "_cancel_feed_task", lambda url: cancelled.append(url))
+
+    async def fake_cancel(bot_arg, url):
+        assert bot_arg is bot
+        cancelled.append(url)
+
+    monkeypatch.setattr(rss, "_cancel_feed_task", fake_cancel)
 
     summary = await rss.cleanup_room_state(bot, "room@conference.example.org")
 

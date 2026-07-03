@@ -418,7 +418,7 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg, monkeyp
         name,
         DummyPluginStore(),
     )
-    cancel_feed_task = MagicMock()
+    cancel_feed_task = AsyncMock()
     monkeypatch.setattr(rss_plugin, "_cancel_feed_task", cancel_feed_task)
 
     async def cleanup_room_state(room_jid):
@@ -442,7 +442,7 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg, monkeyp
         feed_keep: {"rooms": [other_room], "period": 42},
         "https://example.org/other.xml": {"rooms": [other_room]},
     }
-    cancel_feed_task.assert_called_once_with(feed_drop)
+    cancel_feed_task.assert_called_once_with(fake_bot, feed_drop)
 
     assert stores["xkcd"]["XKCD"] == {
         other_room: True,

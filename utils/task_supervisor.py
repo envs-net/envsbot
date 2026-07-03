@@ -195,6 +195,66 @@ class TaskSupervisor:
                 exc_info=exc,
             )
 
+    def _forget_task(self, task: asyncio.Task[Any]) -> None:
+        """Remove a task from supervisor indexes."""
+        meta = self._tasks.pop(task, None)
+        if not meta:
+            return
+        plugin_tasks = self._by_plugin.get(meta["plugin"])
+        if plugin_tasks is not None:
+            plugin_tasks.discard(task)
+            if not plugin_tasks:
+                self._by_plugin.pop(meta["plugin"], None)
+
+    def _forget_cancelled_or_successful_task(self, task: asyncio.Task[Any]) -> None:
+        """Drop completed tasks that do not carry a failure diagnostic."""
+        meta = self._tasks.get(task, {})
+        has_error = meta.get("last_error") is not None
+        keep_for_diagnostics = has_error and task.done() and not task.cancelled()
+        if not keep_for_diagnostics:
+            self._forget_task(task)
+
+    async def cancel_task(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        timeout: float = 5.0,
+    ) -> bool:
+        """Cancel one supervised task and remove normal cancellation noise.
+
+        This is useful for plugins that restart one worker without unloading the
+        whole plugin. Failed tasks remain visible for diagnostics, while
+        successful or cancelled tasks are pruned from task status output.
+
+        Returns:
+            Whether a running task was requested to cancel.
+        """
+        was_running = not task.done()
+        if was_running:
+            task.cancel()
+            gather_future = asyncio.gather(task, return_exceptions=True)
+            try:
+                results = await asyncio.wait_for(gather_future, timeout=timeout)
+            except asyncio.TimeoutError:
+                gather_future.cancel()
+                log.warning(
+                    "[TASKS] Plugin task did not stop in time: %s",
+                    task.get_name(),
+                )
+                return True
+
+            for result in results:
+                if isinstance(result, asyncio.CancelledError):
+                    continue
+                if isinstance(result, Exception):
+                    log.debug(
+                        "[TASKS] Task raised during cancellation",
+                        exc_info=result,
+                    )
+
+        self._forget_cancelled_or_successful_task(task)
+        return was_running
+
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
         """Cancel all running tasks owned by a plugin.
 
@@ -242,19 +302,8 @@ class TaskSupervisor:
                         exc_info=result,
                     )
 
-            plugin_tasks = self._by_plugin.get(plugin)
-            if plugin_tasks is not None:
-                for task in tasks:
-                    plugin_tasks.discard(task)
-                    meta = self._tasks.get(task, {})
-                    has_error = meta.get("last_error") is not None
-                    keep_for_diagnostics = (
-                        has_error and task.done() and not task.cancelled()
-                    )
-                    if not keep_for_diagnostics:
-                        self._tasks.pop(task, None)
-                if not plugin_tasks:
-                    self._by_plugin.pop(plugin, None)
+            for task in tasks:
+                self._forget_cancelled_or_successful_task(task)
         return len(tasks)
 
     async def cancel_all(self, *, timeout: float = 5.0) -> int:
