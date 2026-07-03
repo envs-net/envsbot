@@ -69,7 +69,10 @@ async def fetch_xkcd(url: str, session: aiohttp.ClientSession | None = None):
     """Fetch XKCD comic info from API."""
     try:
         if session is not None:
-            async with session.get(url, timeout=XKCD_HTTP_TIMEOUT) as resp:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=XKCD_HTTP_TIMEOUT),
+            ) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 log.debug("[XKCD] Non-200 response for %s: %s",
@@ -77,7 +80,10 @@ async def fetch_xkcd(url: str, session: aiohttp.ClientSession | None = None):
                 return None
 
         async with aiohttp.ClientSession() as own_session:
-            async with own_session.get(url, timeout=XKCD_HTTP_TIMEOUT) as resp:
+            async with own_session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=XKCD_HTTP_TIMEOUT),
+            ) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 log.debug("[XKCD] Non-200 response for %s: %s",
@@ -635,7 +641,7 @@ async def _handle_xkcd_search(bot, msg, args, lowered_args, command_prefix):
     if not isinstance(search_index, dict) or not search_index:
         bot.reply(
             msg,
-            "❌ Search index not built.\nPlease wait forindexing to complete.",
+            "❌ Search index not built.\nPlease wait for indexing to complete.",
         )
         return
 

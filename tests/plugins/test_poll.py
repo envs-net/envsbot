@@ -639,3 +639,23 @@ async def test_poll_runtime_state_handles_non_dict_rooms(monkeypatch):
         "auto_close_tasks": 0,
     }
 
+
+@pytest.mark.asyncio
+async def test_poll_restart_tasks_restarts_plugin_lifecycle(monkeypatch):
+    bot = DummyBot()
+    calls = []
+
+    async def fake_on_unload(bot_arg):
+        assert bot_arg is bot
+        calls.append("unload")
+
+    async def fake_on_load(bot_arg):
+        assert bot_arg is bot
+        calls.append("load")
+
+    monkeypatch.setattr(poll, "on_unload", fake_on_unload)
+    monkeypatch.setattr(poll, "on_load", fake_on_load)
+
+    await poll.restart_tasks(bot)
+
+    assert calls == ["unload", "load"]

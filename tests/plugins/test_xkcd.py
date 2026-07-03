@@ -788,3 +788,17 @@ async def test_xkcd_runtime_state_handles_bad_store_shapes(monkeypatch):
         "index_task_running": 0,
     }
 
+
+@pytest.mark.asyncio
+async def test_xkcd_restart_tasks_calls_on_load(monkeypatch, mock_bot):
+    calls = []
+
+    async def fake_on_load(bot_arg):
+        assert bot_arg is mock_bot
+        calls.append("load")
+
+    monkeypatch.setattr(xkcd, "on_load", fake_on_load)
+
+    await xkcd.restart_tasks(mock_bot)
+
+    assert calls == ["load"]

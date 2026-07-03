@@ -181,8 +181,12 @@ class PluginManager:
             return True, f"Plugins depend on {name}: {dependents_list}"
         return False, ""
 
-    def _validate_dependencies(self, name: str,
-                               _visited=None) -> tuple[bool, str]:
+    def _validate_dependencies(
+        self,
+        name: str,
+        _visited=None,
+        _discovered=None,
+    ) -> tuple[bool, str]:
         """
         Validate that all dependencies of a plugin are available.
 
@@ -191,6 +195,8 @@ class PluginManager:
         """
         if _visited is None:
             _visited = set()
+        if _discovered is None:
+            _discovered = self.discover()
 
         if name in _visited:
             return False, f"Circular dependency detected involving {name}"
@@ -209,14 +215,18 @@ class PluginManager:
 
         # Check required dependencies
         for dep in meta.get("requires", []):
-            if dep not in self.discover():
+            if dep not in _discovered:
                 return (
                     False,
                     f"Plugin {name} requires {dep}, which is not available",
                 )
 
             # Recursively validate transitive dependencies
-            valid, msg = self._validate_dependencies(dep, _visited.copy())
+            valid, msg = self._validate_dependencies(
+                dep,
+                _visited.copy(),
+                _discovered,
+            )
             if not valid:
                 return False, msg
 

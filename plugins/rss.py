@@ -381,8 +381,12 @@ def _resolve_relative_url(base_url: str, relative_url: str) -> str:
     try:
         return urljoin(base_url, relative_url)
     except Exception as e:
-        log.warning(f"Failed to resolve relative URL {
-                    relative_url} against {base_url}: {e}")
+        log.warning(
+            "Failed to resolve relative URL %s against %s: %s",
+            relative_url,
+            base_url,
+            e,
+        )
         return relative_url
 
 

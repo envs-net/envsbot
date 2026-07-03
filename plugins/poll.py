@@ -847,7 +847,7 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
         _poll_reply(
             bot,
             msg,
-            "ℹ️ Use 'poll on/off/status' here. Create, vote and manage polls"
+            "ℹ️ Use 'poll on/off/status' here. Create, vote and manage polls "
             "in the public room.",
         )
         return

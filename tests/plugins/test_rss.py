@@ -13,8 +13,6 @@ def patch_config(monkeypatch):
     monkeypatch.setattr(rss, "config", {"prefix": ","})
 
 
-
-
 @pytest.mark.asyncio
 async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
@@ -1353,3 +1351,23 @@ async def test_rss_runtime_state_global_and_room(monkeypatch, make_bot):
         "retry_backoff": 1,
     }
 
+
+@pytest.mark.asyncio
+async def test_rss_restart_tasks_restarts_plugin_lifecycle(monkeypatch, make_bot):
+    bot = make_bot()
+    calls = []
+
+    async def fake_on_unload(bot_arg):
+        assert bot_arg is bot
+        calls.append("unload")
+
+    async def fake_on_load(bot_arg):
+        assert bot_arg is bot
+        calls.append("load")
+
+    monkeypatch.setattr(rss, "on_unload", fake_on_unload)
+    monkeypatch.setattr(rss, "on_load", fake_on_load)
+
+    await rss.restart_tasks(bot)
+
+    assert calls == ["unload", "load"]
