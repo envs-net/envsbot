@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import pytest
 
 import core_plugins.doctor as doctor
-from utils.task_supervisor import TaskInfo
 
 
 class Cursor:
