@@ -200,9 +200,12 @@ RSS_GLOBAL_QUERY_INTERVAL = 1200
 # Number of existing entries to show when a feed is newly added.
 MAX_NEW_FEED_ENTRIES = 5
 
-# Backoff behavior for failing feeds.
-RSS_MAX_BACKOFF_TIME = 86400
-RSS_BACKOFF_INCREMENT_MULTIPLIER = 60
+# Retry/backoff behavior for failing feeds.
+# First failure retries after 5 minutes, second after 10 minutes, then grows
+# exponentially up to the maximum delay.
+RSS_RETRY_INITIAL_DELAY = 300
+RSS_RETRY_BACKOFF_MULTIPLIER = 2.0
+RSS_MAX_BACKOFF_TIME = 3600
 
 # Duplicate title/description detection threshold, 0 < value <= 1.
 RSS_SIMILARITY_THRESHOLD = 0.8

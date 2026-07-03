@@ -60,10 +60,18 @@ CHECK_TASKS = {}
 
 # Operator-tunable configuration constants.
 DEFAULT_POLL_INTERVAL = int(config.get("rss_global_query_interval", 1200) or 1200)
-BACKOFF_INCREMENT_MULTIPLIER = int(
-    config.get("rss_backoff_increment_multiplier", 60) or 60
+RSS_RETRY_INITIAL_DELAY = max(
+    1,
+    int(config.get("rss_retry_initial_delay", 300) or 300),
 )
-MAX_BACKOFF_TIME = int(config.get("rss_max_backoff_time", 86400) or 86400)
+RSS_RETRY_BACKOFF_MULTIPLIER = max(
+    1.0,
+    float(config.get("rss_retry_backoff_multiplier", 2.0) or 2.0),
+)
+MAX_BACKOFF_TIME = max(
+    1,
+    int(config.get("rss_max_backoff_time", 3600) or 3600),
+)
 SIMILARITY_THRESHOLD = float(config.get("rss_similarity_threshold", 0.8) or 0.8)
 RSS_USER_AGENT = str(
     config.get("rss_user_agent")
@@ -604,18 +612,21 @@ async def _save_last_id(bot, store, url, entry_id):
     return await _set_feed_field(bot, store, url, "last_id", entry_id)
 
 
-def _retry_delay(period, error_count):
+def _retry_delay(_period, error_count):
     """Return the retry delay for a failed feed fetch."""
-    base_period = max(1, int(period or DEFAULT_POLL_INTERVAL))
-    multiplier = max(1, int(BACKOFF_INCREMENT_MULTIPLIER or 1))
-    return min(base_period * multiplier * error_count, MAX_BACKOFF_TIME)
+    failure_count = max(1, int(error_count or 1))
+    delay = RSS_RETRY_INITIAL_DELAY * (
+        RSS_RETRY_BACKOFF_MULTIPLIER ** (failure_count - 1)
+    )
+    return min(int(delay), MAX_BACKOFF_TIME)
 
 
 async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
     log.warning("Failed to fetch RSS feed %s: %s", url, exc)
 
     error_count += 1
-    next_retry = now + _retry_delay(period, error_count)
+    retry_delay = _retry_delay(period, error_count)
+    next_retry = now + retry_delay
 
     await _set_retry_state(bot, store, url, error_count, next_retry)
     log.debug(
@@ -624,12 +635,12 @@ async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
         error_count,
         next_retry,
     )
-    await asyncio.sleep(period)
+    await asyncio.sleep(retry_delay)
 
 
-async def _sleep_for_retry(period, next_retry, now):
+async def _sleep_for_retry(_period, next_retry, now):
     if next_retry > now:
-        await asyncio.sleep(min(period, next_retry - now))
+        await asyncio.sleep(next_retry - now)
         return True
     return False
 
