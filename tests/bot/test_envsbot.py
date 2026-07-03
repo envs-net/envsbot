@@ -1149,3 +1149,21 @@ def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
     monkeypatch.setattr(envsbot.asyncio, "run", run_interrupted)
     envsbot.cli()
     assert calls[-2:] == ["copy", "run-interrupted"]
+
+def test_configured_rate_limit_bypass_role_edges(monkeypatch):
+    monkeypatch.setattr(envsbot, "config", {"command_rate_limit_bypass_role": " admin "})
+    assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.ADMIN
+    assert envsbot._role_bypasses_rate_limit(envsbot.Role.OWNER) is True
+    assert envsbot._role_bypasses_rate_limit(envsbot.Role.ADMIN) is True
+    assert envsbot._role_bypasses_rate_limit(envsbot.Role.MODERATOR) is False
+
+    monkeypatch.setattr(envsbot, "config", {"command_rate_limit_bypass_role": "off"})
+    assert envsbot._configured_rate_limit_bypass_role() is None
+    assert envsbot._role_bypasses_rate_limit(envsbot.Role.OWNER) is False
+
+    monkeypatch.setattr(envsbot, "config", {"command_rate_limit_bypass_role": "unknown"})
+    assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.MODERATOR
+
+    monkeypatch.setattr(envsbot, "config", {})
+    assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.MODERATOR
+

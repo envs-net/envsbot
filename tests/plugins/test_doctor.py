@@ -78,3 +78,45 @@ async def test_doctor_command_reports_runtime_health(bot, msg=None):
     assert any("Database: connected" in line for line in reply)
     assert any("Background tasks: 2 running" in line for line in reply)
     assert any("Backup retention: keep=5, days=30" in line for line in reply)
+
+class MigrationRow:
+    def __getitem__(self, key):
+        if key == "version":
+            return "0002_row_version"
+        if key == 0:
+            return "0002_tuple_version"
+        raise KeyError(key)
+
+
+@pytest.mark.asyncio
+async def test_doctor_migrations_accept_sqlite_rows(bot):
+    async def list_migrations():
+        return [MigrationRow()]
+
+    bot.db.list_migrations = list_migrations
+
+    lines = await doctor._db_lines(bot)
+
+    assert any("Migrations: 0002_row_version" in line for line in lines)
+
+
+def test_parse_doctor_args_supports_full_and_all_paging():
+    assert doctor._parse_doctor_args([]) == (False, [])
+    assert doctor._parse_doctor_args(["2"]) == (False, ["2"])
+    assert doctor._parse_doctor_args(["full"]) == (True, [])
+    assert doctor._parse_doctor_args(["details", "last"]) == (True, ["last"])
+    assert doctor._parse_doctor_args(["all"]) == (True, ["all"])
+    assert doctor._parse_doctor_args(["full", "all"]) == (True, ["all"])
+
+
+@pytest.mark.asyncio
+async def test_doctor_all_disables_paging_and_keeps_full_details(bot):
+    message = MagicMock()
+
+    await doctor.doctor_command(bot, "admin@example.org", "admin", ["all"], message, False)
+
+    reply = bot.reply.call_args.args[1]
+    assert reply[0] == "🩺 EnvsBot doctor"
+    assert not any("Use ,doctor" in line for line in reply)
+    assert any("Room room@example.org" in line for line in reply)
+

@@ -741,3 +741,50 @@ async def test_cleanup_room_state_removes_legacy_room_entries():
     store = DummyXkcdStore({xkcd.XKCD_KEY: []})
     bot = xkcd_bot_with_store(store)
     assert await xkcd.cleanup_room_state(bot, "room@conf") == {"legacy_rooms": 0}
+
+class _XkcdPendingTask:
+    def done(self):
+        return False
+
+
+class _XkcdDoneTask:
+    def done(self):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_xkcd_runtime_state_global_and_room(monkeypatch):
+    store = DummyXkcdStore({
+        xkcd.XKCD_KEY: {"rooms": ["Room@Conf", "other@conf"]},
+        xkcd.XKCD_INDEX_KEY: {"1": {}, "2": {}},
+    })
+    bot = xkcd_bot_with_store(store)
+    monkeypatch.setattr(xkcd, "CHECK_TASK", _XkcdPendingTask())
+    monkeypatch.setattr(xkcd, "INDEX_TASK", _XkcdDoneTask())
+
+    assert await xkcd.get_runtime_state(bot, "room@conf/nick") == {
+        "legacy_rooms": 1,
+        "indexed_comics": 2,
+    }
+    assert await xkcd.get_runtime_state(bot) == {
+        "legacy_rooms": 2,
+        "indexed_comics": 2,
+        "check_task_running": 1,
+        "index_task_running": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_xkcd_runtime_state_handles_bad_store_shapes(monkeypatch):
+    store = DummyXkcdStore({xkcd.XKCD_KEY: {"rooms": "bad"}, xkcd.XKCD_INDEX_KEY: []})
+    bot = xkcd_bot_with_store(store)
+    monkeypatch.setattr(xkcd, "CHECK_TASK", None)
+    monkeypatch.setattr(xkcd, "INDEX_TASK", None)
+
+    assert await xkcd.get_runtime_state(bot) == {
+        "legacy_rooms": 0,
+        "indexed_comics": 0,
+        "check_task_running": 0,
+        "index_task_running": 0,
+    }
+

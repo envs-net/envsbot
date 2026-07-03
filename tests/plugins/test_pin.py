@@ -494,3 +494,18 @@ async def test_cleanup_room_state_removes_pin_room_data(bot):
         bot,
         "missing@conference.example.com",
     ) == {"rooms": 0}
+
+@pytest.mark.asyncio
+async def test_pin_runtime_state_global_and_room(monkeypatch):
+    state = {
+        "Room@Conf": {pin.PINS_FIELD: [{"id": "1"}, {"id": "2"}]},
+        "other@conf": {pin.PINS_FIELD: [{"id": "3"}]},
+    }
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+
+    bot = MagicMock()
+
+    assert await pin.get_runtime_state(bot, "room@conf/nick") == {"rooms": 1, "pins": 2}
+    assert await pin.get_runtime_state(bot, "missing@conf") == {"rooms": 0, "pins": 0}
+    assert await pin.get_runtime_state(bot) == {"rooms": 2, "pins": 3}
+

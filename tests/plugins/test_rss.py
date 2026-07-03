@@ -1311,3 +1311,45 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
     assert drop_url not in bot.plugin_store[rss.RSS_KEY]
     assert bot.plugin_store[rss.RSS_KEY][other_url]["rooms"] == ["other@conf"]
     assert cancelled == [drop_url]
+
+class _RssPendingTask:
+    def done(self):
+        return False
+
+
+class _RssDoneTask:
+    def done(self):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def clear_rss_runtime_state():
+    rss.CHECK_TASKS.clear()
+    yield
+    rss.CHECK_TASKS.clear()
+
+
+@pytest.mark.asyncio
+async def test_rss_runtime_state_global_and_room(monkeypatch, make_bot):
+    now = 1_000
+    monkeypatch.setattr(rss, "_now", lambda: now)
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://one.example/feed": {"rooms": ["Room@Conf"], "next_retry": now + 60},
+        "https://two.example/feed": {"rooms": ["room@conf", "other@conf"], "next_retry": 0},
+        "https://bad.example/feed": "invalid",
+    }
+    rss.CHECK_TASKS["https://one.example/feed"] = _RssPendingTask()
+    rss.CHECK_TASKS["https://two.example/feed"] = _RssDoneTask()
+
+    assert await rss.get_runtime_state(bot, "room@conf") == {
+        "feeds": 2,
+        "active_tasks": 2,
+        "retry_backoff": 1,
+    }
+    assert await rss.get_runtime_state(bot) == {
+        "feeds": 3,
+        "active_tasks": 1,
+        "retry_backoff": 1,
+    }
+

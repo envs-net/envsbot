@@ -1514,3 +1514,72 @@ def test_plugin_cleanup_summary_helpers_cover_plugin_hook_shapes():
     assert rooms._plugin_hook_cleanup_changed({"pin": {"rooms": "1"}}) is True
     assert rooms._plugin_hook_cleanup_changed({"pin": {"rooms": "bad"}}) is False
     assert rooms._plugin_hook_cleanup_changed(None) is False
+
+@pytest.mark.asyncio
+async def test_room_diagnose_lines_include_runtime_and_plugin_state(fake_bot, monkeypatch):
+    room_jid = "room@conference.test"
+    rooms.JOINED_ROOMS[room_jid] = {
+        "nick": "BotNick",
+        "affiliation": "admin",
+        "role": "moderator",
+        "nicks": {"alice": {}, "bob": {}},
+    }
+    fake_bot.presence.joined_rooms = {room_jid: "BotNick"}
+    fake_bot.pending_room_invites = {
+        "one": {"room_jid": room_jid.upper()},
+        "two": {"room_jid": "other@conference.test"},
+    }
+    fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, "active"))
+    monkeypatch.setattr(
+        rooms,
+        "list_room_features",
+        AsyncMock(return_value=[
+            types.SimpleNamespace(name="rss", enabled=True),
+            types.SimpleNamespace(name="xkcd", enabled=False),
+        ]),
+    )
+    fake_bot.bot_plugins.plugins = {"rss": object(), "pin": object()}
+    fake_bot.bot_plugins.plugin_state = AsyncMock(
+        side_effect=[{"feeds": 2, "loaded": True}, {"pins": 1}]
+    )
+
+    lines = await rooms._room_diagnose_lines(fake_bot, room_jid)
+
+    assert lines[0] == f"🔎 Room diagnostics: {room_jid}"
+    assert "Known in DB: yes" in lines
+    assert "Currently joined: yes" in lines
+    assert "Presence joined: yes" in lines
+    assert "Tracked occupants: 2" in lines
+    assert "Pending invites: 1" in lines
+    assert "Configured nick: BotNick" in lines
+    assert "Autojoin: yes" in lines
+    assert "Status: active" in lines
+    assert "Runtime nick: BotNick" in lines
+    assert "Runtime affiliation: admin" in lines
+    assert "Runtime role: moderator" in lines
+    assert "Enabled room plugins (1): rss" in lines
+    assert "Disabled room plugins (1): xkcd" in lines
+    assert "Plugin room state:" in lines
+    assert "• rss: feeds=2" in lines
+    assert "• pin: pins=1" in lines
+
+
+@pytest.mark.asyncio
+async def test_room_diagnose_lines_handles_missing_room_and_bad_row(fake_bot, monkeypatch):
+    room_jid = "missing@conference.test"
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+    fake_bot.presence.joined_rooms = {}
+    fake_bot.pending_room_invites = {}
+    monkeypatch.setattr(rooms, "list_room_features", AsyncMock(return_value=[]))
+
+    lines = await rooms._room_diagnose_lines(fake_bot, room_jid)
+
+    assert "Known in DB: no" in lines
+    assert "Currently joined: no" in lines
+    assert "Presence joined: no" in lines
+    assert "Pending invites: 0" in lines
+    assert "Enabled room plugins (0): none" in lines
+    assert "Disabled room plugins (0): none" in lines
+    assert rooms._yes_no(object()) == "yes"
+    assert rooms._yes_no(None) == "no"
+

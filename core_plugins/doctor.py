@@ -24,6 +24,30 @@ def _line(ok: bool | None, label: str, text: str) -> str:
     return f"{icon} {label}: {text}"
 
 
+def _migration_version(value: Any) -> str:
+    """Return a readable migration version from strings, tuples or sqlite rows."""
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, dict):
+        for key in ("version", "name", "id"):
+            if key in value:
+                return str(value[key])
+        return str(value)
+
+    for key in ("version", "name", "id"):
+        try:
+            item = value[key]
+        except Exception:
+            continue
+        return str(item)
+
+    try:
+        return str(value[0])
+    except Exception:
+        return str(value)
+
+
 async def _db_lines(bot: Any) -> list[str]:
     db = getattr(bot, "db", None)
     conn = getattr(db, "conn", None)
@@ -41,7 +65,10 @@ async def _db_lines(bot: Any) -> list[str]:
     list_migrations = getattr(db, "list_migrations", None)
     if callable(list_migrations):
         try:
-            applied = list(await list_migrations())
+            applied = [
+                _migration_version(item)
+                for item in list(await list_migrations())
+            ]
             lines.append(
                 _line(
                     True,
@@ -165,11 +192,28 @@ async def build_doctor_lines(bot: Any, *, full: bool = False) -> list[str]:
     return lines
 
 
+def _parse_doctor_args(args: list[str]) -> tuple[bool, list[str]]:
+    """Return ``(full, page_args)`` for doctor command arguments."""
+    normalized = [str(arg).strip().lower() for arg in args if str(arg).strip()]
+    if not normalized:
+        return False, []
+
+    full = False
+    page_args: list[str] = []
+    for arg in normalized:
+        if arg in {"full", "details"}:
+            full = True
+            continue
+        if arg == "all":
+            full = True
+        page_args.append(arg)
+    return full, page_args
+
+
 @command("doctor", role=Role.ADMIN, aliases=["bot doctor", "healthcheck", "bot health"])
 async def doctor_command(bot, sender, nick, args, msg, is_room):
     """Run operator health checks."""
-    full = bool(args and args[0].lower() in {"full", "all", "details"})
-    page_args = args[1:] if full else args
+    full, page_args = _parse_doctor_args(args or [])
     lines = await build_doctor_lines(bot, full=full)
     bot.reply(
         msg,

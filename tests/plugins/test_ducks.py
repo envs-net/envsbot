@@ -591,3 +591,45 @@ async def test_cleanup_room_state_removes_duck_runtime_tasks_and_store():
     for key in (ducks.DUCKS_INDEX_KEY, ducks.DUCKS_LAST_KEY,
                 ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY):
         assert bot.ducks_store._globals[key] == {other: {}}
+
+class _PendingTask:
+    def done(self):
+        return False
+
+
+class _DoneTask:
+    def done(self):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_ducks_runtime_state_global_and_room():
+    ducks.ACTIVE_DUCKS["Room@Conf/nick"] = {"duck": True}
+    ducks.PENDING_DUCKS.add("other@conf")
+    ducks.SPAWN_TASKS["room@conf"] = _PendingTask()
+    ducks.SPAWN_TASKS["done@conf"] = _DoneTask()
+    ducks.EXPIRE_TASKS["room@conf/resource"] = _PendingTask()
+    ducks.MESSAGE_COUNTS["ROOM@CONF"] = {"alice": 2}
+
+    bot = DummyBot()
+
+    assert await ducks.get_runtime_state(bot, "room@conf/SomeNick") == {
+        "active_ducks": 1,
+        "pending_spawn": 1,
+        "expire_tasks": 1,
+        "message_counts": 1,
+    }
+    assert await ducks.get_runtime_state(bot, "missing@conf") == {
+        "active_ducks": 0,
+        "pending_spawn": 0,
+        "expire_tasks": 0,
+        "message_counts": 0,
+    }
+    assert await ducks.get_runtime_state(bot) == {
+        "active_ducks": 1,
+        "pending_rooms": 1,
+        "spawn_tasks": 1,
+        "expire_tasks": 1,
+        "tracked_rooms": 1,
+    }
+

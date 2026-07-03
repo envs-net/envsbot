@@ -481,3 +481,43 @@ async def test_cleanup_room_state_deletes_room_reminders(monkeypatch, dummy_bot)
     reminder._delete_reminder.assert_any_await(dummy_bot, 1)
     reminder._delete_reminder.assert_any_await(dummy_bot, 2)
     assert reminder._delete_reminder.await_count == 2
+
+class _ReminderPendingTask:
+    def done(self):
+        return False
+
+
+class _ReminderDoneTask:
+    def done(self):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_reminder_runtime_state_global_and_room(monkeypatch):
+    monkeypatch.setattr(reminder, "_init_reminder_db", AsyncMock())
+    monkeypatch.setattr(
+        reminder,
+        "_get_all_pending_reminders",
+        AsyncMock(return_value=[
+            {"id": 1, "room_jid": "Room@Conf"},
+            {"id": 2, "room_jid": "room@conf/nick"},
+            {"id": 3, "room_jid": "other@conf"},
+        ]),
+    )
+    monkeypatch.setattr(reminder, "REMINDER_ENABLED", True)
+    reminder.ACTIVE_REMINDERS.clear()
+    reminder.ACTIVE_REMINDERS[1] = _ReminderPendingTask()
+    reminder.ACTIVE_REMINDERS[2] = _ReminderDoneTask()
+    reminder.ACTIVE_REMINDERS[3] = _ReminderPendingTask()
+
+    assert await reminder.get_runtime_state(MagicMock(), "room@conf/SomeNick") == {
+        "pending_reminders": 2,
+        "active_tasks": 1,
+    }
+    assert await reminder.get_runtime_state(MagicMock()) == {
+        "pending_reminders": 3,
+        "active_tasks": 2,
+        "enabled": 1,
+    }
+    reminder.ACTIVE_REMINDERS.clear()
+

@@ -426,6 +426,7 @@ Drone CI is configured in `.drone.yml`.
 * [`docs/commands.md`](docs/commands.md) - generated command reference
 * [`docs/help.md`](docs/help.md) - runtime help guide
 * [`docs/diagnostics.md`](docs/diagnostics.md) - doctor checks, plugin state and operational diagnostics
+* [`docs/plugin-development.md`](docs/plugin-development.md) - plugin structure, hooks, stores, grants and diagnostics
 * [`docs/maintenance.md`](docs/maintenance.md) - offline SQLite maintenance
 * [`docs/release-checklist.md`](docs/release-checklist.md) - release preparation checklist
 

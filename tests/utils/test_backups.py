@@ -202,3 +202,17 @@ def test_plan_backup_prune_supports_dry_run_and_age(backup_env):
     )
     assert [path.name for path in dry_run] == [old.name]
     assert old.exists()
+
+def test_parse_archive_created_at_handles_timezone_and_invalid_values():
+    aware = backups._parse_archive_created_at("2026-01-02T03:04:05+02:00")
+    assert aware is not None
+    assert aware.tzinfo is not None
+    assert aware.hour == 1
+
+    naive = backups._parse_archive_created_at("2026-01-02T03:04:05")
+    assert naive is not None
+    assert naive.tzinfo is not None
+    assert naive.hour == 3
+
+    assert backups._parse_archive_created_at("not-a-date") is None
+

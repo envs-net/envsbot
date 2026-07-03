@@ -726,8 +726,9 @@ def _filter_feeds_for_room(feeds: dict, room: str) -> dict:
     return {
         url: data
         for url, data in feeds.items()
-        if any(_normalize_room_jid(item) == normalized_room
-               for item in data.get("rooms", []))
+        if isinstance(data, dict)
+        and any(_normalize_room_jid(item) == normalized_room
+                for item in data.get("rooms", []))
     }
 
 

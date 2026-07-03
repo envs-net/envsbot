@@ -8,6 +8,7 @@ import pytest
 import asyncio
 import types
 import time
+from unittest.mock import AsyncMock
 
 from plugins import poll
 
@@ -569,3 +570,72 @@ async def test_cleanup_room_state_removes_poll_data_and_tasks(dummy_bot):
     assert list(poll.AUTO_CLOSE_TASKS) == [(other, 3)]
     saved = await poll._get_data(dummy_bot)
     assert saved["rooms"] == {other: {"polls": {"2": {"status": "open"}}}}
+
+class _PollPendingTask:
+    def done(self):
+        return False
+
+
+class _PollDoneTask:
+    def done(self):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def clear_poll_runtime_state():
+    poll.AUTO_CLOSE_TASKS.clear()
+    yield
+    poll.AUTO_CLOSE_TASKS.clear()
+
+
+@pytest.mark.asyncio
+async def test_poll_runtime_state_global_and_room(monkeypatch):
+    data = {
+        "rooms": {
+            "Room@Conf": {
+                "polls": {
+                    "1": {"status": "open"},
+                    "2": {"status": "closed"},
+                }
+            },
+            "bad@conf": {"polls": []},
+        }
+    }
+    monkeypatch.setattr(poll, "_get_data", AsyncMock(return_value=data))
+    poll.AUTO_CLOSE_TASKS[("room@conf", "1")] = _PollPendingTask()
+    poll.AUTO_CLOSE_TASKS[("room@conf", "2")] = _PollDoneTask()
+    poll.AUTO_CLOSE_TASKS[("other@conf", "3")] = _PollPendingTask()
+
+    bot = DummyBot()
+
+    assert await poll.get_runtime_state(bot, "room@conf/nick") == {
+        "rooms": 1,
+        "polls": 2,
+        "active": 1,
+        "auto_close_tasks": 1,
+    }
+    assert await poll.get_runtime_state(bot, "missing@conf") == {
+        "rooms": 0,
+        "polls": 0,
+        "active": 0,
+        "auto_close_tasks": 0,
+    }
+    assert await poll.get_runtime_state(bot) == {
+        "rooms": 2,
+        "polls": 2,
+        "active": 1,
+        "auto_close_tasks": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_poll_runtime_state_handles_non_dict_rooms(monkeypatch):
+    monkeypatch.setattr(poll, "_get_data", AsyncMock(return_value={"rooms": []}))
+
+    assert await poll.get_runtime_state(DummyBot()) == {
+        "rooms": 0,
+        "polls": 0,
+        "active": 0,
+        "auto_close_tasks": 0,
+    }
+
