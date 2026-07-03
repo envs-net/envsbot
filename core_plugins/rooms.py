@@ -1464,6 +1464,10 @@ async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
         "room features",
         "rooms feature list",
         "room feature list",
+        "rooms plugins list",
+        "room plugins list",
+        "rooms features list",
+        "room features list",
     ],
 )
 async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
@@ -1473,6 +1477,13 @@ async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
     if resolved is None:
         return
     room_jid, remaining = resolved
+
+    # Keep the command forgiving for the common ``rooms plugins list all``
+    # form.  Without this, ``list`` is treated as an unknown page argument and
+    # the following ``all`` token is ignored, so the command incorrectly shows
+    # page 1 instead of the complete list.
+    if remaining and str(remaining[0]).strip().lower() in {"list", "ls"}:
+        remaining = remaining[1:]
 
     page = parse_page_args(remaining)
     states = await list_room_features(bot, room_jid)
