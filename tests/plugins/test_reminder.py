@@ -1,8 +1,3 @@
-# ----------------------------------------------------------------------
-# The following tests FAIL as STANDALONE or when only running this file:
-# test_reminder.py::test_remind_command_and_status_controls
-# test_reminder.py::test_reminders_list_and_delete
-# ----------------------------------------------------------------------
 import pytest
 import asyncio
 import datetime
@@ -15,6 +10,28 @@ import plugins.reminder as reminder
 
 # Utility TZ for tests
 MY_TZ = pytz.timezone("Europe/Berlin")  # UTC+2 DST
+
+
+@pytest.fixture(autouse=True)
+def _reset_reminder_module_state():
+    """Reset reminder module globals so tests remain isolated."""
+    old_enabled = getattr(reminder, "REMINDER_ENABLED", None)
+    old_active = getattr(reminder, "ACTIVE_REMINDERS", None)
+
+    reminder.REMINDER_ENABLED = True
+    reminder.ACTIVE_REMINDERS = {}
+    try:
+        yield
+    finally:
+        if old_enabled is None:
+            delattr(reminder, "REMINDER_ENABLED")
+        else:
+            reminder.REMINDER_ENABLED = old_enabled
+
+        if old_active is None:
+            delattr(reminder, "ACTIVE_REMINDERS")
+        else:
+            reminder.ACTIVE_REMINDERS = old_active
 
 
 @pytest.fixture

@@ -1226,7 +1226,7 @@ async def _add_feed(bot, msg, url, store, room):
             # await _flush_user_store(bot)
             await ensure_task(bot, store, url, feeds[url]["period"])
 
-            log.info(f"[RSS] Added new feed {store}\n\n{feeds}")
+            log.debug("[RSS] Added new feed url=%s", url)
             period = feeds[url]["period"]
             bot.reply(
                 msg,
@@ -1242,7 +1242,7 @@ async def _add_feed(bot, msg, url, store, room):
             await save_feeds(store, feeds)
             # await _flush_user_store(bot)
 
-            log.info(f"[RSS] ADD: {store}\n\n{feeds}")
+            log.debug("[RSS] Added room to feed url=%s", url)
             await ensure_task(
                 bot,
                 store,
@@ -1389,7 +1389,7 @@ async def _reset_all_feed_retries(bot, msg, store):
 async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     url = _normalize_url(url)
     feeds = await get_feeds(store)
-    log.info(f"[RSS] DELETE: {store}\n\n{feeds}")
+    log.debug("[RSS] Delete feed request url=%s", url)
 
     if url not in feeds:
         bot.reply(msg, "Feed not found.")

@@ -169,11 +169,13 @@ possible. Supervised tasks show up in `,tasks`, can be restarted and are easier
 to inspect during `,doctor` runs.
 
 ```python
-task = bot.tasks.create(
-    plugin="example",
+from utils.task_supervisor import create_plugin_task
+
+task = create_plugin_task(
+    bot,
+    "example",
+    example_loop(bot),
     name="example-loop",
-    coro=example_loop(bot),
-    restart=True,
 )
 ```
 
