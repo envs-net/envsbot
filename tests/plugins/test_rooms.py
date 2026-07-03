@@ -307,6 +307,51 @@ async def test_cmd_room_plugins(fake_bot, fake_msg):
     await rooms.cmd_room_plugins(fake_bot, "jid", "nick", [], fake_msg, False)
 
 
+def test_cmd_room_plugins_registers_list_aliases():
+    assert "rooms plugins list" in rooms.cmd_room_plugins._command_names
+    assert "room plugins list" in rooms.cmd_room_plugins._command_names
+
+
+@pytest.mark.asyncio
+async def test_cmd_room_plugins_accepts_list_all_page_args(
+    fake_bot, fake_msg, monkeypatch
+):
+    room_jid = fake_msg["from"].bare
+    rooms.JOINED_ROOMS[room_jid] = {"nick": BOT_NICK, "nicks": {}}
+    features = [
+        types.SimpleNamespace(
+            name=f"plugin_{i:02d}",
+            enabled=True,
+            default=True,
+            modified=False,
+        )
+        for i in range(13)
+    ]
+    monkeypatch.setattr(
+        rooms, "list_room_features", AsyncMock(return_value=features)
+    )
+    monkeypatch.setattr(
+        rooms,
+        "format_room_feature_line",
+        lambda state: f"• {state.name}: enabled",
+    )
+
+    await rooms.cmd_room_plugins(
+        fake_bot,
+        "jid",
+        "nick",
+        ["list", "all"],
+        fake_msg,
+        True,
+    )
+
+    reply_lines = fake_bot.reply.call_args.args[1]
+    assert reply_lines[0] == f"📋 Plugin settings for room '{room_jid}'"
+    assert "Use " not in reply_lines[-1]
+    assert sum(1 for line in reply_lines if line.startswith("• plugin_")) == 13
+    assert any("plugin_12" in line for line in reply_lines)
+
+
 @pytest.mark.asyncio
 async def test_rooms_add(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
