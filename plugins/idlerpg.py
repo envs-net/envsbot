@@ -1271,25 +1271,46 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
     if not players or random.random() >= EVENT_CHANCE:
         return
 
-    event_roll = random.random()
-    if len(players) >= 2 and event_roll < BATTLE_EVENT_WEIGHT:
+    events: list[tuple[float, str]] = []
+    if len(players) >= 2:
+        events.append((BATTLE_EVENT_WEIGHT, "battle"))
+    if len(players) >= 6:
+        events.append((TEAM_BATTLE_EVENT_WEIGHT, "team_battle"))
+    events.append((ITEM_EVENT_WEIGHT, "item"))
+    if len(players) >= 2:
+        events.append((ALIGNMENT_EVENT_WEIGHT, "alignment"))
+
+    configured_weight = (
+        BATTLE_EVENT_WEIGHT
+        + TEAM_BATTLE_EVENT_WEIGHT
+        + ITEM_EVENT_WEIGHT
+        + ALIGNMENT_EVENT_WEIGHT
+    )
+    events.append((max(0.0, 1.0 - configured_weight), "fate"))
+    events = [(max(0.0, weight), event) for weight, event in events if weight > 0]
+    total_weight = sum(weight for weight, _event in events)
+    if total_weight <= 0:
+        return
+
+    event_roll = random.random() * total_weight
+    selected = "fate"
+    for weight, event in events:
+        if event_roll < weight:
+            selected = event
+            break
+        event_roll -= weight
+
+    if selected == "battle":
         _run_pvp_battle(players, messages)
         return
-
-    event_roll -= BATTLE_EVENT_WEIGHT
-    if len(players) >= 6 and event_roll < TEAM_BATTLE_EVENT_WEIGHT:
+    if selected == "team_battle":
         _run_team_battle(players, messages)
         return
-
-    event_roll -= TEAM_BATTLE_EVENT_WEIGHT
-    if event_roll < ITEM_EVENT_WEIGHT:
+    if selected == "item":
         _run_item_blessing(players, messages)
         return
-
-    event_roll -= ITEM_EVENT_WEIGHT
-    if len(players) >= 2 and event_roll < ALIGNMENT_EVENT_WEIGHT:
-        if _run_alignment_bonus(players, messages):
-            return
+    if selected == "alignment" and _run_alignment_bonus(players, messages):
+        return
 
     _run_godsend_or_calamity(players, messages)
 

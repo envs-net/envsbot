@@ -457,9 +457,9 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                 <h2>Current Quest</h2>
                 <?php if ($quest): ?>
                     <p><strong>Quest:</strong> <?php echo h($quest['text'] ?? $quest['description'] ?? 'adventure'); ?></p>
-                    <?php if (!empty($quest['participants']) && is_array($quest['participants'])): ?>
+                    <?php if (!empty($quest['questers']) && is_array($quest['questers'])): ?>
                         <table><thead><tr><th>#</th><th>Participant</th></tr></thead><tbody>
-                        <?php foreach ($quest['participants'] as $index => $participant): $participant_name = is_array($participant) ? idlerpg_player_name($participant) : (string) $participant; ?>
+                        <?php foreach ($quest['questers'] as $index => $participant): $participant_name = is_array($participant) ? idlerpg_player_name($participant) : (string) $participant; ?>
                             <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($participant_name)); ?>"><?php echo h($participant_name); ?></a></td></tr>
                         <?php endforeach; ?>
                         </tbody></table>

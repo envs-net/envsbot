@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 import pytest
@@ -532,3 +533,29 @@ def test_team_battle_changes_clocks_and_awards(monkeypatch):
     assert players[0][1]["next"] < 10000
     assert players[3][1]["next"] > 10000
     assert "team_battle_winner" in players[0][1]["achievements"]
+
+
+def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypatch):
+    room = idlerpg._blank_room()
+    room["players"]["alice@envs.net"] = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "online": True},
+    )
+    monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 1.0)
+    random_values = iter([0.0, 0.70])
+    monkeypatch.setattr(idlerpg.random, "random", lambda: next(random_values))
+    monkeypatch.setattr(
+        idlerpg,
+        "_run_item_blessing",
+        lambda _players, _messages: _messages.append("item"),
+    )
+    monkeypatch.setattr(
+        idlerpg,
+        "_run_godsend_or_calamity",
+        lambda _players, _messages: _messages.append("fate"),
+    )
+
+    messages = []
+    asyncio.run(idlerpg._maybe_run_random_event(room, "room@conf", messages))
+
+    assert messages == ["fate"]
