@@ -239,24 +239,30 @@ shown in profile/status output and in exported public JSON data.
 ## Live export for the website
 
 The plugin can export public game state as JSON for a website or status page.
-By default the files are written below `data/idlerpg`:
+By default the files are written below `data/idlerpg` inside the bot checkout.
+For an envs.net-style installation in `/srv/envsbot/envsbot`, that means:
 
 ```text
-data/idlerpg/index.json
-data/idlerpg/leaderboard.json
-data/idlerpg/players.json
-data/idlerpg/map.json
-data/idlerpg/hall_of_fame.json
-data/idlerpg/<room-slug>/room.json
-data/idlerpg/<room-slug>/leaderboard.json
-data/idlerpg/<room-slug>/players.json
-data/idlerpg/<room-slug>/map.json
-data/idlerpg/<room-slug>/hall_of_fame.json
-data/idlerpg/<room-slug>/profiles/<character>.json
+/srv/envsbot/envsbot/data/idlerpg/index.json
+/srv/envsbot/envsbot/data/idlerpg/leaderboard.json
+/srv/envsbot/envsbot/data/idlerpg/players.json
+/srv/envsbot/envsbot/data/idlerpg/map.json
+/srv/envsbot/envsbot/data/idlerpg/hall_of_fame.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/room.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/leaderboard.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/players.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/map.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/hall_of_fame.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/profiles/<character>.json
 ```
 
 The top-level files mirror the first exported room for simple websites. The
 room-specific directories are useful when IdleRPG is enabled in multiple rooms.
+For `idlerpg@conference.envs.net`, the room slug is usually:
+
+```text
+idlerpg_at_conference.envs.net
+```
 
 Manual refresh, limited to room owners/admins:
 
@@ -264,7 +270,7 @@ Manual refresh, limited to room owners/admins:
 ,idlerpg export
 ```
 
-Relevant settings:
+### Export settings
 
 ```python
 IDLERPG = {
@@ -275,9 +281,72 @@ IDLERPG = {
 }
 ```
 
-`export_public_base_url` can be set to the public URL that serves the export
-folder. When configured, commands such as `,idlerpg profile` and `,idlerpg map`
-include links to the exported JSON files.
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `export_enabled` | `True` | Writes public JSON files after game-state changes. Disable this when no website/status export is wanted. |
+| `export_path` | `"data/idlerpg"` | Base directory for JSON exports. Relative paths are resolved from the bot checkout/base directory. Room-specific data is written below `<export_path>/<room-slug>/`. |
+| `export_public_base_url` | `""` | Optional public URL for the export base. When set, commands such as `,idlerpg profile` and `,idlerpg map` can include public JSON links. |
+| `export_top_limit` | `50` | Maximum number of players in exported leaderboard files. `players.json` still contains all exported players. |
+
+### Website data path
+
+For the envs.net website the webroot is `/var/www/envs.net`.
+There are two sane deployment variants.
+
+Variant A: let the bot export directly into the website tree. This is usually the
+simplest option because PHP/nginx only needs to read files below the webroot:
+
+```python
+IDLERPG = {
+    "export_enabled": True,
+    "export_path": "/var/www/envs.net/idlerpg/data",
+    "export_public_base_url": "https://envs.net/idlerpg/data",
+}
+```
+
+The files for the game room will then be written to:
+
+```text
+/var/www/envs.net/idlerpg/data/idlerpg_at_conference.envs.net/map.json
+/var/www/envs.net/idlerpg/data/idlerpg_at_conference.envs.net/leaderboard.json
+/var/www/envs.net/idlerpg/data/idlerpg_at_conference.envs.net/players.json
+```
+
+Make sure the bot can write there and the webserver can read there. Example:
+
+```sh
+sudo install -d -o envsbot -g www-data -m 0755 /var/www/envs.net/idlerpg/data
+```
+
+If the bot uses a restrictive umask, add default ACLs so newly created room
+directories and JSON files stay readable by the webserver:
+
+```sh
+sudo setfacl -m u:envsbot:rwx,u:www-data:rx /var/www/envs.net/idlerpg/data
+sudo setfacl -d -m u:envsbot:rwx,u:www-data:rx /var/www/envs.net/idlerpg/data
+```
+
+Variant B: keep the default bot runtime export below `/srv/envsbot/envsbot` and
+let PHP read it from there. This works too, but only if the PHP/webserver user can
+traverse every parent directory and read the JSON files. Test it with the actual
+webserver user, for example `www-data`:
+
+```sh
+sudo -u www-data test -r /srv/envsbot/envsbot/data/idlerpg/idlerpg_at_conference.envs.net/map.json && echo readable
+namei -l /srv/envsbot/envsbot/data/idlerpg/idlerpg_at_conference.envs.net/map.json
+```
+
+When using an absolute path in PHP, do not prepend `__DIR__`. This is wrong:
+
+```php
+__DIR__ . '/srv/envsbot/envsbot/data/idlerpg/idlerpg_at_conference.envs.net/map.json'
+```
+
+Use the absolute path directly instead:
+
+```php
+'/srv/envsbot/envsbot/data/idlerpg/idlerpg_at_conference.envs.net/map.json'
+```
 
 ## Map
 
@@ -292,6 +361,24 @@ every game tick. Active quests include route coordinates that are exported in
 The XMPP command renders a compact text map with player markers and a legend.
 The website uses the exported `map.json` for a visual map.
 
+Example legend line:
+
+```text
+1 creme [293,133] lv.16 online
+```
+
+This means:
+
+- `1` is the marker on the ASCII map.
+- `creme` is the character name.
+- `[293,133]` is the character position on the virtual map: `x=293`, `y=133`.
+- `lv.16` means the character is level 16.
+- `online` means the character is currently considered online by the game.
+
+With the default map size of `500x500`, `[293,133]` is a point a little right of
+the horizontal center and in the upper third of the map. These are game
+coordinates only, not real-world locations.
+
 Relevant settings:
 
 ```python
@@ -301,6 +388,12 @@ IDLERPG = {
     "map_step_per_tick": 5,
 }
 ```
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `map_x` | `500` | Width of the virtual game map. Exported as `width` in `map.json`. |
+| `map_y` | `500` | Height of the virtual game map. Exported as `height` in `map.json`. |
+| `map_step_per_tick` | `5` | Maximum movement step for online players per game tick. Set to `0` to keep coordinates static. |
 
 ## Seasons and Hall of Fame
 
@@ -335,6 +428,73 @@ IDLERPG = {
     "season_hof_size": 10,
 }
 ```
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `season_enabled` | `False` | Enables automatic season rollover based on `season_duration_days`. Manual season commands are still available to room owners/admins. |
+| `season_duration_days` | `90` | Season length for automatic rollover. Set to `0` to disable duration checks. |
+| `season_reset_on_rollover` | `False` | If `True`, automatic rollover resets player progress after archiving the Hall of Fame entry. |
+| `season_hof_size` | `10` | Number of completed seasons kept in Hall of Fame output/export. |
+
+## Full configuration reference
+
+All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
+
+### Timer and leveling
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `tick_seconds` | `60` | Game-loop interval in seconds. Each tick advances online players, moves map positions and may trigger random events. |
+| `rp_base` | `600` | Base time-to-level in seconds. Level 0 starts with this value. |
+| `rp_step` | `1.16` | Exponential level scaling. Higher values make later levels take longer. Formula: `TTL = rp_base * (rp_step ** current_level)`. |
+
+### Penalties
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `penalty_step` | `1.14` | Exponential scaling for message and logout penalties. |
+| `message_penalty` | `1` | Base penalty in seconds for normal room messages. Formula: `message_penalty * (penalty_step ** current_level)`. |
+| `logout_penalty` | `20` | Base penalty in seconds when a player logs out. |
+| `max_penalty` | `604800` | Maximum single penalty in seconds. The default is 7 days. Set to `0` to disable the cap. |
+| `count_command_messages` | `False` | Whether bot commands also count as message penalties. Usually keep this disabled. |
+
+### Paging and output
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `page_size` | `10` | Number of entries per page for commands such as `top`, `players`, and some lists. |
+
+### Random events and items
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `event_chance` | `0.01` | Chance per room tick to trigger one random event. With a 60-second tick this is roughly a 1% chance per minute and room. |
+| `item_chance` | `0.20` | Chance for a player to find an item on level-up. |
+| `battle_event_weight` | `0.55` | Relative weight for PvP/random battle events when a random event is selected. |
+| `item_event_weight` | `0.15` | Relative weight for item blessing/damage events. |
+| `alignment_event_weight` | `0.10` | Relative weight for alignment-based group events. |
+| `critical_strike_chance` | `0.10` | Chance after a battle that the winner lands a critical strike against the opponent. |
+| `item_drop_chance` | `0.12` | Chance after a battle that an item is dropped/swapped. |
+
+The event weights are relative. Raising `battle_event_weight`, for example,
+makes battle events more likely compared to item and alignment events.
+`event_chance` still controls how often any random event starts at all.
+
+### Quests
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `quest_min_level` | `40` | Minimum level for players to be selected for quests. |
+| `quest_interval` | `21600` | Minimum time in seconds between quest start attempts. The default is 6 hours. |
+| `quest_min_duration` | `43200` | Minimum quest duration in seconds. The default is 12 hours. |
+| `quest_max_duration` | `86400` | Maximum quest duration in seconds. The default is 24 hours. |
+
+### Export, map and seasons
+
+These options are documented in the sections above: `export_enabled`,
+`export_path`, `export_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
+`map_step_per_tick`, `season_enabled`, `season_duration_days`,
+`season_reset_on_rollover`, and `season_hof_size`.
 
 ## Room concept
 

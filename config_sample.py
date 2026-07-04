@@ -258,22 +258,39 @@ DUCKS = {
 
 # Classic IRC-style IdleRPG adapted for XMPP MUCs.
 # Players level up by staying online and idle. Normal room messages add
-# penalty time to the player's timer.
+# penalty time to the player's timer. See docs/idlerpg.md for details.
 IDLERPG = {
+    # Game loop interval. Lower values make timers, map movement and random
+    # events feel more responsive, but also run the loop more often.
     "tick_seconds": 60,
+
+    # Level timer formula: TTL = rp_base * (rp_step ** current_level).
     "rp_base": 600,
     "rp_step": 1.16,
+
+    # Message/logout penalties. Message penalty formula:
+    # penalty = message_penalty * (penalty_step ** current_level).
     "penalty_step": 1.14,
     "message_penalty": 1,
     "logout_penalty": 20,
     "max_penalty": 604800,
+    "count_command_messages": False,
+
+    # Output paging and text/website map dimensions. Coordinates are rendered
+    # as [x,y] within this map size, for example [293,133] on a 500x500 map.
     "page_size": 10,
     "map_x": 500,
     "map_y": 500,
+    "map_step_per_tick": 5,
+
+    # Quest timing. Quest durations are seconds.
     "quest_min_level": 40,
     "quest_interval": 21600,
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
+
+    # Random events. event_chance is checked once per game tick and room.
+    # Event weights are relative to each other.
     "event_chance": 0.01,
     "item_chance": 0.20,
     "battle_event_weight": 0.55,
@@ -281,16 +298,21 @@ IDLERPG = {
     "alignment_event_weight": 0.10,
     "critical_strike_chance": 0.10,
     "item_drop_chance": 0.12,
+
+    # Public JSON export for the website. Prefer exporting directly into a
+    # web-readable directory instead of making the webserver read bot-internal
+    # paths under /srv/envsbot.
     "export_enabled": True,
     "export_path": "data/idlerpg",
     "export_public_base_url": "",
     "export_top_limit": 50,
+
+    # Seasons and Hall of Fame. Automatic season rollover is disabled by
+    # default; manual `,idlerpg season end/reset` still works for admins.
     "season_enabled": False,
     "season_duration_days": 90,
     "season_reset_on_rollover": False,
     "season_hof_size": 10,
-    "map_step_per_tick": 5,
-    "count_command_messages": False,
 }
 
 
