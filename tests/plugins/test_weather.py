@@ -163,6 +163,7 @@ async def test_weather_with_direct_city(fake_bot, fake_msg, patch_plugins,
     fake_bot.reply.assert_called()
     out = output_of_reply(fake_bot.reply)
     assert "Weather for Dresden" in out
+    assert "Dresden: Dresden" not in out
     assert "Forecast: https://wttr.in/Dresden" in out
 
 
@@ -177,6 +178,7 @@ async def test_weather_with_direct_zip(fake_bot, fake_msg, patch_plugins,
     fake_bot.reply.assert_called()
     out = output_of_reply(fake_bot.reply)
     assert "Weather for 01067" in out
+    assert "01067: 01067" not in out
     assert "Forecast: https://wttr.in/01067" in out
 
 
@@ -513,6 +515,29 @@ def test_weather_target_and_location_helpers():
         "https://wttr.in/M%C3%BCnchen%20Hauptbahnhof",
         "https://wttr.in/M%C3%BCnchen%20Hauptbahnhof?format=4&m",
     )
+    assert weather._parse_wttr_weather("Berlin: Sunny 21°C") == (
+        "Berlin",
+        "Sunny 21°C",
+    )
+    assert weather._parse_wttr_weather("Sunny 21°C") == (
+        "",
+        "Sunny 21°C",
+    )
+    assert weather._format_weather_reply(
+        "Berlin",
+        "Berlin",
+        "Berlin: Sunny 21°C",
+    ) == "🌤️ Weather for Berlin: Sunny 21°C"
+    assert weather._format_weather_reply(
+        "alice@example.org",
+        "Saxony",
+        "Saxony: Sunny 21°C",
+    ) == "🌤️ Weather for alice@example.org (Saxony): Sunny 21°C"
+    assert weather._format_weather_reply(
+        "Dresden Neustadt",
+        "Dresden Neustadt",
+        "Dresden: Sunny 21°C",
+    ) == "🌤️ Weather for Dresden Neustadt: Dresden: Sunny 21°C"
 
 
 @pytest.mark.asyncio

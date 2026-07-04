@@ -528,7 +528,7 @@ async def _check_room_birthdays(bot, room_jid: str):
 async def _check_and_announce_birthdays(bot):
     """Check all users for birthdays and announce in enabled rooms."""
     try:
-        log.info("[BIRTHDAY] Already announced: %s", ANNOUNCED_TODAY)
+        log.debug("[BIRTHDAY] Already announced: %s", ANNOUNCED_TODAY)
 
         # JOINED_ROOMS may change while the periodic task is running.
         # Iterate over a snapshot to avoid RuntimeError on concurrent
