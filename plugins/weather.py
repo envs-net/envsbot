@@ -1,7 +1,7 @@
 """
 Info plugin: Show the current weather for a user's location
-configured in their vCard. Only works in groupchats or MUC DMs
-where the user has a vCard with a LOCATION field.
+configured in their vCard or for an explicitly provided city/ZIP code.
+Only works in groupchats or MUC DMs where the room feature is enabled.
 
 IMPORTANT: You may need to turn the plugins usage on with the following
 command in each room you want to use it in:
@@ -9,7 +9,7 @@ command in each room you want to use it in:
 
 Commands:
     {prefix}weather <on|off|status>
-    {prefix}weather [nick]
+    {prefix}weather [nick|city|zip]
 """
 
 import aiohttp
@@ -18,7 +18,8 @@ import urllib
 from core_plugins import _core
 from plugins import vcard
 from utils.command import command, Role
-from utils.config import config  # intentionally exposed for tests and runtime settings
+# Intentionally exposed for tests and runtime settings.
+from utils.config import config
 from core_plugins.rooms import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
@@ -26,8 +27,8 @@ log = logging.getLogger(__name__)
 PLUGIN_META = {
     "name": "weather",
     "version": "0.5.0",
-    "description": ("Gives weather according to users location (supports MUCs "
-                    "and MUC DMs)"),
+    "description": ("Gives weather according to users location or an "
+                    "explicit city/ZIP code"),
     "category": "info",
     "requires": ["_core", "rooms", "vcard"],
 }
@@ -73,15 +74,16 @@ async def get_weather_store(bot):
 @command("weather", role=Role.USER, aliases=["w"])
 async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     """
-    Show the current weather for a users location set in their vCard. If
-    the <nick> is omitted, your own location according to your vCard is
-    used. Only works in groupchats or MUC DMs where the user has a vCard
-    with a LOCATION and/or COUNTRY (CTRY) field set (must be public).
+    Show the current weather for a users location set in their vCard or
+    for an explicitly provided city/ZIP code. If the <nick> is omitted,
+    your own location according to your vCard is used. In rooms and MUC
+    PMs, an argument matching a room nick uses that user's vCard; any
+    other argument is treated as a direct weather location.
 
     Usage:
         {prefix}weather
         {prefix}weather <on|off|status>
-        {prefix}weather <nick>
+        {prefix}weather <nick|city|zip>
     """
     handled = await _core.handle_room_toggle_command(
         bot,
@@ -121,6 +123,17 @@ async def _handle_weather_room(bot, msg, args, enabled_rooms):
         return
 
     nicks = JOINED_ROOMS.get(muc_jid, {}).get("nicks", {})
+
+    direct_location = _resolve_direct_location(args, nicks)
+    if direct_location is not None:
+        await _reply_with_weather_for_location(
+            bot,
+            msg,
+            direct_location,
+            direct_location,
+        )
+        return
+
     target_nick = _resolve_room_target_nick(bot, msg, args)
     if target_nick is None:
         return
@@ -150,6 +163,17 @@ async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
         return
 
     nicks = JOINED_ROOMS.get(muc_jid, {}).get("nicks", {})
+
+    direct_location = _resolve_direct_location(args, nicks)
+    if direct_location is not None:
+        await _reply_with_weather_for_location(
+            bot,
+            msg,
+            direct_location,
+            direct_location,
+        )
+        return
+
     target_nick = _resolve_muc_pm_target_nick(bot, msg, args)
     if target_nick is None:
         return
@@ -173,15 +197,22 @@ async def _handle_weather_dm(bot, msg, args):
     display_name = target_nick
 
     if args:
-        log.warning(
+        direct_location = _location_from_args(args)
+        if not direct_location:
+            bot.reply(
+                msg,
+                "🔴  Please provide a city or ZIP code.",
+            )
+            return
+        log.info(
             f"[WEATHER] Command invoked by '{target_nick}'"
-            f" in DM with args: {args}"
+            f" in DM for direct location: {direct_location}"
         )
-        bot.reply(
+        await _reply_with_weather_for_location(
+            bot,
             msg,
-            "🔴  In a DM, you cannot specify a different nick. "
-            f"Just use {config.get('prefix', ',')}weather without arguments "
-            "to get your weather.",
+            direct_location,
+            direct_location,
         )
         return
 
@@ -220,6 +251,24 @@ def _resolve_muc_pm_target_nick(bot, msg, args):
     return target_nick
 
 
+def _location_from_args(args):
+    return " ".join(str(arg) for arg in args).strip()
+
+
+def _resolve_direct_location(args, nicks):
+    if not args:
+        return None
+
+    arg_text = _location_from_args(args)
+    if not arg_text:
+        return None
+
+    if arg_text in nicks:
+        return None
+
+    return arg_text
+
+
 def _extract_location_fields(vcard_data):
     return (
         vcard_data.get("LOCALITY", None),
@@ -250,6 +299,10 @@ async def _process_weather_for_jid(bot, msg, jid, target_nick, muc_jid, is_dm):
 async def _reply_with_weather(bot, msg, display_name, locality,
                               region, country):
     location = _select_location(locality, region, country)
+    await _reply_with_weather_for_location(bot, msg, display_name, location)
+
+
+async def _reply_with_weather_for_location(bot, msg, display_name, location):
 
     log.info(f"[WEATHER] Location for {display_name}: {location}")
 
@@ -257,12 +310,14 @@ async def _reply_with_weather(bot, msg, display_name, locality,
         bot.reply(msg, f"🟡️ No LOCATION in vCard for {display_name}.")
         return
 
-    enc_location = urllib.parse.quote(location, safe="")
-    url = f"https://wttr.in/{enc_location}?format=4&m"
+    forecast_url, weather_url = _build_wttr_urls(location)
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=WEATHER_HTTP_TIMEOUT) as resp:
+            async with session.get(
+                weather_url,
+                timeout=WEATHER_HTTP_TIMEOUT,
+            ) as resp:
                 if resp.status != 200:
                     bot.reply(msg, f"🌦️ Failed to fetch weather for"
                                    f" {display_name}.")
@@ -285,9 +340,17 @@ async def _reply_with_weather(bot, msg, display_name, locality,
     bot.reply(
         msg,
         f"🌤️ Weather for {display_name}: {weather_loc.title()}:"
-        f" {weather_desc.strip()} ({location})",
+        f" {weather_desc.strip()} ({location})\n"
+        f"Forecast: {forecast_url}",
         ephemeral=False,
     )
+
+
+def _build_wttr_urls(location):
+    enc_location = urllib.parse.quote(location.strip(), safe="")
+    forecast_url = f"https://wttr.in/{enc_location}"
+    weather_url = f"{forecast_url}?format=4&m"
+    return forecast_url, weather_url
 
 
 def _select_location(locality, region, country):
