@@ -1969,16 +1969,16 @@ Examples:
 Source: `plugins`
 Category: `info`
 
-Gives weather according to users location (supports MUCs and MUC DMs)
+Gives weather according to users location or an explicit city/ZIP code
 
 #### `,weather`
 
-Show weather from a user's vCard location or control room access.
+Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,weather [on|off|status|nick]`
+Usage: `,weather [on|off|status|nick|city|zip]`
 
 Aliases: `,w`
 
@@ -1986,6 +1986,8 @@ Examples:
 
 - `,weather status`
 - `,weather Alice`
+- `,w Dresden`
+- `,w 01067`
 - `,rooms enable weather`
 
 ### xkcd

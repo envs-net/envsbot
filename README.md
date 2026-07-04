@@ -290,7 +290,7 @@ Optional plugins:
 * `tools` - ping, echo, time/date, seen and timestamp helpers
 * `urlcheck` - URL title, metadata, file and YouTube lookup
 * `vcard` - public vCard lookup helpers
-* `weather` - weather lookup from configured location data
+* `weather` - weather lookup from configured location data or city/ZIP input
 * `xkcd` - latest, random, specific and searched XKCD comics
 * `xmpp` - XMPP diagnostics, discovery, uptime, version and SRV checks
 
