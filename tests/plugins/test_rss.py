@@ -426,7 +426,9 @@ async def test_fetch_feed_bytes_redirect_and_size_limit(monkeypatch):
         def get(self, url, allow_redirects=False):
             self.calls.append(url)
             if len(self.calls) == 1:
-                return DummyResp(302, url, {"Location": "/real.xml"})
+                return DummyResp(
+                    302, url, {"Location": "https://example.org/real.xml"}
+                )
             return DummyResp(
                 200,
                 url,
