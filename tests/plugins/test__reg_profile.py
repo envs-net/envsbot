@@ -218,16 +218,16 @@ async def test_update_vcard_no_change(monkeypatch, tmp_path):
     monkeypatch.setattr(_reg_profile, "sha1", lambda data: fixed_hash)
     monkeypatch.setattr(_reg_profile, "read_hash", lambda path: fixed_hash)
 
-    info_msgs = []
+    debug_msgs = []
     monkeypatch.setattr(
         _reg_profile,
         "log",
-        types.SimpleNamespace(info=lambda msg: info_msgs.append(msg)),
+        types.SimpleNamespace(debug=lambda msg: debug_msgs.append(msg)),
     )
 
     await _reg_profile.update_vcard(object())
 
-    assert any("unchanged" in m for m in info_msgs)
+    assert any("unchanged" in m for m in debug_msgs)
 
 
 @pytest.mark.asyncio

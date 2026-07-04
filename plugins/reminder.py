@@ -955,9 +955,8 @@ async def _restore_pending_reminders(bot) -> int:
             hours = seconds_left / 3600
 
             log.info(
-                "[REMINDER] ✅ Restored reminder %s: %s (%.1f h remaining)",
+                "[REMINDER] ✅ Restored reminder %s (%.1f h remaining)",
                 reminder_id,
-                message,
                 hours,
             )
 
@@ -1076,8 +1075,8 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         )
 
         bot.reply(msg, f"✅ Reminder set! I'll remind you {display_when}")
-        log.info("[REMINDER] Created reminder %s for %s: %s", reminder_id,
-                 user_jid, message)
+        log.info("[REMINDER] Created reminder %s for %s", reminder_id,
+                 user_jid)
 
     except Exception as exc:
         log.exception("[REMINDER] Error creating reminder: %s", exc)

@@ -32,6 +32,7 @@ class PresenceManager:
         }
 
         self.joined_rooms = {}
+        self._last_info_logged_status = None
 
         self.emojis = {
             "online": "✅",
@@ -120,9 +121,18 @@ class PresenceManager:
         except Exception as e:
             log.debug(f"[PRESENCE] Error accessing rooms plugin: {e}")
 
-        # log message
-        log.info(f"[PRESENCE] {self.emoji(show)} Status set: "
-                 f"'{show}': [{status}]")
+        # Log the first status broadcast at INFO, but keep repeated
+        # unchanged broadcasts at DEBUG to avoid noisy startup logs while
+        # still making them visible when debug logging is enabled.
+        current_status = (show, status)
+        log_method = log.info
+        if self._last_info_logged_status == current_status:
+            log_method = log.debug
+        else:
+            self._last_info_logged_status = current_status
+
+        log_method(f"[PRESENCE] {self.emoji(show)} Status set: "
+                   f"'{show}': [{status}]")
 
     def emoji(self, show=None):
         """Get the emoji representation for a given presence state."""

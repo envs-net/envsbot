@@ -1,3 +1,5 @@
+import logging
+
 from utils.presence_manager import PresenceManager
 
 
@@ -80,3 +82,33 @@ def test_broadcast_with_avatar_hash_sends_xep0153_presence():
     x = room_presence.xml.find("{vcard-temp:x:update}x")
     assert x is not None
     assert x.find("photo").text == "abc123"
+
+
+def test_broadcast_logs_duplicate_status_at_debug(caplog):
+    bot = DummyBot()
+    pm = PresenceManager(bot)
+
+    with caplog.at_level(logging.DEBUG, logger="utils.presence_manager"):
+        pm.broadcast()
+        pm.broadcast()
+        pm.update("away", "Lunch")
+
+    info_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.INFO
+    ]
+    debug_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+    ]
+
+    assert info_messages.count(
+        "[PRESENCE] ✅ Status set: 'online': [I'm ready to serve you!]"
+    ) == 1
+    assert (
+        "[PRESENCE] ✅ Status set: 'online': [I'm ready to serve you!]"
+        in debug_messages
+    )
+    assert "[PRESENCE] 👋  Status set: 'away': [Lunch]" in info_messages

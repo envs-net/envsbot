@@ -52,7 +52,7 @@ async def get_display_name(bot, jid):
             "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
             jid, e
         )
-    log.info(
+    log.debug(
         "[PROFILE] 👤 Profile lookup for self: %s",
         display_name
     )
@@ -113,9 +113,11 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
 
 
 async def _handle_weather_room(bot, msg, args, enabled_rooms):
-    log.info(
-        f"[WEATHER] Command invoked in room {msg['from'].bare} by "
-        f"{msg['from'].resource} with args: {args}"
+    log.debug(
+        "[WEATHER] Command invoked in room %s by %s with args: %s",
+        msg["from"].bare,
+        msg["from"].resource,
+        args,
     )
 
     muc_jid = msg["from"].bare
@@ -139,9 +141,10 @@ async def _handle_weather_room(bot, msg, args, enabled_rooms):
         return
 
     if target_nick not in nicks:
-        log.info(
-            f"[WEATHER] Lookup failed: Nick '{target_nick}'"
-            f" not found in room {muc_jid}"
+        log.debug(
+            "[WEATHER] Lookup failed: Nick %r not found in room %s",
+            target_nick,
+            muc_jid,
         )
         prefix = "Your nick" if not args else "Nick"
         bot.reply(msg, f"🔴  {prefix} '{target_nick}' not found in this room.")
@@ -153,9 +156,11 @@ async def _handle_weather_room(bot, msg, args, enabled_rooms):
 
 
 async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
-    log.info(
-        f"[WEATHER] Command invoked in room {msg['from'].bare} by "
-        f"{msg['from'].resource} with args: {args}"
+    log.debug(
+        "[WEATHER] Command invoked in room %s by %s with args: %s",
+        msg["from"].bare,
+        msg["from"].resource,
+        args,
     )
 
     muc_jid = msg["from"].bare
@@ -179,9 +184,10 @@ async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
         return
 
     if target_nick not in nicks:
-        log.info(
-            f"[WEATHER] Lookup failed: Nick '{target_nick}'"
-            f" not found in room {muc_jid}"
+        log.debug(
+            "[WEATHER] Lookup failed: Nick %r not found in room %s",
+            target_nick,
+            muc_jid,
         )
         prefix = "Your nick" if not args else "Nick"
         bot.reply(msg, f"🔴  {prefix} '{target_nick}' not found in this room.")
@@ -204,9 +210,10 @@ async def _handle_weather_dm(bot, msg, args):
                 "🔴  Please provide a city or ZIP code.",
             )
             return
-        log.info(
-            f"[WEATHER] Command invoked by '{target_nick}'"
-            f" in DM for direct location: {direct_location}"
+        log.debug(
+            "[WEATHER] Command invoked by %r in DM for direct location: %s",
+            target_nick,
+            direct_location,
         )
         await _reply_with_weather_for_location(
             bot,
@@ -304,7 +311,7 @@ async def _reply_with_weather(bot, msg, display_name, locality,
 
 async def _reply_with_weather_for_location(bot, msg, display_name, location):
 
-    log.info(f"[WEATHER] Location for {display_name}: {location}")
+    log.debug("[WEATHER] Location for %s: %s", display_name, location)
 
     if not location or location.strip() == "":
         bot.reply(msg, f"🟡️ No LOCATION in vCard for {display_name}.")

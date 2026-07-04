@@ -197,7 +197,7 @@ async def update_vcard(bot):
     new_hash = sha1(serialized)
     stored_hash = read_hash(VCARD_HASH_FILE)
     if stored_hash == new_hash:
-        log.info(
+        log.debug(
             "[_REG_PROFILE] vCard (from vcard.py/XML) unchanged"
             " — skipping update")
         return
@@ -271,7 +271,7 @@ async def update_avatar(bot):
         stored_hash = read_hash(AVATAR_HASH_FILE)
 
         if stored_hash == new_hash:
-            log.info("[_REG_PROFILE] Avatar unchanged — skipping upload")
+            log.debug("[_REG_PROFILE] Avatar unchanged — skipping upload")
             if hasattr(bot, "presence"):
                 bot.presence.broadcast()
             return
