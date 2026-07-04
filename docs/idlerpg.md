@@ -48,6 +48,7 @@ Use these in the game room or from a MUC private message to the bot:
 ,idlerpg title <achievement|none>
 ,idlerpg map
 ,idlerpg hof
+,idlerpg events [page|last|all]
 ,idlerpg season
 ,idlerpg align <good|neutral|evil>
 ,idlerpg quest
@@ -74,6 +75,7 @@ Examples:
 ,idlerpg top
 ,idlerpg items Sven
 ,idlerpg profile Sven
+,idlerpg events
 ,idlerpg map
 ,idlerpg align good
 ```
@@ -130,8 +132,10 @@ On level-up, the player may find an item.
 The game loop can also trigger rare classic IdleRPG-style events:
 
 - PvP battles between online players
+- team battles between two groups of online players
 - critical strikes that add time to the defeated player's clock
 - item drops and swaps after battles
+- unique envs.net-flavoured items at higher levels
 - item blessings that improve a random item
 - calamities that add time to a player's timer
 - godsends that remove time from a player's timer
@@ -154,12 +158,67 @@ IDLERPG = {
     "event_chance": 0.01,
     "item_chance": 0.20,
     "battle_event_weight": 0.55,
+    "team_battle_event_weight": 0.08,
     "item_event_weight": 0.15,
     "alignment_event_weight": 0.10,
     "critical_strike_chance": 0.10,
     "item_drop_chance": 0.12,
+    "unique_items_enabled": True,
+    "unique_item_min_level": 25,
+    "unique_item_chance": 0.025,
 }
 ```
+
+Battle, godsend, calamity and quest effects are configurable percentages:
+
+```python
+IDLERPG = {
+    "battle_win_min_percent": 7,
+    "battle_loss_min_percent": 7,
+    "critical_min_percent": 5,
+    "critical_max_percent": 25,
+    "godsend_min_percent": 5,
+    "godsend_max_percent": 12,
+    "calamity_min_percent": 5,
+    "calamity_max_percent": 12,
+    "alignment_bonus_percent": 7,
+    "quest_reward_percent": 25,
+    "team_battle_percent": 20,
+}
+```
+
+`battle_win_min_percent` and `battle_loss_min_percent` are minimum values. The
+opponent's level can increase the final battle percentage. Critical strikes,
+godsends and calamities use a random percentage within their configured range.
+
+Unique items use predefined envs.net-themed names and are exported in each
+player profile under `unique_items`. They never expose JIDs or private account
+data.
+
+## Event log
+
+IdleRPG keeps a room-scoped recent event log. It records public game events such
+as registrations, logins, level-ups, battles, critical strikes, item drops,
+godsends, calamities, quest progress, team battles and season changes.
+
+```text
+,idlerpg events
+,idlerpg events last
+,idlerpg events all
+```
+
+Relevant settings:
+
+```python
+IDLERPG = {
+    "event_log_limit": 200,
+    "export_event_limit": 50,
+}
+```
+
+`event_log_limit` controls how many events are kept in bot state per room.
+`export_event_limit` controls how many recent events are written to
+`events.json` for the website.
 
 ## Quests
 
@@ -248,16 +307,23 @@ For an envs.net-style installation in `/srv/envsbot/envsbot`, that means:
 /srv/envsbot/envsbot/data/idlerpg/players.json
 /srv/envsbot/envsbot/data/idlerpg/map.json
 /srv/envsbot/envsbot/data/idlerpg/hall_of_fame.json
+/srv/envsbot/envsbot/data/idlerpg/events.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/room.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/leaderboard.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/players.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/map.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/hall_of_fame.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/events.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/profiles/<character>.json
 ```
 
 The top-level files mirror the first exported room for simple websites. The
 room-specific directories are useful when IdleRPG is enabled in multiple rooms.
+
+Public exports are intentionally privacy-reduced: they contain character names,
+classes, public game state, events and map positions, but no raw JIDs and no
+internal admin-only state. JSON files are written atomically to avoid half-written
+files being read by the website.
 For `idlerpg@conference.envs.net`, the room slug is usually:
 
 ```text
@@ -471,10 +537,14 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `event_chance` | `0.01` | Chance per room tick to trigger one random event. With a 60-second tick this is roughly a 1% chance per minute and room. |
 | `item_chance` | `0.20` | Chance for a player to find an item on level-up. |
 | `battle_event_weight` | `0.55` | Relative weight for PvP/random battle events when a random event is selected. |
+| `team_battle_event_weight` | `0.08` | Relative weight for 3-vs-3 team battles when enough online players exist. |
 | `item_event_weight` | `0.15` | Relative weight for item blessing/damage events. |
 | `alignment_event_weight` | `0.10` | Relative weight for alignment-based group events. |
 | `critical_strike_chance` | `0.10` | Chance after a battle that the winner lands a critical strike against the opponent. |
 | `item_drop_chance` | `0.12` | Chance after a battle that an item is dropped/swapped. |
+| `unique_items_enabled` | `True` | Enables rare named unique items. |
+| `unique_item_min_level` | `25` | Minimum character level before unique items may appear. |
+| `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item. |
 
 The event weights are relative. Raising `battle_event_weight`, for example,
 makes battle events more likely compared to item and alignment events.

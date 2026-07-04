@@ -461,3 +461,74 @@ def test_season_rollover_and_player_movement(monkeypatch):
     assert room["hall_of_fame"][-1]["champion"] == "Alice"
     assert messages and "season old has ended" in messages[0]
     assert (player["x"], player["y"]) != old_pos
+
+@pytest.mark.asyncio
+async def test_events_export_has_no_raw_jids_and_events_command(tmp_path, monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        msg,
+        True,
+    )
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["events"], msg, True)
+    assert "IdleRPG Recent Events" in bot.replies[-1][0]
+    assert "alice@envs.net" not in bot.replies[-1][0]
+
+    room_dir = tmp_path / "room_at_conf"
+    assert (room_dir / "events.json").exists()
+    payload = (room_dir / "players.json").read_text(encoding="utf-8")
+    events_payload = (room_dir / "events.json").read_text(encoding="utf-8")
+    assert "alice@envs.net" not in payload
+    assert "jid_hash" not in payload
+    assert "alice@envs.net" not in events_payload
+
+
+def test_unique_item_roll_grants_title_and_public_record(monkeypatch):
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "level": 52, "next": 10000},
+    )
+    monkeypatch.setattr(idlerpg, "UNIQUE_ITEMS_ENABLED", True)
+    monkeypatch.setattr(idlerpg, "UNIQUE_ITEM_MIN_LEVEL", 25)
+    monkeypatch.setattr(idlerpg, "UNIQUE_ITEM_CHANCE", 1.0)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: start)
+
+    message = idlerpg._grant_level_item(player)
+
+    assert "The Ancient Shell of envs.net" in message
+    assert player["unique_items"]["shield"] == "The Ancient Shell of envs.net"
+    assert "unique_item" in player["achievements"]
+    public = idlerpg._player_public_record("room@conf", "alice@envs.net", player, rank=1)
+    assert "jid_hash" not in public
+    assert public["unique_items"]["shield"] == "The Ancient Shell of envs.net"
+
+
+def test_team_battle_changes_clocks_and_awards(monkeypatch):
+    players = []
+    for idx in range(6):
+        jid = f"u{idx}@envs.net"
+        player = idlerpg._normalize_player(
+            jid,
+            {"name": f"U{idx}", "class": "idler", "level": 30 + idx, "next": 10000, "items": {"weapon": 10 + idx}},
+        )
+        players.append((jid, player))
+
+    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: seq[:count])
+    randint_values = iter([9999, 0])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
+
+    messages = []
+    idlerpg._run_team_battle(players, messages)
+
+    assert any("team battled" in line for line in messages)
+    assert players[0][1]["next"] < 10000
+    assert players[3][1]["next"] > 10000
+    assert "team_battle_winner" in players[0][1]["achievements"]

@@ -18,6 +18,7 @@ Commands:
     {prefix}idlerpg title <achievement|none>
     {prefix}idlerpg map
     {prefix}idlerpg hof
+    {prefix}idlerpg events [page|last|all]
     {prefix}idlerpg season [status|end|reset|hof]
     {prefix}idlerpg align <good|neutral|evil>
     {prefix}idlerpg quest
@@ -33,7 +34,6 @@ Admin commands:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import random
@@ -116,6 +116,57 @@ CRITICAL_STRIKE_CHANCE = float(
 ITEM_DROP_CHANCE = float(
     _cfg.get("item_drop_chance", config.get("idlerpg_item_drop_chance", 0.12)) or 0.12
 )
+TEAM_BATTLE_EVENT_WEIGHT = float(
+    _cfg.get("team_battle_event_weight", config.get("idlerpg_team_battle_event_weight", 0.08)) or 0.08
+)
+BATTLE_WIN_MIN_PERCENT = int(
+    _cfg.get("battle_win_min_percent", config.get("idlerpg_battle_win_min_percent", 7)) or 7
+)
+BATTLE_LOSS_MIN_PERCENT = int(
+    _cfg.get("battle_loss_min_percent", config.get("idlerpg_battle_loss_min_percent", 7)) or 7
+)
+CRITICAL_MIN_PERCENT = int(
+    _cfg.get("critical_min_percent", config.get("idlerpg_critical_min_percent", 5)) or 5
+)
+CRITICAL_MAX_PERCENT = int(
+    _cfg.get("critical_max_percent", config.get("idlerpg_critical_max_percent", 25)) or 25
+)
+GODSEND_MIN_PERCENT = int(
+    _cfg.get("godsend_min_percent", config.get("idlerpg_godsend_min_percent", 5)) or 5
+)
+GODSEND_MAX_PERCENT = int(
+    _cfg.get("godsend_max_percent", config.get("idlerpg_godsend_max_percent", 12)) or 12
+)
+CALAMITY_MIN_PERCENT = int(
+    _cfg.get("calamity_min_percent", config.get("idlerpg_calamity_min_percent", 5)) or 5
+)
+CALAMITY_MAX_PERCENT = int(
+    _cfg.get("calamity_max_percent", config.get("idlerpg_calamity_max_percent", 12)) or 12
+)
+ALIGNMENT_BONUS_PERCENT = int(
+    _cfg.get("alignment_bonus_percent", config.get("idlerpg_alignment_bonus_percent", 7)) or 7
+)
+QUEST_REWARD_PERCENT = int(
+    _cfg.get("quest_reward_percent", config.get("idlerpg_quest_reward_percent", 25)) or 25
+)
+TEAM_BATTLE_PERCENT = int(
+    _cfg.get("team_battle_percent", config.get("idlerpg_team_battle_percent", 20)) or 20
+)
+UNIQUE_ITEMS_ENABLED = bool(
+    _cfg.get("unique_items_enabled", config.get("idlerpg_unique_items_enabled", True))
+)
+UNIQUE_ITEM_MIN_LEVEL = int(
+    _cfg.get("unique_item_min_level", config.get("idlerpg_unique_item_min_level", 25)) or 25
+)
+UNIQUE_ITEM_CHANCE = float(
+    _cfg.get("unique_item_chance", config.get("idlerpg_unique_item_chance", 0.025)) or 0.025
+)
+EVENT_LOG_LIMIT = int(
+    _cfg.get("event_log_limit", config.get("idlerpg_event_log_limit", 200)) or 200
+)
+EXPORT_EVENT_LIMIT = int(
+    _cfg.get("export_event_limit", config.get("idlerpg_export_event_limit", 50)) or 50
+)
 EXPORT_ENABLED = bool(_cfg.get("export_enabled", config.get("idlerpg_export_enabled", True)))
 EXPORT_PATH = str(_cfg.get("export_path", config.get("idlerpg_export_path", "data/idlerpg")) or "data/idlerpg")
 EXPORT_PUBLIC_BASE_URL = str(_cfg.get("export_public_base_url", config.get("idlerpg_export_public_base_url", "")) or "").rstrip("/")
@@ -138,6 +189,8 @@ ACHIEVEMENTS = {
     "level_50": ("Ancient Idler", "reached level 50"),
     "battle_winner": ("Duelist", "won a random battle"),
     "critical_striker": ("Critical Striker", "landed a critical strike"),
+    "team_battle_winner": ("Team Fighter", "won a team battle"),
+    "unique_item": ("Relic Finder", "found a unique item"),
     "quester": ("Quest Chosen", "was chosen for a quest"),
     "quest_hero": ("Quest Hero", "completed a quest"),
     "lucky": ("Blessed", "received a godsend"),
@@ -156,6 +209,17 @@ ITEMS = (
     "shield",
     "set of leggings",
     "pair of boots",
+)
+
+UNIQUE_ITEMS = (
+    {"name": "The Ancient Shell of envs.net", "slot": "shield", "min_level": 25, "min_item_level": 50, "max_item_level": 74},
+    {"name": "The Amulet of Uptime", "slot": "amulet", "min_level": 25, "min_item_level": 50, "max_item_level": 74},
+    {"name": "The Boots of Silent Idling", "slot": "pair of boots", "min_level": 30, "min_item_level": 75, "max_item_level": 99},
+    {"name": "The Crown of Boring Technology", "slot": "helm", "min_level": 35, "min_item_level": 100, "max_item_level": 124},
+    {"name": "The Great Hammer of /bin/sh", "slot": "weapon", "min_level": 40, "min_item_level": 150, "max_item_level": 174},
+    {"name": "The Cloak of Found on the Shell", "slot": "tunic", "min_level": 45, "min_item_level": 175, "max_item_level": 200},
+    {"name": "The Ring of Quiet Services", "slot": "ring", "min_level": 48, "min_item_level": 250, "max_item_level": 300},
+    {"name": "The Cluehammer of Good Documentation", "slot": "weapon", "min_level": 52, "min_item_level": 300, "max_item_level": 350},
 )
 
 CALAMITIES = (
@@ -399,6 +463,7 @@ def _blank_room() -> dict[str, Any]:
         "quest": {"active": False, "next_at": now + QUEST_INTERVAL},
         "season": _blank_season(now),
         "hall_of_fame": [],
+        "events": [],
         "last_tick": now,
         "created_at": now,
     }
@@ -430,6 +495,7 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     room.setdefault("quest", {"active": False, "next_at": _now() + QUEST_INTERVAL})
     room.setdefault("season", _blank_season(_now()))
     room.setdefault("hall_of_fame", [])
+    room.setdefault("events", [])
     room.setdefault("last_tick", _now())
     return room
 
@@ -444,6 +510,11 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
             items[item] = int(items.get(item, 0) or 0)
         except (TypeError, ValueError):
             items[item] = 0
+
+    unique_items = player.get("unique_items")
+    if not isinstance(unique_items, dict):
+        unique_items = {}
+    unique_items = {str(k): str(v) for k, v in unique_items.items() if str(k) in ITEMS and str(v).strip()}
 
     penalties = player.get("penalties")
     if not isinstance(penalties, dict):
@@ -479,6 +550,7 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         "last_seen": int(player.get("last_seen", now) or now),
         "alignment": str(player.get("alignment") or "n")[:1].lower(),
         "items": items,
+        "unique_items": unique_items,
         "penalties": penalties,
         "achievements": achievements,
         "title": title,
@@ -591,7 +663,6 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
     title_key = str(player.get("title") or "")
     return {
         "rank": rank,
-        "jid_hash": hashlib.sha256(str(jid).encode("utf-8")).hexdigest()[:16],
         "name": _display_player(player),
         "character": _display_player(player),
         "class": str(player.get("class") or "idler"),
@@ -604,6 +675,7 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
         "idled": int(player.get("idled", 0) or 0),
         "item_sum": _item_sum(player),
         "items": dict(player.get("items", {}) if isinstance(player.get("items"), dict) else {}),
+        "unique_items": dict(player.get("unique_items", {}) if isinstance(player.get("unique_items"), dict) else {}),
         "achievements": [
             {"key": key, "title": _achievement_title(key), "description": _achievement_description(key)}
             for key in player.get("achievements", [])
@@ -629,6 +701,135 @@ def _public_url(*parts: str) -> str:
     if not EXPORT_PUBLIC_BASE_URL:
         return ""
     return "/".join([EXPORT_PUBLIC_BASE_URL, *[part.strip("/") for part in parts if part]])
+
+
+def _safe_event_kind(kind: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9_.-]", "_", str(kind or "event").lower())
+    return cleaned[:40] or "event"
+
+
+def _clean_event_data(data: dict[str, Any]) -> dict[str, Any]:
+    clean: dict[str, Any] = {}
+    for key, value in data.items():
+        key = _safe_event_kind(str(key))
+        if key in {"jid", "sender", "actor_jid", "target_jid"}:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            clean[key] = value
+        elif isinstance(value, list):
+            clean[key] = [item for item in value if isinstance(item, (str, int, float, bool))][:12]
+    return clean
+
+
+def _record_event(
+    room: dict[str, Any],
+    kind: str,
+    text: str,
+    *,
+    players: list[str] | tuple[str, ...] | None = None,
+    data: dict[str, Any] | None = None,
+) -> None:
+    events = room.setdefault("events", [])
+    if not isinstance(events, list):
+        events = []
+        room["events"] = events
+    entry: dict[str, Any] = {"ts": _now(), "kind": _safe_event_kind(kind), "text": str(text or "")[:500]}
+    player_names = [str(player)[:80] for player in (players or []) if str(player).strip()]
+    if player_names:
+        entry["players"] = player_names[:8]
+    clean_data = _clean_event_data(data or {})
+    if clean_data:
+        entry["data"] = clean_data
+    events.append(entry)
+    del events[:-max(1, EVENT_LOG_LIMIT)]
+
+
+def _event_public_record(event: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(event, dict):
+        return {"ts": _now(), "kind": "event", "text": ""}
+    payload = {
+        "ts": int(event.get("ts", 0) or 0),
+        "kind": _safe_event_kind(str(event.get("kind") or "event")),
+        "text": str(event.get("text") or "")[:500],
+    }
+    players = event.get("players")
+    if isinstance(players, list):
+        payload["players"] = [str(player)[:80] for player in players if str(player).strip()][:8]
+    data = event.get("data")
+    if isinstance(data, dict):
+        payload["data"] = _clean_event_data(data)
+    return payload
+
+
+def _room_events(room: dict[str, Any], *, limit: int | None = None) -> list[dict[str, Any]]:
+    events = room.get("events", []) if isinstance(room, dict) else []
+    if not isinstance(events, list):
+        return []
+    public = [_event_public_record(event) for event in events if isinstance(event, dict)]
+    public.sort(key=lambda event: int(event.get("ts", 0) or 0))
+    if limit is not None and limit >= 0:
+        public = public[-limit:]
+    return public
+
+
+def _percent_amount(player: dict[str, Any], percent: int | float) -> int:
+    ttl = max(1, int(player.get("next", 0) or 0))
+    return max(1, int(ttl * max(0.0, float(percent)) / 100.0))
+
+
+def _battle_percent(opponent: dict[str, Any], outcome: str) -> float:
+    level = max(0, int(opponent.get("level", 0) or 0))
+    if outcome == "win":
+        return max(float(BATTLE_WIN_MIN_PERCENT), level / 4.0)
+    return max(float(BATTLE_LOSS_MIN_PERCENT), level / 7.0)
+
+
+def _battle_clock_delta(player: dict[str, Any], opponent: dict[str, Any], outcome: str) -> int:
+    return max(1, int(_percent_amount(player, _battle_percent(opponent, outcome)) * _alignment_battle_factor(player, outcome)))
+
+
+def _random_percent_amount(player: dict[str, Any], min_percent: int, max_percent: int) -> int:
+    low = min(int(min_percent), int(max_percent))
+    high = max(int(min_percent), int(max_percent))
+    return _percent_amount(player, random.randint(low, high))
+
+
+def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
+    if not UNIQUE_ITEMS_ENABLED:
+        return None
+    level = int(player.get("level", 0) or 0)
+    if level < UNIQUE_ITEM_MIN_LEVEL or random.random() >= UNIQUE_ITEM_CHANCE:
+        return None
+    eligible = [item for item in UNIQUE_ITEMS if level >= int(item.get("min_level", 0) or 0)]
+    if not eligible:
+        return None
+    item = random.choice(eligible)
+    return {
+        "name": str(item["name"]),
+        "slot": str(item["slot"]),
+        "level": random.randint(int(item["min_item_level"]), int(item["max_item_level"])),
+    }
+
+
+def _grant_level_item(player: dict[str, Any]) -> str:
+    unique = _roll_unique_item(player)
+    items = player.setdefault("items", {})
+    unique_items = player.setdefault("unique_items", {})
+    if unique:
+        slot = str(unique["slot"])
+        level = int(unique["level"])
+        items[slot] = max(int(items.get(slot, 0) or 0), level)
+        unique_items[slot] = str(unique["name"])
+        _award(player, "unique_item")
+        _check_level_achievements(player)
+        return f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}!"
+    item = random.choice(ITEMS)
+    gain = max(1, int(player.get("level", 0) or 0) + random.randint(0, 3))
+    if gain >= int(items.get(item, 0) or 0):
+        items[item] = gain
+        unique_items.pop(item, None)
+    _check_level_achievements(player)
+    return f"✨ {_display_player(player)} found {item} level {gain}."
 
 
 def _profile_url(room_jid: str, player: dict[str, Any]) -> str:
@@ -661,6 +862,7 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
             ],
         }
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
+    events = _room_events(room, limit=EXPORT_EVENT_LIMIT)
     hall_of_fame = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
     room_payload = {
         "generated_at": generated_at,
@@ -673,6 +875,7 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
         "leaderboard": leaderboard,
         "players": all_profiles,
         "quest": active_quest,
+        "events": events,
         "hall_of_fame": hall_of_fame[-SEASON_HOF_SIZE:],
     }
     _atomic_write_json(room_dir / "room.json", room_payload)
@@ -687,6 +890,7 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
         "quest": active_quest,
     })
     _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-SEASON_HOF_SIZE:]})
+    _atomic_write_json(room_dir / "events.json", {"generated_at": generated_at, "room": room_jid, "events": events})
     profiles_dir = room_dir / "profiles"
     for profile in all_profiles:
         _atomic_write_json(profiles_dir / f"{_slug(profile['name'])}.json", profile)
@@ -747,6 +951,11 @@ def _export_public_state(data: dict[str, Any]) -> None:
                 "room": default_room_payload["room"],
                 "seasons": default_room_payload["hall_of_fame"],
             })
+            _atomic_write_json(root / "events.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "events": default_room_payload.get("events", []),
+            })
     except Exception:
         log.debug("[IDLERPG] Failed to export public state", exc_info=True)
 
@@ -773,6 +982,7 @@ def _reset_player_for_new_season(player: dict[str, Any]) -> None:
     player["next"] = _ttl_for_level(0)
     player["idled"] = 0
     player["items"] = {item: 0 for item in ITEMS}
+    player["unique_items"] = {}
     player["penalties"] = {}
     player["achievements"] = []
     player["title"] = ""
@@ -793,6 +1003,13 @@ def _end_season(room_jid: str, room: dict[str, Any], *, reset_players: bool | No
             if isinstance(player, dict):
                 _reset_player_for_new_season(_normalize_player(str(jid), player))
     room["season"] = _blank_season(now)
+    _record_event(
+        room,
+        "season",
+        f"Season {snapshot.get('id')} ended. Champion: {snapshot.get('champion') or 'no champion'}.",
+        players=[str(snapshot.get("champion") or "")],
+        data={"season_id": snapshot.get("id"), "champion": snapshot.get("champion") or ""},
+    )
     return snapshot
 
 
@@ -1034,12 +1251,11 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
                 f"Next level in {_duration_clock(player['next'])}."
             )
             if random.random() < ITEM_CHANCE:
-                item = random.choice(ITEMS)
-                gain = max(1, player["level"] + random.randint(0, 3))
-                player["items"][item] = max(int(player["items"].get(item, 0)), gain)
-                messages.append(f"✨ {_display_player(player)} found {item} level {gain}.")
+                messages.append(_grant_level_item(player))
     await _maybe_run_random_event(room, room_jid, messages)
     await _maybe_run_quest(room, room_jid, messages)
+    for text in messages:
+        _record_event(room, "game", text)
     await _set_data(bot, data)
     if announce:
         for text in messages[:8]:
@@ -1061,6 +1277,11 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
         return
 
     event_roll -= BATTLE_EVENT_WEIGHT
+    if len(players) >= 6 and event_roll < TEAM_BATTLE_EVENT_WEIGHT:
+        _run_team_battle(players, messages)
+        return
+
+    event_roll -= TEAM_BATTLE_EVENT_WEIGHT
     if event_roll < ITEM_EVENT_WEIGHT:
         _run_item_blessing(players, messages)
         return
@@ -1085,10 +1306,9 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
     attacker_won = attacker_roll >= defender_roll
     attacker_name = _display_player(attacker)
     defender_name = _display_player(defender)
-    base = random.randint(45, 150)
 
     if attacker_won:
-        amount = _battle_amount(attacker, base, "win")
+        amount = _battle_clock_delta(attacker, defender, "win")
         changed = _remove_time(attacker, amount)
         messages.append(
             f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
@@ -1099,7 +1319,7 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
         winner, loser = attacker, defender
         _award(winner, "battle_winner")
     else:
-        amount = _battle_amount(attacker, base, "loss")
+        amount = _battle_clock_delta(attacker, defender, "loss")
         changed = _add_time(attacker, amount)
         messages.append(
             f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
@@ -1114,14 +1334,44 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
     _maybe_battle_item_drop(winner, loser, messages)
 
 
+def _run_team_battle(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+    if len(players) < 6:
+        return
+    selected = random.sample(players, 6)
+    team_a = selected[:3]
+    team_b = selected[3:]
+    names_a = [_display_player(player) for _jid, player in team_a]
+    names_b = [_display_player(player) for _jid, player in team_b]
+    power_a = sum(_battle_power(player) for _jid, player in team_a)
+    power_b = sum(_battle_power(player) for _jid, player in team_b)
+    roll_a = random.randint(0, max(1, power_a))
+    roll_b = random.randint(0, max(1, power_b))
+    team_a_won = roll_a >= roll_b
+    winners = team_a if team_a_won else team_b
+    losers = team_b if team_a_won else team_a
+    affected = min(max(1, int(player.get("next", 0) or 0)) for _jid, player in winners)
+    changed = max(1, int(affected * max(0, TEAM_BATTLE_PERCENT) / 100))
+    for _jid, player in winners:
+        _remove_time(player, changed)
+        _award(player, "team_battle_winner")
+    for _jid, player in losers:
+        _add_time(player, changed)
+    messages.append(
+        f"🛡️ {', '.join(names_a)} [{roll_a}/{power_a}] have team battled "
+        f"{', '.join(names_b)} [{roll_b}/{power_b}] and {'won' if team_a_won else 'lost'}! "
+        f"{_duration_clock(changed)} is {'removed from their clocks' if team_a_won else 'added to their clocks'}."
+    )
+    for _jid, player in winners + losers:
+        messages.append(_next_level_line(player))
+
+
 def _maybe_critical_strike(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
     if random.random() >= CRITICAL_STRIKE_CHANCE:
         return
     _award(winner, "critical_striker")
     winner_name = _display_player(winner)
     loser_name = _display_player(loser)
-    base = random.randint(10, 75)
-    amount = _battle_amount(winner, base, "win")
+    amount = _random_percent_amount(loser, CRITICAL_MIN_PERCENT, CRITICAL_MAX_PERCENT)
     changed = _add_time(loser, amount)
     loser.setdefault("penalties", {})["critical"] = (
         int(loser.get("penalties", {}).get("critical", 0) or 0) + changed
@@ -1152,6 +1402,18 @@ def _maybe_battle_item_drop(winner: dict[str, Any], loser: dict[str, Any], messa
     item, loser_level, winner_level = random.choice(candidates)
     winner_items[item] = loser_level
     loser_items[item] = winner_level
+    winner_unique = winner.setdefault("unique_items", {})
+    loser_unique = loser.setdefault("unique_items", {})
+    winner_unique_name = winner_unique.get(item)
+    loser_unique_name = loser_unique.get(item)
+    if loser_unique_name:
+        winner_unique[item] = loser_unique_name
+    else:
+        winner_unique.pop(item, None)
+    if winner_unique_name:
+        loser_unique[item] = winner_unique_name
+    else:
+        loser_unique.pop(item, None)
     winner_name = _display_player(winner)
     loser_name = _display_player(loser)
     messages.append(
@@ -1193,10 +1455,10 @@ def _run_alignment_bonus(players: list[tuple[str, dict[str, Any]]], messages: li
     alignment = _alignment_name(selected[0].get("alignment"))
     messages.append(
         f"⚖️ {names[0]} and {names[1]} feel the power of their {alignment} alignment. "
-        "7% of their time is removed from their clocks."
+        f"{ALIGNMENT_BONUS_PERCENT}% of their time is removed from their clocks."
     )
     for player in selected:
-        amount = max(1, int(int(player.get("next", 0) or 0) * 0.07))
+        amount = _percent_amount(player, ALIGNMENT_BONUS_PERCENT)
         _remove_time(player, amount)
         messages.append(_next_level_line(player))
     return True
@@ -1207,7 +1469,7 @@ def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages
     name = _display_player(player)
     level = int(player.get("level", 0) or 0)
     if random.random() < 0.5:
-        amount = _penalty_for(level, random.randint(20, 80))
+        amount = _random_percent_amount(player, CALAMITY_MIN_PERCENT, CALAMITY_MAX_PERCENT)
         changed = _add_time(player, amount)
         player.setdefault("penalties", {})["calamity"] = (
             int(player.get("penalties", {}).get("calamity", 0) or 0) + changed
@@ -1219,7 +1481,7 @@ def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages
         )
         messages.append(_next_level_line(player))
     else:
-        amount = _penalty_for(level, random.randint(20, 80))
+        amount = _random_percent_amount(player, GODSEND_MIN_PERCENT, GODSEND_MAX_PERCENT)
         changed = _remove_time(player, amount)
         _award(player, "lucky")
         messages.append(
@@ -1246,14 +1508,14 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
         for jid in questers:
             player = players.get(jid)
             if isinstance(player, dict):
-                player["next"] = int(int(player.get("next", 0)) * 0.75)
+                player["next"] = int(int(player.get("next", 0)) * max(0, 100 - QUEST_REWARD_PERCENT) / 100)
                 _award(player, "quest_hero")
                 names.append(_display_player(player))
                 completed_players.append(player)
         if names:
             messages.append(
                 f"🧭 {', '.join(names)} completed their quest! "
-                "25% of their burden is removed."
+                f"{QUEST_REWARD_PERCENT}% of their burden is removed."
             )
             for player in completed_players:
                 messages.append(_next_level_line(player))
@@ -1374,6 +1636,7 @@ async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: 
         "last_seen": now,
         "alignment": "n",
         "items": {item: 0 for item in ITEMS},
+        "unique_items": {},
         "penalties": {},
         "achievements": ["founder"],
         "title": "",
@@ -1383,6 +1646,7 @@ async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: 
     })
     players[sender_jid] = player
     _rebuild_name_index(room)
+    _record_event(room, "register", f"Welcome {name}, the {char_class}!", players=[name])
     await _set_data(bot, data)
     await _ensure_game_task(bot, room_jid)
     await audit_event(bot, "idlerpg_register", actor=sender_jid, target=room_jid, details={"name": name})
@@ -1407,6 +1671,7 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
         return
     player["logged_out"] = False
     player["last_login"] = _now()
+    _record_event(room, "login", f"{_display_player(player)} is now online.", players=[_display_player(player)])
     await _set_data(bot, data)
     await _ensure_game_task(bot, room_jid)
     _reply(bot, msg, f"✅ {_display_player(player)} is now online for IdleRPG.")
@@ -1427,6 +1692,7 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
     penalty = _penalty_for(int(player.get("level", 0)), LOGOUT_PENALTY)
     changed = _add_time(player, penalty)
     player.setdefault("penalties", {})["logout"] = int(player.get("penalties", {}).get("logout", 0)) + changed
+    _record_event(room, "logout", f"{_display_player(player)} logged out. {_duration_clock(changed)} was added to their clock.", players=[_display_player(player)])
     await _set_data(bot, data)
     _reply(
         bot,
@@ -1522,7 +1788,12 @@ async def _handle_items(bot, sender_jid: str, args: list[str], msg, is_room: boo
         _reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return
     player = _normalize_player(str(jid), player)
-    lines = [f"{name}: {level}" for name, level in sorted(player["items"].items())]
+    unique_items = player.get("unique_items", {}) if isinstance(player.get("unique_items"), dict) else {}
+    lines = []
+    for name, level in sorted(player["items"].items()):
+        unique = unique_items.get(name)
+        suffix = f" — {unique}" if unique else ""
+        lines.append(f"{name}: {level}{suffix}")
     _reply(bot, msg, f"🎒 Items for {player['name']}\n" + "\n".join(lines))
 
 
@@ -1541,6 +1812,7 @@ async def _handle_align(bot, sender_jid: str, args: list[str], msg, is_room: boo
         _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
     player["alignment"] = args[1].lower()[:1]
+    _record_event(room, "alignment", f"{player['name']} changed alignment to {args[1].lower()}.", players=[player['name']])
     await _set_data(bot, data)
     _reply(bot, msg, f"⚖️ {player['name']} is now {args[1].lower()}.")
 
@@ -1592,6 +1864,7 @@ async def _handle_profile(bot, sender_jid: str, args: list[str], msg, is_room: b
         f"Alignment: {_alignment_name(player.get('alignment'))}",
         f"Map: [{player.get('x', 0)},{player.get('y', 0)}]",
         f"Achievements: {len(achievements)}",
+        f"Unique items: {len(player.get('unique_items', {}) if isinstance(player.get('unique_items'), dict) else {})}",
     ]
     url = _profile_url(room_jid, player)
     if url:
@@ -1649,6 +1922,31 @@ async def _handle_title(bot, sender_jid: str, args: list[str], msg, is_room: boo
     player["title"] = requested
     await _set_data(bot, data)
     _reply(bot, msg, f"✅ {_display_player(player)} now uses title: {_achievement_title(requested)}.")
+
+
+async def _handle_events(bot, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Events are room-scoped. Use this from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    events = list(reversed(_room_events(room)))
+    lines = []
+    for event in events:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(int(event.get("ts", 0) or 0)))
+        lines.append(f"{when} [{event.get('kind', 'event')}] {event.get('text', '')}")
+    if not lines:
+        lines = ["No IdleRPG events yet."]
+    page_request = parse_page_args(args[1:])
+    out = format_page(
+        "📰 IdleRPG Recent Events",
+        lines,
+        page_request=page_request,
+        page_size=PAGE_SIZE,
+        command_hint=f"{_command_prefix(bot)}idlerpg events",
+    )
+    _reply(bot, msg, "\n".join(out))
 
 
 async def _handle_map(bot, msg, is_room: bool) -> None:
@@ -1825,6 +2123,7 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg achievements [character]\n"
         f"{prefix}idlerpg title <achievement|none>\n"
         f"{prefix}idlerpg map|hof|season\n"
+        f"{prefix}idlerpg events [page|last|all]\n"
         f"{prefix}idlerpg align <good|neutral|evil>\n"
         f"{prefix}idlerpg quest\n"
         f"{prefix}idlerpg login|logout|remove-me"
@@ -1836,7 +2135,7 @@ def _usage(bot) -> str:
     role=Role.USER,
     aliases=["irpg", "idle"],
     short="Play IdleRPG in a MUC",
-    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|profile|map|season|...>",
+    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|profile|events|map|season|...>",
     examples=[
         "{prefix}idlerpg register Sven sysadmin",
         "{prefix}idlerpg enabled",
@@ -1845,6 +2144,7 @@ def _usage(bot) -> str:
         "{prefix}idlerpg quest",
         "{prefix}idlerpg map",
         "{prefix}idlerpg profile Sven",
+        "{prefix}idlerpg events",
     ],
     category="fun",
     context="groupchat / MUC PM",
@@ -1898,6 +2198,8 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
         await _handle_profile(bot, sender, args, msg, is_room)
     elif subcmd in {"achievements", "achievement", "badges"}:
         await _handle_achievements(bot, sender, args, msg, is_room)
+    elif subcmd in {"events", "eventlog", "news"}:
+        await _handle_events(bot, args, msg, is_room)
     elif subcmd == "title":
         await _handle_title(bot, sender, args, msg, is_room)
     elif subcmd == "map":

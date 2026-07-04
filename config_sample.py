@@ -294,10 +294,35 @@ IDLERPG = {
     "event_chance": 0.01,
     "item_chance": 0.20,
     "battle_event_weight": 0.55,
+    "team_battle_event_weight": 0.08,
     "item_event_weight": 0.15,
     "alignment_event_weight": 0.10,
     "critical_strike_chance": 0.10,
     "item_drop_chance": 0.12,
+
+    # Balancing percentages. Battle win/loss percentages are minimum values;
+    # opponent level can increase them. Godsend/calamity/critical ranges are
+    # percentages of the affected player's remaining time-to-level.
+    "battle_win_min_percent": 7,
+    "battle_loss_min_percent": 7,
+    "critical_min_percent": 5,
+    "critical_max_percent": 25,
+    "godsend_min_percent": 5,
+    "godsend_max_percent": 12,
+    "calamity_min_percent": 5,
+    "calamity_max_percent": 12,
+    "alignment_bonus_percent": 7,
+    "quest_reward_percent": 25,
+    "team_battle_percent": 20,
+
+    # Unique envs.net-flavoured items can appear at higher levels.
+    "unique_items_enabled": True,
+    "unique_item_min_level": 25,
+    "unique_item_chance": 0.025,
+
+    # Event log retained in bot state and exported for the website.
+    "event_log_limit": 200,
+    "export_event_limit": 50,
 
     # Public JSON export for the website. Prefer exporting directly into a
     # web-readable directory instead of making the webserver read bot-internal
