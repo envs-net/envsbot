@@ -474,6 +474,82 @@ async def _fetch_feed_bytes(url: str) -> tuple[bytes, str, str]:
     raise UnsafeFetchURL("too many redirects")
 
 
+def _github_feed_hint(url: str) -> str:
+    """Return a short GitHub feed hint for common non-feed URLs."""
+    parsed = urlparse(url)
+    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+        return ""
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if "commits" not in path_parts:
+        return ""
+
+    if len(path_parts) >= 2:
+        owner = path_parts[0]
+        repo = path_parts[1]
+        if repo != "commits":
+            return (
+                " For GitHub commit feeds, try "
+                f"https://github.com/{owner}/{repo}/commits/<branch>.atom "
+                f"or https://github.com/{owner}/{repo}/commits.atom."
+            )
+
+    return (
+        " For GitHub commit feeds, use "
+        "https://github.com/<owner>/<repo>/commits/<branch>.atom. "
+        "The repository name must be part of the URL."
+    )
+
+
+def _format_feed_fetch_error(url: str, exc: Exception) -> str:
+    """Format feed fetch/parse errors without exposing tracebacks to users."""
+    hint = _github_feed_hint(url)
+
+    if isinstance(exc, aiohttp.ClientResponseError):
+        status = exc.status
+        message = exc.message or "HTTP error"
+        return f"HTTP {status} {message} while fetching feed.{hint}"
+
+    if isinstance(exc, (FetchURLTooLarge, UnsafeFetchURL, ValueError)):
+        return f"{exc}{hint}"
+
+    if isinstance(exc, asyncio.TimeoutError):
+        return f"Timed out while fetching feed.{hint}"
+
+    if isinstance(exc, aiohttp.ClientError):
+        return f"Network error while fetching feed: {exc}.{hint}"
+
+    return f"{exc}{hint}"
+
+
+def _is_expected_feed_fetch_error(exc: Exception) -> bool:
+    """Return True for normal user/input/network feed-add failures."""
+    return isinstance(
+        exc,
+        (
+            aiohttp.ClientResponseError,
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            FetchURLTooLarge,
+            UnsafeFetchURL,
+            ValueError,
+        ),
+    )
+
+
+def _log_feed_fetch_error(context: str, url: str, exc: Exception) -> None:
+    """Log expected feed errors without traceback and unexpected ones with it."""
+    if _is_expected_feed_fetch_error(exc):
+        log.warning(
+            "%s url=%s: %s",
+            context,
+            url,
+            _format_feed_fetch_error(url, exc),
+        )
+    else:
+        log.exception("%s url=%s", context, url)
+
+
 def _parsed_value(parsed, key, default=None):
     """Return a feedparser result value from mapping or attribute objects."""
     if isinstance(parsed, dict):
@@ -1329,8 +1405,11 @@ async def _add_feed(bot, msg, url, store, room):
                 f"✅ Added feed: {title} ({url}) every {period}s to {room}",
             )
         except Exception as e:
-            log.exception(f"Failed to fetch or parse feed {url}")
-            bot.reply(msg, f"Failed to fetch or parse feed: {e}")
+            _log_feed_fetch_error("Failed to add RSS feed", url, e)
+            bot.reply(
+                msg,
+                f"Failed to fetch or parse feed: {_format_feed_fetch_error(url, e)}",
+            )
             return
     else:
         if room not in feeds[url]["rooms"]:
@@ -1352,9 +1431,11 @@ async def _add_feed(bot, msg, url, store, room):
                 burst_num = config.get("max_new_feed_entries", 5)
                 await burst_recent_entries(bot, feed, room, burst_num)
             except Exception as e:
-                log.exception(
-                    "Failed to fetch or parse feed during burst"
-                    f" to new room: {url}: {e}")
+                _log_feed_fetch_error(
+                    "Failed to fetch or parse feed during burst to new room",
+                    url,
+                    e,
+                )
 
             bot.reply(
                 msg,

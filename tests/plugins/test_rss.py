@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import logging
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
@@ -559,6 +560,43 @@ async def test_rss_add_failures(monkeypatch, make_bot):
                           msg, True)
 
     assert any("Failed to fetch or parse feed" in r[1] for r in bot.replies)
+
+
+@pytest.mark.asyncio
+async def test_rss_add_expected_failures_log_without_traceback(
+        monkeypatch, make_bot, caplog):
+    bot = make_bot()
+
+    monkeypatch.setattr(rss, "feedparser", type("Feedparser", (), {})())
+
+    async def raise_exc(url):
+        raise rss.aiohttp.ClientResponseError(
+            request_info=None,
+            history=(),
+            status=404,
+            message="Not Found",
+        )
+
+    monkeypatch.setattr(rss, "fetch_feed", raise_exc)
+    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+
+    msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
+
+    with caplog.at_level(logging.WARNING, logger="plugins.rss"):
+        await rss.rss_command(
+            bot,
+            "jid",
+            "nick",
+            ["add", "https://github.com/envs-net/commits/main.atom"],
+            msg,
+            True,
+        )
+
+    reply = bot.replies[-1][1]
+    assert "HTTP 404 Not Found" in reply
+    assert "repository name must be part of the URL" in reply
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
 @pytest.mark.asyncio
