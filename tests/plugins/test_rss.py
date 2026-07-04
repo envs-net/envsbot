@@ -914,7 +914,7 @@ async def test_on_load_unload_calls(monkeypatch, make_bot):
     monkeypatch.setattr(rss, "restart_all_tasks", restart)
 
     await rss.on_load(bot)
-    assert restart.awaited
+    restart.assert_awaited_once()
 
     t = asyncio.create_task(asyncio.sleep(0.01))
     rss.CHECK_TASKS["foo"] = t
