@@ -34,7 +34,6 @@ Admin commands:
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import json
 import logging
 import random
@@ -1169,8 +1168,10 @@ async def _cancel_room_task(room_jid: str) -> None:
     task = ROOM_TASKS.pop(room_jid, None)
     if task and not task.done():
         task.cancel()
-        with suppress(asyncio.CancelledError):
+        try:
             await task
+        except asyncio.CancelledError:
+            log.debug("[IDLERPG] Room task for %s cancelled cleanly", room_jid)
 
 
 async def _enabled_rooms(bot) -> dict[str, bool]:
@@ -1916,7 +1917,7 @@ async def _handle_title(bot, sender_jid: str, args: list[str], msg, is_room: boo
         _reply(bot, msg, f"✅ {_display_player(player)} cleared their title.")
         return
     if requested not in achievements:
-        _reply(bot, msg, "❌ You have not unlocked that achievement title. Use `,idlerpg title list`.")
+        _reply(bot, msg, f"❌ You have not unlocked that achievement title. Use `{_command_prefix(bot)}idlerpg title list`.")
         return
     player["title"] = requested
     await _set_data(bot, data)

@@ -535,7 +535,7 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `penalty_step` | `1.14` | Exponential scaling for message and logout penalties. |
-| `message_penalty` | `1` | Base penalty in seconds for normal room messages. Formula: `message_penalty * (penalty_step ** current_level)`. |
+| `message_penalty` | `1` | Base penalty in seconds for normal room messages. Formula: `max(1, len(body) * message_penalty) * (penalty_step ** current_level)`. |
 | `logout_penalty` | `20` | Base penalty in seconds when a player logs out. |
 | `max_penalty` | `604800` | Maximum single penalty in seconds. The default is 7 days. Set to `0` to disable the cap. |
 | `count_command_messages` | `False` | Whether bot commands also count as message penalties. Usually keep this disabled. |

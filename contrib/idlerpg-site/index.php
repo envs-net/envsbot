@@ -297,6 +297,7 @@ foreach ($players as $player) {
     }
 }
 $view = idlerpg_current_view();
+$render_map = false;
 $quest = is_array($map_payload['quest'] ?? null) ? $map_payload['quest'] : null;
 $map_width = max(1, (int) ($map_payload['width'] ?? $map_payload['map_x'] ?? 500));
 $map_height = max(1, (int) ($map_payload['height'] ?? $map_payload['map_y'] ?? 500));
@@ -464,11 +465,11 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                         </tbody></table>
                     <?php endif; ?>
                 <?php else: ?><p class="muted">No active quest right now.</p><?php endif; ?>
-                <?php $view = 'map'; ?>
+                <?php $render_map = true; ?>
             <?php endif; ?>
 
-            <?php if ($view === 'map'): ?>
-                <h2>World Map</h2>
+            <?php if ($render_map || $view === 'map'): ?>
+                <h2><?php echo $view === 'map' ? 'World Map' : 'Quest Map'; ?></h2>
                 <p class="muted">Blue = online, red = offline, orange = quest point.</p>
                 <?php if (count($map_players) > 0): ?>
                     <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
