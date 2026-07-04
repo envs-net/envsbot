@@ -335,15 +335,46 @@ async def _reply_with_weather_for_location(bot, msg, display_name, location):
         )
         return
 
-    weather_loc = weather.split(":")[0].strip()
-    weather_desc = ":".join(weather.split(":")[1:]).strip()
     bot.reply(
         msg,
-        f"🌤️ Weather for {display_name}: {weather_loc.title()}:"
-        f" {weather_desc.strip()} ({location})\n"
+        f"{_format_weather_reply(display_name, location, weather)}\n"
         f"Forecast: {forecast_url}",
         ephemeral=False,
     )
+
+
+def _format_weather_reply(display_name, location, weather):
+    weather_loc, weather_desc = _parse_wttr_weather(weather)
+    header = f"🌤️ Weather for {display_name}"
+
+    if not _same_location_text(display_name, location):
+        location_label = location
+        if weather_loc and _same_location_text(weather_loc, location):
+            location_label = weather_loc.title()
+        header = f"{header} ({location_label})"
+
+    if weather_loc and not (
+        _same_location_text(weather_loc, display_name)
+        or _same_location_text(weather_loc, location)
+    ):
+        weather_desc = f"{weather_loc.title()}: {weather_desc}"
+
+    return f"{header}: {weather_desc.strip()}"
+
+
+def _parse_wttr_weather(weather):
+    weather_loc, separator, weather_desc = weather.partition(":")
+    if not separator:
+        return "", weather.strip()
+    return weather_loc.strip(), weather_desc.strip()
+
+
+def _same_location_text(left, right):
+    return _normalize_location_text(left) == _normalize_location_text(right)
+
+
+def _normalize_location_text(value):
+    return " ".join(str(value or "").strip().split()).casefold()
 
 
 def _build_wttr_urls(location):
