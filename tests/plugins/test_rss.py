@@ -15,6 +15,13 @@ def patch_config(monkeypatch):
     monkeypatch.setattr(rss, "config", {"prefix": ","})
 
 
+def _reply_text(reply):
+    text = reply[1]
+    if isinstance(text, (list, tuple)):
+        return "\n".join(str(part) for part in text)
+    return str(text)
+
+
 @pytest.mark.asyncio
 async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
@@ -115,48 +122,53 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["add", fake_feed_link],
                           msg, True)
-    assert any("already added" in x[1]
-               or "Added room" in x[1] for x in bot.replies)
+    assert any(
+        "already added" in _reply_text(reply)
+        or "Added room" in _reply_text(reply)
+        for reply in bot.replies
+    )
 
     # List
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["list"], msg, True)
-    assert any("Watched RSS feeds" in x[1][0] for x in bot.replies)
+    assert any("Watched RSS feeds" in _reply_text(reply) for reply in bot.replies)
 
     # Delete (should remove the only room, triggers feed delete in dummy)
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["delete", fake_feed_link],
                           msg, True)
     assert any(
-        "no rooms left" in x[1]
-        or "Removed this room" in x[1] for x in bot.replies)
+        "no rooms left" in _reply_text(reply)
+        or "Removed this room" in _reply_text(reply)
+        for reply in bot.replies
+    )
 
     # Delete again (feed not found)
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["delete", fake_feed_link],
                           msg, True)
-    assert any("Feed not found" in x[1] for x in bot.replies)
+    assert any("Feed not found" in _reply_text(reply) for reply in bot.replies)
 
     # Add missing arg
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["add"], msg, True)
-    assert any("Usage:" in x[1] for x in bot.replies)
+    assert any("Usage:" in _reply_text(reply) for reply in bot.replies)
 
     # Delete missing arg
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["delete"], msg, True)
-    assert any("Usage:" in x[1] for x in bot.replies)
+    assert any("Usage:" in _reply_text(reply) for reply in bot.replies)
 
     # List with no feeds (store reset)
     bot.plugin_store.clear()
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["list"], msg, True)
-    assert any("No feeds configured" in x[1] for x in bot.replies)
+    assert any("No feeds configured" in _reply_text(reply) for reply in bot.replies)
 
     # Unknown subcommand
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["foobar"], msg, True)
-    assert any("Unknown subcommand" in x[1] for x in bot.replies)
+    assert any("Unknown subcommand" in _reply_text(reply) for reply in bot.replies)
 
 @pytest.mark.asyncio
 async def test_rss_add_rejects_plain_private_chat(monkeypatch, make_bot):
@@ -630,8 +642,8 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
         }
     }
 
-    # Key step for your plugin: JOINED_ROOMS is a dict, not set
-    core_plugins.rooms.JOINED_ROOMS[room] = True
+    # Key step for your plugin: JOINED_ROOMS is a dict, not set.
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
 
     class Entry(dict):
         def __init__(self, **kwargs):
@@ -661,10 +673,10 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
         def __contains__(self, k):
             return k == "feed"
 
-    async def fetch_feed(_):
+    async def fake_fetch_feed(_):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
     monkeypatch.setattr(rss, "_now", lambda: 1000)
 
     sleep_calls = []
@@ -682,16 +694,12 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
 
     bot.reply = fake_reply
 
-    try:
-        with pytest.raises(asyncio.CancelledError):
-            await rss.rss_check_loop(bot, store, url, 1)
+    with pytest.raises(asyncio.CancelledError):
+        await rss.rss_check_loop(bot, store, url, 1)
 
-        assert posts == []
-        assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a1"
-        # assert bot.flush_count >= 1
-    finally:
-        # Clean up global to avoid leaking state between tests
-        core_plugins.rooms.JOINED_ROOMS.pop(room, None)
+    assert posts == []
+    assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a1"
+    # assert bot.flush_count >= 1
 
 
 @pytest.mark.asyncio
@@ -714,7 +722,7 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
         }
     }
 
-    core_plugins.rooms.JOINED_ROOMS[room] = True
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
 
     class Entry(dict):
         def __init__(self, **kwargs):
@@ -750,10 +758,10 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
         def __contains__(self, k):
             return k == "feed"
 
-    async def fetch_feed(_):
+    async def fake_fetch_feed(_):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
     monkeypatch.setattr(rss, "_now", lambda: 1000)
 
     sleep_calls = []
@@ -771,17 +779,14 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
 
     bot.reply = fake_reply
 
-    try:
-        with pytest.raises(asyncio.CancelledError):
-            await rss.rss_check_loop(bot, store, url, 1)
+    with pytest.raises(asyncio.CancelledError):
+        await rss.rss_check_loop(bot, store, url, 1)
 
-        assert len(posts) == 1
-        assert "ET2" in posts[0][1]
-        assert "http://f.com/a2" in posts[0][1]
-        assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a2"
-        # assert bot.flush_count >= 1
-    finally:
-        core_plugins.rooms.JOINED_ROOMS.pop(room, None)
+    assert len(posts) == 1
+    assert "ET2" in posts[0][1]
+    assert "http://f.com/a2" in posts[0][1]
+    assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a2"
+    # assert bot.flush_count >= 1
 
 
 @pytest.mark.asyncio
@@ -804,7 +809,7 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
         }
     }
 
-    core_plugins.rooms.JOINED_ROOMS[room] = True
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
     monkeypatch.setattr(rss, "RSS_MAX_ENTRIES_PER_POLL", 2)
 
     class Entry(dict):
@@ -855,10 +860,10 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
         def __contains__(self, k):
             return k == "feed"
 
-    async def fetch_feed(_):
+    async def fake_fetch_feed(_):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
     monkeypatch.setattr(rss, "_now", lambda: 1000)
 
     async def fake_sleep(_secs):
@@ -873,17 +878,14 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
 
     bot.reply = fake_reply
 
-    try:
-        with pytest.raises(asyncio.CancelledError):
-            await rss.rss_check_loop(bot, store, url, 1)
+    with pytest.raises(asyncio.CancelledError):
+        await rss.rss_check_loop(bot, store, url, 1)
 
-        assert len(posts) == 2
-        assert "ET3" in posts[0][1]
-        assert "ET4" in posts[1][1]
-        assert all("ET2" not in post[1] for post in posts)
-        assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a4"
-    finally:
-        core_plugins.rooms.JOINED_ROOMS.pop(room, None)
+    assert len(posts) == 2
+    assert "ET3" in posts[0][1]
+    assert "ET4" in posts[1][1]
+    assert all("ET2" not in post[1] for post in posts)
+    assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a4"
 
 
 @pytest.mark.asyncio
@@ -905,10 +907,10 @@ async def test_rss_check_loop_backoff_flushes_state(monkeypatch, make_bot):
         }
     }
 
-    async def fetch_feed(_):
+    async def fake_fetch_feed(_):
         raise Exception("fetch failed")
 
-    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
     monkeypatch.setattr(rss, "_now", lambda: 1000)
 
     sleep_calls = []
@@ -1391,13 +1393,13 @@ async def test_rss_check_loop_empty_feed_resets_retry_state(monkeypatch, make_bo
         def __contains__(self, key):
             return key == "feed"
 
-    async def fetch_feed(_):
+    async def fake_fetch_feed(_):
         return EmptyFeed()
 
     async def fake_sleep(secs):
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr(rss, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
     monkeypatch.setattr(rss, "_now", lambda: 1001)
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
