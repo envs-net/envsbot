@@ -276,6 +276,11 @@ IDLERPG = {
     "quest_max_duration": 86400,
     "event_chance": 0.01,
     "item_chance": 0.20,
+    "battle_event_weight": 0.55,
+    "item_event_weight": 0.15,
+    "alignment_event_weight": 0.10,
+    "critical_strike_chance": 0.10,
+    "item_drop_chance": 0.12,
     "count_command_messages": False,
 }
 

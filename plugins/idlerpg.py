@@ -92,6 +92,21 @@ EVENT_CHANCE = float(
 ITEM_CHANCE = float(
     _cfg.get("item_chance", config.get("idlerpg_item_chance", 0.20)) or 0.20
 )
+BATTLE_EVENT_WEIGHT = float(
+    _cfg.get("battle_event_weight", config.get("idlerpg_battle_event_weight", 0.55)) or 0.55
+)
+ITEM_EVENT_WEIGHT = float(
+    _cfg.get("item_event_weight", config.get("idlerpg_item_event_weight", 0.15)) or 0.15
+)
+ALIGNMENT_EVENT_WEIGHT = float(
+    _cfg.get("alignment_event_weight", config.get("idlerpg_alignment_event_weight", 0.10)) or 0.10
+)
+CRITICAL_STRIKE_CHANCE = float(
+    _cfg.get("critical_strike_chance", config.get("idlerpg_critical_strike_chance", 0.10)) or 0.10
+)
+ITEM_DROP_CHANCE = float(
+    _cfg.get("item_drop_chance", config.get("idlerpg_item_drop_chance", 0.12)) or 0.12
+)
 COUNT_COMMAND_MESSAGES = bool(
     _cfg.get("count_command_messages", config.get("idlerpg_count_command_messages", False))
 )
@@ -192,6 +207,36 @@ def _duration(seconds: int | float | None) -> str:
     if secs or not parts:
         parts.append(f"{secs}s")
     return " ".join(parts)
+
+
+def _duration_clock(seconds: int | float | None) -> str:
+    seconds = max(0, int(seconds or 0))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{days} days, {hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _possessive(name: str) -> str:
+    return f"{name}'" if str(name).endswith("s") else f"{name}'s"
+
+
+def _next_level_line(player: dict[str, Any]) -> str:
+    return f"{_display_player(player)} reaches next level in {_duration_clock(player.get('next', 0))}."
+
+
+def _add_time(player: dict[str, Any], amount: int | float) -> int:
+    amount = max(0, int(amount or 0))
+    player["next"] = max(0, int(player.get("next", 0) or 0)) + amount
+    return amount
+
+
+def _remove_time(player: dict[str, Any], amount: int | float) -> int:
+    amount = max(0, int(amount or 0))
+    current = max(0, int(player.get("next", 0) or 0))
+    removed = min(current, amount)
+    player["next"] = current - removed
+    return removed
 
 
 def _safe_name(value: str) -> str:
@@ -365,6 +410,50 @@ def _format_player_status(room_jid: str, jid: str, player: dict[str, Any]) -> st
     )
 
 
+def _item_sum(player: dict[str, Any]) -> int:
+    items = player.get("items", {})
+    if not isinstance(items, dict):
+        return 0
+    total = 0
+    for value in items.values():
+        try:
+            total += max(0, int(value or 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _battle_power(player: dict[str, Any]) -> int:
+    level = max(0, int(player.get("level", 0) or 0))
+    return max(1, level * 10 + _item_sum(player) + 1)
+
+
+def _alignment_battle_factor(player: dict[str, Any], outcome: str) -> float:
+    alignment = str(player.get("alignment") or "n")[:1].lower()
+    if alignment == "e" and outcome == "win":
+        return 1.10
+    if alignment == "g" and outcome == "loss":
+        return 0.90
+    if alignment == "n":
+        return 0.97
+    return 1.0
+
+
+def _battle_amount(player: dict[str, Any], base: int, outcome: str) -> int:
+    amount = _penalty_for(int(player.get("level", 0)), base)
+    return max(1, int(amount * _alignment_battle_factor(player, outcome)))
+
+
+def _choose_two_players(players: list[tuple[str, dict[str, Any]]]) -> tuple[tuple[str, dict[str, Any]], tuple[str, dict[str, Any]]] | None:
+    if len(players) < 2:
+        return None
+    first = random.choice(players)
+    remaining = [item for item in players if item[0] != first[0]]
+    if not remaining:
+        return None
+    return first, random.choice(remaining)
+
+
 def _room_from_context(msg, is_room: bool) -> str | None:
     if is_room and msg.get("type") == "groupchat":
         return str(msg["from"].bare)
@@ -487,7 +576,7 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
         if leveled:
             messages.append(
                 f"🏆 {_display_player(player)} has reached level {player['level']}! "
-                f"Next level in {_duration(player['next'])}."
+                f"Next level in {_duration_clock(player['next'])}."
             )
             if random.random() < ITEM_CHANCE:
                 item = random.choice(ITEMS)
@@ -498,36 +587,185 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
     await _maybe_run_quest(room, room_jid, messages)
     await _set_data(bot, data)
     if announce:
-        for text in messages[:5]:
+        for text in messages[:8]:
             _system_reply(bot, room_jid, text)
 
 
 async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages: list[str]) -> None:
     players = [
-        (jid, player)
+        (str(jid), _normalize_player(str(jid), player))
         for jid, player in room.get("players", {}).items()
         if isinstance(player, dict) and _is_player_online(room_jid, str(jid), player)
     ]
     if not players or random.random() >= EVENT_CHANCE:
         return
-    _jid, player = random.choice(players)
-    if random.random() < 0.5:
-        penalty = _penalty_for(int(player.get("level", 0)), random.randint(20, 80))
-        player["next"] = int(player.get("next", 0)) + penalty
-        player.setdefault("penalties", {})["calamity"] = (
-            int(player.get("penalties", {}).get("calamity", 0)) + penalty
-        )
+
+    event_roll = random.random()
+    if len(players) >= 2 and event_roll < BATTLE_EVENT_WEIGHT:
+        _run_pvp_battle(players, messages)
+        return
+
+    event_roll -= BATTLE_EVENT_WEIGHT
+    if event_roll < ITEM_EVENT_WEIGHT:
+        _run_item_blessing(players, messages)
+        return
+
+    event_roll -= ITEM_EVENT_WEIGHT
+    if len(players) >= 2 and event_roll < ALIGNMENT_EVENT_WEIGHT:
+        if _run_alignment_bonus(players, messages):
+            return
+
+    _run_godsend_or_calamity(players, messages)
+
+
+def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+    pair = _choose_two_players(players)
+    if pair is None:
+        return
+    (_attacker_jid, attacker), (_defender_jid, defender) = pair
+    attacker_power = _battle_power(attacker)
+    defender_power = _battle_power(defender)
+    attacker_roll = random.randint(0, attacker_power)
+    defender_roll = random.randint(0, defender_power)
+    attacker_won = attacker_roll >= defender_roll
+    attacker_name = _display_player(attacker)
+    defender_name = _display_player(defender)
+    base = random.randint(45, 150)
+
+    if attacker_won:
+        amount = _battle_amount(attacker, base, "win")
+        changed = _remove_time(attacker, amount)
         messages.append(
-            f"💥 Calamity! {_display_player(player)} {random.choice(CALAMITIES)}. "
-            f"Penalty: {_duration(penalty)}."
+            f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
+            f"{defender_name} [{defender_roll}/{defender_power}] in combat and won! "
+            f"{_duration_clock(changed)} is removed from {_possessive(attacker_name)} clock."
         )
+        messages.append(_next_level_line(attacker))
+        winner, loser = attacker, defender
     else:
-        gain = _penalty_for(int(player.get("level", 0)), random.randint(20, 80))
-        player["next"] = max(0, int(player.get("next", 0)) - gain)
+        amount = _battle_amount(attacker, base, "loss")
+        changed = _add_time(attacker, amount)
         messages.append(
-            f"🌟 Godsend! {_display_player(player)} {random.choice(GODSENDS)}. "
-            f"Reward: {_duration(gain)} removed."
+            f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
+            f"{defender_name} [{defender_roll}/{defender_power}] in combat and lost! "
+            f"{_duration_clock(changed)} is added to {_possessive(attacker_name)} clock."
         )
+        messages.append(_next_level_line(attacker))
+        winner, loser = defender, attacker
+
+    _maybe_critical_strike(winner, loser, messages)
+    _maybe_battle_item_drop(winner, loser, messages)
+
+
+def _maybe_critical_strike(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
+    if random.random() >= CRITICAL_STRIKE_CHANCE:
+        return
+    winner_name = _display_player(winner)
+    loser_name = _display_player(loser)
+    base = random.randint(10, 75)
+    amount = _battle_amount(winner, base, "win")
+    changed = _add_time(loser, amount)
+    loser.setdefault("penalties", {})["critical"] = (
+        int(loser.get("penalties", {}).get("critical", 0) or 0) + changed
+    )
+    messages.append(
+        f"💢 {winner_name} has dealt {loser_name} a Critical Strike! "
+        f"{_duration_clock(changed)} is added to {_possessive(loser_name)} clock."
+    )
+    messages.append(_next_level_line(loser))
+
+
+def _maybe_battle_item_drop(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
+    if random.random() >= ITEM_DROP_CHANCE:
+        return
+    winner_items = winner.setdefault("items", {})
+    loser_items = loser.setdefault("items", {})
+    candidates: list[tuple[str, int, int]] = []
+    for item in ITEMS:
+        try:
+            winner_level = int(winner_items.get(item, 0) or 0)
+            loser_level = int(loser_items.get(item, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if loser_level > winner_level:
+            candidates.append((item, loser_level, winner_level))
+    if not candidates:
+        return
+    item, loser_level, winner_level = random.choice(candidates)
+    winner_items[item] = loser_level
+    loser_items[item] = winner_level
+    winner_name = _display_player(winner)
+    loser_name = _display_player(loser)
+    messages.append(
+        f"🎒 In the fierce battle, {loser_name} dropped their level {loser_level} {item}! "
+        f"{winner_name} picks it up, tossing their old level {winner_level} {item} to {loser_name}."
+    )
+
+
+def _run_item_blessing(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+    _jid, player = random.choice(players)
+    item = random.choice(ITEMS)
+    items = player.setdefault("items", {})
+    try:
+        old_level = int(items.get(item, 0) or 0)
+    except (TypeError, ValueError):
+        old_level = 0
+    level = max(0, int(player.get("level", 0) or 0))
+    gain = max(1, old_level // 10, level // 10)
+    items[item] = old_level + gain
+    name = _display_player(player)
+    messages.append(
+        f"✨ {name}'s {item} has been blessed by a wandering enchanter! "
+        f"{_possessive(name)} {item} gains {gain} level{'s' if gain != 1 else ''}."
+    )
+
+
+def _run_alignment_bonus(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> bool:
+    groups: dict[str, list[dict[str, Any]]] = {"g": [], "n": [], "e": []}
+    for _jid, player in players:
+        alignment = str(player.get("alignment") or "n")[:1].lower()
+        groups.setdefault(alignment if alignment in groups else "n", []).append(player)
+    candidates = [group for group in groups.values() if len(group) >= 2]
+    if not candidates:
+        return False
+    chosen = random.choice(candidates)
+    selected = random.sample(chosen, 2)
+    names = [_display_player(player) for player in selected]
+    alignment = _alignment_name(selected[0].get("alignment"))
+    messages.append(
+        f"⚖️ {names[0]} and {names[1]} feel the power of their {alignment} alignment. "
+        "7% of their time is removed from their clocks."
+    )
+    for player in selected:
+        amount = max(1, int(int(player.get("next", 0) or 0) * 0.07))
+        _remove_time(player, amount)
+        messages.append(_next_level_line(player))
+    return True
+
+
+def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+    _jid, player = random.choice(players)
+    name = _display_player(player)
+    level = int(player.get("level", 0) or 0)
+    if random.random() < 0.5:
+        amount = _penalty_for(level, random.randint(20, 80))
+        changed = _add_time(player, amount)
+        player.setdefault("penalties", {})["calamity"] = (
+            int(player.get("penalties", {}).get("calamity", 0) or 0) + changed
+        )
+        messages.append(
+            f"💥 {name} {random.choice(CALAMITIES)}. This terrible calamity has slowed them "
+            f"{_duration_clock(changed)} from level {level + 1}."
+        )
+        messages.append(_next_level_line(player))
+    else:
+        amount = _penalty_for(level, random.randint(20, 80))
+        changed = _remove_time(player, amount)
+        messages.append(
+            f"🌟 {name} {random.choice(GODSENDS)}. This wondrous godsend has accelerated them "
+            f"{_duration_clock(changed)} towards level {level + 1}."
+        )
+        messages.append(_next_level_line(player))
 
 
 async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[str]) -> None:
@@ -542,17 +780,21 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
             return
         players = room.get("players", {})
         questers = [str(jid) for jid in quest.get("questers", [])]
+        completed_players: list[dict[str, Any]] = []
         names: list[str] = []
         for jid in questers:
             player = players.get(jid)
             if isinstance(player, dict):
                 player["next"] = int(int(player.get("next", 0)) * 0.75)
                 names.append(_display_player(player))
+                completed_players.append(player)
         if names:
             messages.append(
                 f"🧭 {', '.join(names)} completed their quest! "
                 "25% of their burden is removed."
             )
+            for player in completed_players:
+                messages.append(_next_level_line(player))
         room["quest"] = {"active": False, "next_at": now + QUEST_INTERVAL}
         return
 
@@ -583,7 +825,7 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
     names = [room["players"][jid].get("name", jid) for jid in questers]
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
-        f"Quest completes in {_duration(duration)}."
+        f"Quest completes in {_duration_clock(duration)}."
     )
 
 
@@ -603,17 +845,18 @@ async def _penalize_player(
         return 0
     player = _normalize_player(jid, player)
     penalty = _penalty_for(int(player.get("level", 0)), amount)
-    player["next"] = int(player.get("next", 0)) + penalty
+    changed = _add_time(player, penalty)
     penalties = player.setdefault("penalties", {})
-    penalties[reason] = int(penalties.get(reason, 0) or 0) + penalty
+    penalties[reason] = int(penalties.get(reason, 0) or 0) + changed
     await _set_data(bot, data)
-    if announce and penalty:
+    if announce and changed:
         _system_reply(
             bot,
             room_jid,
-            f"⏳ {_display_player(player)} is penalized {_duration(penalty)} for {reason}.",
+            f"⏳ {_display_player(player)} is penalized {_duration_clock(changed)} for {reason}. "
+            + _next_level_line(player),
         )
-    return penalty
+    return changed
 
 
 async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
@@ -707,10 +950,16 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
         return
     player["logged_out"] = True
     penalty = _penalty_for(int(player.get("level", 0)), LOGOUT_PENALTY)
-    player["next"] = int(player.get("next", 0)) + penalty
-    player.setdefault("penalties", {})["logout"] = int(player.get("penalties", {}).get("logout", 0)) + penalty
+    changed = _add_time(player, penalty)
+    player.setdefault("penalties", {})["logout"] = int(player.get("penalties", {}).get("logout", 0)) + changed
     await _set_data(bot, data)
-    _reply(bot, msg, f"👋 {_display_player(player)} logged out. Penalty: {_duration(penalty)}.")
+    _reply(
+        bot,
+        msg,
+        f"👋 {_display_player(player)} logged out. {_duration_clock(changed)} is added to "
+        f"{_possessive(_display_player(player))} clock. "
+        + _next_level_line(player),
+    )
 
 
 async def _handle_status(bot, args: list[str], msg, is_room: bool) -> None:
@@ -892,22 +1141,25 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         if amount is None:
             _reply(bot, msg, "❌ Invalid duration. Example: 10m, 1h30m, 2d")
             return True
-        player["next"] = max(0, int(player.get("next", 0)) - amount)
-        text = f"✅ Pushed {name} {_duration(amount)} toward next level."
+        changed = _remove_time(player, amount)
+        text = (
+            f"✅ Pushed {name} {_duration_clock(changed)} toward next level. "
+            + _next_level_line(player)
+        )
     elif subcmd == "setlevel":
         if len(args) < 3 or not str(args[2]).isdigit():
             _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg setlevel <character> <level>")
             return True
         player["level"] = max(0, int(args[2]))
         player["next"] = _ttl_for_level(player["level"])
-        text = f"✅ Set {name} to level {player['level']}."
+        text = f"✅ Set {name} to level {player['level']}. " + _next_level_line(player)
     elif subcmd == "reset":
         player["level"] = 0
         player["next"] = _ttl_for_level(0)
         player["idled"] = 0
         player["items"] = {item: 0 for item in ITEMS}
         player["penalties"] = {}
-        text = f"✅ Reset {name}."
+        text = f"✅ Reset {name}. " + _next_level_line(player)
     else:
         room.get("players", {}).pop(str(jid), None)
         _rebuild_name_index(room)

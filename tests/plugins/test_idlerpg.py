@@ -266,3 +266,73 @@ async def test_cleanup_room_state_removes_data_and_task():
 
     assert "room@conf" not in bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]
     assert "room@conf" not in idlerpg.ROOM_TASKS
+
+
+def test_duration_clock_and_next_level_line():
+    player = {"name": "Alice", "next": 93784}
+    assert idlerpg._duration_clock(93784) == "1 days, 02:03:04"
+    assert idlerpg._next_level_line(player) == "Alice reaches next level in 1 days, 02:03:04."
+
+
+def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "level": 10, "next": 10000, "items": {"weapon": 1}},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "class": "wizard", "level": 10, "next": 10000, "items": {"weapon": 20}},
+    )
+    players = [("alice@envs.net", alice), ("bob@envs.net", bob)]
+
+    def choice(seq):
+        return seq[0]
+
+    monkeypatch.setattr(idlerpg.random, "choice", choice)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    randint_values = iter([999, 0, 120, 30])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
+
+    messages = []
+    idlerpg._run_pvp_battle(players, messages)
+
+    assert alice["next"] < 10000
+    assert bob["next"] > 10000
+    assert alice["items"]["weapon"] == 20
+    assert bob["items"]["weapon"] == 1
+    assert any("has challenged Bob" in line and "won" in line for line in messages)
+    assert any("Critical Strike" in line for line in messages)
+    assert any("dropped their level 20 weapon" in line for line in messages)
+    assert any("Bob reaches next level in" in line for line in messages)
+
+
+def test_godsend_calamity_and_alignment_bonus_messages(monkeypatch):
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "level": 10, "next": 10000, "alignment": "g"},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "class": "wizard", "level": 11, "next": 9000, "alignment": "g"},
+    )
+    players = [("alice@envs.net", alice), ("bob@envs.net", bob)]
+
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: seq[:count])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: start)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+
+    calamity_messages = []
+    idlerpg._run_godsend_or_calamity(players, calamity_messages)
+    assert alice["next"] > 10000
+    assert any("terrible calamity" in line for line in calamity_messages)
+    assert any("Alice reaches next level in" in line for line in calamity_messages)
+
+    alice["next"] = 10000
+    bob["next"] = 9000
+    alignment_messages = []
+    assert idlerpg._run_alignment_bonus(players, alignment_messages) is True
+    assert alice["next"] == 9300
+    assert bob["next"] == 8370
+    assert "7% of their time is removed" in alignment_messages[0]
+    assert any("Bob reaches next level in" in line for line in alignment_messages)

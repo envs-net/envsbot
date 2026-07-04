@@ -115,14 +115,29 @@ penalty = base_penalty * (penalty_step ** current_level)
 
 `max_penalty` caps a single penalty event. Set it to `0` to disable the cap.
 
-## Random events and items
+## Random events, battles and items
 
 On level-up, the player may find an item.
 
-The game loop can also trigger rare random events:
+The game loop can also trigger rare classic IdleRPG-style events:
 
-- calamities add time to a player's timer
-- godsends remove time from a player's timer
+- PvP battles between online players
+- critical strikes that add time to the defeated player's clock
+- item drops and swaps after battles
+- item blessings that improve a random item
+- calamities that add time to a player's timer
+- godsends that remove time from a player's timer
+- alignment bonuses that remove time for aligned players
+
+Whenever an event changes a player's timer, the bot also prints the player's new
+time to next level. Example output:
+
+```text
+Alice [42/111] has challenged Bob [13/96] in combat and won! 0 days, 00:12:10 is removed from Alice's clock.
+Alice reaches next level in 0 days, 05:41:33.
+Alice has dealt Bob a Critical Strike! 0 days, 00:03:20 is added to Bob's clock.
+Bob reaches next level in 0 days, 09:12:44.
+```
 
 Relevant settings:
 
@@ -130,6 +145,11 @@ Relevant settings:
 IDLERPG = {
     "event_chance": 0.01,
     "item_chance": 0.20,
+    "battle_event_weight": 0.55,
+    "item_event_weight": 0.15,
+    "alignment_event_weight": 0.10,
+    "critical_strike_chance": 0.10,
+    "item_drop_chance": 0.12,
 }
 ```
 
