@@ -180,7 +180,7 @@ IDLERPG = {
 
 ## Admin commands
 
-Room moderators/admins can adjust characters:
+Room owners/admins can adjust characters:
 
 ```text
 ,idlerpg push <character> <duration>
@@ -258,7 +258,7 @@ data/idlerpg/<room-slug>/profiles/<character>.json
 The top-level files mirror the first exported room for simple websites. The
 room-specific directories are useful when IdleRPG is enabled in multiple rooms.
 
-Manual refresh:
+Manual refresh, limited to room owners/admins:
 
 ```text
 ,idlerpg export
@@ -289,6 +289,9 @@ every game tick. Active quests include route coordinates that are exported in
 ,idlerpg map
 ```
 
+The XMPP command renders a compact text map with player markers and a legend.
+The website uses the exported `map.json` for a visual map.
+
 Relevant settings:
 
 ```python
@@ -311,7 +314,7 @@ players, but can be enabled in config.
 ,idlerpg hof
 ```
 
-Room moderators/admins can manually end a season:
+Room owners/admins can manually end a season:
 
 ```text
 ,idlerpg season end

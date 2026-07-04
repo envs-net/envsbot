@@ -37,6 +37,8 @@ class DummyBot:
         )
 
     async def get_user_role(self, jid, room=None):
+        if str(jid).startswith("admin@"):
+            return Role.ADMIN
         if str(jid).startswith("mod@"):
             return Role.MODERATOR
         return Role.USER
@@ -90,7 +92,8 @@ def clear_idlerpg_state():
     JOINED_ROOMS["room@conf"] = {
         "nicks": {
             "Alice": {"jid": "alice@envs.net", "affiliation": "member"},
-            "Mod": {"jid": "mod@envs.net", "affiliation": "admin"},
+            "Mod": {"jid": "mod@envs.net", "affiliation": "member"},
+            "Admin": {"jid": "admin@envs.net", "affiliation": "admin"},
         }
     }
     yield
@@ -207,7 +210,7 @@ async def test_tick_levels_up_and_can_show_items(monkeypatch):
 @pytest.mark.asyncio
 async def test_admin_push_setlevel_reset_delete():
     bot = DummyBot()
-    msg = DummyMsg(resource="Mod")
+    msg = DummyMsg(resource="Admin")
     await idlerpg._handle_register(
         bot,
         "alice@envs.net",
@@ -216,18 +219,18 @@ async def test_admin_push_setlevel_reset_delete():
         True,
     )
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["setlevel", "Alice", "5"], msg, True)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["setlevel", "Alice", "5"], msg, True)
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
     assert room["players"]["alice@envs.net"]["level"] == 5
 
     before = room["players"]["alice@envs.net"]["next"]
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["push", "Alice", "1m"], msg, True)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["push", "Alice", "1m"], msg, True)
     assert room["players"]["alice@envs.net"]["next"] < before
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["reset", "Alice"], msg, True)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["reset", "Alice"], msg, True)
     assert room["players"]["alice@envs.net"]["level"] == 0
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["delete", "Alice"], msg, True)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["delete", "Alice"], msg, True)
     assert "alice@envs.net" not in room["players"]
 
 
@@ -367,7 +370,8 @@ async def test_profile_achievements_title_map_and_export(tmp_path, monkeypatch):
     assert "IdleRPG map for room@conf" in bot.replies[-1][0]
     assert "Map JSON: https://envs.net/idlerpg/room_at_conf/map.json" in bot.replies[-1][0]
 
-    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["export"], msg, True)
+    admin_msg = DummyMsg(resource="Admin")
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["export"], admin_msg, True)
     assert (tmp_path / "index.json").exists()
     assert (tmp_path / "leaderboard.json").exists()
     assert (tmp_path / "room_at_conf" / "profiles" / "Alice.json").exists()
@@ -376,7 +380,7 @@ async def test_profile_achievements_title_map_and_export(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     bot = DummyBot()
-    msg = DummyMsg(resource="Mod")
+    msg = DummyMsg(resource="Admin")
     await idlerpg._handle_register(
         bot,
         "alice@envs.net",
@@ -388,12 +392,12 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     room["players"]["alice@envs.net"]["level"] = 12
     room["players"]["alice@envs.net"]["next"] = 5
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "end"], msg, True)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "end"], msg, True)
     assert "Champion: Alice" in bot.replies[-1][0]
     assert room["hall_of_fame"][-1]["champion"] == "Alice"
     assert room["players"]["alice@envs.net"]["level"] == 12
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "reset"], msg, True)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "reset"], msg, True)
     assert "Players were reset" in bot.replies[-1][0]
     assert room["players"]["alice@envs.net"]["level"] == 0
 
@@ -401,6 +405,40 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     assert "Hall of Fame" in bot.replies[-1][0]
     assert "Alice" in bot.replies[-1][0]
 
+
+
+@pytest.mark.asyncio
+async def test_mutating_admin_commands_require_room_admin():
+    bot = DummyBot()
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    mod_msg = DummyMsg(resource="Mod")
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["export"], mod_msg, True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "end"], mod_msg, True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["delete", "Alice"], mod_msg, True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+
+
+def test_ascii_map_rendering_contains_grid_and_legend():
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "level": 3, "x": 10, "y": 20},
+    )
+    lines = idlerpg._render_ascii_map("room@conf", [("alice@envs.net", player)], {"active": False})
+
+    assert any(line.startswith("+") and line.endswith("+") for line in lines)
+    assert any("1 Alice" in line for line in lines)
+    assert any("lv.3" in line for line in lines)
 
 def test_season_rollover_and_player_movement(monkeypatch):
     room = idlerpg._blank_room()

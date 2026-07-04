@@ -861,10 +861,75 @@ async def _sender_can_manage_room(bot, sender_jid: str | None, room_jid: str | N
             role = await get_role(str(sender_jid), room_jid)
         else:
             role = await get_role(str(sender_jid))
-        return role <= Role.MODERATOR
+        # IdleRPG admin actions mutate game state and public exports. Keep those
+        # operations limited to room owners/admins, not normal moderators.
+        return role <= Role.ADMIN
     except Exception:
         log.debug("[IDLERPG] Could not resolve sender role", exc_info=True)
         return False
+
+
+def _map_marker(index: int) -> str:
+    alphabet = "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if index < len(alphabet):
+        return alphabet[index]
+    return "+"
+
+
+def _render_ascii_map(
+    room_jid: str,
+    players: list[tuple[str, dict[str, Any]]],
+    quest: dict[str, Any] | None,
+    *,
+    width: int = 24,
+    height: int = 10,
+) -> list[str]:
+    width = max(8, min(40, int(width or 24)))
+    height = max(4, min(16, int(height or 10)))
+    map_width = max(1, int(MAP_X) or 1)
+    map_height = max(1, int(MAP_Y) or 1)
+    grid = [["." for _ in range(width)] for _ in range(height)]
+    legend: list[str] = []
+
+    if isinstance(quest, dict) and quest.get("active") and isinstance(quest.get("route"), list):
+        for point in quest.get("route", [])[:2]:
+            if not isinstance(point, list | tuple) or len(point) < 2:
+                continue
+            try:
+                x = float(point[0])
+                y = float(point[1])
+            except (TypeError, ValueError):
+                continue
+            col = max(0, min(width - 1, int((x / map_width) * (width - 1))))
+            row = max(0, min(height - 1, int((y / map_height) * (height - 1))))
+            grid[row][col] = "Q"
+
+    for index, (jid, player) in enumerate(players[:35]):
+        marker = _map_marker(index)
+        x = max(0, min(map_width, int(player.get("x", 0) or 0)))
+        y = max(0, min(map_height, int(player.get("y", 0) or 0)))
+        col = max(0, min(width - 1, int((x / map_width) * (width - 1))))
+        row = max(0, min(height - 1, int((y / map_height) * (height - 1))))
+        grid[row][col] = marker if grid[row][col] == "." else "*"
+        status = "online" if _is_player_online(room_jid, jid, player) else "offline"
+        legend.append(
+            f"{marker} {_display_player(player)} [{x},{y}] lv.{player.get('level', 0)} {status}"
+        )
+
+    lines = [f"🗺️ IdleRPG map for {room_jid}: {MAP_X}x{MAP_Y}"]
+    lines.append("+" + "-" * width + "+")
+    lines.extend("|" + "".join(row) + "|" for row in grid)
+    lines.append("+" + "-" * width + "+")
+    if legend:
+        lines.append("Legend:")
+        lines.extend(legend[:12])
+        if len(legend) > 12:
+            lines.append(f"… and {len(legend) - 12} more players")
+    else:
+        lines.append("No players on the map yet.")
+    if isinstance(quest, dict) and quest.get("active") and quest.get("route"):
+        lines.append("Q = active quest route point")
+    return lines
 
 
 async def _ensure_game_task(bot, room_jid: str) -> asyncio.Task | None:
@@ -1594,15 +1659,8 @@ async def _handle_map(bot, msg, is_room: bool) -> None:
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
     players = _ranked_players(room)
-    lines = [
-        f"🗺️ IdleRPG map for {room_jid}: {MAP_X}x{MAP_Y}",
-    ]
-    for _jid, player in players[:10]:
-        lines.append(f"• {_display_player(player)} [{player.get('x', 0)},{player.get('y', 0)}] lv.{player.get('level', 0)}")
-    quest = room.get("quest", {})
-    if isinstance(quest, dict) and quest.get("active") and quest.get("route"):
-        route = quest.get("route", [])
-        lines.append(f"Quest route: {route}")
+    quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
+    lines = _render_ascii_map(room_jid, players, quest)
     url = _public_url(_room_slug(room_jid), "map.json")
     if url:
         lines.append(f"Map JSON: {url}")
@@ -1636,7 +1694,7 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
     subcmd = args[1].lower() if len(args) > 1 else "status"
     if subcmd in {"end", "finish", "reset"}:
         if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-            _reply(bot, msg, "⛔ Only room moderators/admins can end IdleRPG seasons.")
+            _reply(bot, msg, "⛔ Only room owners/admins can end IdleRPG seasons.")
             return
         reset_players = subcmd == "reset"
         snapshot = _end_season(room_jid, room, reset_players=reset_players)
@@ -1662,15 +1720,18 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
     )
 
 
-async def _handle_export(bot, msg, is_room: bool) -> None:
+async def _handle_export(bot, sender_jid: str, msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Export is room-scoped. Use it from a game room or MUC PM.")
+        return
+    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
+        _reply(bot, msg, "⛔ Only room owners/admins can refresh IdleRPG exports.")
+        return
     data = await _get_data(bot)
     _export_public_state(data)
     root = _export_root()
-    if room_jid:
-        _reply(bot, msg, f"📤 IdleRPG export refreshed for {room_jid}: {root / _room_slug(room_jid)}")
-    else:
-        _reply(bot, msg, f"📤 IdleRPG export refreshed: {root}")
+    _reply(bot, msg, f"📤 IdleRPG export refreshed for {room_jid}: {root / _room_slug(room_jid)}")
 
 
 async def _handle_remove_me(bot, sender_jid: str, msg, is_room: bool) -> None:
@@ -1701,7 +1762,7 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         _reply(bot, msg, "ℹ️ Admin actions are room-scoped. Use them from a game room or MUC PM.")
         return True
     if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room moderators/admins can use this IdleRPG admin command.")
+        _reply(bot, msg, "⛔ Only room owners/admins can use this IdleRPG admin command.")
         return True
     if len(args) < 2:
         _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg {subcmd} <character> [...]")
@@ -1846,7 +1907,7 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
     elif subcmd == "season":
         await _handle_season(bot, sender, args, msg, is_room)
     elif subcmd == "export":
-        await _handle_export(bot, msg, is_room)
+        await _handle_export(bot, sender, msg, is_room)
     elif subcmd == "align":
         await _handle_align(bot, sender, args, msg, is_room)
     elif subcmd == "quest":
