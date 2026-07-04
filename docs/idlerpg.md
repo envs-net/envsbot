@@ -354,6 +354,22 @@ IDLERPG = {
 | `export_public_base_url` | `""` | Optional public URL for the export base. When set, commands such as `,idlerpg profile` and `,idlerpg map` can include public JSON links. |
 | `export_top_limit` | `50` | Maximum number of players in exported leaderboard files. `players.json` still contains all exported players. |
 
+### Generic website example
+
+A standalone PHP example website is available in:
+
+```text
+contrib/idlerpg-site/index.php
+```
+
+It is intentionally generic and not tied to the envs.net website layout. Copy the
+example into a PHP-capable webroot and either place exported JSON files below
+`data/<room-slug>/` next to the page, or set `IDLERPG_DATA_DIR` to the export
+base or room-specific directory.
+
+Open the example with `?debug=1` to see which export paths are readable by PHP.
+See `contrib/idlerpg-site/README.md` for deployment notes.
+
 ### Website data path
 
 For the envs.net website the webroot is `/var/www/envs.net`.

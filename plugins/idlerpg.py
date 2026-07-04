@@ -34,6 +34,7 @@ Admin commands:
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import random
@@ -1168,10 +1169,8 @@ async def _cancel_room_task(room_jid: str) -> None:
     task = ROOM_TASKS.pop(room_jid, None)
     if task and not task.done():
         task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 async def _enabled_rooms(bot) -> dict[str, bool]:
