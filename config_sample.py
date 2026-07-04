@@ -281,6 +281,15 @@ IDLERPG = {
     "alignment_event_weight": 0.10,
     "critical_strike_chance": 0.10,
     "item_drop_chance": 0.12,
+    "export_enabled": True,
+    "export_path": "data/idlerpg",
+    "export_public_base_url": "",
+    "export_top_limit": 50,
+    "season_enabled": False,
+    "season_duration_days": 90,
+    "season_reset_on_rollover": False,
+    "season_hof_size": 10,
+    "map_step_per_tick": 5,
     "count_command_messages": False,
 }
 

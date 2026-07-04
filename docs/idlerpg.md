@@ -43,6 +43,12 @@ Use these in the game room or from a MUC private message to the bot:
 ,idlerpg top [page|last|all]
 ,idlerpg players [page|last|all]
 ,idlerpg items [character]
+,idlerpg profile [character]
+,idlerpg achievements [character]
+,idlerpg title <achievement|none>
+,idlerpg map
+,idlerpg hof
+,idlerpg season
 ,idlerpg align <good|neutral|evil>
 ,idlerpg quest
 ,idlerpg login
@@ -67,6 +73,8 @@ Examples:
 ,idlerpg status
 ,idlerpg top
 ,idlerpg items Sven
+,idlerpg profile Sven
+,idlerpg map
 ,idlerpg align good
 ```
 
@@ -208,3 +216,125 @@ The supervised game-loop tasks are also visible through:
 ,tasks
 ,tasks all
 ```
+
+## Profiles, achievements and titles
+
+IdleRPG now tracks profile metadata and achievements per character.
+
+```text
+,idlerpg profile [character]
+,idlerpg achievements [character]
+,idlerpg title list
+,idlerpg title <achievement-key>
+,idlerpg title none
+```
+
+Achievements are unlocked by normal play, for example by registering, reaching
+level milestones, winning battles, landing critical strikes, completing quests,
+receiving godsends or suffering calamities.
+
+A player can select one unlocked achievement as their public title. The title is
+shown in profile/status output and in exported public JSON data.
+
+## Live export for the website
+
+The plugin can export public game state as JSON for a website or status page.
+By default the files are written below `data/idlerpg`:
+
+```text
+data/idlerpg/index.json
+data/idlerpg/leaderboard.json
+data/idlerpg/players.json
+data/idlerpg/map.json
+data/idlerpg/hall_of_fame.json
+data/idlerpg/<room-slug>/room.json
+data/idlerpg/<room-slug>/leaderboard.json
+data/idlerpg/<room-slug>/players.json
+data/idlerpg/<room-slug>/map.json
+data/idlerpg/<room-slug>/hall_of_fame.json
+data/idlerpg/<room-slug>/profiles/<character>.json
+```
+
+The top-level files mirror the first exported room for simple websites. The
+room-specific directories are useful when IdleRPG is enabled in multiple rooms.
+
+Manual refresh:
+
+```text
+,idlerpg export
+```
+
+Relevant settings:
+
+```python
+IDLERPG = {
+    "export_enabled": True,
+    "export_path": "data/idlerpg",
+    "export_public_base_url": "",
+    "export_top_limit": 50,
+}
+```
+
+`export_public_base_url` can be set to the public URL that serves the export
+folder. When configured, commands such as `,idlerpg profile` and `,idlerpg map`
+include links to the exported JSON files.
+
+## Map
+
+Each character has a coordinate on the room map. Online players move a little on
+every game tick. Active quests include route coordinates that are exported in
+`map.json` and can be rendered by the website.
+
+```text
+,idlerpg map
+```
+
+Relevant settings:
+
+```python
+IDLERPG = {
+    "map_x": 500,
+    "map_y": 500,
+    "map_step_per_tick": 5,
+}
+```
+
+## Seasons and Hall of Fame
+
+IdleRPG can archive season winners into a room-scoped Hall of Fame.
+Automatic season rollover is disabled by default to avoid surprising existing
+players, but can be enabled in config.
+
+```text
+,idlerpg season
+,idlerpg season hof
+,idlerpg hof
+```
+
+Room moderators/admins can manually end a season:
+
+```text
+,idlerpg season end
+,idlerpg season reset
+```
+
+`season end` archives the current ranking and starts a new season without
+resetting player progress. `season reset` archives the ranking and resets player
+levels/items/timers for a fresh season.
+
+Relevant settings:
+
+```python
+IDLERPG = {
+    "season_enabled": False,
+    "season_duration_days": 90,
+    "season_reset_on_rollover": False,
+    "season_hof_size": 10,
+}
+```
+
+## Room concept
+
+There is no globally forced game room. IdleRPG is room-scoped and only active in
+rooms where the plugin is enabled. Since the default is disabled, operators can
+choose a dedicated game room or enable the game in selected community rooms.

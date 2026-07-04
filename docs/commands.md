@@ -941,7 +941,7 @@ Context: `room / MUC PM / private chat with <room_jid>`<br>
 Category: `rooms`<br>
 Usage: `,rooms plugins [<room_jid>] [all|page|last]`
 
-Aliases: `,room feature list`, `,room features`, `,room plugins`, `,rooms feature list`, `,rooms features`
+Aliases: `,room feature list`, `,room features`, `,room features list`, `,room plugins`, `,room plugins list`, `,rooms feature list`, `,rooms features`, `,rooms features list`, `,rooms plugins list`
 
 Examples:
 
@@ -1305,7 +1305,7 @@ Play IdleRPG in a MUC
 Role: `user`<br>
 Context: `groupchat / MUC PM`<br>
 Category: `fun`<br>
-Usage: `,idlerpg <on|off|enabled|register|status|top|players|quest|...>`
+Usage: `,idlerpg <on|off|enabled|register|status|top|players|profile|map|season|...>`
 
 Aliases: `,idle`, `,irpg`
 
@@ -1316,6 +1316,8 @@ Examples:
 - `,idlerpg status`
 - `,idlerpg top`
 - `,idlerpg quest`
+- `,idlerpg map`
+- `,idlerpg profile Sven`
 
 ### info
 

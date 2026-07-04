@@ -13,6 +13,12 @@ Commands:
     {prefix}idlerpg top [page|last|all]
     {prefix}idlerpg players [page|last|all]
     {prefix}idlerpg items [character]
+    {prefix}idlerpg profile [character]
+    {prefix}idlerpg achievements [character]
+    {prefix}idlerpg title <achievement|none>
+    {prefix}idlerpg map
+    {prefix}idlerpg hof
+    {prefix}idlerpg season [status|end|reset|hof]
     {prefix}idlerpg align <good|neutral|evil>
     {prefix}idlerpg quest
     {prefix}idlerpg remove-me
@@ -27,16 +33,19 @@ Admin commands:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import random
 import re
 import time
+from pathlib import Path
 from functools import partial
 from typing import Any
 
 from utils.audit import audit_event
 from utils.command import Role, command
-from utils.config import config
+from utils.config import BASE_DIR, config
 from utils.formatting import format_page, parse_page_args
 from utils.task_supervisor import create_plugin_task
 from core_plugins import _core
@@ -107,11 +116,34 @@ CRITICAL_STRIKE_CHANCE = float(
 ITEM_DROP_CHANCE = float(
     _cfg.get("item_drop_chance", config.get("idlerpg_item_drop_chance", 0.12)) or 0.12
 )
+EXPORT_ENABLED = bool(_cfg.get("export_enabled", config.get("idlerpg_export_enabled", True)))
+EXPORT_PATH = str(_cfg.get("export_path", config.get("idlerpg_export_path", "data/idlerpg")) or "data/idlerpg")
+EXPORT_PUBLIC_BASE_URL = str(_cfg.get("export_public_base_url", config.get("idlerpg_export_public_base_url", "")) or "").rstrip("/")
+EXPORT_TOP_LIMIT = int(_cfg.get("export_top_limit", config.get("idlerpg_export_top_limit", 50)) or 50)
+SEASON_ENABLED = bool(_cfg.get("season_enabled", config.get("idlerpg_season_enabled", False)))
+SEASON_DURATION_DAYS = int(_cfg.get("season_duration_days", config.get("idlerpg_season_duration_days", 90)) or 0)
+SEASON_RESET_ON_ROLLOVER = bool(_cfg.get("season_reset_on_rollover", config.get("idlerpg_season_reset_on_rollover", False)))
+SEASON_HOF_SIZE = int(_cfg.get("season_hof_size", config.get("idlerpg_season_hof_size", 10)) or 10)
+MAP_STEP_PER_TICK = int(_cfg.get("map_step_per_tick", config.get("idlerpg_map_step_per_tick", 5)) or 0)
 COUNT_COMMAND_MESSAGES = bool(
     _cfg.get("count_command_messages", config.get("idlerpg_count_command_messages", False))
 )
 
 ROOM_TASKS: dict[str, asyncio.Task] = {}
+
+ACHIEVEMENTS = {
+    "founder": ("Founder", "registered an IdleRPG character"),
+    "level_10": ("Novice Idler", "reached level 10"),
+    "level_25": ("Seasoned Idler", "reached level 25"),
+    "level_50": ("Ancient Idler", "reached level 50"),
+    "battle_winner": ("Duelist", "won a random battle"),
+    "critical_striker": ("Critical Striker", "landed a critical strike"),
+    "quester": ("Quest Chosen", "was chosen for a quest"),
+    "quest_hero": ("Quest Hero", "completed a quest"),
+    "lucky": ("Blessed", "received a godsend"),
+    "unlucky": ("Cursed", "suffered a calamity"),
+    "collector": ("Collector", "collected at least 100 total item levels"),
+}
 
 ITEMS = (
     "ring",
@@ -268,12 +300,105 @@ def _alignment_name(value: str | None) -> str:
     return _ALIGNMENT_NAMES.get(str(value or "n")[:1].lower(), "neutral")
 
 
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip()).strip("-._")
+    return slug[:80] or "idlerpg"
+
+
+def _room_slug(room_jid: str) -> str:
+    return _slug(room_jid.replace("@", "_at_"))
+
+
+def _export_root() -> Path:
+    path = Path(EXPORT_PATH)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path
+
+
+def _season_id(ts: int | None = None) -> str:
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(int(ts or _now())))
+
+
+def _season_duration_seconds() -> int:
+    return max(0, int(SEASON_DURATION_DAYS) * 86400)
+
+
+def _award(player: dict[str, Any], achievement: str) -> bool:
+    if achievement not in ACHIEVEMENTS:
+        return False
+    current = player.setdefault("achievements", [])
+    if not isinstance(current, list):
+        current = []
+        player["achievements"] = current
+    if achievement in current:
+        return False
+    current.append(achievement)
+    current.sort()
+    return True
+
+
+def _achievement_title(achievement: str) -> str:
+    return ACHIEVEMENTS.get(achievement, (achievement, ""))[0]
+
+
+def _achievement_description(achievement: str) -> str:
+    return ACHIEVEMENTS.get(achievement, (achievement, ""))[1]
+
+
+def _display_title(player: dict[str, Any]) -> str:
+    title = str(player.get("title") or "").strip()
+    achievements = player.get("achievements")
+    if title and isinstance(achievements, list) and title in achievements:
+        return _achievement_title(title)
+    return ""
+
+
+def _display_character(player: dict[str, Any]) -> str:
+    title = _display_title(player)
+    name = _display_player(player)
+    return f"{name}, {title}" if title else name
+
+
+def _check_level_achievements(player: dict[str, Any]) -> None:
+    level = int(player.get("level", 0) or 0)
+    if level >= 10:
+        _award(player, "level_10")
+    if level >= 25:
+        _award(player, "level_25")
+    if level >= 50:
+        _award(player, "level_50")
+    if _item_sum(player) >= 100:
+        _award(player, "collector")
+
+
+def _move_player(player: dict[str, Any], steps: int = 1) -> None:
+    if MAP_STEP_PER_TICK <= 0:
+        return
+    steps = max(1, min(24, int(steps or 1)))
+    for _ in range(steps):
+        player["x"] = (int(player.get("x", 0) or 0) + random.randint(-MAP_STEP_PER_TICK, MAP_STEP_PER_TICK)) % max(1, MAP_X + 1)
+        player["y"] = (int(player.get("y", 0) or 0) + random.randint(-MAP_STEP_PER_TICK, MAP_STEP_PER_TICK)) % max(1, MAP_Y + 1)
+
+
+def _blank_season(now: int | None = None) -> dict[str, Any]:
+    now = int(now or _now())
+    duration = _season_duration_seconds()
+    return {
+        "id": _season_id(now),
+        "started_at": now,
+        "ends_at": now + duration if duration else 0,
+    }
+
+
 def _blank_room() -> dict[str, Any]:
     now = _now()
     return {
         "players": {},
         "name_index": {},
         "quest": {"active": False, "next_at": now + QUEST_INTERVAL},
+        "season": _blank_season(now),
+        "hall_of_fame": [],
         "last_tick": now,
         "created_at": now,
     }
@@ -288,6 +413,7 @@ async def _get_data(bot) -> dict[str, Any]:
 async def _set_data(bot, data: dict[str, Any]) -> None:
     store = await get_idlerpg_store(bot)
     await store.set_global(IDLERPG_DATA_KEY, data)
+    _export_public_state(data)
 
 
 def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
@@ -302,6 +428,8 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     room.setdefault("players", {})
     room.setdefault("name_index", {})
     room.setdefault("quest", {"active": False, "next_at": _now() + QUEST_INTERVAL})
+    room.setdefault("season", _blank_season(_now()))
+    room.setdefault("hall_of_fame", [])
     room.setdefault("last_tick", _now())
     return room
 
@@ -331,6 +459,14 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         ttl = _ttl_for_level(level)
 
+    achievements = player.get("achievements")
+    if not isinstance(achievements, list):
+        achievements = []
+    achievements = sorted({str(value) for value in achievements if str(value) in ACHIEVEMENTS})
+    title = str(player.get("title") or "")
+    if title not in achievements:
+        title = ""
+
     player.update({
         "jid": str(player.get("jid") or jid),
         "name": _safe_name(str(player.get("name") or jid.split("@", 1)[0])) or "player",
@@ -344,10 +480,13 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         "alignment": str(player.get("alignment") or "n")[:1].lower(),
         "items": items,
         "penalties": penalties,
+        "achievements": achievements,
+        "title": title,
         "x": int(player.get("x", random.randint(0, MAP_X)) or 0),
         "y": int(player.get("y", random.randint(0, MAP_Y)) or 0),
         "logged_out": bool(player.get("logged_out", False)),
     })
+    _check_level_achievements(player)
     if player["alignment"] not in {"g", "n", "e"}:
         player["alignment"] = "n"
     player["x"] %= max(1, MAP_X + 1)
@@ -401,11 +540,15 @@ def _is_player_online(room_jid: str, jid: str, player: dict[str, Any]) -> bool:
 
 def _format_player_status(room_jid: str, jid: str, player: dict[str, Any]) -> str:
     online = "online" if _is_player_online(room_jid, jid, player) else "offline"
+    title = _display_title(player)
+    title_part = f" [{title}]" if title else ""
     return (
-        f"{_display_player(player)}, the level {player.get('level', 0)} "
+        f"{_display_player(player)}{title_part}, the level {player.get('level', 0)} "
         f"{player.get('class', 'idler')} ({_alignment_name(player.get('alignment'))}); "
         f"Status: {online}; TTL: {_duration(player.get('next', 0))}; "
         f"Idled: {_duration(player.get('idled', 0))}; "
+        f"Map: [{player.get('x', 0)},{player.get('y', 0)}]; "
+        f"Achievements: {len(player.get('achievements', []) if isinstance(player.get('achievements'), list) else [])}; "
         f"Item sum: {sum(int(v or 0) for v in player.get('items', {}).values())}"
     )
 
@@ -426,6 +569,249 @@ def _item_sum(player: dict[str, Any]) -> int:
 def _battle_power(player: dict[str, Any]) -> int:
     level = max(0, int(player.get("level", 0) or 0))
     return max(1, level * 10 + _item_sum(player) + 1)
+
+
+def _ranked_players(room: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    players = [
+        (str(jid), _normalize_player(str(jid), player))
+        for jid, player in room.get("players", {}).items()
+        if isinstance(player, dict)
+    ]
+    players.sort(
+        key=lambda item: (
+            -int(item[1].get("level", 0) or 0),
+            int(item[1].get("next", 0) or 0),
+            str(item[1].get("name", "")).lower(),
+        )
+    )
+    return players
+
+
+def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
+    title_key = str(player.get("title") or "")
+    return {
+        "rank": rank,
+        "jid_hash": hashlib.sha256(str(jid).encode("utf-8")).hexdigest()[:16],
+        "name": _display_player(player),
+        "character": _display_player(player),
+        "class": str(player.get("class") or "idler"),
+        "title": _achievement_title(title_key) if title_key else "",
+        "title_key": title_key,
+        "level": int(player.get("level", 0) or 0),
+        "ttl": int(player.get("next", 0) or 0),
+        "time_to_level": int(player.get("next", 0) or 0),
+        "alignment": _alignment_name(player.get("alignment")),
+        "idled": int(player.get("idled", 0) or 0),
+        "item_sum": _item_sum(player),
+        "items": dict(player.get("items", {}) if isinstance(player.get("items"), dict) else {}),
+        "achievements": [
+            {"key": key, "title": _achievement_title(key), "description": _achievement_description(key)}
+            for key in player.get("achievements", [])
+            if key in ACHIEVEMENTS
+        ],
+        "x": int(player.get("x", 0) or 0),
+        "y": int(player.get("y", 0) or 0),
+        "online": _is_player_online(room_jid, str(jid), player),
+        "logged_out": bool(player.get("logged_out", False)),
+        "created_at": int(player.get("created_at", 0) or 0),
+        "last_seen": int(player.get("last_seen", 0) or 0),
+    }
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _public_url(*parts: str) -> str:
+    if not EXPORT_PUBLIC_BASE_URL:
+        return ""
+    return "/".join([EXPORT_PUBLIC_BASE_URL, *[part.strip("/") for part in parts if part]])
+
+
+def _profile_url(room_jid: str, player: dict[str, Any]) -> str:
+    return _public_url(_room_slug(room_jid), "profiles", f"{_slug(_display_player(player))}.json")
+
+
+def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generated_at: int) -> dict[str, Any]:
+    slug = _room_slug(room_jid)
+    room_dir = root / slug
+    ranked = _ranked_players(room)
+    leaderboard = [
+        _player_public_record(room_jid, jid, player, rank=rank)
+        for rank, (jid, player) in enumerate(ranked[:EXPORT_TOP_LIMIT], start=1)
+    ]
+    all_profiles = [
+        _player_public_record(room_jid, jid, player, rank=rank)
+        for rank, (jid, player) in enumerate(ranked, start=1)
+    ]
+    quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
+    active_quest = None
+    if quest.get("active"):
+        active_quest = {
+            "text": quest.get("text", "adventure"),
+            "started_at": int(quest.get("started_at", 0) or 0),
+            "complete_at": int(quest.get("complete_at", 0) or 0),
+            "route": quest.get("route", []),
+            "questers": [
+                _display_player(room.get("players", {}).get(jid, {"name": jid}))
+                for jid in quest.get("questers", [])
+            ],
+        }
+    season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
+    hall_of_fame = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
+    room_payload = {
+        "generated_at": generated_at,
+        "room": room_jid,
+        "slug": slug,
+        "map": {"width": MAP_X, "height": MAP_Y},
+        "season": season,
+        "players_total": len(all_profiles),
+        "players_online": sum(1 for player in all_profiles if player["online"]),
+        "leaderboard": leaderboard,
+        "players": all_profiles,
+        "quest": active_quest,
+        "hall_of_fame": hall_of_fame[-SEASON_HOF_SIZE:],
+    }
+    _atomic_write_json(room_dir / "room.json", room_payload)
+    _atomic_write_json(room_dir / "leaderboard.json", {"generated_at": generated_at, "room": room_jid, "players": leaderboard})
+    _atomic_write_json(room_dir / "players.json", {"generated_at": generated_at, "room": room_jid, "players": all_profiles})
+    _atomic_write_json(room_dir / "map.json", {
+        "generated_at": generated_at,
+        "room": room_jid,
+        "width": MAP_X,
+        "height": MAP_Y,
+        "players": all_profiles,
+        "quest": active_quest,
+    })
+    _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-SEASON_HOF_SIZE:]})
+    profiles_dir = room_dir / "profiles"
+    for profile in all_profiles:
+        _atomic_write_json(profiles_dir / f"{_slug(profile['name'])}.json", profile)
+    return {
+        "room": room_jid,
+        "slug": slug,
+        "players_total": len(all_profiles),
+        "players_online": room_payload["players_online"],
+        "leaderboard_url": _public_url(slug, "leaderboard.json"),
+        "map_url": _public_url(slug, "map.json"),
+    }
+
+
+def _export_public_state(data: dict[str, Any]) -> None:
+    if not EXPORT_ENABLED:
+        return
+    try:
+        root = _export_root()
+        generated_at = _now()
+        rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
+        if not isinstance(rooms, dict):
+            rooms = {}
+        summaries: list[dict[str, Any]] = []
+        default_room_payload = None
+        for room_jid, room in sorted(rooms.items()):
+            if not isinstance(room, dict):
+                continue
+            summary = _export_room_state(root, str(room_jid), room, generated_at)
+            summaries.append(summary)
+            if default_room_payload is None:
+                room_json = root / summary["slug"] / "room.json"
+                try:
+                    default_room_payload = json.loads(room_json.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    default_room_payload = None
+        _atomic_write_json(root / "index.json", {"generated_at": generated_at, "rooms": summaries})
+        if default_room_payload:
+            _atomic_write_json(root / "leaderboard.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "players": default_room_payload["leaderboard"],
+            })
+            _atomic_write_json(root / "map.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "width": MAP_X,
+                "height": MAP_Y,
+                "players": default_room_payload["players"],
+                "quest": default_room_payload["quest"],
+            })
+            _atomic_write_json(root / "players.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "players": default_room_payload["players"],
+            })
+            _atomic_write_json(root / "hall_of_fame.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "seasons": default_room_payload["hall_of_fame"],
+            })
+    except Exception:
+        log.debug("[IDLERPG] Failed to export public state", exc_info=True)
+
+
+def _season_snapshot(room_jid: str, room: dict[str, Any], ended_at: int | None = None) -> dict[str, Any]:
+    ended_at = int(ended_at or _now())
+    season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(ended_at)
+    ranked = _ranked_players(room)[:SEASON_HOF_SIZE]
+    return {
+        "id": season.get("id") or _season_id(ended_at),
+        "room": room_jid,
+        "started_at": int(season.get("started_at", 0) or 0),
+        "ended_at": ended_at,
+        "champion": _display_player(ranked[0][1]) if ranked else "",
+        "top": [
+            _player_public_record(room_jid, jid, player, rank=rank)
+            for rank, (jid, player) in enumerate(ranked, start=1)
+        ],
+    }
+
+
+def _reset_player_for_new_season(player: dict[str, Any]) -> None:
+    player["level"] = 0
+    player["next"] = _ttl_for_level(0)
+    player["idled"] = 0
+    player["items"] = {item: 0 for item in ITEMS}
+    player["penalties"] = {}
+    player["achievements"] = []
+    player["title"] = ""
+
+
+def _end_season(room_jid: str, room: dict[str, Any], *, reset_players: bool | None = None) -> dict[str, Any]:
+    now = _now()
+    snapshot = _season_snapshot(room_jid, room, now)
+    hof = room.setdefault("hall_of_fame", [])
+    if not isinstance(hof, list):
+        hof = []
+        room["hall_of_fame"] = hof
+    hof.append(snapshot)
+    del hof[:-max(1, SEASON_HOF_SIZE * 5)]
+    should_reset = reset_players if reset_players is not None else SEASON_RESET_ON_ROLLOVER
+    if should_reset:
+        for jid, player in room.get("players", {}).items():
+            if isinstance(player, dict):
+                _reset_player_for_new_season(_normalize_player(str(jid), player))
+    room["season"] = _blank_season(now)
+    return snapshot
+
+
+def _maybe_rollover_season(room_jid: str, room: dict[str, Any], messages: list[str]) -> None:
+    if not SEASON_ENABLED or _season_duration_seconds() <= 0:
+        return
+    season = room.get("season")
+    if not isinstance(season, dict):
+        room["season"] = _blank_season(_now())
+        return
+    ends_at = int(season.get("ends_at", 0) or 0)
+    if ends_at <= 0 or _now() < ends_at:
+        return
+    snapshot = _end_season(room_jid, room)
+    champion = snapshot.get("champion") or "no champion"
+    messages.append(
+        f"🏁 IdleRPG season {snapshot.get('id')} has ended. Champion: {champion}. "
+        f"New season {room['season']['id']} has begun."
+    )
 
 
 def _alignment_battle_factor(player: dict[str, Any], outcome: str) -> float:
@@ -558,6 +944,8 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
 
     online_jids = _online_jids(room_jid)
     messages: list[str] = []
+    _maybe_rollover_season(room_jid, room, messages)
+    movement_steps = max(1, delta // max(1, TICK_SECONDS))
     for jid, raw_player in list(players.items()):
         if not isinstance(raw_player, dict):
             players.pop(jid, None)
@@ -568,14 +956,16 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
         player["next"] = max(0, int(player.get("next", 0)) - delta)
         player["idled"] = int(player.get("idled", 0)) + delta
         player["last_seen"] = now
+        _move_player(player, movement_steps)
         leveled = False
         while int(player.get("next", 0)) <= 0:
             player["level"] = int(player.get("level", 0)) + 1
             player["next"] = int(player.get("next", 0)) + _ttl_for_level(player["level"])
             leveled = True
         if leveled:
+            _check_level_achievements(player)
             messages.append(
-                f"🏆 {_display_player(player)} has reached level {player['level']}! "
+                f"🏆 {_display_character(player)} has reached level {player['level']}! "
                 f"Next level in {_duration_clock(player['next'])}."
             )
             if random.random() < ITEM_CHANCE:
@@ -642,6 +1032,7 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
         )
         messages.append(_next_level_line(attacker))
         winner, loser = attacker, defender
+        _award(winner, "battle_winner")
     else:
         amount = _battle_amount(attacker, base, "loss")
         changed = _add_time(attacker, amount)
@@ -652,6 +1043,7 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
         )
         messages.append(_next_level_line(attacker))
         winner, loser = defender, attacker
+        _award(winner, "battle_winner")
 
     _maybe_critical_strike(winner, loser, messages)
     _maybe_battle_item_drop(winner, loser, messages)
@@ -660,6 +1052,7 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
 def _maybe_critical_strike(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
     if random.random() >= CRITICAL_STRIKE_CHANCE:
         return
+    _award(winner, "critical_striker")
     winner_name = _display_player(winner)
     loser_name = _display_player(loser)
     base = random.randint(10, 75)
@@ -714,6 +1107,7 @@ def _run_item_blessing(players: list[tuple[str, dict[str, Any]]], messages: list
     gain = max(1, old_level // 10, level // 10)
     items[item] = old_level + gain
     name = _display_player(player)
+    _check_level_achievements(player)
     messages.append(
         f"✨ {name}'s {item} has been blessed by a wandering enchanter! "
         f"{_possessive(name)} {item} gains {gain} level{'s' if gain != 1 else ''}."
@@ -753,6 +1147,7 @@ def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages
         player.setdefault("penalties", {})["calamity"] = (
             int(player.get("penalties", {}).get("calamity", 0) or 0) + changed
         )
+        _award(player, "unlucky")
         messages.append(
             f"💥 {name} {random.choice(CALAMITIES)}. This terrible calamity has slowed them "
             f"{_duration_clock(changed)} from level {level + 1}."
@@ -761,6 +1156,7 @@ def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages
     else:
         amount = _penalty_for(level, random.randint(20, 80))
         changed = _remove_time(player, amount)
+        _award(player, "lucky")
         messages.append(
             f"🌟 {name} {random.choice(GODSENDS)}. This wondrous godsend has accelerated them "
             f"{_duration_clock(changed)} towards level {level + 1}."
@@ -786,6 +1182,7 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
             player = players.get(jid)
             if isinstance(player, dict):
                 player["next"] = int(int(player.get("next", 0)) * 0.75)
+                _award(player, "quest_hero")
                 names.append(_display_player(player))
                 completed_players.append(player)
         if names:
@@ -815,16 +1212,27 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
     questers = candidates[:4]
     duration = random.randint(max(1, QUEST_MIN_DURATION), max(QUEST_MIN_DURATION, QUEST_MAX_DURATION))
     quest_text = random.choice(QUEST_TEXTS)
+    route = [
+        [random.randint(0, MAP_X), random.randint(0, MAP_Y)],
+        [random.randint(0, MAP_X), random.randint(0, MAP_Y)],
+    ]
     room["quest"] = {
         "active": True,
         "questers": questers,
         "text": quest_text,
         "started_at": now,
         "complete_at": now + duration,
+        "route": route,
     }
-    names = [room["players"][jid].get("name", jid) for jid in questers]
+    names = []
+    for jid in questers:
+        player = room["players"].get(jid)
+        if isinstance(player, dict):
+            _award(player, "quester")
+            names.append(player.get("name", jid))
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
+        f"Participants must first reach [{route[0][0]},{route[0][1]}], then [{route[1][0]},{route[1][1]}]. "
         f"Quest completes in {_duration_clock(duration)}."
     )
 
@@ -902,6 +1310,8 @@ async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: 
         "alignment": "n",
         "items": {item: 0 for item in ITEMS},
         "penalties": {},
+        "achievements": ["founder"],
+        "title": "",
         "x": random.randint(0, MAP_X),
         "y": random.randint(0, MAP_Y),
         "logged_out": False,
@@ -1093,6 +1503,176 @@ async def _handle_quest(bot, msg, is_room: bool) -> None:
     )
 
 
+async def _handle_profile(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Profile is room-scoped. Use it from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    target = args[1] if len(args) > 1 else sender_jid
+    jid, player = _find_player(room, target)
+    if not player:
+        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        return
+    player = _normalize_player(str(jid), player)
+    achievements = player.get("achievements", [])
+    title = _display_title(player) or "none"
+    lines = [
+        f"🧙 Profile: {_display_player(player)}",
+        f"Class: {player.get('class', 'idler')}",
+        f"Title: {title}",
+        f"Level: {player.get('level', 0)}",
+        f"TTL: {_duration_clock(player.get('next', 0))}",
+        f"Alignment: {_alignment_name(player.get('alignment'))}",
+        f"Map: [{player.get('x', 0)},{player.get('y', 0)}]",
+        f"Achievements: {len(achievements)}",
+    ]
+    url = _profile_url(room_jid, player)
+    if url:
+        lines.append(f"Profile JSON: {url}")
+    _reply(bot, msg, "\n".join(lines))
+
+
+async def _handle_achievements(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Achievements are room-scoped. Use this from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    target = args[1] if len(args) > 1 else sender_jid
+    jid, player = _find_player(room, target)
+    if not player:
+        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        return
+    player = _normalize_player(str(jid), player)
+    lines = []
+    for key in player.get("achievements", []):
+        lines.append(f"• {_achievement_title(key)} — {_achievement_description(key)}")
+    if not lines:
+        lines = ["No achievements yet."]
+    _reply(bot, msg, f"🏅 Achievements for {_display_player(player)}\n" + "\n".join(lines))
+
+
+async def _handle_title(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Titles are room-scoped. Use this from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    _jid, player = _find_player(room, sender_jid)
+    if not player:
+        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        return
+    player = _normalize_player(sender_jid, player)
+    achievements = set(player.get("achievements", []))
+    if len(args) < 2 or args[1].lower() in {"list", "show"}:
+        lines = [f"{key}: {_achievement_title(key)}" for key in sorted(achievements)] or ["No unlocked titles yet."]
+        _reply(bot, msg, "🎖️ Available titles\n" + "\n".join(lines))
+        return
+    requested = args[1].lower()
+    if requested in {"none", "clear", "off"}:
+        player["title"] = ""
+        await _set_data(bot, data)
+        _reply(bot, msg, f"✅ {_display_player(player)} cleared their title.")
+        return
+    if requested not in achievements:
+        _reply(bot, msg, "❌ You have not unlocked that achievement title. Use `,idlerpg title list`.")
+        return
+    player["title"] = requested
+    await _set_data(bot, data)
+    _reply(bot, msg, f"✅ {_display_player(player)} now uses title: {_achievement_title(requested)}.")
+
+
+async def _handle_map(bot, msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Map is room-scoped. Use it from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    players = _ranked_players(room)
+    lines = [
+        f"🗺️ IdleRPG map for {room_jid}: {MAP_X}x{MAP_Y}",
+    ]
+    for _jid, player in players[:10]:
+        lines.append(f"• {_display_player(player)} [{player.get('x', 0)},{player.get('y', 0)}] lv.{player.get('level', 0)}")
+    quest = room.get("quest", {})
+    if isinstance(quest, dict) and quest.get("active") and quest.get("route"):
+        route = quest.get("route", [])
+        lines.append(f"Quest route: {route}")
+    url = _public_url(_room_slug(room_jid), "map.json")
+    if url:
+        lines.append(f"Map JSON: {url}")
+    _reply(bot, msg, "\n".join(lines))
+
+
+async def _handle_hof(bot, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Hall of fame is room-scoped. Use it from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    hof = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
+    lines = []
+    for entry in reversed(hof[-SEASON_HOF_SIZE:]):
+        champion = entry.get("champion") or "no champion"
+        lines.append(f"• Season {entry.get('id', '?')}: {champion}")
+    if not lines:
+        lines = ["No completed seasons yet."]
+    _reply(bot, msg, "🏛️ IdleRPG Hall of Fame\n" + "\n".join(lines))
+
+
+async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Seasons are room-scoped. Use this from a game room or MUC PM.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    subcmd = args[1].lower() if len(args) > 1 else "status"
+    if subcmd in {"end", "finish", "reset"}:
+        if not await _sender_can_manage_room(bot, sender_jid, room_jid):
+            _reply(bot, msg, "⛔ Only room moderators/admins can end IdleRPG seasons.")
+            return
+        reset_players = subcmd == "reset"
+        snapshot = _end_season(room_jid, room, reset_players=reset_players)
+        await _set_data(bot, data)
+        _reply(
+            bot,
+            msg,
+            f"🏁 Season {snapshot.get('id')} ended. Champion: {snapshot.get('champion') or 'no champion'}. "
+            f"New season: {room['season']['id']}." + (" Players were reset." if reset_players else ""),
+        )
+        return
+    if subcmd in {"hof", "hall", "hall-of-fame"}:
+        await _handle_hof(bot, args[1:], msg, is_room)
+        return
+    season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(_now())
+    ends_at = int(season.get("ends_at", 0) or 0)
+    remaining = _duration(ends_at - _now()) if ends_at else "manual"
+    _reply(
+        bot,
+        msg,
+        f"🏁 Current season: {season.get('id', 'unknown')} — ends in {remaining}. "
+        f"Hall of fame entries: {len(room.get('hall_of_fame', []) if isinstance(room.get('hall_of_fame'), list) else [])}.",
+    )
+
+
+async def _handle_export(bot, msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    data = await _get_data(bot)
+    _export_public_state(data)
+    root = _export_root()
+    if room_jid:
+        _reply(bot, msg, f"📤 IdleRPG export refreshed for {room_jid}: {root / _room_slug(room_jid)}")
+    else:
+        _reply(bot, msg, f"📤 IdleRPG export refreshed: {root}")
+
+
 async def _handle_remove_me(bot, sender_jid: str, msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
     if not room_jid:
@@ -1180,6 +1760,10 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg top [page|last|all]\n"
         f"{prefix}idlerpg players [page|last|all]\n"
         f"{prefix}idlerpg items [character]\n"
+        f"{prefix}idlerpg profile [character]\n"
+        f"{prefix}idlerpg achievements [character]\n"
+        f"{prefix}idlerpg title <achievement|none>\n"
+        f"{prefix}idlerpg map|hof|season\n"
         f"{prefix}idlerpg align <good|neutral|evil>\n"
         f"{prefix}idlerpg quest\n"
         f"{prefix}idlerpg login|logout|remove-me"
@@ -1191,13 +1775,15 @@ def _usage(bot) -> str:
     role=Role.USER,
     aliases=["irpg", "idle"],
     short="Play IdleRPG in a MUC",
-    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|quest|...>",
+    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|profile|map|season|...>",
     examples=[
         "{prefix}idlerpg register Sven sysadmin",
         "{prefix}idlerpg enabled",
         "{prefix}idlerpg status",
         "{prefix}idlerpg top",
         "{prefix}idlerpg quest",
+        "{prefix}idlerpg map",
+        "{prefix}idlerpg profile Sven",
     ],
     category="fun",
     context="groupchat / MUC PM",
@@ -1247,6 +1833,20 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
         await _handle_players(bot, args, msg, is_room)
     elif subcmd == "items":
         await _handle_items(bot, sender, args, msg, is_room)
+    elif subcmd in {"profile", "char", "character"}:
+        await _handle_profile(bot, sender, args, msg, is_room)
+    elif subcmd in {"achievements", "achievement", "badges"}:
+        await _handle_achievements(bot, sender, args, msg, is_room)
+    elif subcmd == "title":
+        await _handle_title(bot, sender, args, msg, is_room)
+    elif subcmd == "map":
+        await _handle_map(bot, msg, is_room)
+    elif subcmd in {"hof", "hall", "hall-of-fame"}:
+        await _handle_hof(bot, args, msg, is_room)
+    elif subcmd == "season":
+        await _handle_season(bot, sender, args, msg, is_room)
+    elif subcmd == "export":
+        await _handle_export(bot, msg, is_room)
     elif subcmd == "align":
         await _handle_align(bot, sender, args, msg, is_room)
     elif subcmd == "quest":

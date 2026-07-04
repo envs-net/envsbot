@@ -336,3 +336,90 @@ def test_godsend_calamity_and_alignment_bonus_messages(monkeypatch):
     assert bob["next"] == 8370
     assert "7% of their time is removed" in alignment_messages[0]
     assert any("Bob reaches next level in" in line for line in alignment_messages)
+
+@pytest.mark.asyncio
+async def test_profile_achievements_title_map_and_export(tmp_path, monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        msg,
+        True,
+    )
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["achievements"], msg, True)
+    assert "Founder" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["title", "founder"], msg, True)
+    assert "Founder" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["profile"], msg, True)
+    assert "Profile: Alice" in bot.replies[-1][0]
+    assert "Profile JSON: https://envs.net/idlerpg/room_at_conf/profiles/Alice.json" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["map"], msg, True)
+    assert "IdleRPG map for room@conf" in bot.replies[-1][0]
+    assert "Map JSON: https://envs.net/idlerpg/room_at_conf/map.json" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["export"], msg, True)
+    assert (tmp_path / "index.json").exists()
+    assert (tmp_path / "leaderboard.json").exists()
+    assert (tmp_path / "room_at_conf" / "profiles" / "Alice.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(resource="Mod")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["players"]["alice@envs.net"]["level"] = 12
+    room["players"]["alice@envs.net"]["next"] = 5
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "end"], msg, True)
+    assert "Champion: Alice" in bot.replies[-1][0]
+    assert room["hall_of_fame"][-1]["champion"] == "Alice"
+    assert room["players"]["alice@envs.net"]["level"] == 12
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "reset"], msg, True)
+    assert "Players were reset" in bot.replies[-1][0]
+    assert room["players"]["alice@envs.net"]["level"] == 0
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["hof"], DummyMsg(), True)
+    assert "Hall of Fame" in bot.replies[-1][0]
+    assert "Alice" in bot.replies[-1][0]
+
+
+def test_season_rollover_and_player_movement(monkeypatch):
+    room = idlerpg._blank_room()
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "level": 3, "next": 100, "items": {}},
+    )
+    room["players"]["alice@envs.net"] = player
+    room["season"] = {"id": "old", "started_at": idlerpg._now() - 10, "ends_at": idlerpg._now() - 1}
+    monkeypatch.setattr(idlerpg, "SEASON_ENABLED", True)
+    monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 1)
+    monkeypatch.setattr(idlerpg, "MAP_STEP_PER_TICK", 1)
+    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: 1)
+
+    old_pos = (player["x"], player["y"])
+    messages = []
+    idlerpg._maybe_rollover_season("room@conf", room, messages)
+    idlerpg._move_player(player, 2)
+
+    assert room["hall_of_fame"][-1]["champion"] == "Alice"
+    assert messages and "season old has ended" in messages[0]
+    assert (player["x"], player["y"]) != old_pos
