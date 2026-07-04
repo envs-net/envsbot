@@ -1700,7 +1700,11 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         room_feeds = _filter_feeds_for_room(feeds, room_target)
         return {
             "feeds": len(room_feeds),
-            "active_tasks": sum(1 for url in room_feeds if url in CHECK_TASKS),
+            "active_tasks": sum(
+                1
+                for url in room_feeds
+                if url in CHECK_TASKS and not CHECK_TASKS[url].done()
+            ),
             "retry_backoff": sum(
                 1 for feed in room_feeds.values()
                 if isinstance(feed, dict)

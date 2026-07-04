@@ -22,6 +22,20 @@ def _reply_text(reply):
     return str(text)
 
 
+class Entry(dict):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def get(self, key, default=None):
+        if hasattr(self, key):
+            return getattr(self, key)
+        if key in self:
+            return self[key]
+        return default
+
+
 @pytest.mark.asyncio
 async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
@@ -42,7 +56,7 @@ def make_bot():
 
     class DummyStore(dict):
         async def get_global(self, key, default=None):
-            return self.get(key, default if default is not None else {})
+            return self.get(key, default)
 
         async def set_global(self, key, value):
             self[key] = value
@@ -645,19 +659,6 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
     # Key step for your plugin: JOINED_ROOMS is a dict, not set.
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
 
-    class Entry(dict):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-        def get(self, k, default=None):
-            if hasattr(self, k):
-                return getattr(self, k)
-            if k in self:
-                return self[k]
-            return default
-
     entry = Entry(
         title="ET",
         link="http://f.com/a1",
@@ -723,19 +724,6 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
     }
 
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
-
-    class Entry(dict):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-        def get(self, k, default=None):
-            if hasattr(self, k):
-                return getattr(self, k)
-            if k in self:
-                return self[k]
-            return default
 
     newest_entry = Entry(
         title="ET2",
@@ -811,19 +799,6 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
 
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
     monkeypatch.setattr(rss, "RSS_MAX_ENTRIES_PER_POLL", 2)
-
-    class Entry(dict):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-        def get(self, k, default=None):
-            if hasattr(self, k):
-                return getattr(self, k)
-            if k in self:
-                return self[k]
-            return default
 
     entries = [
         Entry(
@@ -1612,7 +1587,7 @@ async def test_rss_runtime_state_global_and_room(monkeypatch, make_bot):
 
     assert await rss.get_runtime_state(bot, "room@conf") == {
         "feeds": 2,
-        "active_tasks": 2,
+        "active_tasks": 1,
         "retry_backoff": 1,
     }
     assert await rss.get_runtime_state(bot) == {
