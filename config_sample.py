@@ -269,10 +269,12 @@ IDLERPG = {
     "rp_step": 1.16,
 
     # Message/logout penalties. Message penalty formula:
-    # penalty = message_penalty * (penalty_step ** current_level).
+    # penalty = max(1, len(body) * message_penalty) * (penalty_step ** current_level).
+    # logout_grace_seconds lets short reconnects avoid logout penalties.
     "penalty_step": 1.14,
     "message_penalty": 1,
     "logout_penalty": 20,
+    "logout_grace_seconds": 300,
     "max_penalty": 604800,
     "count_command_messages": False,
 
@@ -315,13 +317,15 @@ IDLERPG = {
     "quest_reward_percent": 25,
     "team_battle_percent": 20,
 
-    # Unique envs.net-flavoured items can appear at higher levels.
+    # Unique envs.net-flavoured items can appear at higher levels and grant
+    # small bonuses such as reduced penalties or slightly stronger battles.
     "unique_items_enabled": True,
     "unique_item_min_level": 25,
     "unique_item_chance": 0.025,
 
     # Event log retained in bot state and exported for the website.
     "event_log_limit": 200,
+    "event_retention_days": 90,
     "export_event_limit": 50,
 
     # Public JSON export for the website. Prefer exporting directly into a

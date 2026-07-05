@@ -537,6 +537,7 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `penalty_step` | `1.14` | Exponential scaling for message and logout penalties. |
 | `message_penalty` | `1` | Base penalty in seconds for normal room messages. Formula: `max(1, len(body) * message_penalty) * (penalty_step ** current_level)`. |
 | `logout_penalty` | `20` | Base penalty in seconds when a player logs out. |
+| `logout_grace_seconds` | `300` | Grace period for short reconnects/logouts. If the player logs back in before this expires, the pending logout penalty is cleared. |
 | `max_penalty` | `604800` | Maximum single penalty in seconds. The default is 7 days. Set to `0` to disable the cap. |
 | `count_command_messages` | `False` | Whether bot commands also count as message penalties. Usually keep this disabled. |
 
@@ -560,11 +561,25 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `item_drop_chance` | `0.12` | Chance after a battle that an item is dropped/swapped. |
 | `unique_items_enabled` | `True` | Enables rare named unique items. |
 | `unique_item_min_level` | `25` | Minimum character level before unique items may appear. |
-| `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item. |
+| `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item. Unique items may grant small bonuses such as battle power, godsend rewards, reduced penalties or stronger quest rewards. |
 
 The event weights are relative. Raising `battle_event_weight`, for example,
 makes battle events more likely compared to item and alignment events.
 `event_chance` still controls how often any random event starts at all.
+
+### Events, achievements and retention
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `event_log_limit` | `200` | Maximum number of room events kept in bot state. |
+| `event_retention_days` | `90` | Maximum age for retained room events. Set to `0` to keep by count only. |
+| `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. |
+
+Achievements are awarded automatically for long idling, level milestones,
+battles, quests, unique items, godsends, calamities and item collection.
+Players can inspect unlocked achievements with `,idlerpg achievements` and the
+full catalog with `,idlerpg achievements list`. Room owners/admins can use
+`,idlerpg balance` to inspect basic balancing statistics for a room.
 
 ### Quests
 
@@ -580,7 +595,8 @@ makes battle events more likely compared to item and alignment events.
 These options are documented in the sections above: `export_enabled`,
 `export_path`, `export_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
 `map_step_per_tick`, `season_enabled`, `season_duration_days`,
-`season_reset_on_rollover`, and `season_hof_size`.
+`season_reset_on_rollover`, `season_hof_size`, `event_log_limit`,
+`event_retention_days`, and `export_event_limit`.
 
 ## Room concept
 

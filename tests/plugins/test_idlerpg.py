@@ -559,3 +559,93 @@ def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypa
     asyncio.run(idlerpg._maybe_run_random_event(room, "room@conf", messages))
 
     assert messages == ["fate"]
+
+@pytest.mark.asyncio
+async def test_logout_grace_clears_pending_penalty(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "LOGOUT_GRACE_SECONDS", 300)
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    before = player["next"]
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["logout"], msg, True)
+    assert player["logged_out"] is True
+    assert player["pending_logout_penalty"]
+    assert player["next"] == before
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["login"], msg, True)
+    assert player["logged_out"] is False
+    assert player["pending_logout_penalty"] == {}
+    assert player["next"] == before
+    assert "Logout grace used" in bot.replies[-1][0]
+
+
+def test_event_retention_prunes_old_events(monkeypatch):
+    room = idlerpg._blank_room()
+    now = 1_700_000_000
+    monkeypatch.setattr(idlerpg, "EVENT_RETENTION_DAYS", 1)
+    monkeypatch.setattr(idlerpg, "EVENT_LOG_LIMIT", 10)
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    room["events"] = [
+        {"ts": now - 3 * 86400, "kind": "old", "text": "old"},
+        {"ts": now - 60, "kind": "new", "text": "new"},
+    ]
+
+    idlerpg._record_event(room, "game", "fresh")
+
+    assert [event["text"] for event in room["events"]] == ["new", "fresh"]
+
+
+def test_unique_item_bonuses_and_achievement_catalog_export(tmp_path, monkeypatch):
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 52,
+            "next": 10000,
+            "unique_items": {"weapon": "The Great Hammer of /bin/sh"},
+            "items": {"weapon": 150},
+            "x": 300,
+            "y": 230,
+        },
+    )
+    assert idlerpg._unique_bonus_percent(player, "battle_bonus") >= 5
+    assert idlerpg._battle_power(player) > 52 * 10 + idlerpg._item_sum(player)
+    public = idlerpg._player_public_record("room@conf", "alice@envs.net", player, rank=1)
+    assert public["region"] == "Velbragh"
+    assert public["unique_item_bonuses"][0]["bonus"] == "battle_bonus"
+
+    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    room = idlerpg._blank_room()
+    room["players"] = {"alice@envs.net": player}
+    idlerpg._export_room_state(tmp_path, "room@conf", room, idlerpg._now())
+    assert (tmp_path / "room_at_conf" / "achievements.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_balance_stats_admin_only():
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["balance"], DummyMsg(resource="Mod"), True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["balance"], msg, True)
+    assert "IdleRPG balance stats" in bot.replies[-1][0]
+    assert "Logout grace" in bot.replies[-1][0]
