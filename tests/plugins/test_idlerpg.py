@@ -954,3 +954,234 @@ async def test_stats_command_is_primary_and_balance_alias_still_works():
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["balance"], msg, True)
     assert "IdleRPG stats" in bot.replies[-1][0]
     assert "balance" not in idlerpg._usage(bot)
+
+
+def test_battle_amount_alignment_factors_and_logout_penalty(monkeypatch):
+    monkeypatch.setattr(idlerpg, "PENALTY_STEP", 1.0)
+    monkeypatch.setattr(idlerpg, "MAX_PENALTY", 0)
+    evil = {"name": "Eve", "level": 5, "next": 1000, "alignment": "e", "stats": {}}
+    good = {"name": "Grace", "level": 5, "next": 1000, "alignment": "g", "stats": {}}
+    neutral = {"name": "Neo", "level": 5, "next": 1000, "alignment": "n", "stats": {}}
+    unknown = {"name": "Myst", "level": 5, "next": 1000, "alignment": "x", "stats": {}}
+
+    assert idlerpg._battle_amount(evil, 100, "win") == 110
+    assert idlerpg._battle_amount(good, 100, "loss") == 90
+    assert idlerpg._battle_amount(neutral, 100, "win") == 97
+    assert idlerpg._battle_amount(unknown, 100, "win") == 100
+
+    monkeypatch.setattr(idlerpg, "LOGOUT_PENALTY", 20)
+    changed = idlerpg._apply_logout_penalty(neutral)
+    assert changed == 20
+    assert neutral["next"] == 1020
+    assert neutral["penalties"]["logout"] == 20
+    assert neutral["pending_logout_penalty"] == {}
+    assert neutral["stats"]["logouts"] == 1
+
+
+def test_pending_logout_penalty_waits_then_applies(monkeypatch):
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 1, "next": 1000, "pending_logout_penalty": {"due_at": 2000}},
+    )
+    monkeypatch.setattr(idlerpg, "_now", lambda: 1000)
+    messages: list[str] = []
+    idlerpg._maybe_apply_pending_logout_penalty(player, messages)
+    assert messages == []
+    assert player["next"] == 1000
+    assert player["pending_logout_penalty"] == {"due_at": 2000}
+
+    monkeypatch.setattr(idlerpg, "_now", lambda: 3000)
+    monkeypatch.setattr(idlerpg, "LOGOUT_PENALTY", 1)
+    monkeypatch.setattr(idlerpg, "PENALTY_STEP", 1.0)
+    idlerpg._maybe_apply_pending_logout_penalty(player, messages)
+    assert player["next"] == 1001
+    assert player["pending_logout_penalty"] == {}
+    assert any("stayed logged out past the grace period" in line for line in messages)
+    assert any("reaches next level" in line for line in messages)
+
+
+def test_item_blessing_normalizes_bad_item_level_and_records(monkeypatch):
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 21, "next": 1000, "items": {"ring": "bad"}, "x": 300, "y": 230},
+    )
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+
+    messages: list[str] = []
+    idlerpg._run_item_blessing([("alice@envs.net", player)], messages)
+
+    assert player["items"][idlerpg.ITEMS[0]] == 2
+    assert player["stats"]["item_blessings"] == 1
+    assert messages and "wandering enchanter" in messages[0]
+    assert "Velbragh" in messages[0]
+
+
+@pytest.mark.asyncio
+async def test_align_command_usage_missing_character_and_success():
+    bot = DummyBot()
+    room_msg = DummyMsg()
+    private_without_room = DummyMsg(bare="user@envs.net", resource="Alice", mtype="chat")
+
+    await idlerpg._handle_align(bot, "alice@envs.net", ["align", "good"], private_without_room, False)
+    assert "Alignment is room-scoped" in bot.replies[-1][0]
+
+    await idlerpg._handle_align(bot, "alice@envs.net", ["align"], room_msg, True)
+    assert "Usage:" in bot.replies[-1][0]
+
+    await idlerpg._handle_align(bot, "alice@envs.net", ["align", "evil"], room_msg, True)
+    assert "do not have" in bot.replies[-1][0]
+
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        room_msg,
+        True,
+    )
+    await idlerpg._handle_align(bot, "alice@envs.net", ["align", "good"], room_msg, True)
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    assert room["players"]["alice@envs.net"]["alignment"] == "g"
+    assert room["events"][-1]["kind"] == "alignment"
+    assert "now good" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_remove_me_command_room_scope_missing_and_success():
+    bot = DummyBot()
+    room_msg = DummyMsg()
+    private_without_room = DummyMsg(bare="user@envs.net", resource="Alice", mtype="chat")
+
+    await idlerpg._handle_remove_me(bot, "alice@envs.net", private_without_room, False)
+    assert "remove-me is room-scoped" in bot.replies[-1][0]
+
+    await idlerpg._handle_remove_me(bot, "alice@envs.net", room_msg, True)
+    assert "do not have" in bot.replies[-1][0]
+
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        room_msg,
+        True,
+    )
+    await idlerpg._handle_remove_me(bot, "alice@envs.net", room_msg, True)
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    assert "alice@envs.net" not in room["players"]
+    assert room["name_index"] == {}
+    assert bot.audit_events[-1][0] == "idlerpg_remove_me"
+    assert "character Alice removed" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
+    bot = DummyBot()
+    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = {
+        "room@conf": True,
+        "off@conf": False,
+        123: True,
+    }
+    ensured: list[str] = []
+    cancelled: list[str] = []
+
+    async def fake_ensure(_bot, room_jid):
+        ensured.append(room_jid)
+        idlerpg.ROOM_TASKS[room_jid] = DummyTask(name=room_jid)
+        return idlerpg.ROOM_TASKS[room_jid]
+
+    async def fake_cancel(room_jid):
+        cancelled.append(room_jid)
+        idlerpg.ROOM_TASKS.pop(room_jid, None)
+
+    monkeypatch.setattr(idlerpg, "_ensure_game_task", fake_ensure)
+    monkeypatch.setattr(idlerpg, "_cancel_room_task", fake_cancel)
+
+    assert await idlerpg._enabled_rooms(bot) == {"room@conf": True, "off@conf": False, 123: True}
+    await idlerpg._start_enabled_room_tasks(bot)
+    assert ensured == ["room@conf", "123"]
+
+    idlerpg.ROOM_TASKS["old@conf"] = DummyTask(name="old")
+    ensured.clear()
+    await idlerpg._sync_tasks_to_enabled_rooms(bot)
+    assert ensured == ["123", "room@conf"]
+    assert cancelled == ["old@conf"]
+
+    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = "broken"
+    assert await idlerpg._enabled_rooms(bot) == {}
+
+
+@pytest.mark.asyncio
+async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
+    bot = DummyBot()
+    started = 0
+    cancelled: list[str] = []
+
+    async def fake_start(_bot):
+        nonlocal started
+        started += 1
+
+    async def fake_cancel(room_jid):
+        cancelled.append(room_jid)
+        idlerpg.ROOM_TASKS.pop(room_jid, None)
+
+    monkeypatch.setattr(idlerpg, "_start_enabled_room_tasks", fake_start)
+    monkeypatch.setattr(idlerpg, "_cancel_room_task", fake_cancel)
+
+    await idlerpg.on_ready(bot)
+    assert started == 1
+
+    idlerpg.ROOM_TASKS["a@conf"] = DummyTask(name="a")
+    idlerpg.ROOM_TASKS["b@conf"] = DummyTask(name="b")
+    await idlerpg.restart_tasks(bot)
+    assert cancelled == ["a@conf", "b@conf"]
+    assert started == 2
+
+    idlerpg.ROOM_TASKS["c@conf"] = DummyTask(name="c")
+    await idlerpg.on_unload(bot)
+    assert cancelled[-1] == "c@conf"
+
+
+@pytest.mark.asyncio
+async def test_on_load_registers_message_and_presence_handlers():
+    registered = []
+    bot = DummyBot()
+    bot.bot_plugins = types.SimpleNamespace(
+        register_event=lambda *args: registered.append(args)
+    )
+
+    await idlerpg.on_load(bot)
+
+    assert [entry[:2] for entry in registered] == [
+        (idlerpg.PLUGIN_NAME, "groupchat_message"),
+        (idlerpg.PLUGIN_NAME, "groupchat_presence"),
+    ]
+    assert all(callable(entry[2]) for entry in registered)
+
+
+@pytest.mark.asyncio
+async def test_on_muc_presence_starts_task_only_when_enabled(monkeypatch):
+    bot = DummyBot()
+    pres = DummyMsg(bare="room@conf", resource="Alice")
+    ensured: list[str] = []
+
+    async def fake_enabled(_bot, _key, _plugin, room_jid):
+        return room_jid == "room@conf"
+
+    async def fake_ensure(_bot, room_jid):
+        ensured.append(room_jid)
+        return DummyTask(name=room_jid)
+
+    monkeypatch.setattr(idlerpg._core, "_is_enabled_for_room", fake_enabled)
+    monkeypatch.setattr(idlerpg, "_ensure_game_task", fake_ensure)
+
+    await idlerpg.on_muc_presence(bot, pres)
+    assert ensured == ["room@conf"]
+
+    await idlerpg.on_muc_presence(bot, DummyMsg(bare="other@conf", resource="Alice"))
+    assert ensured == ["room@conf"]
+
+    async def raising_enabled(*_args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(idlerpg._core, "_is_enabled_for_room", raising_enabled)
+    await idlerpg.on_muc_presence(bot, pres)
+    assert ensured == ["room@conf"]
