@@ -2277,13 +2277,13 @@ async def _handle_events(bot, args: list[str], msg, is_room: bool) -> None:
     _reply(bot, msg, "\n".join(out))
 
 
-async def _handle_balance(bot, sender_jid: str, msg, is_room: bool) -> None:
+async def _handle_stats(bot, sender_jid: str, msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Balance stats are room-scoped. Use this from a game room or MUC PM.")
+        _reply(bot, msg, "ℹ️ IdleRPG stats are room-scoped. Use this from a game room or MUC PM.")
         return
     if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room owners/admins can inspect IdleRPG balance stats.")
+        _reply(bot, msg, "⛔ Only room owners/admins can inspect IdleRPG stats.")
         return
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
@@ -2306,7 +2306,7 @@ async def _handle_balance(bot, sender_jid: str, msg, is_room: bool) -> None:
     kind_line = ", ".join(f"{kind}: {count}" for kind, count in sorted(kinds.items())) or "none"
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
     lines = [
-        f"⚖️ IdleRPG balance stats for {room_jid}",
+        f"📊 IdleRPG stats for {room_jid}",
         f"Players: {len(ranked)} ({sum(1 for jid, player in ranked if _is_player_online(room_jid, jid, player))} online)",
         f"Average level: {avg_level:.1f}",
         f"Average TTL: {_duration_clock(avg_ttl)}",
@@ -2496,7 +2496,7 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg map|hof|season\n"
         f"{prefix}idlerpg events [page|last|all]\n"
         f"{prefix}idlerpg achievements list\n"
-        f"{prefix}idlerpg balance  # room owners/admins\n"
+        f"{prefix}idlerpg stats  # room owners/admins\n"
         f"{prefix}idlerpg align <good|neutral|evil>\n"
         f"{prefix}idlerpg quest\n"
         f"{prefix}idlerpg login|logout|remove-me"
@@ -2508,7 +2508,7 @@ def _usage(bot) -> str:
     role=Role.USER,
     aliases=["irpg", "idle"],
     short="Play IdleRPG in a MUC",
-    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|profile|events|map|season|...>",
+    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|profile|events|stats|map|season|...>",
     examples=[
         "{prefix}idlerpg register Sven sysadmin",
         "{prefix}idlerpg enabled",
@@ -2518,6 +2518,7 @@ def _usage(bot) -> str:
         "{prefix}idlerpg map",
         "{prefix}idlerpg profile Sven",
         "{prefix}idlerpg events",
+        "{prefix}idlerpg stats",
     ],
     category="fun",
     context="groupchat / MUC PM",
@@ -2573,8 +2574,8 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
         await _handle_achievements(bot, sender, args, msg, is_room)
     elif subcmd in {"events", "eventlog", "news"}:
         await _handle_events(bot, args, msg, is_room)
-    elif subcmd in {"balance", "stats"}:
-        await _handle_balance(bot, sender, msg, is_room)
+    elif subcmd in {"stats", "balance"}:
+        await _handle_stats(bot, sender, msg, is_room)
     elif subcmd == "title":
         await _handle_title(bot, sender, args, msg, is_room)
     elif subcmd == "map":

@@ -1305,7 +1305,7 @@ Play IdleRPG in a MUC
 Role: `user`<br>
 Context: `groupchat / MUC PM`<br>
 Category: `fun`<br>
-Usage: `,idlerpg <on|off|enabled|register|status|top|players|profile|events|achievements|balance|map|season|...>`
+Usage: `,idlerpg <on|off|enabled|register|status|top|players|profile|events|achievements|stats|map|season|...>`
 
 Aliases: `,idle`, `,irpg`
 
@@ -1320,7 +1320,7 @@ Examples:
 - `,idlerpg profile Sven`
 - `,idlerpg events`
 - `,idlerpg achievements list`
-- `,idlerpg balance`
+- `,idlerpg stats`
 
 ### info
 

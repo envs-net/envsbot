@@ -579,7 +579,7 @@ Achievements are awarded automatically for long idling, level milestones,
 battles, quests, unique items, godsends, calamities and item collection.
 Players can inspect unlocked achievements with `,idlerpg achievements` and the
 full catalog with `,idlerpg achievements list`. Room owners/admins can use
-`,idlerpg balance` to inspect basic balancing statistics for a room.
+`,idlerpg stats` to inspect basic game statistics for a room.
 
 ### Quests
 

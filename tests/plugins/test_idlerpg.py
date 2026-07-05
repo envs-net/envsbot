@@ -632,7 +632,7 @@ def test_unique_item_bonuses_and_achievement_catalog_export(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_balance_stats_admin_only():
+async def test_stats_command_admin_only():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
     await idlerpg._handle_register(
@@ -643,9 +643,186 @@ async def test_balance_stats_admin_only():
         True,
     )
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["balance"], DummyMsg(resource="Mod"), True)
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["stats"], DummyMsg(resource="Mod"), True)
     assert "Only room owners/admins" in bot.replies[-1][0]
 
-    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["balance"], msg, True)
-    assert "IdleRPG balance stats" in bot.replies[-1][0]
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["stats"], msg, True)
+    assert "IdleRPG stats" in bot.replies[-1][0]
     assert "Logout grace" in bot.replies[-1][0]
+
+
+def test_event_retention_sanitizes_and_limits(monkeypatch):
+    room = {
+        "events": [
+            {"ts": 900, "kind": "old", "text": "too old"},
+            {"ts": 1900, "kind": "keep", "text": "first"},
+        ]
+    }
+    monkeypatch.setattr(idlerpg, "_now", lambda: 2000)
+    monkeypatch.setattr(idlerpg, "EVENT_RETENTION_DAYS", 0)
+    monkeypatch.setattr(idlerpg, "EVENT_LOG_LIMIT", 2)
+
+    idlerpg._record_event(
+        room,
+        "bad kind !",
+        "hello" * 200,
+        players=["Alice", "", "Bob"],
+        data={"jid": "secret@envs.net", "note": "public", "items": ["a", object(), 1]},
+    )
+    idlerpg._record_event(room, "latest", "last")
+
+    public = idlerpg._room_events(room)
+    assert [event["kind"] for event in public] == ["bad_kind__", "latest"]
+    assert public[0]["text"].startswith("hello")
+    assert len(public[0]["text"]) == 500
+    assert public[0]["players"] == ["Alice", "Bob"]
+    assert "jid" not in public[0]["data"]
+    assert public[0]["data"]["note"] == "public"
+    assert public[0]["data"]["items"] == ["a", 1]
+
+    monkeypatch.setattr(idlerpg, "EVENT_RETENTION_DAYS", 1)
+    room["events"] = [
+        {"ts": 2000 - 90000, "kind": "old", "text": "too old"},
+        {"ts": 1999, "kind": "new", "text": "kept"},
+    ]
+    assert [event["text"] for event in idlerpg._room_events(room)] == ["kept"]
+
+
+def test_unique_item_level_gating_bonuses_and_grant(monkeypatch):
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": idlerpg.UNIQUE_ITEM_MIN_LEVEL - 1, "next": 1000},
+    )
+    assert idlerpg._roll_unique_item(player) is None
+
+    player["level"] = 50
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: high)
+
+    unique = idlerpg._roll_unique_item(player)
+    assert unique is not None
+    assert unique["name"] == idlerpg.UNIQUE_ITEMS[0]["name"]
+    assert unique["level"] == idlerpg.UNIQUE_ITEMS[0]["max_item_level"]
+
+    monkeypatch.setattr(
+        idlerpg,
+        "_roll_unique_item",
+        lambda _player: {
+            "name": "The Great Hammer of /bin/sh",
+            "slot": "weapon",
+            "level": 155,
+            "bonus": "battle_bonus",
+            "bonus_percent": 5,
+        },
+    )
+    text = idlerpg._grant_level_item(player)
+    assert "The Great Hammer of /bin/sh" in text
+    assert player["items"]["weapon"] == 155
+    assert player["unique_items"]["weapon"] == "The Great Hammer of /bin/sh"
+    assert "unique_item" in player["achievements"]
+    assert idlerpg._stats(player)["unique_items_found"] == 1
+    assert idlerpg._unique_bonus_percent(player, "battle_bonus") == 5
+    assert idlerpg._adjust_percent_amount(100, player, "battle_bonus", increase=True) == 105
+
+    player["unique_items"] = {
+        "weapon": "The Great Hammer of /bin/sh",
+        "tunic": "The Cluehammer of Good Documentation",
+        "shield": "not a real unique item",
+    }
+    assert idlerpg._unique_bonus_percent(player, "battle_bonus") == 13
+    assert idlerpg._unique_bonus_percent(player, "missing_bonus") == 0
+
+
+@pytest.mark.asyncio
+async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
+    room = idlerpg._blank_room()
+    room_jid = "room@conf"
+    JOINED_ROOMS[room_jid] = {"nicks": {}}
+    for index in range(4):
+        jid = f"quester{index}@envs.net"
+        name = f"Quester{index}"
+        JOINED_ROOMS[room_jid]["nicks"][name] = {"jid": jid, "affiliation": "member"}
+        room["players"][jid] = idlerpg._normalize_player(
+            jid,
+            {
+                "name": name,
+                "level": idlerpg.QUEST_MIN_LEVEL - 1,
+                "next": 1000,
+                "x": 320,
+                "y": 240,
+            },
+        )
+    room["quest"] = {"active": False, "next_at": 0}
+    monkeypatch.setattr(idlerpg, "_now", lambda: 1000)
+    monkeypatch.setattr(idlerpg.random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: low)
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+
+    messages: list[str] = []
+    await idlerpg._maybe_run_quest(room, room_jid, messages)
+    assert messages == []
+    assert room["quest"] == {"active": False, "next_at": 1000 + idlerpg.QUEST_INTERVAL}
+
+    for player in room["players"].values():
+        player["level"] = idlerpg.QUEST_MIN_LEVEL
+    room["quest"] = {"active": False, "next_at": 0}
+    await idlerpg._maybe_run_quest(room, room_jid, messages)
+    assert room["quest"]["active"] is True
+    assert len(room["quest"]["questers"]) == 4
+    assert any("have been chosen" in line for line in messages)
+    assert all("quester" in player["achievements"] for player in room["players"].values())
+
+    first_jid = room["quest"]["questers"][0]
+    room["players"][first_jid]["unique_items"] = {"pair of boots": "The Boots of Silent Idling"}
+    before = int(room["players"][first_jid]["next"])
+    room["quest"]["complete_at"] = 999
+    messages.clear()
+    await idlerpg._maybe_run_quest(room, room_jid, messages)
+    assert room["quest"]["active"] is False
+    assert room["players"][first_jid]["next"] == int(before * 70 / 100)
+    assert "quest_hero" in room["players"][first_jid]["achievements"]
+    assert any("completed their quest" in line for line in messages)
+
+
+def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_path, monkeypatch):
+    room = idlerpg._blank_room()
+    room["players"] = {
+        "alice@envs.net": idlerpg._normalize_player(
+            "alice@envs.net",
+            {"name": "Alice", "level": 25, "next": 1000, "x": 300, "y": 200},
+        )
+    }
+    idlerpg._record_event(room, "level", "Alice reached level 25", players=["Alice"])
+
+    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://example.org/idlerpg/data")
+    summary = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
+    assert summary["leaderboard_url"].endswith("/room_at_conf/leaderboard.json")
+
+    import json
+    room_payload = json.loads((tmp_path / "room_at_conf" / "room.json").read_text())
+    assert room_payload["achievement_catalog"] == idlerpg._achievement_catalog()
+    assert room_payload["map"] == {"width": idlerpg.MAP_X, "height": idlerpg.MAP_Y}
+    assert room_payload["events"][0]["players"] == ["Alice"]
+    assert "jid" not in room_payload["players"][0]
+
+
+@pytest.mark.asyncio
+async def test_stats_command_is_primary_and_balance_alias_still_works():
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["stats"], msg, True)
+    assert "IdleRPG stats" in bot.replies[-1][0]
+    assert "Average level" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["balance"], msg, True)
+    assert "IdleRPG stats" in bot.replies[-1][0]
+    assert "balance" not in idlerpg._usage(bot)
