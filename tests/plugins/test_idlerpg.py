@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import types
 
 import pytest
@@ -140,6 +141,11 @@ async def test_enabled_is_room_feature_status_and_status_stays_player_status(mon
     await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["enabled"], admin_pm, False)
     assert "IdleRPG is **enabled**" in bot.replies[-1][0]
 
+    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY]["room@conf"] = False
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["enabled"], admin_pm, False)
+    assert "IdleRPG is **disabled**" in bot.replies[-1][0]
+    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY]["room@conf"] = True
+
     public_msg = DummyMsg()
     await idlerpg.idlerpg_command(
         bot,
@@ -278,6 +284,128 @@ def test_duration_clock_and_next_level_line():
     assert idlerpg._next_level_line(player) == "Alice reaches next level in 1 days, 02:03:04."
 
 
+def test_idlerpg_small_helper_edges(monkeypatch):
+    bot = types.SimpleNamespace(prefix="!")
+    assert idlerpg._command_prefix(bot) == "!"
+    assert idlerpg._command_prefix(types.SimpleNamespace(prefix="")) == ","
+    assert idlerpg._possessive("Chris") == "Chris'"
+    assert idlerpg._possessive("Alice") == "Alice's"
+    assert idlerpg._duration(None) == "0s"
+    assert idlerpg._duration(90061) == "1d 1h 1m 1s"
+    assert idlerpg._add_time({"next": -5}, -10) == 0
+    player = {"next": 5}
+    assert idlerpg._remove_time(player, 10) == 5
+    assert player["next"] == 0
+    assert idlerpg._safe_name(" Alice !@#_-. 123 ") == "Alice_-.123"
+    assert idlerpg._safe_class("sys\n\tadmin   ops") == "sysadmin ops"
+    assert idlerpg._ttl_for_level(-10) == idlerpg._ttl_for_level(0)
+    monkeypatch.setattr(idlerpg, "MAX_PENALTY", 10)
+    assert idlerpg._penalty_for(50, 100) == 10
+
+
+def test_idlerpg_player_normalization_and_lookup_edges(monkeypatch):
+    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: stop)
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice!",
+            "class": "sys\nadmin",
+            "level": "bad",
+            "next": "bad",
+            "alignment": "x",
+            "items": {"weapon": "bad", "shield": 3},
+            "unique_items": {"weapon": "The Great Hammer of /bin/sh", "bad": "ignored"},
+            "stats": {"wins": "bad", "losses": -5},
+            "achievements": "bad",
+            "title": "level_10",
+            "x": 9999,
+            "y": 9999,
+        },
+    )
+    assert player["name"] == "Alice"
+    assert player["class"] == "sysadmin"
+    assert player["level"] == 0
+    assert player["next"] == idlerpg._ttl_for_level(0)
+    assert player["alignment"] == "n"
+    assert player["items"]["weapon"] == 0
+    assert player["items"]["shield"] == 3
+    assert player["unique_items"] == {"weapon": "The Great Hammer of /bin/sh"}
+    assert player["stats"] == {"wins": 0, "losses": 0}
+    assert player["achievements"] == []
+    assert player["title"] == ""
+    assert 0 <= player["x"] <= idlerpg.MAP_X
+    assert 0 <= player["y"] <= idlerpg.MAP_Y
+
+    room = {
+        "players": {"alice@envs.net": player, "bad@envs.net": "not-a-player"},
+        "name_index": {},
+    }
+    assert idlerpg._rebuild_name_index(room) == {"alice": "alice@envs.net"}
+    assert idlerpg._find_player(room, None) == (None, None)
+    assert idlerpg._find_player(room, "alice@envs.net") == ("alice@envs.net", player)
+    assert idlerpg._find_player(room, "Alice") == ("alice@envs.net", player)
+    assert idlerpg._find_player(room, "missing") == (None, None)
+
+
+def test_idlerpg_achievements_titles_stats_and_regions():
+    player = {
+        "level": 100,
+        "idled": 604800,
+        "items": {item: 100 for item in idlerpg.ITEMS},
+        "stats": {
+            "battles_won": 10,
+            "team_battles_won": 5,
+            "quests_completed": 3,
+            "godsends": 10,
+            "calamities": 10,
+            "bad": "nope",
+        },
+        "unique_items": {
+            "weapon": "The Great Hammer of /bin/sh",
+            "shield": "The Ancient Shell of envs.net",
+            "tunic": "The Cluehammer of Good Documentation",
+        },
+    }
+    assert idlerpg._award(player, "does-not-exist") is False
+    assert idlerpg._award(player, "founder") is True
+    assert idlerpg._award(player, "founder") is False
+    idlerpg._check_level_achievements(player)
+    for achievement in [
+        "level_10",
+        "level_25",
+        "level_50",
+        "level_75",
+        "level_100",
+        "silent_24h",
+        "silent_week",
+        "collector",
+        "hoarder",
+        "battle_scarred",
+        "team_veteran",
+        "quest_walker",
+        "very_lucky",
+        "the_unlucky", "artifact_finder",
+    ]:
+        assert achievement in player["achievements"]
+    assert idlerpg._stats(player)["bad"] == 0
+    idlerpg._inc_stat(player, "battles_won", -99)
+    assert idlerpg._stats(player)["battles_won"] == 0
+    player["title"] = "level_100"
+    assert idlerpg._display_title(player) == "Mythic Idler"
+    assert (
+        idlerpg._display_character(
+            {"name": "Alice", "title": "level_100", "achievements": ["level_100"]}
+        )
+        == "Alice, Mythic Idler"
+    )
+    assert idlerpg._achievement_description("missing") == ""
+    assert idlerpg._map_region_name("bad", 1) == "the wilderness"
+    assert idlerpg._player_region({"x": 300, "y": 230}) == "Velbragh"
+    assert idlerpg._room_slug("idlerpg@conference.envs.net") == "idlerpg_at_conference.envs.net"
+    assert idlerpg._slug("***") == "idlerpg"
+    assert idlerpg._season_duration_seconds() == max(0, idlerpg.SEASON_DURATION_DAYS * 86400)
+
+
 def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
     alice = idlerpg._normalize_player(
         "alice@envs.net",
@@ -294,7 +422,7 @@ def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
 
     monkeypatch.setattr(idlerpg.random, "choice", choice)
     monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
-    randint_values = iter([999, 0, 120, 30])
+    randint_values = itertools.cycle([999, 0, 120, 30])
     monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
 
     messages = []
@@ -523,7 +651,7 @@ def test_team_battle_changes_clocks_and_awards(monkeypatch):
         players.append((jid, player))
 
     monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: seq[:count])
-    randint_values = iter([9999, 0])
+    randint_values = itertools.cycle([9999, 0])
     monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
 
     messages = []
