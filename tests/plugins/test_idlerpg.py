@@ -422,8 +422,12 @@ def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
 
     monkeypatch.setattr(idlerpg.random, "choice", choice)
     monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
-    randint_values = itertools.cycle([999, 0, 120, 30])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
+    battle_randint_values = iter([999, 0, 120, 30])
+    monkeypatch.setattr(
+        idlerpg.random,
+        "randint",
+        lambda _start, _stop: next(battle_randint_values),
+    )
 
     messages = []
     idlerpg._run_pvp_battle(players, messages)
