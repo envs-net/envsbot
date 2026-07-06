@@ -1338,6 +1338,28 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
     assert idlerpg._topic_text(room, custom_text="CustomText").startswith("CustomText #1")
 
 
+def test_normalize_player_does_not_bypass_season_achievement_gates(monkeypatch):
+    now = 2_000_000_000
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "fresh", "started_at": now, "ends_at": 0}
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 75, "next": 1000},
+    )
+
+    assert "level_50" not in player["achievements"]
+    assert "level_75" not in player["achievements"]
+
+    idlerpg._check_level_achievements(player, room)
+    assert "level_50" not in player["achievements"]
+
+    room["season"]["started_at"] = now - 8 * 86400
+    idlerpg._check_level_achievements(player, room)
+    assert "level_50" in player["achievements"]
+    assert "level_75" in player["achievements"]
+
+
 @pytest.mark.asyncio
 async def test_login_announcement_and_manual_top_command(monkeypatch):
     bot = DummyBot()

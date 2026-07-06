@@ -835,7 +835,6 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         "y": int(player.get("y", random.randint(0, MAP_Y)) or 0),
         "logged_out": bool(player.get("logged_out", False)),
     })
-    _check_level_achievements(player)
     if player["alignment"] not in {"g", "n", "e"}:
         player["alignment"] = "n"
     player["x"] %= max(1, MAP_X + 1)
@@ -1698,7 +1697,7 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
         player["next"] = max(0, int(player.get("next", 0)) - delta)
         player["idled"] = int(player.get("idled", 0)) + delta
         player["last_seen"] = now
-        _check_level_achievements(player)
+        _check_level_achievements(player, room)
         _move_player(player, movement_steps)
         leveled = False
         while int(player.get("next", 0)) <= 0:
@@ -1706,7 +1705,7 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
             player["next"] = int(player.get("next", 0)) + _ttl_for_level(player["level"])
             leveled = True
         if leveled:
-            _check_level_achievements(player)
+            _check_level_achievements(player, room)
             messages.append(
                 f"🏆 {_display_character(player)} has reached level {player['level']}! "
                 f"Next level in {_duration_clock(player['next'])}."
@@ -2893,6 +2892,7 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
             return True
         player["level"] = max(0, int(args[2]))
         player["next"] = _ttl_for_level(player["level"])
+        _check_level_achievements(player, room)
         text = f"✅ Set {name} to level {player['level']}. " + _next_level_line(player)
     elif subcmd == "reset":
         player["level"] = 0
