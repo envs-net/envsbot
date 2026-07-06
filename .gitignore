@@ -8,7 +8,7 @@ tmp/
 .ruff_cache/
 .coverage
 config.json
-config.py
+./config.py
 vcard.py
 delete_vcard.py
 profile_hash.asc

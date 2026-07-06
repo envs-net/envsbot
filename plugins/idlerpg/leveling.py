@@ -1,0 +1,209 @@
+"""Split module for plugins/idlerpg.py: leveling."""
+
+from __future__ import annotations
+import asyncio
+import json
+import logging
+import random
+import re
+import time
+from pathlib import Path
+from functools import partial
+from typing import Any
+from utils.audit import audit_event
+from utils.command import Role, command
+from utils.config import BASE_DIR, config
+from utils.formatting import format_page, parse_page_args
+from utils.task_supervisor import create_plugin_task
+from core_plugins import _core
+from core_plugins.rooms import JOINED_ROOMS
+
+
+def _add_time(player: dict[str, Any], amount: int | float) -> int:
+    amount = max(0, int(amount or 0))
+    player["next"] = max(0, int(player.get("next", 0) or 0)) + amount
+    return amount
+
+
+def _remove_time(player: dict[str, Any], amount: int | float) -> int:
+    amount = max(0, int(amount or 0))
+    current = max(0, int(player.get("next", 0) or 0))
+    removed = min(current, amount)
+    player["next"] = current - removed
+    return removed
+
+
+def _ttl_for_level(level: int) -> int:
+    return max(1, int(RP_BASE * (RP_STEP ** max(0, int(level)))))
+
+
+def _penalty_for(level: int, base: int) -> int:
+    value = max(0, int(base * (PENALTY_STEP ** max(0, int(level)))))
+    if MAX_PENALTY and value > MAX_PENALTY:
+        return MAX_PENALTY
+    return value
+
+
+def _penalty_amount_for(player: dict[str, Any], base: int, reason: str) -> int:
+    amount = _penalty_for(int(player.get("level", 0)), base)
+    if reason == "message":
+        amount = _adjust_percent_amount(amount, player, "message_penalty_reduction")
+    elif reason == "logout":
+        amount = _adjust_percent_amount(amount, player, "logout_penalty_reduction")
+    return amount
+
+
+def _stats(player: dict[str, Any]) -> dict[str, int]:
+    stats = player.get("stats")
+    if not isinstance(stats, dict):
+        stats = {}
+        player["stats"] = stats
+    cleaned: dict[str, int] = {}
+    for key, value in stats.items():
+        try:
+            cleaned[str(key)] = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            cleaned[str(key)] = 0
+    player["stats"] = cleaned
+    return cleaned
+
+
+def _inc_stat(player: dict[str, Any], key: str, amount: int = 1) -> None:
+    stats = _stats(player)
+    stats[key] = max(0, int(stats.get(key, 0) or 0) + int(amount or 0))
+    _check_level_achievements(player)
+
+
+def _achievement_catalog() -> list[dict[str, str]]:
+    return [
+        {"key": key, "title": title, "description": description}
+        for key, (title, description) in sorted(ACHIEVEMENTS.items())
+    ]
+
+
+def _season_gate_passed(room: dict[str, Any] | None, required_days: int) -> bool:
+    if room is None or not SEASON_ACHIEVEMENT_GATES_ENABLED or required_days <= 0:
+        return True
+    return _season_age_days(room) >= required_days
+
+
+def _award(player: dict[str, Any], achievement: str) -> bool:
+    if achievement not in ACHIEVEMENTS:
+        return False
+    current = player.setdefault("achievements", [])
+    if not isinstance(current, list):
+        current = []
+        player["achievements"] = current
+    if achievement in current:
+        return False
+    current.append(achievement)
+    current.sort()
+    return True
+
+
+def _achievement_title(achievement: str) -> str:
+    return ACHIEVEMENTS.get(achievement, (achievement, ""))[0]
+
+
+def _achievement_description(achievement: str) -> str:
+    return ACHIEVEMENTS.get(achievement, (achievement, ""))[1]
+
+
+def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | None = None) -> None:
+    level = int(player.get("level", 0) or 0)
+    if level >= 10:
+        _award(player, "level_10")
+    if level >= 25:
+        _award(player, "level_25")
+    if level >= 50 and _season_gate_passed(room, 3):
+        _award(player, "level_50")
+        _award(player, "level_reward_50")
+    if level >= 75 and _season_gate_passed(room, 7):
+        _award(player, "level_75")
+        _award(player, "level_reward_75")
+    if level >= 100 and _season_gate_passed(room, 14):
+        _award(player, "level_100")
+    idled = int(player.get("idled", 0) or 0)
+    if idled >= 86400:
+        _award(player, "silent_24h")
+    if idled >= 3 * 86400 and _season_gate_passed(room, 3):
+        _award(player, "season_day_3")
+    if idled >= 604800 and _season_gate_passed(room, 7):
+        _award(player, "silent_week")
+        _award(player, "season_week_1")
+    item_sum = _item_sum(player)
+    if item_sum >= 100:
+        _award(player, "collector")
+    if item_sum >= 500:
+        _award(player, "hoarder")
+    stats = _stats(player)
+    if stats.get("battles_won", 0) >= 10:
+        _award(player, "battle_scarred")
+    if stats.get("team_battles_won", 0) >= 5:
+        _award(player, "team_veteran")
+    if stats.get("quests_completed", 0) >= 3 and _season_gate_passed(room, 7):
+        _award(player, "quest_walker")
+    if stats.get("godsends", 0) >= 10:
+        _award(player, "very_lucky")
+    if stats.get("calamities", 0) >= 10:
+        _award(player, "the_unlucky")
+    unique_items = player.get("unique_items", {})
+    if isinstance(unique_items, dict) and len(unique_items) >= 3:
+        _award(player, "artifact_finder")
+
+
+def _apply_logout_penalty(player: dict[str, Any]) -> int:
+    changed = _add_time(player, _penalty_amount_for(player, LOGOUT_PENALTY, "logout"))
+    penalties = player.setdefault("penalties", {})
+    penalties["logout"] = int(penalties.get("logout", 0) or 0) + changed
+    player["pending_logout_penalty"] = {}
+    _inc_stat(player, "logouts", 1)
+    return changed
+
+
+def _maybe_apply_pending_logout_penalty(player: dict[str, Any], messages: list[str]) -> None:
+    pending = player.get("pending_logout_penalty")
+    if not isinstance(pending, dict) or not pending:
+        return
+    due_at = int(pending.get("due_at", 0) or 0)
+    if due_at > _now():
+        return
+    changed = _apply_logout_penalty(player)
+    name = _display_player(player)
+    messages.append(
+        f"👋 {name} stayed logged out past the grace period. "
+        f"{_duration_clock(changed)} is added to {_possessive(name)} clock."
+    )
+    messages.append(_next_level_line(player))
+
+
+async def _penalize_player(
+    bot,
+    room_jid: str,
+    jid: str,
+    reason: str,
+    amount: int,
+    *,
+    announce: bool = False,
+) -> int:
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    _player_jid, player = _find_player(room, jid)
+    if not player:
+        return 0
+    player = _normalize_player(jid, player)
+    penalty = _penalty_amount_for(player, amount, reason)
+    changed = _add_time(player, penalty)
+    penalties = player.setdefault("penalties", {})
+    penalties[reason] = int(penalties.get(reason, 0) or 0) + changed
+    if reason == "message":
+        _inc_stat(player, "messages", 1)
+    await _set_data(bot, data)
+    if announce and changed:
+        _system_reply(
+            bot,
+            room_jid,
+            f"⏳ {_display_player(player)} is penalized {_duration_clock(changed)} for {reason}. "
+            + _next_level_line(player),
+        )
+    return changed
