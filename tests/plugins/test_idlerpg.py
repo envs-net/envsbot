@@ -129,7 +129,7 @@ async def test_register_status_and_lists():
 
 
 @pytest.mark.asyncio
-async def test_enabled_is_room_feature_status_and_status_stays_player_status(monkeypatch):
+async def test_enabled_shows_room_feature_state(monkeypatch):
     bot = DummyBot()
 
     async def noop_sync(_bot):
@@ -144,8 +144,11 @@ async def test_enabled_is_room_feature_status_and_status_stays_player_status(mon
     bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY]["room@conf"] = False
     await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["enabled"], admin_pm, False)
     assert "IdleRPG is **disabled**" in bot.replies[-1][0]
-    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY]["room@conf"] = True
 
+
+@pytest.mark.asyncio
+async def test_status_returns_player_status():
+    bot = DummyBot()
     public_msg = DummyMsg()
     await idlerpg.idlerpg_command(
         bot,
@@ -254,7 +257,9 @@ async def test_quest_and_runtime_state(monkeypatch):
     bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = data
     monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
 
-    await idlerpg._maybe_run_quest(room, "room@conf", messages := [])
+    messages = []
+
+    await idlerpg._maybe_run_quest(room, "room@conf", messages)
     assert room["quest"]["active"] is True
     assert messages
 
@@ -482,14 +487,7 @@ def test_godsend_calamity_and_alignment_bonus_messages(monkeypatch):
     assert "7% of their time is removed" in alignment_messages[0]
     assert any("Bob reaches next level in" in line for line in alignment_messages)
 
-@pytest.mark.asyncio
-async def test_profile_achievements_title_map_and_export(tmp_path, monkeypatch):
-    bot = DummyBot()
-    msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
-    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
-    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
-
+async def _register_alice(bot, msg):
     await idlerpg._handle_register(
         bot,
         "alice@envs.net",
@@ -498,22 +496,70 @@ async def test_profile_achievements_title_map_and_export(tmp_path, monkeypatch):
         True,
     )
 
+
+@pytest.mark.asyncio
+async def test_achievements_command_shows_founder():
+    bot = DummyBot()
+    msg = DummyMsg()
+    await _register_alice(bot, msg)
+
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["achievements"], msg, True)
+
     assert "Founder" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_title_command_sets_founder():
+    bot = DummyBot()
+    msg = DummyMsg()
+    await _register_alice(bot, msg)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["title", "founder"], msg, True)
+
     assert "Founder" in bot.replies[-1][0]
 
+
+@pytest.mark.asyncio
+async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+    await _register_alice(bot, msg)
+
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["profile"], msg, True)
+
     assert "Profile: Alice" in bot.replies[-1][0]
     assert "Profile JSON: https://envs.net/idlerpg/room_at_conf/profiles/Alice.json" in bot.replies[-1][0]
 
+
+@pytest.mark.asyncio
+async def test_map_command_includes_public_json(tmp_path, monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+    await _register_alice(bot, msg)
+
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["map"], msg, True)
+
     assert "IdleRPG map for room@conf" in bot.replies[-1][0]
     assert "Map JSON: https://envs.net/idlerpg/room_at_conf/map.json" in bot.replies[-1][0]
 
+
+@pytest.mark.asyncio
+async def test_export_command_writes_public_files(tmp_path, monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+    await _register_alice(bot, msg)
+
     admin_msg = DummyMsg(resource="Admin")
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["export"], admin_msg, True)
+
     assert (tmp_path / "index.json").exists()
     assert (tmp_path / "leaderboard.json").exists()
     assert (tmp_path / "room_at_conf" / "profiles" / "Alice.json").exists()
@@ -915,6 +961,11 @@ async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
     assert all("quester" in player["achievements"] for player in room["players"].values())
 
     first_jid = room["quest"]["questers"][0]
+    assert "quest_hero" not in room["players"][first_jid]["achievements"]
+    assert not any(
+        event.get("kind") == "quest" and "completed" in event.get("text", "").lower()
+        for event in room["events"]
+    )
     room["players"][first_jid]["unique_items"] = {"pair of boots": "The Boots of Silent Idling"}
     before = int(room["players"][first_jid]["next"])
     room["quest"]["complete_at"] = 999
