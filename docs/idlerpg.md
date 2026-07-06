@@ -142,7 +142,7 @@ The game loop can also trigger rare classic IdleRPG-style events:
 - calamities that add time to a player's timer
 - godsends that remove time from a player's timer
 - alignment bonuses that remove time for aligned players
-- optional periodic top-player announcements and topic updates
+- optional periodic top-player announcements and topic updates with configurable custom topic text
 
 Whenever an event changes a player's timer, the bot also prints the player's new
 time to next level. Example output:

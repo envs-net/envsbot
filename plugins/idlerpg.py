@@ -21,7 +21,7 @@ Commands:
     {prefix}idlerpg events [page|last|all]
     {prefix}idlerpg season [status|end|reset|extend [duration]|clear-end|hof]
     {prefix}idlerpg announce top
-    {prefix}idlerpg topic update
+    {prefix}idlerpg topic update [custom text]
     {prefix}idlerpg align <good|neutral|evil>
     {prefix}idlerpg quest
     {prefix}idlerpg remove-me
@@ -35,7 +35,7 @@ Admin commands:
     {prefix}idlerpg season extend [duration]
     {prefix}idlerpg season clear-end
     {prefix}idlerpg announce top
-    {prefix}idlerpg topic update
+    {prefix}idlerpg topic update [custom text]
 """
 
 from __future__ import annotations
@@ -205,6 +205,11 @@ UPDATE_ROOM_TOPIC = bool(
 TOPIC_UPDATE_INTERVAL = int(
     _cfg.get("topic_update_interval", config.get("idlerpg_topic_update_interval", 14400)) or 0
 )
+TOPIC_CUSTOM_TEXT = str(
+    _cfg.get("topic_custom_text", config.get("idlerpg_topic_custom_text", ""))
+    or EXPORT_PUBLIC_BASE_URL
+    or "IdleRPG"
+).strip()
 ITEM_DAMAGE_EVENT_WEIGHT = float(
     _cfg.get("item_damage_event_weight", config.get("idlerpg_item_damage_event_weight", 0.08)) or 0.08
 )
@@ -982,20 +987,29 @@ def _format_top_lines(room: dict[str, Any], *, limit: int | None = None) -> list
     return lines
 
 
-def _topic_text(room: dict[str, Any]) -> str:
+def _topic_text(room: dict[str, Any], custom_text: str | None = None) -> str:
     ranked = _ranked_players(room)[:3]
     top = "; ".join(
         f"#{rank}: {_display_character(player)}, lv. {player.get('level', 0)} {player.get('class', 'idler')}"
         for rank, (_jid, player) in enumerate(ranked, start=1)
     )
-    prefix = EXPORT_PUBLIC_BASE_URL or "IdleRPG"
+    prefix = (custom_text if custom_text is not None else TOPIC_CUSTOM_TEXT).strip()
+    if not prefix:
+        prefix = "IdleRPG"
     return f"{prefix} {top}" if top else str(prefix)
 
 
-def _maybe_set_room_topic(bot, room_jid: str, room: dict[str, Any]) -> None:
-    if not UPDATE_ROOM_TOPIC:
+def _maybe_set_room_topic(
+    bot,
+    room_jid: str,
+    room: dict[str, Any],
+    *,
+    custom_text: str | None = None,
+    force: bool = False,
+) -> None:
+    if not UPDATE_ROOM_TOPIC and not force:
         return
-    topic = _topic_text(room)[:250]
+    topic = _topic_text(room, custom_text=custom_text)[:250]
     xep_muc = getattr(bot, "plugin", {}).get("xep_0045") if isinstance(getattr(bot, "plugin", {}), dict) else None
     setter = getattr(xep_muc, "set_subject", None)
     try:
@@ -1226,6 +1240,7 @@ def _public_rules() -> dict[str, Any]:
         "announce_top_limit": ANNOUNCE_TOP_LIMIT,
         "update_room_topic": UPDATE_ROOM_TOPIC,
         "topic_update_interval": TOPIC_UPDATE_INTERVAL,
+        "topic_custom_text": TOPIC_CUSTOM_TEXT,
         "unique_items_enabled": UNIQUE_ITEMS_ENABLED,
         "unique_item_min_level": UNIQUE_ITEM_MIN_LEVEL,
         "unique_item_chance": UNIQUE_ITEM_CHANCE,
@@ -2638,7 +2653,7 @@ async def _handle_stats(bot, sender_jid: str, msg, is_room: bool) -> None:
         f"Logout grace: {_duration_clock(LOGOUT_GRACE_SECONDS)}",
         f"Login announcements: {'on' if ANNOUNCE_LOGIN else 'off'}",
         f"Top announcements: {_duration_clock(ANNOUNCE_TOP_INTERVAL) if ANNOUNCE_TOP_INTERVAL > 0 else 'off'}",
-        f"Topic updates: {'on' if UPDATE_ROOM_TOPIC else 'off'}",
+        f"Topic updates: {'on' if UPDATE_ROOM_TOPIC else 'off'} ({TOPIC_CUSTOM_TEXT})",
     ]
     _reply(bot, msg, "\n".join(lines))
 
@@ -2788,7 +2803,7 @@ async def _handle_announce_top(bot, sender_jid: str, msg, is_room: bool) -> None
     _reply(bot, msg, "✅ IdleRPG top players announced.")
 
 
-async def _handle_topic_update(bot, sender_jid: str, msg, is_room: bool) -> None:
+async def _handle_topic_update(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
     if not room_jid:
         _reply(bot, msg, "ℹ️ Topic updates are room-scoped. Use it from a game room or MUC PM.")
@@ -2798,10 +2813,12 @@ async def _handle_topic_update(bot, sender_jid: str, msg, is_room: bool) -> None
         return
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
-    _maybe_set_room_topic(bot, room_jid, room)
+    custom_text = " ".join(str(part) for part in args[2:]).strip() if len(args) > 2 else None
+    _maybe_set_room_topic(bot, room_jid, room, custom_text=custom_text, force=True)
     room["next_topic_update_at"] = _now() + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0
     await _set_data(bot, data)
-    _reply(bot, msg, "✅ IdleRPG room topic update requested.")
+    preview = _topic_text(room, custom_text=custom_text)[:250]
+    _reply(bot, msg, f"✅ IdleRPG room topic update requested: {preview}")
 
 async def _handle_export(bot, sender_jid: str, msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
@@ -2912,7 +2929,7 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg season extend [duration]  # room owners/admins\n"
         f"{prefix}idlerpg season clear-end  # room owners/admins\n"
         f"{prefix}idlerpg announce top  # room owners/admins\n"
-        f"{prefix}idlerpg topic update  # room owners/admins\n"
+        f"{prefix}idlerpg topic update [custom text]  # room owners/admins\n"
         f"{prefix}idlerpg events [page|last|all]\n"
         f"{prefix}idlerpg achievements list\n"
         f"{prefix}idlerpg stats  # room owners/admins\n"
@@ -2939,7 +2956,7 @@ def _usage(bot) -> str:
         "{prefix}idlerpg events",
         "{prefix}idlerpg stats",
         "{prefix}idlerpg announce top",
-        "{prefix}idlerpg topic update",
+        "{prefix}idlerpg topic update IdleRPG",
     ],
     category="fun",
     context="groupchat / MUC PM",
@@ -3010,7 +3027,7 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
     elif subcmd == "announce" and len(args) > 1 and args[1].lower() == "top":
         await _handle_announce_top(bot, sender, msg, is_room)
     elif subcmd == "topic" and len(args) > 1 and args[1].lower() == "update":
-        await _handle_topic_update(bot, sender, msg, is_room)
+        await _handle_topic_update(bot, sender, args, msg, is_room)
     elif subcmd == "align":
         await _handle_align(bot, sender, args, msg, is_room)
     elif subcmd == "quest":

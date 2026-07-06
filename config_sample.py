@@ -333,6 +333,10 @@ IDLERPG = {
     "announce_top_limit": 5,
     "update_room_topic": False,
     "topic_update_interval": 14400,
+    # Optional prefix for room topics. Result: "<topic_custom_text> #1: ..."
+    # If empty, export_public_base_url is used; otherwise "IdleRPG".
+    "topic_custom_text": "",
+
 
     # Level-gated reward badges and season-age achievement gates keep long-term
     # achievements from all appearing at the very start of a season.

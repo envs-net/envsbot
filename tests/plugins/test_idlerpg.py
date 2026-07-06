@@ -1335,6 +1335,7 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
     assert "level_reward_75" in alice["achievements"]
     assert idlerpg._format_top_lines(room, limit=2)[0] == "IdleRPG Top Players:"
     assert "#1" in idlerpg._topic_text(room)
+    assert idlerpg._topic_text(room, custom_text="CustomText").startswith("CustomText #1")
 
 
 @pytest.mark.asyncio
@@ -1360,10 +1361,22 @@ async def test_login_announcement_and_manual_top_command(monkeypatch):
     assert any("IdleRPG Top Players" in text for text, _kwargs in bot.replies)
     assert "announced" in bot.replies[-1][0]
 
+    bot.replies.clear()
+    await idlerpg.idlerpg_command(
+        bot,
+        "admin@envs.net",
+        "Admin",
+        ["topic", "update", "CustomText"],
+        admin_msg,
+        True,
+    )
+    assert "CustomText #1" in bot.replies[-1][0]
+
 
 def test_public_rules_include_new_options():
     rules = idlerpg._public_rules()
     assert rules["announce_login"] is True
+    assert rules["topic_custom_text"]
     assert "item_damage_event_weight" in rules
     assert "item_steal_event_weight" in rules
     assert "season_achievement_gates_enabled" in rules
