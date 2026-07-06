@@ -1,6 +1,7 @@
 from .helpers import *  # noqa: F401,F403
 
 
+@pytest.mark.asyncio
 async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
     bot = DummyBot()
     bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = {
@@ -37,6 +38,7 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
     assert await idlerpg._enabled_rooms(bot) == {}
 
 
+@pytest.mark.asyncio
 async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
     bot = DummyBot()
     started = 0
@@ -67,6 +69,7 @@ async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
     assert cancelled[-1] == "c@conf"
 
 
+@pytest.mark.asyncio
 async def test_on_muc_presence_starts_task_only_when_enabled(monkeypatch):
     bot = DummyBot()
     pres = DummyMsg(bare="room@conf", resource="Alice")

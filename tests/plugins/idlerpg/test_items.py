@@ -1,6 +1,7 @@
 from .helpers import *  # noqa: F401,F403
 
 
+@pytest.mark.asyncio
 async def test_tick_levels_up_and_can_show_items(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()

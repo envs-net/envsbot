@@ -1,6 +1,8 @@
 from .helpers import *  # noqa: F401,F403
+from .helpers import _register_alice
 
 
+@pytest.mark.asyncio
 async def test_register_status_and_lists():
     bot = DummyBot()
     msg = DummyMsg()
@@ -25,6 +27,7 @@ async def test_register_status_and_lists():
     assert "Alice" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_enabled_shows_room_feature_state(monkeypatch):
     bot = DummyBot()
 
@@ -42,6 +45,7 @@ async def test_enabled_shows_room_feature_state(monkeypatch):
     assert "IdleRPG is **disabled**" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_status_returns_player_status():
     bot = DummyBot()
     public_msg = DummyMsg()
@@ -61,6 +65,7 @@ async def test_status_returns_player_status():
     assert "level 0 sysadmin" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_message_penalty_and_logout_login(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -85,6 +90,7 @@ async def test_message_penalty_and_logout_login(monkeypatch):
     assert player["logged_out"] is False
 
 
+@pytest.mark.asyncio
 async def test_admin_push_setlevel_reset_delete():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -111,6 +117,7 @@ async def test_admin_push_setlevel_reset_delete():
     assert "alice@envs.net" not in room["players"]
 
 
+@pytest.mark.asyncio
 async def test_quest_and_runtime_state(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -228,6 +235,7 @@ def test_godsend_calamity_and_alignment_bonus_messages(monkeypatch):
     assert any("Bob reaches next level in" in line for line in alignment_messages)
 
 
+@pytest.mark.asyncio
 async def test_achievements_command_shows_founder():
     bot = DummyBot()
     msg = DummyMsg()
@@ -238,6 +246,7 @@ async def test_achievements_command_shows_founder():
     assert "Founder" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_title_command_sets_founder():
     bot = DummyBot()
     msg = DummyMsg()
@@ -248,6 +257,7 @@ async def test_title_command_sets_founder():
     assert "Founder" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -262,6 +272,7 @@ async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
     assert "Profile JSON: https://envs.net/idlerpg/room_at_conf/profiles/Alice.json" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_map_command_includes_public_json(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -276,6 +287,7 @@ async def test_map_command_includes_public_json(tmp_path, monkeypatch):
     assert "Map JSON: https://envs.net/idlerpg/room_at_conf/map.json" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_export_command_writes_public_files(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -291,6 +303,7 @@ async def test_export_command_writes_public_files(tmp_path, monkeypatch):
     assert (tmp_path / "room_at_conf" / "profiles" / "Alice.json").exists()
 
 
+@pytest.mark.asyncio
 async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -319,6 +332,7 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     assert "Alice" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_mutating_admin_commands_require_room_admin():
     bot = DummyBot()
     await idlerpg._handle_register(
@@ -375,6 +389,7 @@ def test_season_rollover_and_player_movement(monkeypatch):
     assert (player["x"], player["y"]) != old_pos
 
 
+@pytest.mark.asyncio
 async def test_events_export_has_no_raw_jids_and_events_command(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -423,6 +438,7 @@ def test_unique_item_roll_grants_title_and_public_record(monkeypatch):
     assert public["unique_items"]["shield"] == "The Ancient Shell of envs.net"
 
 
+@pytest.mark.asyncio
 async def test_logout_grace_clears_pending_penalty(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -493,6 +509,7 @@ def test_unique_item_bonuses_and_achievement_catalog_export(tmp_path, monkeypatc
     assert (tmp_path / "room_at_conf" / "achievements.json").exists()
 
 
+@pytest.mark.asyncio
 async def test_stats_command_admin_only():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -549,6 +566,7 @@ def test_event_retention_sanitizes_and_limits(monkeypatch):
     assert [event["text"] for event in idlerpg._room_events(room)] == ["kept"]
 
 
+@pytest.mark.asyncio
 async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
     room = idlerpg._blank_room()
     room_jid = "room@conf"
@@ -626,6 +644,7 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
     assert "jid" not in room_payload["players"][0]
 
 
+@pytest.mark.asyncio
 async def test_stats_command_is_primary_and_balance_alias_still_works():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -690,6 +709,7 @@ def test_pending_logout_penalty_waits_then_applies(monkeypatch):
     assert any("reaches next level" in line for line in messages)
 
 
+@pytest.mark.asyncio
 async def test_align_command_usage_missing_character_and_success():
     bot = DummyBot()
     room_msg = DummyMsg()
@@ -718,6 +738,7 @@ async def test_align_command_usage_missing_character_and_success():
     assert "now good" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_remove_me_command_room_scope_missing_and_success():
     bot = DummyBot()
     room_msg = DummyMsg()
@@ -744,6 +765,7 @@ async def test_remove_me_command_room_scope_missing_and_success():
     assert "character Alice removed" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_on_load_registers_message_and_presence_handlers():
     registered = []
     bot = DummyBot()
@@ -760,6 +782,7 @@ async def test_on_load_registers_message_and_presence_handlers():
     assert all(callable(entry[2]) for entry in registered)
 
 
+@pytest.mark.asyncio
 async def test_hof_clear_requires_confirmation_and_admin():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -788,6 +811,7 @@ async def test_hof_clear_requires_confirmation_and_admin():
     assert room["hall_of_fame"] == []
 
 
+@pytest.mark.asyncio
 async def test_season_extend_and_clear_end(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -821,6 +845,7 @@ async def test_season_extend_and_clear_end(monkeypatch):
     assert "ends in manual" in bot.replies[-1][0]
 
 
+@pytest.mark.asyncio
 async def test_season_extend_uses_config_or_manual(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -848,6 +873,7 @@ async def test_season_extend_uses_config_or_manual(monkeypatch):
     assert int(room["season"]["ends_at"]) == 0
 
 
+@pytest.mark.asyncio
 async def test_season_hof_clear_confirm_alias_path():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
@@ -926,6 +952,7 @@ def test_normalize_player_does_not_bypass_season_achievement_gates(monkeypatch):
     assert "level_75" in player["achievements"]
 
 
+@pytest.mark.asyncio
 async def test_login_announcement_and_manual_top_command(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()

@@ -1,6 +1,7 @@
 from .helpers import *  # noqa: F401,F403
 
 
+@pytest.mark.asyncio
 async def test_cleanup_room_state_removes_data_and_task():
     bot = DummyBot()
     bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {"rooms": {"room@conf": idlerpg._blank_room()}}
