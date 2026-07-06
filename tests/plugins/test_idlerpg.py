@@ -1298,3 +1298,72 @@ async def test_season_hof_clear_confirm_alias_path():
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "hof", "clear", "confirm"], msg, True)
     assert "Hall of Fame cleared" in bot.replies[-1][0]
     assert room["hall_of_fame"] == []
+
+
+def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
+    room = idlerpg._blank_room()
+    now = 2_000_000_000
+    room["season"] = {"id": "s", "started_at": now - 8 * 86400, "ends_at": 0}
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "wizard", "level": 75, "next": 1000, "items": {"weapon": 10}},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "class": "fighter", "level": 60, "next": 2000, "items": {"weapon": 30}},
+    )
+    room["players"] = {"alice@envs.net": alice, "bob@envs.net": bob}
+    players = [("alice@envs.net", alice), ("bob@envs.net", bob)]
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+
+    messages: list[str] = []
+    idlerpg._run_item_damage(players, messages)
+    assert alice["items"]["weapon"] == 9
+    assert "item_damaged" in alice["achievements"]
+    assert any("damaged their weapon" in line for line in messages)
+
+    messages.clear()
+    idlerpg._run_item_swap(players, messages)
+    assert alice["items"]["weapon"] == 30
+    assert bob["items"]["weapon"] == 9
+    assert "item_swapped" in alice["achievements"]
+    assert any("leaves their old level" in line for line in messages)
+
+    idlerpg._check_level_achievements(alice, room)
+    assert "level_reward_50" in alice["achievements"]
+    assert "level_reward_75" in alice["achievements"]
+    assert idlerpg._format_top_lines(room, limit=2)[0] == "IdleRPG Top Players:"
+    assert "#1" in idlerpg._topic_text(room)
+
+
+@pytest.mark.asyncio
+async def test_login_announcement_and_manual_top_command(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "ANNOUNCE_LOGIN", True)
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "wizard"],
+        msg,
+        True,
+    )
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["logout"], msg, True)
+    bot.replies.clear()
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["login"], msg, True)
+    assert any("is now online from nickname" in text for text, _kwargs in bot.replies)
+
+    admin_msg = DummyMsg(resource="Admin")
+    bot.replies.clear()
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["announce", "top"], admin_msg, True)
+    assert any("IdleRPG Top Players" in text for text, _kwargs in bot.replies)
+    assert "announced" in bot.replies[-1][0]
+
+
+def test_public_rules_include_new_options():
+    rules = idlerpg._public_rules()
+    assert rules["announce_login"] is True
+    assert "item_damage_event_weight" in rules
+    assert "item_steal_event_weight" in rules
+    assert "season_achievement_gates_enabled" in rules

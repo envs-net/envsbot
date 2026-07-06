@@ -298,6 +298,8 @@ IDLERPG = {
     "battle_event_weight": 0.55,
     "team_battle_event_weight": 0.08,
     "item_event_weight": 0.15,
+    "item_damage_event_weight": 0.08,
+    "item_steal_event_weight": 0.04,
     "alignment_event_weight": 0.10,
     "critical_strike_chance": 0.10,
     "item_drop_chance": 0.12,
@@ -322,6 +324,20 @@ IDLERPG = {
     "unique_items_enabled": True,
     "unique_item_min_level": 25,
     "unique_item_chance": 0.025,
+
+    # Announcements and optional room topic integration. Login announcements
+    # default to True to make the game feel alive. Topic updates are disabled
+    # by default because not every MUC wants bots to change subjects.
+    "announce_login": True,
+    "announce_top_interval": 21600,
+    "announce_top_limit": 5,
+    "update_room_topic": False,
+    "topic_update_interval": 14400,
+
+    # Level-gated reward badges and season-age achievement gates keep long-term
+    # achievements from all appearing at the very start of a season.
+    "level_reward_min_level": 50,
+    "season_achievement_gates_enabled": True,
 
     # Event log retained in bot state and exported for the website.
     "event_log_limit": 200,

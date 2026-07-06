@@ -1324,6 +1324,8 @@ Examples:
 - `,idlerpg season extend 30d`
 - `,idlerpg season clear-end`
 - `,idlerpg hof clear confirm`
+- `,idlerpg announce top`
+- `,idlerpg topic update`
 
 ### info
 

@@ -20,6 +20,8 @@ Commands:
     {prefix}idlerpg hof [clear confirm]
     {prefix}idlerpg events [page|last|all]
     {prefix}idlerpg season [status|end|reset|extend [duration]|clear-end|hof]
+    {prefix}idlerpg announce top
+    {prefix}idlerpg topic update
     {prefix}idlerpg align <good|neutral|evil>
     {prefix}idlerpg quest
     {prefix}idlerpg remove-me
@@ -32,6 +34,8 @@ Admin commands:
     {prefix}idlerpg hof clear confirm
     {prefix}idlerpg season extend [duration]
     {prefix}idlerpg season clear-end
+    {prefix}idlerpg announce top
+    {prefix}idlerpg topic update
 """
 
 from __future__ import annotations
@@ -188,6 +192,31 @@ MAP_STEP_PER_TICK = int(_cfg.get("map_step_per_tick", config.get("idlerpg_map_st
 COUNT_COMMAND_MESSAGES = bool(
     _cfg.get("count_command_messages", config.get("idlerpg_count_command_messages", False))
 )
+ANNOUNCE_LOGIN = bool(_cfg.get("announce_login", config.get("idlerpg_announce_login", True)))
+ANNOUNCE_TOP_INTERVAL = int(
+    _cfg.get("announce_top_interval", config.get("idlerpg_announce_top_interval", 21600)) or 0
+)
+ANNOUNCE_TOP_LIMIT = int(
+    _cfg.get("announce_top_limit", config.get("idlerpg_announce_top_limit", 5)) or 5
+)
+UPDATE_ROOM_TOPIC = bool(
+    _cfg.get("update_room_topic", config.get("idlerpg_update_room_topic", False))
+)
+TOPIC_UPDATE_INTERVAL = int(
+    _cfg.get("topic_update_interval", config.get("idlerpg_topic_update_interval", 14400)) or 0
+)
+ITEM_DAMAGE_EVENT_WEIGHT = float(
+    _cfg.get("item_damage_event_weight", config.get("idlerpg_item_damage_event_weight", 0.08)) or 0.08
+)
+ITEM_STEAL_EVENT_WEIGHT = float(
+    _cfg.get("item_steal_event_weight", config.get("idlerpg_item_steal_event_weight", 0.04)) or 0.04
+)
+LEVEL_REWARD_MIN_LEVEL = int(
+    _cfg.get("level_reward_min_level", config.get("idlerpg_level_reward_min_level", 50)) or 50
+)
+SEASON_ACHIEVEMENT_GATES_ENABLED = bool(
+    _cfg.get("season_achievement_gates_enabled", config.get("idlerpg_season_achievement_gates_enabled", True))
+)
 
 ROOM_TASKS: dict[str, asyncio.Task] = {}
 
@@ -195,11 +224,15 @@ ACHIEVEMENTS = {
     "founder": ("Founder", "registered an IdleRPG character"),
     "silent_24h": ("Silent Idler", "stayed online and idle for 24 hours"),
     "silent_week": ("Ancient Patience", "stayed online and idle for 7 days"),
+    "season_day_3": ("Season Settler", "stayed active for at least 3 season days"),
+    "season_week_1": ("Season Regular", "stayed active for at least 7 season days"),
     "level_10": ("Novice Idler", "reached level 10"),
     "level_25": ("Seasoned Idler", "reached level 25"),
     "level_50": ("Ancient Idler", "reached level 50"),
     "level_75": ("Legendary Idler", "reached level 75"),
     "level_100": ("Mythic Idler", "reached level 100"),
+    "level_reward_50": ("Cloaked Traveler", "unlocked the level 50 reward badge"),
+    "level_reward_75": ("Rare Title Bearer", "unlocked the level 75 rare title pool"),
     "battle_winner": ("Duelist", "won a random battle"),
     "battle_scarred": ("Battle Scarred", "won 10 random battles"),
     "critical_striker": ("Critical Striker", "landed a critical strike"),
@@ -207,6 +240,9 @@ ACHIEVEMENTS = {
     "team_veteran": ("Team Veteran", "won 5 team battles"),
     "unique_item": ("Relic Finder", "found a unique item"),
     "artifact_finder": ("Artifact Finder", "found 3 unique items"),
+    "item_blessed": ("Blessed Gear", "had an item blessed"),
+    "item_damaged": ("Dented Gear", "had an item damaged"),
+    "item_swapped": ("Light Fingers", "won a fair item swap"),
     "quester": ("Quest Chosen", "was chosen for a quest"),
     "quest_hero": ("Quest Hero", "completed a quest"),
     "quest_walker": ("Quest Walker", "completed 3 quests"),
@@ -214,9 +250,11 @@ ACHIEVEMENTS = {
     "very_lucky": ("Favoured by the RNG", "received 10 godsends"),
     "unlucky": ("Cursed", "suffered a calamity"),
     "the_unlucky": ("The Unlucky", "suffered 10 calamities"),
+    "alignment_blessed": ("Aligned", "benefited from an alignment group event"),
     "collector": ("Collector", "collected at least 100 total item levels"),
     "hoarder": ("Hoarder", "collected at least 500 total item levels"),
 }
+
 
 ITEMS = (
     "ring",
@@ -262,6 +300,20 @@ CALAMITIES = (
     "got lost in the woods",
     "walked face-first into a tree",
     "was caught in a terrible snowstorm",
+    "was bitten by a moose",
+    "lost their glasses",
+    "misplaced their map",
+    "was bucked from a horse",
+    "ate a plate of discounted, day-old sushi",
+    "bit their tongue",
+    "was tipped by a cow",
+    "was caught in quicksand",
+    "was chased by angry bees",
+    "dropped their lucky coin into a well",
+    "was cursed by a wandering oracle",
+    "fell asleep in a haunted forest",
+    "angered a jealous goblin",
+    "was trapped in a sudden hailstorm",
 )
 
 GODSENDS = (
@@ -272,6 +324,20 @@ GODSENDS = (
     "drank from a magic stream",
     "found a faster pair of boots",
     "caught a unicorn",
+    "invented the wheel",
+    "discovered caffeinated coffee",
+    "found a kitten",
+    "stopped using dial-up",
+    "found an exploit in the IRPG code",
+    "got a kiss from a mysterious stranger",
+    "was blessed by a passing cleric",
+    "found a pair of Nikes",
+    "learned Python",
+    "grew an extra leg",
+    "found a shimmering shortcut",
+    "was carried by a friendly giant eagle",
+    "received a lucky charm from a travelling merchant",
+    "found a hidden cache of golden apples",
 )
 
 QUEST_TEXTS = (
@@ -281,6 +347,12 @@ QUEST_TEXTS = (
     "destroy the bandits terrorizing the mountain roads",
     "map the dark lands beyond the eastern hills",
     "return the stolen relics to the city temple",
+    "learn the ancient magick of the tribe of pygmie people",
+    "carry the silver lantern through the valley of echoes",
+    "recover the crown from the sleeping dragon",
+    "escort a wandering sage across the haunted marshes",
+    "decode the riddle carved into the black obelisk",
+    "retrieve the lost banner from the broken tower",
 )
 
 _ALIGNMENT_NAMES = {"g": "good", "n": "neutral", "e": "evil"}
@@ -519,6 +591,22 @@ def _season_duration_seconds() -> int:
     return max(0, int(SEASON_DURATION_DAYS) * 86400)
 
 
+def _season_age_days(room: dict[str, Any] | None) -> int:
+    if not isinstance(room, dict):
+        return 0
+    season = room.get("season")
+    if not isinstance(season, dict):
+        return 0
+    started_at = int(season.get("started_at", _now()) or _now())
+    return max(0, int((_now() - started_at) // 86400))
+
+
+def _season_gate_passed(room: dict[str, Any] | None, required_days: int) -> bool:
+    if room is None or not SEASON_ACHIEVEMENT_GATES_ENABLED or required_days <= 0:
+        return True
+    return _season_age_days(room) >= required_days
+
+
 def _award(player: dict[str, Any], achievement: str) -> bool:
     if achievement not in ACHIEVEMENTS:
         return False
@@ -555,23 +643,28 @@ def _display_character(player: dict[str, Any]) -> str:
     return f"{name}, {title}" if title else name
 
 
-def _check_level_achievements(player: dict[str, Any]) -> None:
+def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | None = None) -> None:
     level = int(player.get("level", 0) or 0)
     if level >= 10:
         _award(player, "level_10")
     if level >= 25:
         _award(player, "level_25")
-    if level >= 50:
+    if level >= 50 and _season_gate_passed(room, 3):
         _award(player, "level_50")
-    if level >= 75:
+        _award(player, "level_reward_50")
+    if level >= 75 and _season_gate_passed(room, 7):
         _award(player, "level_75")
-    if level >= 100:
+        _award(player, "level_reward_75")
+    if level >= 100 and _season_gate_passed(room, 14):
         _award(player, "level_100")
     idled = int(player.get("idled", 0) or 0)
     if idled >= 86400:
         _award(player, "silent_24h")
-    if idled >= 604800:
+    if idled >= 3 * 86400 and _season_gate_passed(room, 3):
+        _award(player, "season_day_3")
+    if idled >= 604800 and _season_gate_passed(room, 7):
         _award(player, "silent_week")
+        _award(player, "season_week_1")
     item_sum = _item_sum(player)
     if item_sum >= 100:
         _award(player, "collector")
@@ -582,7 +675,7 @@ def _check_level_achievements(player: dict[str, Any]) -> None:
         _award(player, "battle_scarred")
     if stats.get("team_battles_won", 0) >= 5:
         _award(player, "team_veteran")
-    if stats.get("quests_completed", 0) >= 3:
+    if stats.get("quests_completed", 0) >= 3 and _season_gate_passed(room, 7):
         _award(player, "quest_walker")
     if stats.get("godsends", 0) >= 10:
         _award(player, "very_lucky")
@@ -622,6 +715,8 @@ def _blank_room() -> dict[str, Any]:
         "hall_of_fame": [],
         "events": [],
         "last_tick": now,
+        "next_top_announce_at": now + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0,
+        "next_topic_update_at": now + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0,
         "created_at": now,
     }
 
@@ -655,6 +750,8 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     room.setdefault("events", [])
     _prune_events(room)
     room.setdefault("last_tick", _now())
+    room.setdefault("next_top_announce_at", _now() + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0)
+    room.setdefault("next_topic_update_at", _now() + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0)
     return room
 
 
@@ -869,6 +966,65 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
     }
 
 
+
+
+def _format_top_lines(room: dict[str, Any], *, limit: int | None = None) -> list[str]:
+    limit = max(1, int(limit or ANNOUNCE_TOP_LIMIT or 5))
+    ranked = _ranked_players(room)[:limit]
+    if not ranked:
+        return ["No IdleRPG players yet."]
+    lines = ["IdleRPG Top Players:"]
+    for rank, (_jid, player) in enumerate(ranked, start=1):
+        lines.append(
+            f"{_display_character(player)}, the level {player.get('level', 0)} "
+            f"{player.get('class', 'idler')}, is #{rank}! Next level in {_duration_clock(player.get('next', 0))}."
+        )
+    return lines
+
+
+def _topic_text(room: dict[str, Any]) -> str:
+    ranked = _ranked_players(room)[:3]
+    top = "; ".join(
+        f"#{rank}: {_display_character(player)}, lv. {player.get('level', 0)} {player.get('class', 'idler')}"
+        for rank, (_jid, player) in enumerate(ranked, start=1)
+    )
+    prefix = EXPORT_PUBLIC_BASE_URL or "IdleRPG"
+    return f"{prefix} {top}" if top else str(prefix)
+
+
+def _maybe_set_room_topic(bot, room_jid: str, room: dict[str, Any]) -> None:
+    if not UPDATE_ROOM_TOPIC:
+        return
+    topic = _topic_text(room)[:250]
+    xep_muc = getattr(bot, "plugin", {}).get("xep_0045") if isinstance(getattr(bot, "plugin", {}), dict) else None
+    setter = getattr(xep_muc, "set_subject", None)
+    try:
+        if callable(setter):
+            result = setter(room_jid, topic)
+            if hasattr(result, "__await__"):
+                # Fire-and-forget is intentional here: topic updates are best-effort only.
+                create_plugin_task(bot, PLUGIN_NAME, result, name=f"idlerpg-topic-{room_jid}")
+            return
+        sender = getattr(bot, "send_message", None)
+        if callable(sender):
+            sender(mto=room_jid, msubject=topic, mtype="groupchat")
+    except Exception:
+        log.debug("[IDLERPG] Failed to update room topic for %s", room_jid, exc_info=True)
+
+
+def _maybe_periodic_announcements(bot, room_jid: str, room: dict[str, Any], messages: list[str]) -> None:
+    now = _now()
+    if ANNOUNCE_TOP_INTERVAL > 0:
+        next_at = int(room.get("next_top_announce_at", 0) or 0)
+        if now >= next_at:
+            messages.extend(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT))
+            room["next_top_announce_at"] = now + ANNOUNCE_TOP_INTERVAL
+    if UPDATE_ROOM_TOPIC and TOPIC_UPDATE_INTERVAL > 0:
+        next_at = int(room.get("next_topic_update_at", 0) or 0)
+        if now >= next_at:
+            _maybe_set_room_topic(bot, room_jid, room)
+            room["next_topic_update_at"] = now + TOPIC_UPDATE_INTERVAL
+
 def _atomic_write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -1040,6 +1196,55 @@ def _profile_url(room_jid: str, player: dict[str, Any]) -> str:
     return _public_url(_room_slug(room_jid), "profiles", f"{_slug(_display_player(player))}.json")
 
 
+
+
+def _public_rules() -> dict[str, Any]:
+    return {
+        "tick_seconds": TICK_SECONDS,
+        "rp_base": RP_BASE,
+        "rp_step": RP_STEP,
+        "penalty_step": PENALTY_STEP,
+        "message_penalty": MESSAGE_PENALTY,
+        "logout_penalty": LOGOUT_PENALTY,
+        "logout_grace_seconds": LOGOUT_GRACE_SECONDS,
+        "max_penalty": MAX_PENALTY,
+        "map_x": MAP_X,
+        "map_y": MAP_Y,
+        "map_step_per_tick": MAP_STEP_PER_TICK,
+        "event_chance": EVENT_CHANCE,
+        "item_chance": ITEM_CHANCE,
+        "battle_event_weight": BATTLE_EVENT_WEIGHT,
+        "team_battle_event_weight": TEAM_BATTLE_EVENT_WEIGHT,
+        "item_event_weight": ITEM_EVENT_WEIGHT,
+        "item_damage_event_weight": ITEM_DAMAGE_EVENT_WEIGHT,
+        "item_steal_event_weight": ITEM_STEAL_EVENT_WEIGHT,
+        "alignment_event_weight": ALIGNMENT_EVENT_WEIGHT,
+        "critical_strike_chance": CRITICAL_STRIKE_CHANCE,
+        "item_drop_chance": ITEM_DROP_CHANCE,
+        "announce_login": ANNOUNCE_LOGIN,
+        "announce_top_interval": ANNOUNCE_TOP_INTERVAL,
+        "announce_top_limit": ANNOUNCE_TOP_LIMIT,
+        "update_room_topic": UPDATE_ROOM_TOPIC,
+        "topic_update_interval": TOPIC_UPDATE_INTERVAL,
+        "unique_items_enabled": UNIQUE_ITEMS_ENABLED,
+        "unique_item_min_level": UNIQUE_ITEM_MIN_LEVEL,
+        "unique_item_chance": UNIQUE_ITEM_CHANCE,
+        "level_reward_min_level": LEVEL_REWARD_MIN_LEVEL,
+        "quest_min_level": QUEST_MIN_LEVEL,
+        "quest_interval": QUEST_INTERVAL,
+        "quest_min_duration": QUEST_MIN_DURATION,
+        "quest_max_duration": QUEST_MAX_DURATION,
+        "season_enabled": SEASON_ENABLED,
+        "season_duration_days": SEASON_DURATION_DAYS,
+        "season_reset_on_rollover": SEASON_RESET_ON_ROLLOVER,
+        "season_hof_size": SEASON_HOF_SIZE,
+        "season_achievement_gates_enabled": SEASON_ACHIEVEMENT_GATES_ENABLED,
+        "event_log_limit": EVENT_LOG_LIMIT,
+        "event_retention_days": EVENT_RETENTION_DAYS,
+        "export_event_limit": EXPORT_EVENT_LIMIT,
+        "export_top_limit": EXPORT_TOP_LIMIT,
+    }
+
 def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generated_at: int) -> dict[str, Any]:
     slug = _room_slug(room_jid)
     room_dir = root / slug
@@ -1082,6 +1287,7 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
         "events": events,
         "hall_of_fame": hall_of_fame[-SEASON_HOF_SIZE:],
         "achievement_catalog": _achievement_catalog(),
+        "rules": _public_rules(),
     }
     _atomic_write_json(room_dir / "room.json", room_payload)
     _atomic_write_json(room_dir / "leaderboard.json", {"generated_at": generated_at, "room": room_jid, "players": leaderboard})
@@ -1490,8 +1696,13 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
                 f"🏆 {_display_character(player)} has reached level {player['level']}! "
                 f"Next level in {_duration_clock(player['next'])}."
             )
+            if int(player.get("level", 0) or 0) >= LEVEL_REWARD_MIN_LEVEL and _award(player, "level_reward_50"):
+                messages.append(f"🎖️ {_display_player(player)} has unlocked the level {LEVEL_REWARD_MIN_LEVEL} reward badge.")
+            if int(player.get("level", 0) or 0) >= 75 and _award(player, "level_reward_75"):
+                messages.append(f"🏷️ {_display_player(player)} has unlocked the rare title pool at level 75.")
             if random.random() < ITEM_CHANCE:
                 messages.append(_grant_level_item(player))
+    _maybe_periodic_announcements(bot, room_jid, room, messages)
     await _maybe_run_random_event(room, room_jid, messages)
     await _maybe_run_quest(room, room_jid, messages)
     for text in messages:
@@ -1517,13 +1728,17 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
     if len(players) >= 6:
         events.append((TEAM_BATTLE_EVENT_WEIGHT, "team_battle"))
     events.append((ITEM_EVENT_WEIGHT, "item"))
+    events.append((ITEM_DAMAGE_EVENT_WEIGHT, "item_damage"))
     if len(players) >= 2:
+        events.append((ITEM_STEAL_EVENT_WEIGHT, "item_steal"))
         events.append((ALIGNMENT_EVENT_WEIGHT, "alignment"))
 
     configured_weight = (
         BATTLE_EVENT_WEIGHT
         + TEAM_BATTLE_EVENT_WEIGHT
         + ITEM_EVENT_WEIGHT
+        + ITEM_DAMAGE_EVENT_WEIGHT
+        + ITEM_STEAL_EVENT_WEIGHT
         + ALIGNMENT_EVENT_WEIGHT
     )
     events.append((max(0.0, 1.0 - configured_weight), "fate"))
@@ -1549,6 +1764,16 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
     if selected == "item":
         _run_item_blessing(players, messages)
         return
+    if selected == "item_damage":
+        before = len(messages)
+        _run_item_damage(players, messages)
+        if len(messages) > before:
+            return
+    if selected == "item_steal":
+        before = len(messages)
+        _run_item_swap(players, messages)
+        if len(messages) > before:
+            return
     if selected == "alignment" and _run_alignment_bonus(players, messages):
         return
 
@@ -1698,6 +1923,7 @@ def _run_item_blessing(players: list[tuple[str, dict[str, Any]]], messages: list
     gain = max(1, old_level // 10, level // 10)
     items[item] = old_level + gain
     name = _display_player(player)
+    _award(player, "item_blessed")
     _inc_stat(player, "item_blessings", 1)
     _check_level_achievements(player)
     messages.append(
@@ -1705,6 +1931,81 @@ def _run_item_blessing(players: list[tuple[str, dict[str, Any]]], messages: list
         f"{_possessive(name)} {item} gains {gain} level{'s' if gain != 1 else ''}."
     )
 
+
+
+
+def _run_item_damage(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+    candidates: list[tuple[dict[str, Any], str, int]] = []
+    for _jid, player in players:
+        items = player.setdefault("items", {})
+        for item in ITEMS:
+            try:
+                level = int(items.get(item, 0) or 0)
+            except (TypeError, ValueError):
+                level = 0
+            if level > 0:
+                candidates.append((player, item, level))
+    if not candidates:
+        return
+    player, item, old_level = random.choice(candidates)
+    loss = max(1, old_level // 10)
+    new_level = max(0, old_level - loss)
+    player.setdefault("items", {})[item] = new_level
+    if new_level <= 0:
+        player.setdefault("unique_items", {}).pop(item, None)
+    _award(player, "item_damaged")
+    _inc_stat(player, "item_damage_events", 1)
+    name = _display_player(player)
+    messages.append(
+        f"🪨 {name} slipped and damaged their {item} near {_player_region(player)}! "
+        f"{_possessive(name)} {item} loses {loss} level{'s' if loss != 1 else ''}."
+    )
+
+
+def _run_item_swap(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+    pair = _choose_two_players(players)
+    if pair is None:
+        return
+    (_winner_jid, winner), (_loser_jid, loser) = pair
+    winner_items = winner.setdefault("items", {})
+    loser_items = loser.setdefault("items", {})
+    candidates: list[tuple[str, int, int]] = []
+    for item in ITEMS:
+        try:
+            winner_level = int(winner_items.get(item, 0) or 0)
+            loser_level = int(loser_items.get(item, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        # Fairness guard: swap only when the target item is better and the winner gives
+        # their old item back. This mirrors classic IdleRPG steal/swap events without
+        # deleting progress from either player.
+        if loser_level > winner_level:
+            candidates.append((item, loser_level, winner_level))
+    if not candidates:
+        return
+    item, loser_level, winner_level = random.choice(candidates)
+    winner_items[item] = loser_level
+    loser_items[item] = winner_level
+    winner_unique = winner.setdefault("unique_items", {})
+    loser_unique = loser.setdefault("unique_items", {})
+    winner_unique_name = winner_unique.get(item)
+    loser_unique_name = loser_unique.get(item)
+    if loser_unique_name:
+        winner_unique[item] = loser_unique_name
+    else:
+        winner_unique.pop(item, None)
+    if winner_unique_name:
+        loser_unique[item] = winner_unique_name
+    else:
+        loser_unique.pop(item, None)
+    _award(winner, "item_swapped")
+    _inc_stat(winner, "item_swaps_won", 1)
+    winner_name = _display_player(winner)
+    loser_name = _display_player(loser)
+    messages.append(
+        f"🎒 {winner_name} found {loser_name}'s level {loser_level} {item} while they were distracted! "
+        f"{winner_name} leaves their old level {winner_level} {item} behind, which {loser_name} then takes."
+    )
 
 def _run_alignment_bonus(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> bool:
     groups: dict[str, list[dict[str, Any]]] = {"g": [], "n": [], "e": []}
@@ -1719,13 +2020,20 @@ def _run_alignment_bonus(players: list[tuple[str, dict[str, Any]]], messages: li
     names = [_display_player(player) for player in selected]
     alignment = _alignment_name(selected[0].get("alignment"))
     bonus_percent = ALIGNMENT_BONUS_PERCENT + max(_unique_bonus_percent(player, "alignment_bonus") for player in selected)
+    if alignment == "good":
+        lead = f"{names[0]} and {names[1]} have not let the iniquities of evil men poison them."
+    elif alignment == "evil":
+        lead = f"{names[0]} and {names[1]} revel in their wickedness and draw power from the darkness."
+    else:
+        lead = f"{names[0]} and {names[1]} find perfect balance between fortune and disaster."
     messages.append(
-        f"⚖️ {names[0]} and {names[1]} feel the power of their {alignment} alignment. "
-        f"{bonus_percent}% of their time is removed from their clocks."
+        f"⚖️ {lead} {bonus_percent}% of their time is removed from their clocks."
     )
     for player in selected:
         amount = _percent_amount(player, bonus_percent)
         _remove_time(player, amount)
+        _award(player, "alignment_blessed")
+        _inc_stat(player, "alignment_events", 1)
         messages.append(_next_level_line(player))
     return True
 
@@ -1835,11 +2143,13 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
             names.append(player.get("name", jid))
     first_region = _map_region_name(route[0][0], route[0][1])
     second_region = _map_region_name(route[1][0], route[1][1])
+    quest_url = _public_url(_room_slug(room_jid), "map.json")
+    url_part = f" See {quest_url} to monitor their journey." if quest_url else ""
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
         f"Participants must first reach [{route[0][0]},{route[0][1]}] near {first_region}, "
         f"then [{route[1][0]},{route[1][1]}] near {second_region}. "
-        f"Quest completes in {_duration_clock(duration)}."
+        f"Quest completes in {_duration_clock(duration)}.{url_part}"
     )
 
 
@@ -1964,9 +2274,16 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
     player["logged_out"] = False
     player["last_login"] = _now()
     player["last_seen"] = _now()
-    _record_event(room, "login", f"{_display_player(player)} is now online.", players=[_display_player(player)])
+    login_text = (
+        f"👤 {_display_character(player)}, the level {player.get('level', 0)} {player.get('class', 'idler')}, "
+        f"is now online from nickname {getattr(msg['from'], 'resource', None) or _display_player(player)}. "
+        f"Next level in {_duration_clock(player.get('next', 0))}."
+    )
+    _record_event(room, "login", login_text, players=[_display_player(player)])
     await _set_data(bot, data)
     await _ensure_game_task(bot, room_jid)
+    if ANNOUNCE_LOGIN:
+        _system_reply(bot, room_jid, login_text)
     _reply(bot, msg, f"✅ {_display_player(player)} is now online for IdleRPG." + reply_suffix)
 
 
@@ -2319,6 +2636,9 @@ async def _handle_stats(bot, sender_jid: str, msg, is_room: bool) -> None:
         f"Current season: {season.get('id', 'unknown')}",
         f"Event retention: {EVENT_RETENTION_DAYS or 'limit-only'} days, max {EVENT_LOG_LIMIT}",
         f"Logout grace: {_duration_clock(LOGOUT_GRACE_SECONDS)}",
+        f"Login announcements: {'on' if ANNOUNCE_LOGIN else 'off'}",
+        f"Top announcements: {_duration_clock(ANNOUNCE_TOP_INTERVAL) if ANNOUNCE_TOP_INTERVAL > 0 else 'off'}",
+        f"Topic updates: {'on' if UPDATE_ROOM_TOPIC else 'off'}",
     ]
     _reply(bot, msg, "\n".join(lines))
 
@@ -2449,6 +2769,40 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
     )
 
 
+
+
+async def _handle_announce_top(bot, sender_jid: str, msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Top announcements are room-scoped. Use it from a game room or MUC PM.")
+        return
+    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
+        _reply(bot, msg, "⛔ Only room owners/admins can announce IdleRPG top players.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    for line in _format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT):
+        _system_reply(bot, room_jid, line)
+    room["next_top_announce_at"] = _now() + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0
+    await _set_data(bot, data)
+    _reply(bot, msg, "✅ IdleRPG top players announced.")
+
+
+async def _handle_topic_update(bot, sender_jid: str, msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Topic updates are room-scoped. Use it from a game room or MUC PM.")
+        return
+    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
+        _reply(bot, msg, "⛔ Only room owners/admins can update the IdleRPG topic.")
+        return
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    _maybe_set_room_topic(bot, room_jid, room)
+    room["next_topic_update_at"] = _now() + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0
+    await _set_data(bot, data)
+    _reply(bot, msg, "✅ IdleRPG room topic update requested.")
+
 async def _handle_export(bot, sender_jid: str, msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
     if not room_jid:
@@ -2557,6 +2911,8 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg hof clear confirm  # room owners/admins\n"
         f"{prefix}idlerpg season extend [duration]  # room owners/admins\n"
         f"{prefix}idlerpg season clear-end  # room owners/admins\n"
+        f"{prefix}idlerpg announce top  # room owners/admins\n"
+        f"{prefix}idlerpg topic update  # room owners/admins\n"
         f"{prefix}idlerpg events [page|last|all]\n"
         f"{prefix}idlerpg achievements list\n"
         f"{prefix}idlerpg stats  # room owners/admins\n"
@@ -2582,6 +2938,8 @@ def _usage(bot) -> str:
         "{prefix}idlerpg profile Sven",
         "{prefix}idlerpg events",
         "{prefix}idlerpg stats",
+        "{prefix}idlerpg announce top",
+        "{prefix}idlerpg topic update",
     ],
     category="fun",
     context="groupchat / MUC PM",
@@ -2649,6 +3007,10 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
         await _handle_season(bot, sender, args, msg, is_room)
     elif subcmd == "export":
         await _handle_export(bot, sender, msg, is_room)
+    elif subcmd == "announce" and len(args) > 1 and args[1].lower() == "top":
+        await _handle_announce_top(bot, sender, msg, is_room)
+    elif subcmd == "topic" and len(args) > 1 and args[1].lower() == "update":
+        await _handle_topic_update(bot, sender, msg, is_room)
     elif subcmd == "align":
         await _handle_align(bot, sender, args, msg, is_room)
     elif subcmd == "quest":

@@ -137,9 +137,12 @@ The game loop can also trigger rare classic IdleRPG-style events:
 - item drops and swaps after battles
 - unique envs.net-flavoured items at higher levels
 - item blessings that improve a random item
+- item damage events that fairly reduce an existing item a little
+- fair item swap/steal events where the old item is left behind
 - calamities that add time to a player's timer
 - godsends that remove time from a player's timer
 - alignment bonuses that remove time for aligned players
+- optional periodic top-player announcements and topic updates
 
 Whenever an event changes a player's timer, the bot also prints the player's new
 time to next level. Example output:
@@ -160,6 +163,8 @@ IDLERPG = {
     "battle_event_weight": 0.55,
     "team_battle_event_weight": 0.08,
     "item_event_weight": 0.15,
+    "item_damage_event_weight": 0.08,
+    "item_steal_event_weight": 0.04,
     "alignment_event_weight": 0.10,
     "critical_strike_chance": 0.10,
     "item_drop_chance": 0.12,
@@ -563,7 +568,9 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `item_chance` | `0.20` | Chance for a player to find an item on level-up. |
 | `battle_event_weight` | `0.55` | Relative weight for PvP/random battle events when a random event is selected. |
 | `team_battle_event_weight` | `0.08` | Relative weight for 3-vs-3 team battles when enough online players exist. |
-| `item_event_weight` | `0.15` | Relative weight for item blessing/damage events. |
+| `item_event_weight` | `0.15` | Relative weight for item blessing events. |
+| `item_damage_event_weight` | `0.08` | Relative weight for item damage events. |
+| `item_steal_event_weight` | `0.04` | Relative weight for fair item swap/steal events. |
 | `alignment_event_weight` | `0.10` | Relative weight for alignment-based group events. |
 | `critical_strike_chance` | `0.10` | Chance after a battle that the winner lands a critical strike against the opponent. |
 | `item_drop_chance` | `0.12` | Chance after a battle that an item is dropped/swapped. |
