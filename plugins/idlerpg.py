@@ -1633,7 +1633,9 @@ async def _cancel_room_task(room_jid: str) -> None:
 async def _enabled_rooms(bot) -> dict[str, bool]:
     store = await get_idlerpg_store(bot)
     state = await store.get_global(IDLERPG_ENABLED_KEY, default={})
-    return state if isinstance(state, dict) else {}
+    if not isinstance(state, dict):
+        return {}
+    return {str(room_jid): bool(enabled) for room_jid, enabled in state.items()}
 
 
 async def _start_enabled_room_tasks(bot) -> None:

@@ -422,7 +422,16 @@ def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
 
     monkeypatch.setattr(idlerpg.random, "choice", choice)
     monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
-    battle_randint_values = iter([999, 0, 120, 30])
+    # Values are consumed in order by successive random.randint calls in
+    # _run_pvp_battle: attacker_roll, defender_roll, critical_strike_amount,
+    # dropped_item_level.
+    attacker_roll = 999
+    defender_roll = 0
+    critical_strike_amount = 120
+    dropped_item_level = 30
+    battle_randint_values = iter(
+        [attacker_roll, defender_roll, critical_strike_amount, dropped_item_level]
+    )
     monkeypatch.setattr(
         idlerpg.random,
         "randint",
@@ -674,7 +683,7 @@ def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypa
         {"name": "Alice", "class": "sysadmin", "online": True},
     )
     monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 1.0)
-    random_values = iter([0.0, 0.70])
+    random_values = itertools.cycle([0.0, 0.70])
     monkeypatch.setattr(idlerpg.random, "random", lambda: next(random_values))
     monkeypatch.setattr(
         idlerpg,
@@ -1099,7 +1108,7 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
     monkeypatch.setattr(idlerpg, "_ensure_game_task", fake_ensure)
     monkeypatch.setattr(idlerpg, "_cancel_room_task", fake_cancel)
 
-    assert await idlerpg._enabled_rooms(bot) == {"room@conf": True, "off@conf": False, 123: True}
+    assert await idlerpg._enabled_rooms(bot) == {"room@conf": True, "off@conf": False, "123": True}
     await idlerpg._start_enabled_room_tasks(bot)
     assert ensured == ["room@conf", "123"]
 
