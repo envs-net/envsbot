@@ -177,6 +177,13 @@ ROOM_PLUGIN_DEFAULTS = {
 }
 
 
+# ================= USER TRACKING =================
+
+USERS = {
+    "max_room_nicks": 5,
+}
+
+
 # ================= URL CHECK =================
 
 # Suppress repeated output for the same URL in the same room for this many seconds.
@@ -239,6 +246,44 @@ BIRTHDAY_CHECK_INTERVAL_SECONDS = 3600
 
 REMINDER_ENABLED = True
 REMINDER_MAX_AGE_DAYS = 365
+
+
+# ================= SED CORRECTIONS =================
+
+SED_REGEX_TIMEOUT = 1.0
+SED_MAX_PATTERN_LENGTH = 256
+SED_MAX_REPLACEMENT_LENGTH = 1000
+SED_MAX_INPUT_LENGTH = 5000
+SED_MAX_OUTPUT_LENGTH = 8000
+SED_CACHE_SIZE = 10
+
+
+# ================= POLLS =================
+
+POLL_MAX_OPTIONS = 10
+POLL_MAX_QUESTION_LEN = 200
+POLL_MAX_OPTION_LEN = 100
+POLL_MAX_HISTORY_PER_ROOM = 50
+
+
+# ================= PINS =================
+
+PIN_PAGE_SIZE = 10
+PIN_RECENT_CACHE_SIZE = 80
+
+
+# ================= KARMA / TELL =================
+
+KARMA_DELAY_SECONDS = 60
+TELL_DELIVERY_DELAY_SECONDS = 5
+
+
+# ================= XKCD =================
+
+XKCD_CHECK_INTERVAL = 3600
+XKCD_INDEX_START_DELAY_SECONDS = 30
+XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.15
+XKCD_HTTP_TIMEOUT = 10
 
 
 # ================= DUCK GAME =================
@@ -337,7 +382,6 @@ IDLERPG = {
     # If empty, export_public_base_url is used; otherwise "IdleRPG".
     "topic_custom_text": "",
 
-
     # Level-gated reward badges and season-age achievement gates keep long-term
     # achievements from all appearing at the very start of a season.
     "level_reward_min_level": 50,
@@ -364,48 +408,3 @@ IDLERPG = {
     "season_reset_on_rollover": False,
     "season_hof_size": 10,
 }
-
-
-# ================= USER TRACKING =================
-
-USERS = {
-    "max_room_nicks": 5,
-}
-
-
-# ================= SED CORRECTIONS =================
-
-SED_REGEX_TIMEOUT = 1.0
-SED_MAX_PATTERN_LENGTH = 256
-SED_MAX_REPLACEMENT_LENGTH = 1000
-SED_MAX_INPUT_LENGTH = 5000
-SED_MAX_OUTPUT_LENGTH = 8000
-SED_CACHE_SIZE = 10
-
-
-# ================= POLLS =================
-
-POLL_MAX_OPTIONS = 10
-POLL_MAX_QUESTION_LEN = 200
-POLL_MAX_OPTION_LEN = 100
-POLL_MAX_HISTORY_PER_ROOM = 50
-
-
-# ================= PINS =================
-
-PIN_PAGE_SIZE = 10
-PIN_RECENT_CACHE_SIZE = 80
-
-
-# ================= KARMA / TELL =================
-
-KARMA_DELAY_SECONDS = 60
-TELL_DELIVERY_DELAY_SECONDS = 5
-
-
-# ================= XKCD =================
-
-XKCD_CHECK_INTERVAL = 3600
-XKCD_INDEX_START_DELAY_SECONDS = 30
-XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.15
-XKCD_HTTP_TIMEOUT = 10
