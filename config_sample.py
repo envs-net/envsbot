@@ -337,7 +337,8 @@ IDLERPG = {
     "export_top_limit": 50,
 
     # Seasons and Hall of Fame. Automatic season rollover is disabled by
-    # default; manual `,idlerpg season end/reset` still works for admins.
+    # default; manual `,idlerpg season end/reset/extend/clear-end` still works
+    # for admins. Set season_duration_days to 0 for manual/endless seasons.
     "season_enabled": False,
     "season_duration_days": 90,
     "season_reset_on_rollover": False,

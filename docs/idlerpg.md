@@ -489,16 +489,24 @@ players, but can be enabled in config.
 ,idlerpg hof
 ```
 
-Room owners/admins can manually end a season:
+Room owners/admins can manually end, reset or adjust a season:
 
 ```text
 ,idlerpg season end
 ,idlerpg season reset
+,idlerpg season extend [duration|manual]
+,idlerpg season clear-end
+,idlerpg hof clear confirm
 ```
 
 `season end` archives the current ranking and starts a new season without
 resetting player progress. `season reset` archives the ranking and resets player
-levels/items/timers for a fresh season.
+levels/items/timers for a fresh season. `season extend` extends the current
+season by a duration such as `30d`, `12h` or by the configured season length
+when no duration is given. `season extend manual` and `season clear-end` remove
+the current end timestamp so the season runs until an admin ends or resets it.
+`hof clear confirm` clears the room-scoped Hall of Fame without changing active
+players.
 
 Relevant settings:
 

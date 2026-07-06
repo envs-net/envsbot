@@ -1185,3 +1185,112 @@ async def test_on_muc_presence_starts_task_only_when_enabled(monkeypatch):
     monkeypatch.setattr(idlerpg._core, "_is_enabled_for_room", raising_enabled)
     await idlerpg.on_muc_presence(bot, pres)
     assert ensured == ["room@conf"]
+
+@pytest.mark.asyncio
+async def test_hof_clear_requires_confirmation_and_admin():
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["players"]["alice@envs.net"]["level"] = 9
+    idlerpg._end_season("room@conf", room)
+    assert room["hall_of_fame"]
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["hof", "clear"], msg, True)
+    assert "Usage" in bot.replies[-1][0]
+    assert room["hall_of_fame"]
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["hof", "clear", "confirm"], DummyMsg(resource="Mod"), True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+    assert room["hall_of_fame"]
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["hof", "clear", "confirm"], msg, True)
+    assert "Hall of Fame cleared" in bot.replies[-1][0]
+    assert room["hall_of_fame"] == []
+
+
+@pytest.mark.asyncio
+async def test_season_extend_and_clear_end(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    data = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]
+    room = data["rooms"]["room@conf"]
+    room["season"] = {"id": "test-season", "started_at": idlerpg._now() - 10, "ends_at": idlerpg._now() + 10}
+
+    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "extend", "1h"], DummyMsg(resource="Mod"), True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+
+    before = int(room["season"]["ends_at"])
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend", "1h"], msg, True)
+    assert "extended by 1h" in bot.replies[-1][0]
+    assert int(room["season"]["ends_at"]) == before + 3600
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend", "nonsense"], msg, True)
+    assert "Usage" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "clear-end"], msg, True)
+    assert "manual/endless" in bot.replies[-1][0]
+    assert int(room["season"]["ends_at"]) == 0
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season"], msg, True)
+    assert "ends in manual" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_season_extend_uses_config_or_manual(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["season"] = {"id": "config-season", "started_at": idlerpg._now(), "ends_at": 0}
+
+    monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 2)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend"], msg, True)
+    assert "extended by 2d" in bot.replies[-1][0]
+    assert int(room["season"]["ends_at"]) > idlerpg._now()
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend", "manual"], msg, True)
+    assert int(room["season"]["ends_at"]) == 0
+
+    monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 0)
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend"], msg, True)
+    assert "manual/endless" in bot.replies[-1][0]
+    assert int(room["season"]["ends_at"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_season_hof_clear_confirm_alias_path():
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["hall_of_fame"] = [{"id": "old", "champion": "Alice"}]
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "hof", "clear", "confirm"], msg, True)
+    assert "Hall of Fame cleared" in bot.replies[-1][0]
+    assert room["hall_of_fame"] == []

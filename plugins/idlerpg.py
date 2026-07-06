@@ -17,9 +17,9 @@ Commands:
     {prefix}idlerpg achievements [character]
     {prefix}idlerpg title <achievement|none>
     {prefix}idlerpg map
-    {prefix}idlerpg hof
+    {prefix}idlerpg hof [clear confirm]
     {prefix}idlerpg events [page|last|all]
-    {prefix}idlerpg season [status|end|reset|hof]
+    {prefix}idlerpg season [status|end|reset|extend [duration]|clear-end|hof]
     {prefix}idlerpg align <good|neutral|evil>
     {prefix}idlerpg quest
     {prefix}idlerpg remove-me
@@ -29,6 +29,9 @@ Admin commands:
     {prefix}idlerpg setlevel <character> <level>
     {prefix}idlerpg reset <character>
     {prefix}idlerpg delete <character>
+    {prefix}idlerpg hof clear confirm
+    {prefix}idlerpg season extend [duration]
+    {prefix}idlerpg season clear-end
 """
 
 from __future__ import annotations
@@ -2336,13 +2339,27 @@ async def _handle_map(bot, msg, is_room: bool) -> None:
     _reply(bot, msg, "\n".join(lines))
 
 
-async def _handle_hof(bot, args: list[str], msg, is_room: bool) -> None:
+async def _handle_hof(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
     if not room_jid:
         _reply(bot, msg, "ℹ️ Hall of fame is room-scoped. Use it from a game room or MUC PM.")
         return
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
+    subargs = [str(arg).lower() for arg in args[1:]]
+    if subargs:
+        if subargs == ["clear", "confirm"]:
+            if not await _sender_can_manage_room(bot, sender_jid, room_jid):
+                _reply(bot, msg, "⛔ Only room owners/admins can clear the IdleRPG Hall of Fame.")
+                return
+            removed = len(room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else [])
+            room["hall_of_fame"] = []
+            await _set_data(bot, data)
+            await audit_event(bot, "idlerpg_hof_clear", actor=sender_jid, target=room_jid, details={"removed": removed})
+            _reply(bot, msg, f"✅ IdleRPG Hall of Fame cleared for {room_jid}. Removed {removed} entries.")
+            return
+        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg hof [clear confirm]")
+        return
     hof = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
     lines = []
     for entry in reversed(hof[-SEASON_HOF_SIZE:]):
@@ -2351,6 +2368,11 @@ async def _handle_hof(bot, args: list[str], msg, is_room: bool) -> None:
     if not lines:
         lines = ["No completed seasons yet."]
     _reply(bot, msg, "🏛️ IdleRPG Hall of Fame\n" + "\n".join(lines))
+
+
+def _season_end_summary(season: dict[str, Any]) -> str:
+    ends_at = int(season.get("ends_at", 0) or 0)
+    return _duration(ends_at - _now()) if ends_at else "manual"
 
 
 async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
@@ -2375,12 +2397,50 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
             f"New season: {room['season']['id']}." + (" Players were reset." if reset_players else ""),
         )
         return
+    if subcmd in {"extend", "clear-end"}:
+        if not await _sender_can_manage_room(bot, sender_jid, room_jid):
+            _reply(bot, msg, "⛔ Only room owners/admins can change IdleRPG season timing.")
+            return
+        season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(_now())
+        room["season"] = season
+        if subcmd == "clear-end":
+            season["ends_at"] = 0
+            await _set_data(bot, data)
+            await audit_event(bot, "idlerpg_season_clear_end", actor=sender_jid, target=room_jid, details={"season_id": season.get("id")})
+            _reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
+            return
+        duration_arg = args[2].lower() if len(args) > 2 else ""
+        if duration_arg in {"", "config", "default"}:
+            amount = _season_duration_seconds()
+            if amount <= 0:
+                season["ends_at"] = 0
+                await _set_data(bot, data)
+                await audit_event(bot, "idlerpg_season_extend", actor=sender_jid, target=room_jid, details={"season_id": season.get("id"), "duration": 0})
+                _reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
+                return
+        elif duration_arg in {"0", "manual", "endless", "forever", "clear", "none"}:
+            amount = 0
+        else:
+            amount = _core.parse_duration(duration_arg)
+            if amount is None:
+                _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg season extend [duration|manual]")
+                return
+        if amount <= 0:
+            season["ends_at"] = 0
+            action = "manual/endless"
+        else:
+            base = max(int(season.get("ends_at", 0) or 0), _now())
+            season["ends_at"] = base + int(amount)
+            action = f"extended by {_duration(amount)}"
+        await _set_data(bot, data)
+        await audit_event(bot, "idlerpg_season_extend", actor=sender_jid, target=room_jid, details={"season_id": season.get("id"), "duration": int(amount)})
+        _reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} {action}. Ends in {_season_end_summary(season)}.")
+        return
     if subcmd in {"hof", "hall", "hall-of-fame"}:
-        await _handle_hof(bot, args[1:], msg, is_room)
+        await _handle_hof(bot, sender_jid, ["hof", *args[2:]], msg, is_room)
         return
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(_now())
-    ends_at = int(season.get("ends_at", 0) or 0)
-    remaining = _duration(ends_at - _now()) if ends_at else "manual"
+    remaining = _season_end_summary(season)
     _reply(
         bot,
         msg,
@@ -2494,6 +2554,9 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg achievements [character]\n"
         f"{prefix}idlerpg title <achievement|none>\n"
         f"{prefix}idlerpg map|hof|season\n"
+        f"{prefix}idlerpg hof clear confirm  # room owners/admins\n"
+        f"{prefix}idlerpg season extend [duration]  # room owners/admins\n"
+        f"{prefix}idlerpg season clear-end  # room owners/admins\n"
         f"{prefix}idlerpg events [page|last|all]\n"
         f"{prefix}idlerpg achievements list\n"
         f"{prefix}idlerpg stats  # room owners/admins\n"
@@ -2581,7 +2644,7 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
     elif subcmd == "map":
         await _handle_map(bot, msg, is_room)
     elif subcmd in {"hof", "hall", "hall-of-fame"}:
-        await _handle_hof(bot, args, msg, is_room)
+        await _handle_hof(bot, sender, args, msg, is_room)
     elif subcmd == "season":
         await _handle_season(bot, sender, args, msg, is_room)
     elif subcmd == "export":
