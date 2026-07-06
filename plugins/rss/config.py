@@ -1,0 +1,93 @@
+"""Split module for plugins/rss.py: config."""
+
+import asyncio
+import logging
+import time
+import html
+import hashlib
+from difflib import SequenceMatcher
+from urllib.parse import urljoin, urlparse
+import aiohttp
+from bs4 import BeautifulSoup
+from utils.command import command, Role
+from utils.config import config
+from core_plugins._core import paginate_items
+from utils.url_safety import (
+    FetchURLTooLarge,
+    UnsafeFetchURL,
+    validate_fetch_url_async,
+)
+from core_plugins.rooms import JOINED_ROOMS
+from core_plugins.users import user_has_room_plugin_grant
+from utils.audit import audit_event
+from utils.task_supervisor import create_plugin_task
+
+
+PLUGIN_META = {
+    "name": "rss",
+    "version": "0.2.3",
+    "description": "RSS/Atom feed watcher and poster",
+    "category": "info",
+    "requires": ["rooms"],
+}
+
+
+RSS_KEY = "RSS"
+
+
+DEFAULT_POLL_INTERVAL = int(config.get("rss_global_query_interval", 1200) or 1200)
+
+
+RSS_RETRY_INITIAL_DELAY = max(
+    1,
+    int(config.get("rss_retry_initial_delay", 300) or 300),
+)
+
+
+RSS_RETRY_BACKOFF_MULTIPLIER = max(
+    1.0,
+    float(config.get("rss_retry_backoff_multiplier", 2.0) or 2.0),
+)
+
+
+MAX_BACKOFF_TIME = max(
+    1,
+    int(config.get("rss_max_backoff_time", 3600) or 3600),
+)
+
+
+RSS_USER_AGENT = str(
+    config.get("rss_user_agent")
+    or config.get("http_user_agent")
+    or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
+)
+
+
+RSS_FETCH_TIMEOUT_SECONDS = float(
+    config.get(
+        "rss_fetch_timeout_seconds",
+        config.get("http_timeout_seconds", 8),
+    )
+    or 8
+)
+
+
+RSS_MAX_REDIRECTS = max(1, int(config.get("rss_max_redirects", 5) or 5))
+
+
+RSS_MAX_READ_BYTES = max(
+    4096,
+    int(config.get("rss_max_read_bytes", 1048576) or 1048576),
+)
+
+
+ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
+
+
+RSS_LIST_PAGE_SIZE = max(1, int(config.get("rss_list_page_size", 10) or 10))
+
+
+RSS_MAX_ENTRIES_PER_POLL = max(
+    1,
+    int(config.get("rss_max_entries_per_poll", 10) or 10),
+)
