@@ -1,47 +1,9 @@
-"""Schedule and manage reminders.
-
-Schedule reminders to notify you at a later time.
-
-Commands:
-• {prefix}remind <duration|date time> <message> - Set a new reminder
-• {prefix}reminders - List all your pending reminders
-• {prefix}remind delete <id> - Delete a reminder by ID
-• {prefix}remind <on|off|status> - Enable, disable, or show reminder status
-• {prefix}reminder <on|off|status> - Same as above
-
-Duration formats:
-• Single: 10s, 5m, 1h, 2d
-• Combined: 1h30m, 2d5h, 3d12h30m45s
-
-Date/time formats:
-• ISO-like: 2026-05-01 14:30, 2026-05-01T14:30
-• German: 01.05.2026 14:30, 01.05.26 14:30
-
-Absolute date/time values are interpreted in the user's vCard TIMEZONE if set.
-If no valid vCard TIMEZONE exists, UTC is used.
-
-Examples:
-• {prefix}remind 30m Take a break
-• {prefix}remind 1h Important meeting
-• {prefix}remind 2d5h3m20s Long term goal with exact time
-• {prefix}remind 2026-05-01 14:30 Birthday reminder
-• {prefix}remind 01.05.2026 14:30 Birthday reminder
-• {prefix}reminders
-• {prefix}remind delete 1
-• {prefix}remind <on|off|status>
-• {prefix}reminder <on|off|status>
-
-Limits:
-• Maximum reminder duration/date distance: 365 days by default
-• Maximum message length: 500 characters
-"""
+"""Split module for plugins/reminder.py: store."""
 
 import asyncio
 import datetime
 import logging
-
 import pytz
-
 from utils.command import command, Role
 from utils.config import config
 from core_plugins._core import (
@@ -52,9 +14,11 @@ from core_plugins._core import (
     _normalize_bare_jid,
     parse_duration,
 )
-
 from utils.task_supervisor import create_plugin_task
+
+
 log = logging.getLogger(__name__)
+
 
 PLUGIN_META = {
     "name": "reminder",
@@ -64,190 +28,22 @@ PLUGIN_META = {
     "requires": ["_core", "rooms"],
 }
 
-# In-memory storage of active asyncio tasks: {reminder_id: task}
+
 ACTIVE_REMINDERS: dict[int, asyncio.Task] = {}
 
-# Runtime switch for the reminder plugin. Defaults to enabled.
-# Optional config.py override: "reminder_enabled": false
+
 REMINDER_ENABLED: bool = bool(config.get("reminder_enabled", True))
+
+
 REMINDER_KEY = "REMINDER"
 
-# The plugin initializes its DB table lazily and on_ready().
+
 REMINDER_DB_READY = False
-
-
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-
-def _utcnow() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
-
-
-def _utc_tz():
-    return pytz.UTC
-
-
-def _display_nick(sender_jid, nick: str | None = None) -> str:
-    """Best-effort display name for reminder messages."""
-    if nick:
-        return str(nick)
-
-    value = str(sender_jid)
-
-    if "/" in value:
-        resource = value.rsplit("/", 1)[-1]
-        if resource:
-            return resource
-
-    if "@" in value:
-        return value.split("@", 1)[0]
-
-    return value
-
-
-def _timezone_lookup_jid(bot, sender_jid, msg, is_room: bool) -> str | None:
-    """Return the best real JID to use for vCard TIMEZONE lookup."""
-    if not is_room and not _is_muc_pm(msg, is_room):
-        try:
-            return str(msg["from"].bare)
-        except Exception:
-            return _normalize_bare_jid(sender_jid)
-
-    try:
-        muc = getattr(bot, "plugin", {}).get("xep_0045", None)
-        if muc:
-            room = msg["from"].bare
-            nick = msg["from"].resource
-            real_jid = muc.get_jid_property(room, nick, "jid")
-            if real_jid:
-                return _normalize_bare_jid(real_jid)
-    except Exception as exc:
-        log.debug("[REMINDER] Could not resolve MUC real JID for timezone: %s",
-                  exc)
-
-    try:
-        room = msg["from"].bare
-        muc_nick = msg["from"].resource
-        joined = JOINED_ROOMS.get(room, {})
-        nick_info = joined.get("nicks", {}).get(muc_nick, {})
-        real_jid = nick_info.get("jid")
-        if real_jid:
-            return _normalize_bare_jid(real_jid)
-    except Exception as exc:
-        log.debug(
-            "[REMINDER] Could not resolve JOINED_ROOMS JID for timezone: %s",
-            exc)
-
-    return _normalize_bare_jid(sender_jid)
-
-
-def _localize_naive_datetime(
-    dt: datetime.datetime,
-    tz: datetime.tzinfo,
-) -> datetime.datetime:
-    """Attach timezone to a naive datetime, handling pytz timezones safely."""
-    if dt.tzinfo is not None:
-        return dt
-
-    if hasattr(tz, "localize"):
-        try:
-            return tz.localize(dt, is_dst=None)
-        except pytz.NonExistentTimeError:
-            # DST spring-forward gap: move to the next valid local hour.
-            return tz.localize(dt + datetime.timedelta(hours=1), is_dst=True)
-        except pytz.AmbiguousTimeError:
-            # DST fall-back duplicate hour: choose standard time.
-            return tz.localize(dt, is_dst=False)
-
-    return dt.replace(tzinfo=tz)
-
-
-def _format_local_datetime(
-    dt: datetime.datetime,
-    tz: datetime.tzinfo,
-) -> str:
-    """Format a UTC datetime in the user's local timezone."""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
-
-    return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
-
-
-def _reminder_context(bot, sender_jid, nick, msg, is_room: bool):
-    """Build stable ownership and delivery context.
-
-    Cases:
-    - normal DM: send chat to bare user JID
-    - MUC: send groupchat to room bare JID
-    - MUC-PM: send chat to full occupant JID room@conference/nick
-    """
-    if is_room:
-        room_jid = msg["from"].bare
-        user_jid = _normalize_bare_jid(sender_jid)
-        display_nick = _display_nick(sender_jid, nick)
-
-        return {
-            "user_jid": user_jid,
-            "timezone_jid": _timezone_lookup_jid(bot, sender_jid,
-                                                 msg, is_room),
-            "display_nick": display_nick,
-            "room_jid": room_jid,
-            "msg_mto": room_jid,
-            "msg_type": "groupchat",
-        }
-
-    if _is_muc_pm(msg, is_room):
-        muc_occupant_jid = str(msg["from"])
-        display_nick = msg["from"].resource or _display_nick(sender_jid, nick)
-
-        return {
-            "user_jid": muc_occupant_jid,
-            "timezone_jid": _timezone_lookup_jid(bot, sender_jid,
-                                                 msg, is_room),
-            "display_nick": display_nick,
-            "room_jid": None,
-            "msg_mto": muc_occupant_jid,
-            "msg_type": "chat",
-        }
-
-    user_jid = _normalize_bare_jid(sender_jid)
-
-    return {
-        "user_jid": user_jid,
-        "timezone_jid": user_jid,
-        "display_nick": _display_nick(sender_jid, nick),
-        "room_jid": None,
-        "msg_mto": user_jid,
-        "msg_type": "chat",
-    }
 
 
 async def get_reminder_store(bot):
     """Return the plugin runtime store used for room-scoped settings."""
     return bot.db.users.plugin("reminder")
-
-
-def _room_jid_from_context(msg, is_room: bool) -> str | None:
-    """Return the room JID for groupchat or MUC-PM contexts.
-
-    The other room-controlled plugins use MUC-PM room management, where
-    is_room is False but msg["from"].bare is the room JID. Public groupchat
-    messages have is_room=True. Normal DMs return None.
-    """
-    try:
-        room_jid = str(msg["from"].bare)
-    except Exception:
-        return None
-
-    if is_room:
-        return room_jid
-
-    if room_jid in JOINED_ROOMS:
-        return room_jid
-
-    return None
 
 
 async def _get_room_reminder_state(bot, room_jid: str) -> bool:
@@ -272,19 +68,6 @@ async def _get_room_reminder_state(bot, room_jid: str) -> bool:
         return False
 
     return bool(state.get(room_jid))
-
-
-async def _is_reminder_enabled_for_context(bot, msg, is_room: bool) -> bool:
-    """Return whether reminders may be used in the current context.
-
-    Normal DMs are allowed. Groupchat and MUC-PM contexts must be enabled via
-    the room control state.
-    """
-    room_jid = _room_jid_from_context(msg, is_room)
-    if not room_jid:
-        return True
-
-    return await _get_room_reminder_state(bot, room_jid)
 
 
 async def _handle_reminder_control_command(bot, args,
@@ -388,155 +171,6 @@ async def _handle_reminder_control_command(bot, args,
     return True
 
 
-def format_seconds(total_seconds: float) -> str:
-    """Convert seconds to a human-readable duration."""
-    if total_seconds < 0:
-        return "overdue"
-
-    days = int(total_seconds // 86400)
-    remaining = total_seconds % 86400
-
-    hours = int(remaining // 3600)
-    remaining %= 3600
-
-    minutes = int(remaining // 60)
-    seconds = int(remaining % 60)
-
-    parts = []
-
-    if days > 0:
-        parts.append(f"{days}d")
-    if hours > 0:
-        parts.append(f"{hours}h")
-    if minutes > 0:
-        parts.append(f"{minutes}m")
-    if seconds > 0 or not parts:
-        parts.append(f"{seconds}s")
-
-    return " ".join(parts)
-
-
-def _ensure_utc(
-    dt: datetime.datetime,
-    assume_tz: datetime.tzinfo | None = None,
-) -> datetime.datetime:
-    """Return timezone-aware UTC datetime.
-
-    Naive datetime values are interpreted in assume_tz. If no timezone is
-    supplied, UTC is used as fallback.
-    """
-    if dt.tzinfo is None:
-        dt = _localize_naive_datetime(dt, assume_tz or _utc_tz())
-
-    return dt.astimezone(datetime.timezone.utc)
-
-
-def parse_absolute_datetime(
-    args: list[str],
-    user_tz: datetime.tzinfo | None = None,
-) -> tuple[datetime.datetime | None, int]:
-    """Parse an absolute date/time from the beginning of command arguments.
-
-    Returns (datetime_utc, consumed_arg_count), or (None, 0) if parsing fails.
-    """
-    if not args:
-        return None, 0
-
-    candidates: list[tuple[str, int]] = [(args[0], 1)]
-
-    if len(args) >= 2:
-        candidates.append((" ".join(args[:2]), 2))
-
-    formats = [
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-        "%Y-%m-%dT%H:%M:%S",
-        "%d.%m.%Y %H:%M",
-        "%d.%m.%Y %H:%M:%S",
-        "%d.%m.%y %H:%M",
-        "%d.%m.%y %H:%M:%S",
-    ]
-
-    for candidate, consumed in candidates:
-        for fmt in formats:
-            try:
-                dt = datetime.datetime.strptime(candidate, fmt)
-                return _ensure_utc(dt, user_tz), consumed
-            except ValueError:
-                continue
-
-    return None, 0
-
-
-def parse_reminder_when(
-    args: list[str],
-    user_tz: datetime.tzinfo | None = None,
-) -> tuple[int | None, str | None, str | None]:
-    """Parse relative duration or absolute date/time from reminder args.
-
-    Returns (seconds_until_reminder, message, display_when). If parsing fails,
-    returns (None, None, None).
-    """
-    if len(args) < 2:
-        return None, None, None
-
-    seconds = parse_duration(args[0])
-    if seconds is not None:
-        message = " ".join(args[1:]).strip()
-        if not message:
-            return None, None, None
-
-        return seconds, message, f"in {format_seconds(seconds)}"
-
-    remind_at, consumed = parse_absolute_datetime(args, user_tz)
-    if remind_at is None or len(args) <= consumed:
-        return None, None, None
-
-    message = " ".join(args[consumed:]).strip()
-    if not message:
-        return None, None, None
-
-    seconds = int((remind_at - _utcnow()).total_seconds())
-    if seconds < 1:
-        return None, None, None
-
-    display_when = f"on {_format_local_datetime(
-        remind_at, user_tz or _utc_tz())}"
-    return seconds, message, display_when
-
-
-def _format_overdue(seconds: float) -> str:
-    overdue_seconds = abs(seconds)
-
-    if overdue_seconds < 60:
-        return f"{int(overdue_seconds)}s ago"
-    if overdue_seconds < 3600:
-        return f"{int(overdue_seconds / 60)}m ago"
-    if overdue_seconds < 86400:
-        return f"{overdue_seconds / 3600:.1f}h ago"
-
-    return f"{overdue_seconds / 86400:.1f}d ago"
-
-
-def _parse_datetime(value) -> datetime.datetime:
-    """Handle DB values returned as datetime or ISO string."""
-    if isinstance(value, datetime.datetime):
-        dt = value
-    else:
-        dt = datetime.datetime.fromisoformat(str(value))
-
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
-
-    return dt
-
-
-# ============================================================================
-# SELF-CONTAINED DATABASE HELPERS
-# ============================================================================
-
-
 async def _init_reminder_db(bot):
     """Create the reminders table and indexes if they do not exist.
 
@@ -609,52 +243,6 @@ async def _create_reminder(
     return cursor.lastrowid
 
 
-async def _get_reminder(bot, reminder_id: int) -> dict | None:
-    """Return one reminder by ID, or None if it does not exist."""
-    await _init_reminder_db(bot)
-
-    rows = await bot.db.fetch_all(
-        "SELECT * FROM reminders WHERE id = ?",
-        (reminder_id,),
-    )
-
-    if not rows:
-        return None
-
-    return dict(rows[0])
-
-
-async def _get_pending_reminders(bot, user_jid: str) -> list[dict]:
-    """Return pending reminders for one user ordered by due date."""
-    await _init_reminder_db(bot)
-
-    rows = await bot.db.fetch_all(
-        """
-        SELECT * FROM reminders
-        WHERE user_jid = ? AND is_active = 1
-        ORDER BY remind_at ASC
-        """,
-        (user_jid,),
-    )
-
-    return [dict(row) for row in rows]
-
-
-async def _get_all_pending_reminders(bot) -> list[dict]:
-    """Return all pending reminders ordered by due date."""
-    await _init_reminder_db(bot)
-
-    rows = await bot.db.fetch_all(
-        """
-        SELECT * FROM reminders
-        WHERE is_active = 1
-        ORDER BY remind_at ASC
-        """
-    )
-
-    return [dict(row) for row in rows]
-
-
 async def _delete_reminder(bot, reminder_id: int):
     """Delete one reminder by ID."""
     await _init_reminder_db(bot)
@@ -663,29 +251,6 @@ async def _delete_reminder(bot, reminder_id: int):
         "DELETE FROM reminders WHERE id = ?",
         (reminder_id,),
     )
-
-
-# ============================================================================
-# DELIVERY / SCHEDULING
-# ============================================================================
-
-
-async def _send_reminder_message(bot, mto: str, mbody: str, mtype: str):
-    """Send reminder as a fresh message.
-
-    Do not use bot.reply() here because delayed reminders should not depend on
-    an old message object or client-specific reply/thread rendering.
-    """
-    msg = bot.make_message(
-        mto=mto,
-        mbody=mbody,
-        mtype=mtype,
-    )
-
-    if hasattr(bot, "_safe_send_message"):
-        await bot._safe_send_message(msg)
-    else:
-        msg.send()
 
 
 async def schedule_reminder_task(
@@ -776,103 +341,6 @@ async def schedule_reminder_task(
 
     finally:
         ACTIVE_REMINDERS.pop(reminder_id, None)
-
-
-def _schedule_task(
-    bot,
-    reminder_id: int,
-    user_jid: str,
-    nick: str,
-    message: str,
-    seconds: float,
-    original_msg,
-    overdue_str: str | None = None,
-    room_jid: str | None = None,
-    msg_mto: str | None = None,
-    msg_type: str | None = None,
-):
-    """Create or replace an active reminder task safely."""
-    old_task = ACTIVE_REMINDERS.get(reminder_id)
-
-    if old_task and not old_task.done():
-        old_task.cancel()
-
-    task = create_plugin_task(bot, 
-        "reminder",
-        schedule_reminder_task(
-            bot,
-            reminder_id,
-            user_jid,
-            nick,
-            message,
-            seconds,
-            original_msg,
-            overdue_str=overdue_str,
-            room_jid=room_jid,
-            msg_mto=msg_mto,
-            msg_type=msg_type,
-        ),
-        name=f"reminder-{reminder_id}",
-    )
-
-    ACTIVE_REMINDERS[reminder_id] = task
-    return task
-
-
-async def _cancel_all_active_tasks() -> int:
-    """Cancel all active in-memory reminder tasks and return the count."""
-    cancelled = 0
-
-    for reminder_id, task in list(ACTIVE_REMINDERS.items()):
-        if task and not task.done():
-            task.cancel()
-            cancelled += 1
-
-        try:
-            await task
-        except asyncio.CancelledError:
-            log.debug("[REMINDER] Reminder task %s cancelled", reminder_id)
-        except Exception as exc:
-            log.exception(
-                "[REMINDER] Error cancelling reminder %s: %s",
-                reminder_id,
-                exc,
-            )
-
-    ACTIVE_REMINDERS.clear()
-    return cancelled
-
-
-async def _cancel_active_tasks_for_room(bot, room_jid: str) -> int:
-    """Cancel active in-memory reminder tasks belonging to one room."""
-    pending = await _get_all_pending_reminders(bot)
-    room_reminder_ids = {
-        int(reminder["id"])
-        for reminder in pending
-        if reminder.get("room_jid") == room_jid
-    }
-
-    cancelled = 0
-
-    for reminder_id in room_reminder_ids:
-        task = ACTIVE_REMINDERS.pop(reminder_id, None)
-
-        if task and not task.done():
-            task.cancel()
-            cancelled += 1
-
-        try:
-            await task
-        except asyncio.CancelledError:
-            log.debug("[REMINDER] Room reminder task %s cancelled", reminder_id)
-        except Exception as exc:
-            log.exception(
-                "[REMINDER] Error cancelling room reminder %s: %s",
-                reminder_id,
-                exc,
-            )
-
-    return cancelled
 
 
 async def _restore_pending_reminders(bot) -> int:
@@ -972,11 +440,6 @@ async def _restore_pending_reminders(bot) -> int:
                  restored)
 
     return restored
-
-
-# ============================================================================
-# COMMANDS
-# ============================================================================
 
 
 @command("remind", role=Role.USER, aliases=["rem", "reminder"])
@@ -1083,40 +546,6 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "❌ Error creating reminder. Please try again.")
 
 
-@command("reminders", role=Role.USER, aliases=["rems", "remind list"])
-async def list_reminders(bot, sender_jid, nick, args, msg, is_room):
-    """List all pending reminders for the current user."""
-    try:
-        ctx = _reminder_context(bot, sender_jid, nick, msg, is_room)
-        user_jid = ctx["user_jid"]
-        user_tz = await get_user_tzinfo(bot, ctx.get("timezone_jid"))
-
-        reminders = await _get_pending_reminders(bot, user_jid)
-
-        if not reminders:
-            bot.reply(msg, "✅ No pending reminders.")
-            return
-
-        lines = ["⏰ Your pending reminders:"]
-
-        for reminder in reminders:
-            remind_at = _parse_datetime(reminder["remind_at"])
-            time_left = remind_at - _utcnow()
-            time_str = format_seconds(time_left.total_seconds())
-            local_time = _format_local_datetime(remind_at, user_tz)
-
-            lines.append(
-                f"• ID {reminder['id']}: {reminder['message']} "
-                f"(in {time_str}, at {local_time})"
-            )
-
-        bot.reply(msg, "\n".join(lines))
-
-    except Exception as exc:
-        log.exception("[REMINDER] Error listing reminders: %s", exc)
-        bot.reply(msg, "❌ Error retrieving reminders.")
-
-
 @command("remind delete", role=Role.USER,
          aliases=["remind rm", "remind cancel"])
 async def delete_reminder(bot, sender_jid, nick, args, msg, is_room):
@@ -1165,10 +594,6 @@ async def delete_reminder(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "❌ Error deleting reminder.")
 
 
-# ============================================================================
-# PLUGIN LIFECYCLE
-# ============================================================================
-
 async def on_ready(bot):
     """
     Initialize the reminder table and restore pending reminders after
@@ -1188,37 +613,6 @@ async def on_ready(bot):
 
     except Exception as exc:
         log.exception("[REMINDER] Error during reminder restoration: %s", exc)
-
-
-async def on_unload(bot):
-    """Cancel all active reminder tasks."""
-    try:
-        log.info("[REMINDER] Unloading reminder plugin...")
-
-        cancelled = await _cancel_all_active_tasks()
-        log.info("[REMINDER] ✅ Plugin unloaded; cancelled %s task(s)",
-                 cancelled)
-
-    except Exception as exc:
-        log.exception("[REMINDER] Error during plugin unload: %s", exc)
-
-
-async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
-    """Cancel and delete pending reminders for a deleted room."""
-    target = str(room_jid or "").split("/", 1)[0].strip().lower()
-    await _init_reminder_db(bot)
-    pending = await _get_all_pending_reminders(bot)
-    room_ids = [
-        int(reminder["id"])
-        for reminder in pending
-        if str(reminder.get("room_jid") or "").split("/", 1)[0].strip().lower() == target
-    ]
-
-    cancelled = await _cancel_active_tasks_for_room(bot, room_jid)
-    for reminder_id in room_ids:
-        await _delete_reminder(bot, reminder_id)
-
-    return {"reminders": len(room_ids), "tasks": cancelled}
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
