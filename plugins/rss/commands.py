@@ -45,9 +45,14 @@ from .formatting import (
 from .store import (
     _apply_retry_state,
     _reset_feed_retry,
+    get_effective_template,
+    get_feed_template,
     get_room_template,
     log,
+    set_feed_template,
     set_room_template,
+    unset_feed_template,
+    unset_feed_templates_for_feed,
     unset_room_template,
 )
 from .tasks import ensure_task
@@ -260,7 +265,10 @@ async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=
             entry_id=entry_id,
             entry_date=_entry_date(entry),
         )
-        template = await get_room_template(store, room) if store else None
+        template = (
+            await get_effective_template(store, room, feed_url or feed_link)
+            if store else None
+        )
         msg_text = _build_rss_message_from_context(context, template)
 
         bot.reply(
@@ -281,23 +289,73 @@ async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=
     return last_id
 
 
-def _split_template_room_args(msg, is_room: bool, args: list[str]):
-    """Return ``(room, rest)`` for RSS template subcommands."""
+def _looks_like_feed_arg(value) -> bool:
+    """Best-effort test for feed URL arguments."""
+    return "://" in str(value or "")
+
+
+def _split_template_scope_args(msg, is_room: bool, args: list[str]):
+    """Return ``(room, feed_url, rest)`` for RSS template subcommands.
+
+    Scope syntax is intentionally compact:
+
+    * ``[room_jid]`` targets a room template.
+    * ``[room_jid] <feed_url>`` targets a feed template in that room.
+    * In a public room/MUC PM, ``<feed_url>`` is enough for a feed template.
+    """
     rest = list(args)
     explicit_room = None
     if rest and _looks_like_room_arg(rest[0]):
         explicit_room = rest.pop(0)
-    return _room_for_feed_command(msg, is_room, explicit_room=explicit_room), rest
+    room = _room_for_feed_command(msg, is_room, explicit_room=explicit_room)
+
+    feed_url = None
+    if rest and _looks_like_feed_arg(rest[0]):
+        feed_url = _normalize_url(rest.pop(0))
+
+    return room, feed_url, rest
+
+
+async def _template_feed_for_room(store, room: str, feed_url: str):
+    """Return feed metadata when the feed is subscribed in the room."""
+    feeds = await get_feeds(store)
+    feed = feeds.get(_normalize_url(feed_url))
+    if not isinstance(feed, dict):
+        return None
+    rooms = feed.get("rooms")
+    if not isinstance(rooms, list):
+        return None
+    target = _normalize_room_jid(room)
+    if not any(_normalize_room_jid(item) == target for item in rooms):
+        return None
+    return feed
+
+
+def _sample_template_context_for_feed(feed, feed_url: str) -> dict[str, str]:
+    """Return sample template context enriched with feed metadata."""
+    context = dict(_SAMPLE_TEMPLATE_CONTEXT)
+    if isinstance(feed, dict):
+        context["feed_title"] = str(feed.get("title") or context["feed_title"])
+        context["feed_link"] = str(feed.get("link") or context["feed_link"])
+    context["feed_url"] = str(feed_url or context["feed_url"])
+    return context
+
+
+def _sample_rss_template_preview(
+    template: str,
+    feed=None,
+    feed_url: str = "",
+) -> str:
+    """Render a template using example RSS data."""
+    return _build_rss_message_from_context(
+        _sample_template_context_for_feed(feed, feed_url),
+        template,
+    )
 
 
 def _join_template_args(parts: list[str]) -> str:
     """Build a template string from command arguments."""
     return _normalize_rss_template_input(" ".join(str(part) for part in parts))
-
-
-def _sample_rss_template_preview(template: str) -> str:
-    """Render a template using example RSS data."""
-    return _build_rss_message_from_context(_SAMPLE_TEMPLATE_CONTEXT, template)
 
 
 async def _sender_can_manage_template(
@@ -310,7 +368,7 @@ async def _sender_can_manage_template(
 
 
 async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
-    """Handle room-scoped RSS template commands."""
+    """Handle room- and feed-scoped RSS template commands."""
     if not args:
         action = "show"
         rest = []
@@ -326,7 +384,7 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
             action = "show"
             rest = list(args)
 
-    room, rest = _split_template_room_args(msg, is_room, rest)
+    room, feed_url, rest = _split_template_scope_args(msg, is_room, rest)
     if not room:
         bot.reply(msg, _rss_template_usage(bot))
         return
@@ -339,16 +397,38 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         )
         return
 
+    feed = None
+    if feed_url:
+        feed = await _template_feed_for_room(store, room, feed_url)
+        if feed is None:
+            bot.reply(msg, f"🔴 Feed is not configured for {room}: {feed_url}")
+            return
+
+    scope = f"{room} / {feed_url}" if feed_url else room
+
     if action == "show":
         if rest:
             bot.reply(msg, _rss_template_usage(bot))
             return
-        template = await get_room_template(store, room)
-        source = "custom" if template else "default"
-        template = template or DEFAULT_RSS_TEMPLATE
+        if feed_url:
+            feed_template = await get_feed_template(store, room, feed_url)
+            room_template = await get_room_template(store, room)
+            if feed_template:
+                source = "feed custom"
+                template = feed_template
+            elif room_template:
+                source = "room custom"
+                template = room_template
+            else:
+                source = "default"
+                template = DEFAULT_RSS_TEMPLATE
+        else:
+            template = await get_room_template(store, room)
+            source = "custom" if template else "default"
+            template = template or DEFAULT_RSS_TEMPLATE
         bot.reply(
             msg,
-            f"🧩 RSS template for {room} ({source}):\n"
+            f"🧩 RSS template for {scope} ({source}):\n"
             f"{template}\n\n{_rss_template_variables_text()}",
         )
         return
@@ -357,31 +437,41 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         if rest:
             bot.reply(msg, _rss_template_usage(bot))
             return
-        removed = await unset_room_template(store, room)
+        if feed_url:
+            removed = await unset_feed_template(store, room, feed_url)
+            event_type = "rss_feed_template_unset"
+            success = f"✅ RSS feed template reset for {scope}."
+            unchanged = f"ℹ️ {scope} already uses the room/default RSS template."
+        else:
+            removed = await unset_room_template(store, room)
+            event_type = "rss_template_unset"
+            success = f"✅ RSS template reset to default for {room}."
+            unchanged = f"ℹ️ {room} already uses the default RSS template."
         if removed:
-            bot.reply(msg, f"✅ RSS template reset to default for {room}.")
+            bot.reply(msg, success)
             await audit_event(
                 bot,
-                "rss_template_unset",
+                event_type,
                 actor=sender_jid,
-                target=room,
+                target=scope,
             )
         else:
-            bot.reply(msg, f"ℹ️ {room} already uses the default RSS template.")
+            bot.reply(msg, unchanged)
         return
 
     if action == "test":
         template = _join_template_args(rest) if rest else (
-            await get_room_template(store, room) or DEFAULT_RSS_TEMPLATE
-        )
+            await get_effective_template(store, room, feed_url)
+            if feed_url else await get_room_template(store, room)
+        ) or DEFAULT_RSS_TEMPLATE
         error = _validate_rss_template(template)
         if error:
             bot.reply(msg, f"🔴 {error}\n{_rss_template_variables_text()}")
             return
         bot.reply(
             msg,
-            f"🧪 RSS template preview for {room}:\n"
-            f"{_sample_rss_template_preview(template)}",
+            f"🧪 RSS template preview for {scope}:\n"
+            f"{_sample_rss_template_preview(template, feed, feed_url or '')}",
         )
         return
 
@@ -391,17 +481,24 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         if error:
             bot.reply(msg, f"🔴 {error}\n{_rss_template_variables_text()}")
             return
-        await set_room_template(store, room, template)
+        if feed_url:
+            await set_feed_template(store, room, feed_url, template)
+            event_type = "rss_feed_template_set"
+            success = f"✅ RSS feed template set for {scope}."
+        else:
+            await set_room_template(store, room, template)
+            event_type = "rss_template_set"
+            success = f"✅ RSS template set for {room}."
         bot.reply(
             msg,
-            f"✅ RSS template set for {room}.\n"
-            f"Preview:\n{_sample_rss_template_preview(template)}",
+            f"{success}\nPreview:\n"
+            f"{_sample_rss_template_preview(template, feed, feed_url or '')}",
         )
         await audit_event(
             bot,
-            "rss_template_set",
+            event_type,
             actor=sender_jid,
-            target=room,
+            target=scope,
             details={"length": len(template)},
         )
         return
@@ -422,7 +519,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss delete|remove|del|rm <feedurl> [room_jid|all]
     {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss list [room_jid] [page|all|last]
-    {prefix}rss template [show|set|unset|test] [room_jid] [template]
+    {prefix}rss template [show|set|unset|test] [room_jid] [feedurl] [template]
     """
     store = bot.db.users.plugin("rss")
 
@@ -729,10 +826,11 @@ async def _add_feed(bot, msg, url, store, room):
     return
 
 
-async def _delete_feed_everywhere(bot, msg, url, feeds):
+async def _delete_feed_everywhere(bot, msg, url, store, feeds):
     """Remove a feed and its task regardless of subscribed rooms."""
     rooms = list(feeds[url].get("rooms", []))
     feeds.pop(url)
+    await unset_feed_templates_for_feed(store, url)
     await _cancel_feed_task(bot, url)
 
     room_text = ", ".join(rooms) if rooms else "no rooms"
@@ -759,12 +857,15 @@ async def _delete_feed_room(bot, msg, url, store, feeds, room):
 
     if not rooms:
         feeds.pop(url)
+        await unset_feed_templates_for_feed(store, url)
         await _cancel_feed_task(bot, url)
         bot.reply(
             msg,
             f"🗑 Deleted feed: {url} (no rooms left, feed removed)",
         )
         return
+
+    await unset_feed_template(store, stored_room, url)
 
     await ensure_task(
         bot,
@@ -819,7 +920,7 @@ async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     target = str(delete_target).strip() if delete_target else ""
 
     if target.lower() == "all":
-        await _delete_feed_everywhere(bot, msg, url, feeds)
+        await _delete_feed_everywhere(bot, msg, url, store, feeds)
     elif target:
         await _delete_feed_room(
             bot, msg, url, store, feeds, _normalize_room_jid(target)
@@ -829,7 +930,7 @@ async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     else:
         # Direct/private cleanup path: useful for stale feeds whose room no
         # longer exists and cannot be addressed via a room or MUC PM anymore.
-        await _delete_feed_everywhere(bot, msg, url, feeds)
+        await _delete_feed_everywhere(bot, msg, url, store, feeds)
 
     await save_feeds(store, feeds)
     # await _flush_user_store(bot)

@@ -1678,8 +1678,11 @@ Examples:
 - `,rss retry https://example.org/feed.rss room@conference.example.org`
 - `,rss template`
 - `,rss template set 📰 $feed_title: $title\n$link`
+- `,rss template set https://example.org/feed.rss [$feed_title] $title`
 - `,rss template test [$feed_title] $title`
+- `,rss template test https://example.org/feed.rss`
 - `,rss template unset`
+- `,rss template unset https://example.org/feed.rss`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`
 

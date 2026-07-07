@@ -520,6 +520,141 @@ async def test_rss_template_show_set_test_unset(make_bot):
     assert bot.plugin_store[rss.RSS_TEMPLATES_KEY] == {}
 
 
+
+@pytest.mark.asyncio
+async def test_rss_feed_template_show_set_test_unset(make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.rss"
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed Title",
+            "link": "https://example.org/",
+            "rooms": [room],
+            "period": 1200,
+        }
+    }
+    bot.plugin_store[rss.RSS_TEMPLATES_KEY] = {
+        room: "ROOM $feed_title :: $title",
+    }
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "show", url],
+        msg,
+        True,
+    )
+    assert "(room custom)" in bot.replies[-1][1]
+    assert "ROOM $feed_title" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "set", url, "FEED", "$feed_title:", "$title"],
+        msg,
+        True,
+    )
+    assert "RSS feed template set" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY][room][url] == (
+        "FEED $feed_title: $title"
+    )
+    assert "Feed Title" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "show", url],
+        msg,
+        True,
+    )
+    assert "(feed custom)" in bot.replies[-1][1]
+    assert "FEED $feed_title" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "test", url],
+        msg,
+        True,
+    )
+    assert "RSS template preview" in bot.replies[-1][1]
+    assert "FEED Feed Title: Example entry" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "unset", url],
+        msg,
+        True,
+    )
+    assert "RSS feed template reset" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] == {}
+
+
+@pytest.mark.asyncio
+async def test_rss_feed_template_requires_subscribed_feed(make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.rss"
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {"title": "Feed", "rooms": ["other@conference.example.org"]}
+    }
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "set", url, "$title"],
+        msg,
+        True,
+    )
+
+    assert "Feed is not configured for room@conference.example.org" in bot.replies[-1][1]
+    assert rss.RSS_FEED_TEMPLATES_KEY not in bot.plugin_store
+
+
+@pytest.mark.asyncio
+async def test_rss_delete_cleans_feed_specific_templates(monkeypatch, make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    other = "other@conference.example.org"
+    url = "https://example.org/feed.rss"
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "link": "https://example.org/",
+            "period": 1200,
+            "rooms": [room, other],
+        }
+    }
+    bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] = {
+        room: {url: "ROOM $title"},
+        other: {url: "OTHER $title"},
+    }
+    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+
+    await rss.rss_command(bot, "jid", "nick", ["delete", url], msg, True)
+
+    assert bot.plugin_store[rss.RSS_KEY][url]["rooms"] == [other]
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] == {
+        other: {url: "OTHER $title"}
+    }
+
+    await rss.rss_command(bot, "jid", "nick", ["delete", url, "all"], msg, True)
+
+    assert url not in bot.plugin_store[rss.RSS_KEY]
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] == {}
+
+
 @pytest.mark.asyncio
 async def test_rss_template_validates_unknown_vars_and_direct_room(make_bot):
     bot = make_bot()

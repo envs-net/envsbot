@@ -105,3 +105,39 @@ async def test_rss_room_template_store_helpers(make_bot):
     assert await rss.unset_room_template(store, "room@conference.example.org") is True
     assert await rss.unset_room_template(store, "room@conference.example.org") is False
     assert await rss.get_room_templates(store) == {}
+
+    await rss.set_room_template(store, "room@conference.example.org", "ROOM $title")
+    await rss.set_feed_template(
+        store,
+        "Room@Conference.Example.org",
+        "https://example.org/feed.xml",
+        "FEED $title",
+    )
+
+    assert await rss.get_feed_template(
+        store,
+        "room@conference.example.org",
+        "https://example.org/feed.xml",
+    ) == "FEED $title"
+    assert await rss.get_effective_template(
+        store,
+        "room@conference.example.org",
+        "https://example.org/feed.xml",
+    ) == "FEED $title"
+    assert await rss.get_effective_template(
+        store,
+        "room@conference.example.org",
+        "https://example.org/other.xml",
+    ) == "ROOM $title"
+
+    assert await rss.unset_feed_template(
+        store,
+        "room@conference.example.org",
+        "https://example.org/feed.xml",
+    ) is True
+    assert await rss.unset_feed_template(
+        store,
+        "room@conference.example.org",
+        "https://example.org/feed.xml",
+    ) is False
+    assert await rss.get_feed_templates(store) == {}

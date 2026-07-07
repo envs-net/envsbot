@@ -20,7 +20,7 @@ from .fetch import (
     entry_get,
     html_to_text_with_links,
 )
-from .store import get_room_templates
+from .store import get_effective_template
 
 
 log = logging.getLogger(__name__)
@@ -51,10 +51,10 @@ def _rss_template_usage(bot=None) -> str:
     """Return RSS template command usage."""
     prefix = _template_command_prefix(bot)
     return (
-        f"Usage: {prefix}rss template [show] [room_jid]\n"
-        f"       {prefix}rss template set [room_jid] <template>\n"
-        f"       {prefix}rss template unset [room_jid]\n"
-        f"       {prefix}rss template test [room_jid] [template]"
+        f"Usage: {prefix}rss template [show] [room_jid] [feedurl]\n"
+        f"       {prefix}rss template set [room_jid] [feedurl] <template>\n"
+        f"       {prefix}rss template unset [room_jid] [feedurl]\n"
+        f"       {prefix}rss template test [room_jid] [feedurl] [template]"
     )
 
 
@@ -179,13 +179,12 @@ def _format_duration(seconds: int) -> str:
     return " ".join(parts[:3])
 
 
-async def _post_rss_entry_to_rooms(bot, store, rooms, context):
-    """Post one RSS entry to subscribed rooms using per-room templates."""
+async def _post_rss_entry_to_rooms(bot, store, rooms, url, context):
+    """Post one RSS entry using feed, room, or default templates."""
     posted = False
-    templates = await get_room_templates(store)
     for room in rooms:
-        room_template = templates.get(_normalize_template_room_jid(room))
-        msg = _build_rss_message_from_context(context, room_template)
+        template = await get_effective_template(store, room, url)
+        msg = _build_rss_message_from_context(context, template)
         if await _post_entry_to_rooms(bot, [room], msg):
             posted = True
     return posted
@@ -214,7 +213,7 @@ async def _post_new_entries(bot, store, url, feed_title,
             entry_date=_entry_date(entry),
         )
 
-        posted = await _post_rss_entry_to_rooms(bot, store, rooms, context)
+        posted = await _post_rss_entry_to_rooms(bot, store, rooms, url, context)
 
         if not await _save_last_id_for_template_post(bot, store, url, entry_id):
             log.warning("Feed %s was deleted during posting!", url)

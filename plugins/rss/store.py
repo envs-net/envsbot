@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from .config import RSS_TEMPLATES_KEY
+from .config import RSS_FEED_TEMPLATES_KEY, RSS_TEMPLATES_KEY
 
 
 log = logging.getLogger(__name__)
@@ -12,6 +12,11 @@ log = logging.getLogger(__name__)
 def _normalize_template_room_jid(room: str) -> str:
     """Normalize a room JID used for RSS template storage."""
     return str(room or "").strip().lower()
+
+
+def _normalize_template_feed_url(url: str) -> str:
+    """Normalize a feed URL used for RSS template storage."""
+    return str(url or "").strip()
 
 
 async def _flush_user_store(bot):
@@ -62,6 +67,115 @@ async def save_room_templates(store, templates: dict[str, str]) -> None:
         if _normalize_template_room_jid(room) and isinstance(template, str)
     }
     await store.set_global(RSS_TEMPLATES_KEY, normalized)
+
+
+
+
+async def get_feed_templates(store) -> dict[str, dict[str, str]]:
+    """Return custom RSS templates keyed by room JID and feed URL."""
+    templates = await store.get_global(RSS_FEED_TEMPLATES_KEY, default={})
+    if not isinstance(templates, dict):
+        return {}
+
+    normalized: dict[str, dict[str, str]] = {}
+    for room, feed_templates in templates.items():
+        room_key = _normalize_template_room_jid(room)
+        if not room_key or not isinstance(feed_templates, dict):
+            continue
+        feeds = {
+            _normalize_template_feed_url(url): str(template)
+            for url, template in feed_templates.items()
+            if _normalize_template_feed_url(url) and isinstance(template, str)
+        }
+        if feeds:
+            normalized[room_key] = feeds
+    return normalized
+
+
+async def save_feed_templates(
+    store, templates: dict[str, dict[str, str]]
+) -> None:
+    """Persist custom RSS feed templates."""
+    normalized: dict[str, dict[str, str]] = {}
+    for room, feed_templates in templates.items():
+        room_key = _normalize_template_room_jid(room)
+        if not room_key or not isinstance(feed_templates, dict):
+            continue
+        feeds = {
+            _normalize_template_feed_url(url): str(template)
+            for url, template in feed_templates.items()
+            if _normalize_template_feed_url(url) and isinstance(template, str)
+        }
+        if feeds:
+            normalized[room_key] = feeds
+    await store.set_global(RSS_FEED_TEMPLATES_KEY, normalized)
+
+
+async def get_feed_template(store, room: str, url: str) -> str | None:
+    """Return a custom RSS template for one room/feed pair."""
+    templates = await get_feed_templates(store)
+    room_templates = templates.get(_normalize_template_room_jid(room), {})
+    return room_templates.get(_normalize_template_feed_url(url))
+
+
+async def set_feed_template(store, room: str, url: str, template: str) -> None:
+    """Set a custom RSS template for one room/feed pair."""
+    templates = await get_feed_templates(store)
+    room_key = _normalize_template_room_jid(room)
+    url_key = _normalize_template_feed_url(url)
+    if not room_key or not url_key:
+        return
+    templates.setdefault(room_key, {})[url_key] = template
+    await save_feed_templates(store, templates)
+
+
+async def unset_feed_template(store, room: str, url: str) -> bool:
+    """Remove a custom RSS template for one room/feed pair."""
+    templates = await get_feed_templates(store)
+    room_key = _normalize_template_room_jid(room)
+    room_templates = templates.get(room_key)
+    if not isinstance(room_templates, dict):
+        return False
+    removed = room_templates.pop(_normalize_template_feed_url(url), None) is not None
+    if not room_templates:
+        templates.pop(room_key, None)
+    if removed:
+        await save_feed_templates(store, templates)
+    return removed
+
+
+async def unset_feed_templates_for_feed(store, url: str) -> int:
+    """Remove custom RSS templates for a feed URL across all rooms."""
+    templates = await get_feed_templates(store)
+    url_key = _normalize_template_feed_url(url)
+    removed = 0
+    for room in list(templates):
+        room_templates = templates.get(room, {})
+        if room_templates.pop(url_key, None) is not None:
+            removed += 1
+        if not room_templates:
+            templates.pop(room, None)
+    if removed:
+        await save_feed_templates(store, templates)
+    return removed
+
+
+async def unset_feed_templates_for_room(store, room: str) -> int:
+    """Remove all feed-specific RSS templates for a room."""
+    templates = await get_feed_templates(store)
+    room_key = _normalize_template_room_jid(room)
+    removed = len(templates.get(room_key, {}))
+    if templates.pop(room_key, None) is not None:
+        await save_feed_templates(store, templates)
+    return removed
+
+
+async def get_effective_template(store, room: str, url: str) -> str | None:
+    """Return the room/feed template override, falling back to room template."""
+    feed_template = await get_feed_template(store, room, url)
+    if feed_template:
+        return feed_template
+    return await get_room_template(store, room)
 
 
 async def get_room_template(store, room: str) -> str | None:
@@ -197,8 +311,10 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
 
     templates = await get_room_templates(store)
     if templates.pop(target, None) is not None:
-        summary["templates"] = 1
+        summary["templates"] += 1
         await save_room_templates(store, templates)
+
+    summary["templates"] += await unset_feed_templates_for_room(store, target)
 
     return summary
 
@@ -239,6 +355,15 @@ __all__ = [
     'get_rss_store',
     'get_room_templates',
     'save_room_templates',
+    '_normalize_template_feed_url',
+    'get_feed_templates',
+    'save_feed_templates',
+    'get_feed_template',
+    'set_feed_template',
+    'unset_feed_template',
+    'unset_feed_templates_for_feed',
+    'unset_feed_templates_for_room',
+    'get_effective_template',
     'get_room_template',
     'set_room_template',
     'unset_room_template',

@@ -206,6 +206,10 @@ async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
     store[rss.RSS_TEMPLATES_KEY] = {
         room_b: "CUSTOM $feed_title :: $title :: $link",
     }
+    store[rss.RSS_FEED_TEMPLATES_KEY] = {
+        room_a: {url: "FEED $title -> $feed_url"},
+        room_b: {"https://example.org/other.xml": "IGNORED $title"},
+    }
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room_a, True)
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room_b, True)
 
@@ -227,6 +231,6 @@ async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
     )
 
     posted = [reply[1] for reply in bot.replies]
-    assert "[RSS] (Feed) Entry - Distinct summary\nhttps://example.org/a" in posted
+    assert "FEED Entry -> https://example.org/feed.xml" in posted
     assert "CUSTOM Feed :: Entry :: https://example.org/a" in posted
     assert store[rss.RSS_KEY][url]["last_id"] == "entry-1"
