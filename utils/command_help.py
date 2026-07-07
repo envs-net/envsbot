@@ -175,6 +175,27 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "context": "private chat / MUC PM",
         "category": "admin",
     },
+    "config search": {
+        "short": "Search visible config keys and values.",
+        "usage": "{prefix}config search/find <query>",
+        "examples": ["{prefix}config search rss", "{prefix}config find timeout"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "config set": {
+        "short": "Persist and apply one runtime-writable config value.",
+        "usage": "{prefix}config set <KEY> <value>",
+        "examples": ["{prefix}config set LOG_LEVEL DEBUG"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
+    "config unset": {
+        "short": "Reset one runtime-writable config value to the config_sample.py default.",
+        "usage": "{prefix}config unset <KEY>",
+        "examples": ["{prefix}config unset LOG_LEVEL"],
+        "context": "private chat / MUC PM",
+        "category": "admin",
+    },
     "config reload": {
         "short": "Reload config.py into the running bot where possible.",
         "usage": "{prefix}config reload",

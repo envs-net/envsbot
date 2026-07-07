@@ -121,7 +121,10 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,bot status` | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
 | `,config diff` | `admin` | `private chat / MUC PM` | Show config values that differ from config_sample.py defaults. |
 | `,config reload` | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |
+| `,config search` | `admin` | `private chat / MUC PM` | Search visible config keys and values. |
+| `,config set` | `admin` | `private chat / MUC PM` | Persist and apply one runtime-writable config value. |
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
+| `,config unset` | `admin` | `private chat / MUC PM` | Reset one runtime-writable config value to the config_sample.py default. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
 | `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks and backups. |
 | `,plugin diagnose` | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
@@ -518,6 +521,49 @@ Examples:
 
 - `,config diff`
 - `,config diff all`
+
+#### `,config search`
+
+Search visible config keys and values.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,config search/find <query>`
+
+Aliases: `,config find`
+
+Examples:
+
+- `,config search rss`
+- `,config find timeout`
+
+#### `,config set`
+
+Persist and apply one runtime-writable config value. A managed backup is created before editing `config.py` when the backup system is available. Startup-only and secret/protected keys are rejected.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,config set <KEY> <value>`
+
+Examples:
+
+- `,config set LOG_LEVEL DEBUG`
+- `,config set RSS_GLOBAL_QUERY_INTERVAL 900`
+
+#### `,config unset`
+
+Reset one runtime-writable config value to the `config_sample.py` default and apply it through the same reload path as `,config reload`.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,config unset <KEY>`
+
+Examples:
+
+- `,config unset LOG_LEVEL`
 
 #### `,config reload`
 

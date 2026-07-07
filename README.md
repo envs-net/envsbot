@@ -144,11 +144,14 @@ Runtime-safe configuration checks are available through:
 ```text
 ,config show
 ,config diff
+,config search rss
+,config set LOG_LEVEL DEBUG
+,config unset LOG_LEVEL
 ,config validate
 ,config reload
 ```
 
-Secrets such as passwords and API keys are redacted in bot output.
+Secrets such as passwords and API keys are redacted in bot output. `,config set` rejects startup-only, secret and protected options.
 
 Optional release update checks can be enabled with:
 
@@ -212,6 +215,9 @@ Examples assume the default command prefix `,`.
 | `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
 | `,config show [all/page/last]` | Show redacted runtime configuration |
 | `,config diff [all/page/last]` | Show values that differ from `config_sample.py` defaults |
+| `,config search/find <query>` | Search visible config keys and values |
+| `,config set <KEY> <value>` | Persist and apply one runtime-writable config value |
+| `,config unset <KEY>` | Reset one runtime-writable config value to the sample default |
 | `,config validate` | Validate `config.py` |
 | `,config reload` | Reload runtime-safe configuration |
 | `,backup` / `,backup create [reason]` | Create a managed ZIP backup |

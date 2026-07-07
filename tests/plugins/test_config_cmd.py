@@ -272,3 +272,146 @@ async def test_config_reload_reports_errors(monkeypatch):
         f"Config reload failed:\n{error_message}"
         in bot.reply_error.call_args.args[1]
     )
+
+
+def test_config_key_mapping_and_runtime_writable_guards():
+    assert config_cmd._display_key_to_normalized("LOG_LEVEL") == "loglevel"
+    assert config_cmd._display_key_to_normalized("loglevel") == "loglevel"
+    assert config_cmd._normalized_to_display_key("loglevel") == "LOG_LEVEL"
+    assert config_cmd._is_runtime_writable_config_key("loglevel") is True
+    assert config_cmd._is_runtime_writable_config_key("jid") is False
+    assert config_cmd._is_runtime_writable_config_key("password") is False
+    assert config_cmd._is_runtime_writable_config_key("youtube_api_key") is False
+
+
+def test_parse_config_value_and_replace_multiline_assignment():
+    assert config_cmd._parse_config_value("true") is True
+    assert config_cmd._parse_config_value("None") is None
+    assert config_cmd._parse_config_value("42") == 42
+    assert config_cmd._parse_config_value("DEBUG") == "DEBUG"
+
+    source = "A = 1\nROOM_PLUGIN_DEFAULTS = {\n    'dice': True,\n}\nB = 2\n"
+    updated = config_cmd._replace_config_assignment(
+        source,
+        "ROOM_PLUGIN_DEFAULTS",
+        {"dice": False, "rss": True},
+    )
+    assert "'dice': True" not in updated
+    assert "'dice': False" in updated
+    assert "'rss': True" in updated
+    compile(updated, "config.py", "exec")
+
+
+@pytest.mark.asyncio
+async def test_config_search_and_find(monkeypatch):
+    bot = _bot()
+    msg = MagicMock()
+    monkeypatch.setattr(
+        config_cmd,
+        "get_config_display_sections",
+        lambda cfg: [("Runtime", [("LOG_LEVEL", "INFO"), ("PASSWORD", "secret")])],
+    )
+
+    await config_cmd.config_search(
+        bot, "admin@example.org", "admin", ["log"], msg, False
+    )
+
+    reply = bot.reply.call_args.args[1]
+    assert "Config search for 'log': 1 match(es)" in reply
+    assert "✏️ LOG_LEVEL = 'INFO'" in reply
+    assert "PASSWORD" not in reply
+
+
+@pytest.mark.asyncio
+async def test_config_set_updates_file_and_applies_reload(tmp_path, monkeypatch):
+    bot = _bot()
+    msg = MagicMock()
+    config_path = tmp_path / "config.py"
+    config_path.write_text(
+        "JID = 'bot@example.org'\n"
+        "PASSWORD = 'secret'\n"
+        "NICK = 'Bot'\n"
+        "OWNER = 'owner@example.org'\n"
+        "LOG_LEVEL = 'INFO'\n",
+        encoding="utf-8",
+    )
+    live_config = config_cmd.load_config(require_required_keys=False).copy()
+    live_config.update({
+        "jid": "bot@example.org",
+        "password": "secret",
+        "nick": "Bot",
+        "owner": "owner@example.org",
+        "loglevel": "INFO",
+    })
+    audit = AsyncMock()
+    monkeypatch.setenv("ENVSBOT_CONFIG", str(config_path))
+    monkeypatch.setattr(config_cmd, "config", live_config)
+    monkeypatch.setattr(config_cmd, "create_backup", AsyncMock(return_value=None))
+    monkeypatch.setattr(config_cmd, "audit_event", audit)
+    monkeypatch.setattr(config_cmd, "restart_reloadable_plugin_tasks", AsyncMock(return_value=[]))
+
+    await config_cmd.config_set(
+        bot, "admin@example.org", "admin", ["LOG_LEVEL", "DEBUG"], msg, False
+    )
+
+    text = config_path.read_text(encoding="utf-8")
+    assert "LOG_LEVEL = 'DEBUG'" in text
+    assert config_cmd.config["loglevel"] == "DEBUG"
+    assert bot.reply_ok.called
+    assert "LOG_LEVEL updated: 'INFO' → 'DEBUG'" in bot.reply_ok.call_args.args[1]
+    assert audit.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_config_set_rejects_protected_and_invalid_values(monkeypatch):
+    bot = _bot()
+    msg = MagicMock()
+    monkeypatch.setattr(config_cmd, "config", {"loglevel": "INFO"})
+
+    await config_cmd.config_set(
+        bot, "admin@example.org", "admin", ["PASSWORD", "new"], msg, False
+    )
+    assert "not a runtime-writable" in bot.reply_error.call_args.args[1]
+
+    bot.reply_error.reset_mock()
+    await config_cmd.config_set(
+        bot, "admin@example.org", "admin", ["LOG_LEVEL", "NOPE"], msg, False
+    )
+    assert "Invalid value" in bot.reply_error.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_config_unset_resets_to_sample_default(tmp_path, monkeypatch):
+    bot = _bot()
+    msg = MagicMock()
+    config_path = tmp_path / "config.py"
+    config_path.write_text(
+        "JID = 'bot@example.org'\n"
+        "PASSWORD = 'secret'\n"
+        "NICK = 'Bot'\n"
+        "OWNER = 'owner@example.org'\n"
+        "LOG_LEVEL = 'DEBUG'\n",
+        encoding="utf-8",
+    )
+    live_config = config_cmd.load_config(require_required_keys=False).copy()
+    live_config.update({
+        "jid": "bot@example.org",
+        "password": "secret",
+        "nick": "Bot",
+        "owner": "owner@example.org",
+        "loglevel": "DEBUG",
+    })
+    monkeypatch.setenv("ENVSBOT_CONFIG", str(config_path))
+    monkeypatch.setattr(config_cmd, "config", live_config)
+    monkeypatch.setattr(config_cmd, "create_backup", AsyncMock(return_value=None))
+    monkeypatch.setattr(config_cmd, "audit_event", AsyncMock())
+    monkeypatch.setattr(config_cmd, "restart_reloadable_plugin_tasks", AsyncMock(return_value=[]))
+
+    await config_cmd.config_unset(
+        bot, "admin@example.org", "admin", ["LOG_LEVEL"], msg, False
+    )
+
+    text = config_path.read_text(encoding="utf-8")
+    assert "LOG_LEVEL = 'INFO'" in text
+    assert config_cmd.config["loglevel"] == "INFO"
+    assert "LOG_LEVEL reset to default" in bot.reply_ok.call_args.args[1]
