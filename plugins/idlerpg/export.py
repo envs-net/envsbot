@@ -17,10 +17,11 @@ def _export_root() -> Path:
 
 def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
     title_key = str(player.get("title") or "")
+    display_name = _display_player(player)
     return {
         "rank": rank,
-        "name": _display_player(player),
-        "character": _display_player(player),
+        "name": display_name,
+        "character": display_name,
         "class": str(player.get("class") or "idler"),
         "title": _achievement_title(title_key) if title_key else "",
         "title_key": title_key,
@@ -109,7 +110,7 @@ def _record_event(
         events = []
         room["events"] = events
     _prune_events(room)
-    events = room.setdefault("events", [])
+    events = room["events"]
     entry: dict[str, Any] = {"ts": _now(), "kind": _safe_event_kind(kind), "text": str(text or "")[:500]}
     player_names = [str(player)[:80] for player in (players or []) if str(player).strip()]
     if player_names:
@@ -274,6 +275,7 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
         "players_online": room_payload["players_online"],
         "leaderboard_url": _public_url(slug, "leaderboard.json"),
         "map_url": _public_url(slug, "map.json"),
+        "_room_payload": room_payload,
     }
 
 
@@ -291,14 +293,15 @@ def _export_public_state(data: dict[str, Any]) -> None:
         for room_jid, room in sorted(rooms.items()):
             if not isinstance(room, dict):
                 continue
-            summary = _export_room_state(root, str(room_jid), room, generated_at)
-            summaries.append(summary)
-            if default_room_payload is None:
-                room_json = root / summary["slug"] / "room.json"
-                try:
-                    default_room_payload = json.loads(room_json.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    default_room_payload = None
+            summary_with_payload = _export_room_state(root, str(room_jid), room, generated_at)
+            room_payload = summary_with_payload.get("_room_payload")
+            summaries.append({
+                key: value
+                for key, value in summary_with_payload.items()
+                if key != "_room_payload"
+            })
+            if default_room_payload is None and isinstance(room_payload, dict):
+                default_room_payload = room_payload
         _atomic_write_json(root / "index.json", {"generated_at": generated_at, "rooms": summaries})
         if default_room_payload:
             _atomic_write_json(root / "leaderboard.json", {

@@ -21,7 +21,7 @@ async def test_cleanup_room_state_removes_data_and_task():
 def test_public_rules_include_new_options():
     rules = idlerpg._public_rules()
     assert rules["announce_login"] is True
-    assert rules["topic_custom_text"]
+    assert rules["topic_custom_text"] == idlerpg.TOPIC_CUSTOM_TEXT
     assert "item_damage_event_weight" in rules
     assert "item_steal_event_weight" in rules
     assert rules["manual_duel_max_distance"] == idlerpg.MANUAL_DUEL_MAX_DISTANCE
