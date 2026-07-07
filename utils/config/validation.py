@@ -7,6 +7,7 @@ from zoneinfo import available_timezones
 import slixmpp
 
 from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
+from .errors import ConfigError
 
 
 def _validate_string(value, key, errors, allow_empty=False):

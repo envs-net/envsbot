@@ -15,6 +15,7 @@ from .defaults import (
     PYTHON_CONFIG_KEY_MAP,
 )
 from .errors import ConfigError
+from .validation import validate_config
 
 
 def _config_path_from_env() -> Path | None:

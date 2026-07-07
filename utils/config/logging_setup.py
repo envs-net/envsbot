@@ -13,7 +13,9 @@ def setup_logging(log_dir: Path | str = "logs"):
     ``log_dir`` is injectable for tests so mutation tools can keep a stable
     project working directory while still verifying log-file creation.
     """
-    log_level = getattr(logging, config.get(
+    from . import config as runtime_config
+
+    log_level = getattr(logging, runtime_config.get(
         "loglevel", "INFO").upper(), logging.INFO)
 
     log_dir = Path(log_dir)

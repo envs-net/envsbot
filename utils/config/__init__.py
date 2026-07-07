@@ -23,10 +23,13 @@ for _part in _PARTS:
 globals().update(_SHARED)
 
 # Backwards-compatible global config object.
+_load_config = _SHARED["load_config"]
+_ConfigError = _SHARED["ConfigError"]
+_exit_on_config_error = _SHARED["exit_on_config_error"]
 try:
-    config = load_config(require_required_keys=False)  # type: ignore[name-defined]
-except ConfigError as e:  # type: ignore[name-defined]
-    exit_on_config_error(e)  # type: ignore[name-defined]
+    config = _load_config(require_required_keys=False)
+except _ConfigError as e:
+    _exit_on_config_error(e)
 _SHARED['config'] = config
 for _part in _PARTS:
     vars(_part)['config'] = config

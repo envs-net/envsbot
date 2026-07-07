@@ -10,7 +10,11 @@ from .defaults import (
     PYTHON_CONFIG_KEY_MAP,
     _LOWER_TO_PYTHON_CONFIG_KEY,
 )
-from .loader import _load_python_config
+from .loader import (
+    _load_python_config,
+    _merge_room_plugin_default_config,
+)
+from .validation import validate_config
 
 
 def get_config_display_sections(cfg: dict) -> list[tuple[str, list[tuple[str, object]]]]:
@@ -83,7 +87,10 @@ def get_config_diff_sections(
     ``(display_name, current_value, default_value)`` tuples. Nested dictionaries
     are compared one level deep as dotted keys such as ``DUCKS.spawn_chance``.
     """
-    current = config if current_cfg is None else current_cfg
+    if current_cfg is None:
+        from . import config as current
+    else:
+        current = current_cfg
     defaults = load_default_config_for_diff() if default_cfg is None else default_cfg
     sections = []
     seen = set()
