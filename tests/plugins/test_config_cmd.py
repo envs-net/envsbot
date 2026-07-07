@@ -29,7 +29,7 @@ def _bot():
     return bot
 
 
-def test_format_diff_lines_reports_grouped_changes_and_redacts(monkeypatch):
+def test_format_diff_lines_reports_muc_banbot_style_and_skips_secrets(monkeypatch):
     monkeypatch.setattr(
         config_cmd,
         "get_config_diff_sections",
@@ -47,14 +47,15 @@ def test_format_diff_lines_reports_grouped_changes_and_redacts(monkeypatch):
 
     lines = config_cmd._format_diff_lines({})
 
-    assert lines[0] == "XMPP Account:"
-    assert (
-        "• JID = 'bot@example.org' "
-        "(default: 'envsbot@domain.tld')"
-    ) in lines
-    assert "• PASSWORD = '<redacted>' (default: '<redacted>')" in lines
-    assert "URL Check:" in lines
-    assert "• URLCHECK_WAIT_SECONDS = 60 (default: 120)" in lines
+    assert lines == [
+        "• JID",
+        "  current: 'bot@example.org'",
+        "  default: 'envsbot@domain.tld'",
+        "",
+        "• URLCHECK_WAIT_SECONDS",
+        "  current: 60",
+        "  default: 120",
+    ]
 
 
 def test_format_diff_lines_handles_no_changes(monkeypatch):
@@ -66,13 +67,21 @@ def test_format_diff_lines_handles_no_changes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_config_diff_uses_pagination(monkeypatch):
+async def test_config_diff_uses_muc_banbot_style_default_full_output(monkeypatch):
     bot = _bot()
     msg = MagicMock()
     monkeypatch.setattr(
         config_cmd,
-        "_format_diff_lines",
-        lambda cfg: ["one", "two"],
+        "_config_diff_entries",
+        lambda cfg: [
+            "• ONE",
+            "  current: 1",
+            "  default: 0",
+            "",
+            "• TWO",
+            "  current: 2",
+            "  default: 0",
+        ],
     )
 
     await config_cmd.config_diff(
@@ -81,8 +90,29 @@ async def test_config_diff_uses_pagination(monkeypatch):
 
     bot.reply.assert_called_once()
     reply = bot.reply.call_args.args[1]
-    assert reply[0] == "⚙️ Config differences"
-    assert "one" in reply
+    assert reply.startswith("🧩 Config Diff (2 change(s)):")
+    assert "• ONE" in reply
+    assert "Use ,config diff all" not in reply
+
+
+@pytest.mark.asyncio
+async def test_config_diff_paginates_explicit_pages(monkeypatch):
+    bot = _bot()
+    msg = MagicMock()
+    monkeypatch.setattr(
+        config_cmd,
+        "_config_diff_entries",
+        lambda cfg: [f"line {idx}" for idx in range(30)],
+    )
+
+    await config_cmd.config_diff(
+        bot, "admin@example.org", "admin", ["2"], msg, False
+    )
+
+    reply = bot.reply.call_args.args[1]
+    assert reply.startswith("🧩 Config Diff (0 change(s)) - Page 2/2:")
+    assert "line 24" in reply
+    assert "Use ,config diff all for the full output." in reply
 
 
 def test_redact_sensitive_keys():
@@ -198,7 +228,8 @@ async def test_config_reload_applies_runtime_config(monkeypatch):
     reply = bot.reply_ok.call_args.args[1]
     assert "config.py reloaded." in reply
     assert "Prefix changed from ',' to ';'." in reply
-    assert "require a bot restart" in reply
+    assert "Changed:" in reply
+    assert "COMMAND_PREFIX" in reply
 
 
 @pytest.mark.asyncio

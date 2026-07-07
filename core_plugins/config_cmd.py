@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from utils.command import Role, command
 from utils.config import (
     ConfigError,
+    STARTUP_ONLY_KEYS,
+    apply_runtime_config,
     config,
-    load_config,
-    validate_config,
+    config_change_lines,
     get_config_display_sections,
     get_config_diff_sections,
+    load_config,
+    restart_reloadable_plugin_tasks,
+    startup_change_lines,
+    validate_config,
 )
-from utils.formatting import format_page, parse_page_args
+from utils.formatting import format_page, paginate_lines, parse_page_args
 from utils.audit import audit_event
 from utils.room_features import clear_room_feature_caches
 
@@ -89,24 +94,71 @@ def _format_config_lines(cfg: dict) -> list[str]:
     return lines
 
 
-def _format_diff_lines(cfg: dict) -> list[str]:
+def _config_diff_entries(cfg: dict) -> list[str]:
     sections = get_config_diff_sections(cfg)
-    if not sections:
-        return ["No config differences from config_sample.py defaults."]
+    lines: list[str] = []
 
-    lines = []
-    for section_title, entries in sections:
-        if lines:
-            lines.append("")
-        lines.append(f"{section_title}:")
+    for _section_title, entries in sections:
         for name, current_value, default_value in entries:
-            current_display = _render_value(_redact_named(name, current_value))
-            default_display = _render_value(_redact_named(name, default_value))
-            lines.append(
-                f"• {name} = {current_display} "
-                f"(default: {default_display})"
-            )
+            if _is_secret_key(name):
+                continue
+            lines.extend([
+                f"• {name}",
+                f"  current: {_render_value(_redact_named(name, current_value))}",
+                f"  default: {_render_value(_redact_named(name, default_value))}",
+                "",
+            ])
+
+    if lines and lines[-1] == "":
+        lines.pop()
     return lines
+
+
+def _config_diff_arg_requests_page(args: Sequence[str]) -> bool:
+    return any(
+        str(arg).lower().strip() == "last" or str(arg).isdigit()
+        for arg in args
+    )
+
+
+
+def _format_diff_body(cfg: dict, args: Sequence[str], *, prefix: str = ",") -> str:
+    entries = _config_diff_entries(cfg)
+    diff_count = sum(1 for line in entries if line.startswith("• "))
+
+    if not entries:
+        return "🧩 Config Diff: no differences from config_sample.py defaults."
+
+    page_request = parse_page_args(args)
+    should_paginate = (not page_request.all) and _config_diff_arg_requests_page(args)
+    if should_paginate:
+        page_size = 24
+        page = page_request.page
+        page_lines, current_page, total_pages = paginate_lines(
+            entries,
+            page=page,
+            page_size=page_size,
+        )
+        return "\n".join([
+            f"🧩 Config Diff ({diff_count} change(s)) - Page {current_page}/{total_pages}:",
+            "",
+            *page_lines,
+            "",
+            f"Use {prefix}config diff all for the full output.",
+        ])
+
+    return "\n".join([
+        f"🧩 Config Diff ({diff_count} change(s)):",
+        "",
+        *entries,
+    ])
+
+
+def _format_diff_lines(cfg: dict) -> list[str]:
+    entries = _config_diff_entries(cfg)
+    if not entries:
+        return ["No config differences from config_sample.py defaults."]
+    return entries
 
 
 @command("config show", role=Role.ADMIN, aliases=["config"])
@@ -128,16 +180,9 @@ async def config_show(bot, sender, nick, args, msg, is_room):
 @command("config diff", role=Role.ADMIN)
 async def config_diff(bot, sender, nick, args, msg, is_room):
     """Show config values that differ from config_sample.py defaults."""
-    page = parse_page_args(args)
     bot.reply(
         msg,
-        format_page(
-            "⚙️ Config differences",
-            _format_diff_lines(config),
-            page_request=page,
-            page_size=24,
-            command_hint=f"{bot.prefix}config diff",
-        ),
+        _format_diff_body(config, args, prefix=getattr(bot, "prefix", ",")),
     )
 
 
@@ -158,26 +203,49 @@ async def config_validate(bot, sender, nick, args, msg, is_room):
 @command("config reload", role=Role.ADMIN)
 async def config_reload(bot, sender, nick, args, msg, is_room):
     """Reload config.py into the running process where possible."""
+    before = dict(config)
     try:
         new_config = load_config(require_required_keys=True)
     except ConfigError as exc:
         bot.reply_error(msg, f"Config reload failed:\n{exc}")
         return
 
-    old_prefix = config.get("prefix", ",")
+    startup_changes = startup_change_lines(before, new_config)
+    effective_config = dict(new_config)
+    for key in STARTUP_ONLY_KEYS:
+        if before.get(key) != new_config.get(key):
+            if key in before:
+                effective_config[key] = before[key]
+            else:
+                effective_config.pop(key, None)
+
     config.clear()
-    config.update(new_config)
+    config.update(effective_config)
     clear_room_feature_caches()
 
-    bot.prefix = config.get("prefix", bot.prefix)
-    bot.nick = config.get("nick", bot.nick)
+    runtime_notes = apply_runtime_config(bot, before, config)
+    restarted = await restart_reloadable_plugin_tasks(bot, before, config)
+
+    changed_lines = config_change_lines(before, config)
 
     notes = ["config.py reloaded."]
-    if bot.prefix != old_prefix:
-        notes.append(f"Prefix changed from {old_prefix!r} to {bot.prefix!r}.")
-    notes.append(
-        "Connection credentials and DB path require a bot restart "
-        "to fully apply."
-    )
+    if changed_lines:
+        notes.append("\nChanged:")
+        notes.extend(changed_lines)
+    else:
+        notes.append("\nNo config changes detected.")
+
+    if runtime_notes:
+        notes.append("\nApplied at runtime:")
+        notes.extend(f"- {line}" for line in runtime_notes)
+
+    if restarted:
+        notes.append("\nRestarted plugin tasks:")
+        notes.extend(f"- {line}" for line in restarted)
+
+    if startup_changes:
+        notes.append("\nStartup-only changes detected and NOT fully applied. Restart the bot to activate:")
+        notes.extend(startup_changes)
+
     await audit_event(bot, "config_reloaded", actor=sender, target="config")
     bot.reply_ok(msg, "\n".join(notes))
