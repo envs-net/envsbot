@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import inspect
 import types
@@ -7,7 +8,7 @@ import pytest
 
 from utils import plugin_manager
 from utils.plugin_manager import PluginManager
-from utils.command import CommandRegistry
+from utils.command import CommandRegistry, Role, command
 
 
 class FakeBot:
@@ -106,6 +107,79 @@ async def test_load_plugin_with_no_hooks(monkeypatch):
                         lambda name: mod)
     pm.meta["nohooks"] = {'name': 'nohooks'}
     await pm.load("nohooks")
+
+
+@pytest.mark.asyncio
+async def test_failed_load_cleans_events_and_tasks(monkeypatch):
+    class EventBot:
+        def __init__(self):
+            self.calls = []
+            self.tasks = types.SimpleNamespace(
+                created=[],
+                cancel_plugin=AsyncMock(return_value=1),
+            )
+
+            def _create(plugin, coro, name=None):
+                coro.close()
+                self.tasks.created.append((plugin, name))
+                return object()
+
+            self.tasks.create = _create
+
+        def add_event_handler(self, event, handler):
+            self.calls.append(("add", event, handler))
+
+        def del_event_handler(self, event, handler):
+            self.calls.append(("del", event, handler))
+
+    bot = EventBot()
+    registry = CommandRegistry()
+    monkeypatch.setattr(plugin_manager, "COMMANDS", registry)
+    pm = PluginManager(bot=bot, package="fakepkg")
+    bot.bot_plugins = pm
+
+    @command("dupe", role=Role.USER)
+    async def existing(_bot, _msg, _args):
+        return None
+
+    pm._register_commands("existing", types.SimpleNamespace(existing=existing))
+
+    mod = types.ModuleType("fakepkg.bad")
+
+    async def _never():
+        await asyncio.sleep(3600)
+
+    def handler(*_args):
+        return None
+
+    async def on_load(bot_arg):
+        bot_arg.bot_plugins.register_event("bad", "message", handler)
+        bot_arg.bot_plugins.create_task("bad", _never(), name="bad-task")
+
+    @command("dupe", role=Role.USER)
+    async def duplicate(_bot, _msg, _args):
+        return None
+
+    mod.on_load = on_load
+    mod.duplicate = duplicate
+    monkeypatch.setattr(
+        "utils.plugin_manager.importlib.import_module",
+        lambda _name: mod,
+    )
+
+    with pytest.raises(ValueError, match="Command already registered"):
+        await pm.load("bad")
+
+    assert "bad" not in pm.plugins
+    assert pm._event_handlers == {}
+    assert bot.calls == [
+        ("add", "message", handler),
+        ("del", "message", handler),
+    ]
+    assert bot.tasks.created == [("bad", "bad-task")]
+    bot.tasks.cancel_plugin.assert_awaited_once_with("bad")
+    assert tuple("dupe".split()) in registry.index
+    assert registry.by_plugin == {"existing": {tuple("dupe".split())}}
 
 
 @pytest.mark.asyncio

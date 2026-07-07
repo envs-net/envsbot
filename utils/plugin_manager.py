@@ -436,6 +436,35 @@ class PluginManager:
         for k in [k for k in sys.modules.keys() if k.startswith(prefix)]:
             sys.modules.pop(k, None)
 
+    async def _cleanup_failed_load(self, name: str) -> None:
+        """Best-effort cleanup after a plugin load failed mid-flight.
+
+        ``on_load`` hooks may already have registered event handlers or
+        started supervised tasks before command registration fails. Leaving
+        those behind makes the next retry behave differently and can duplicate
+        handlers after a failed update/reload.
+        """
+        for event, handler in self._event_handlers.pop(name, []):
+            try:
+                self.bot.del_event_handler(event, handler)
+            except Exception:
+                log.debug(
+                    "[PLUGIN] failed to remove event handler after load "
+                    "failure: %s.%s",
+                    name,
+                    event,
+                    exc_info=True,
+                )
+
+        try:
+            await self._cancel_plugin_tasks(name)
+        except Exception:
+            log.debug(
+                "[PLUGIN] failed to cancel plugin tasks after load failure: %s",
+                name,
+                exc_info=True,
+            )
+
     async def _run_hook(self, hook):
         """
         Execute a plugin hook safely.
@@ -528,8 +557,10 @@ class PluginManager:
                         "[PLUGIN] 🔴 Failed to load plugin (on_load): '%s'",
                         name,
                     )
-                    # Remove any commands that might have been registered
+                    # Remove any commands, event handlers, and tasks that
+                    # might have been registered by a partially-loaded plugin.
                     COMMANDS.remove_by_plugin(name)
+                    await self._cleanup_failed_load(name)
                     # Ensure the partially-imported module is not left
                     # reachable
                     if module is not None:
