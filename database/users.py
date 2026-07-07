@@ -85,6 +85,13 @@ class PluginRuntimeStore:
 
         return data
 
+    def _mark_runtime_dirty(self, jid: str) -> None:
+        marker = getattr(self.um, "_mark_runtime_dirty", None)
+        if marker is not None:
+            marker(jid)
+            return
+        self.um._dirty_runtime.add(jid)
+
     def _ensure_cache(self, jid: str):
         """
         Ensure runtime cache structure exists for the given jid and plugin.
@@ -186,7 +193,7 @@ class PluginRuntimeStore:
         plugin_data[key] = value
 
         self.um._runtime_meta[jid] = now
-        self.um._dirty_runtime.add(jid)
+        self._mark_runtime_dirty(jid)
 
     async def delete(self, jid: str, key: str):
         """
@@ -204,7 +211,7 @@ class PluginRuntimeStore:
         if key in plugin_data:
             del plugin_data[key]
             self.um._runtime_meta[jid] = now
-            self.um._dirty_runtime.add(jid)
+            self._mark_runtime_dirty(jid)
 
     async def clear(self, jid: str):
         """
@@ -223,7 +230,7 @@ class PluginRuntimeStore:
         data["plugins"][self.plugin_name] = {}
 
         self.um._runtime_meta[jid] = now
-        self.um._dirty_runtime.add(jid)
+        self._mark_runtime_dirty(jid)
 
 
 class UserManager:
@@ -250,9 +257,36 @@ class UserManager:
 
         self._runtime_meta = {}
         self._runtime_update_lock = asyncio.Lock()
+        self._flush_lock = asyncio.Lock()
 
         self._dirty_users = set()
         self._dirty_runtime = set()
+        self._dirty_users_versions = {}
+        self._dirty_runtime_versions = {}
+        self._dirty_version = 0
+
+    def _next_dirty_version(self) -> int:
+        self._dirty_version += 1
+        return self._dirty_version
+
+    def _mark_user_dirty(self, jid: str) -> None:
+        self._dirty_users.add(jid)
+        self._dirty_users_versions[jid] = self._next_dirty_version()
+
+    def _mark_runtime_dirty(self, jid: str) -> None:
+        self._dirty_runtime.add(jid)
+        self._dirty_runtime_versions[jid] = self._next_dirty_version()
+
+    @staticmethod
+    def _dirty_snapshot(dirty: set, versions: dict) -> dict:
+        return {jid: versions.get(jid, 0) for jid in list(dirty)}
+
+    @staticmethod
+    def _clear_flushed_dirty(dirty: set, versions: dict, snapshot: dict) -> None:
+        for jid, version in snapshot.items():
+            if versions.get(jid, 0) == version:
+                dirty.discard(jid)
+                versions.pop(jid, None)
 
     # ------------------------------------------------------------------
     # Initialization
@@ -315,7 +349,7 @@ class UserManager:
                 "last_seen": now,
                 "registered": True,
             }
-            self._dirty_users.add(jid)
+            self._mark_user_dirty(jid)
 
     async def get(self, jid):
         if jid in self._users_cache:
@@ -339,7 +373,7 @@ class UserManager:
         if not user:
             return None
         user[key] = value
-        self._dirty_users.add(jid)
+        self._mark_user_dirty(jid)
         return user
 
     async def list(self):
@@ -384,6 +418,8 @@ class UserManager:
         # 3. Clean dirty flags
         self._dirty_users.discard(jid)
         self._dirty_runtime.discard(jid)
+        self._dirty_users_versions.pop(jid, None)
+        self._dirty_runtime_versions.pop(jid, None)
 
         # 4. Remove from _nick_index
         for nick in list(self._nick_index.keys()):
@@ -432,9 +468,11 @@ class UserManager:
     # FLUSH LOGIC
     # ------------------------------------------------------------------
 
-    async def flush_users(self):
-        for jid in self._dirty_users:
-            user = self._users_cache[jid]
+    async def flush_users(self, jids=None):
+        for jid in list(self._dirty_users if jids is None else jids):
+            user = self._users_cache.get(jid)
+            if user is None:
+                continue
 
             await self.db.execute(
                 """
@@ -477,59 +515,83 @@ class UserManager:
 
     async def flush_all(self):
         """
-        Flush all cached data atomically in a single transaction.
+        Flush cached data atomically in a single transaction.
+
+        Dirty sets may be changed by plugin tasks while a flush is already in
+        progress.  Work on snapshots and only clear entries whose dirty version
+        did not change during the flush.  This avoids both ``RuntimeError: Set
+        changed size during iteration`` and accidental loss of writes created
+        concurrently with the flush.
         """
-        # Persist nick index
-        index = getattr(self, "_nick_index", None)
-        if index is not None:
-            store = self.plugin("users")
-            # Convert sets to lists for JSON serialization
-            serializable_index = {
-                nick: list(jids) if isinstance(jids, set) else jids
-                for nick, jids in index.items()
-            }
-            await store.set_global("_nick_index", serializable_index)
+        async with self._flush_lock:
+            # Persist nick index
+            index = getattr(self, "_nick_index", None)
+            if index is not None:
+                store = self.plugin("users")
+                # Convert sets to lists for JSON serialization
+                serializable_index = {
+                    nick: list(jids) if isinstance(jids, set) else jids
+                    for nick, jids in index.items()
+                }
+                await store.set_global("_nick_index", serializable_index)
 
-        if not (self._dirty_users or self._dirty_runtime):
-            return
+            if not (self._dirty_users or self._dirty_runtime):
+                return
 
-        # Start transaction using SAVEPOINT (thread-safe alternative)
-        try:
-            await self.db.execute("SAVEPOINT flush_checkpoint")
+            dirty_users = self._dirty_snapshot(
+                self._dirty_users,
+                self._dirty_users_versions,
+            )
+            dirty_runtime = self._dirty_snapshot(
+                self._dirty_runtime,
+                self._dirty_runtime_versions,
+            )
 
-            # ----------------------------------------------------------
-            # 1. USERS
-            # ----------------------------------------------------------
-            if self._dirty_users:
-                await self.flush_users()
-
-            # ----------------------------------------------------------
-            # 2. RUNTIME
-            # ----------------------------------------------------------
-            for jid in self._dirty_runtime:
-                data = self._runtime_cache.get(jid) or {"plugins": {}}
-                await self._write_runtime(jid, data)
-
-            # Commit transaction
-            await self.db.execute("RELEASE flush_checkpoint")
-            log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
-
-        except Exception:
+            # Start transaction using SAVEPOINT (thread-safe alternative)
             try:
-                await self.db.execute("ROLLBACK TO flush_checkpoint")
-            except Exception as rollback_exc:
-                log.debug(
-                    "[DB] Rollback after flush failure also failed: %s",
-                    rollback_exc,
-                )
-            log.exception("[DB] FLUSH ALL FAILED!")
-            raise
+                await self.db.execute("SAVEPOINT flush_checkpoint")
 
-        # ----------------------------------------------------------
-        # CLEAR DIRTY FLAGS AFTER SUCCESS
-        # ----------------------------------------------------------
-        self._dirty_users.clear()
-        self._dirty_runtime.clear()
+                # ------------------------------------------------------
+                # 1. USERS
+                # ------------------------------------------------------
+                if dirty_users:
+                    await self.flush_users(dirty_users.keys())
+
+                # ------------------------------------------------------
+                # 2. RUNTIME
+                # ------------------------------------------------------
+                for jid in dirty_runtime:
+                    data = self._runtime_cache.get(jid) or {"plugins": {}}
+                    await self._write_runtime(jid, data)
+
+                # Commit transaction
+                await self.db.execute("RELEASE flush_checkpoint")
+                log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
+
+            except Exception:
+                try:
+                    await self.db.execute("ROLLBACK TO flush_checkpoint")
+                except Exception as rollback_exc:
+                    log.debug(
+                        "[DB] Rollback after flush failure also failed: %s",
+                        rollback_exc,
+                    )
+                log.exception("[DB] FLUSH ALL FAILED!")
+                raise
+
+            # ----------------------------------------------------------
+            # CLEAR ONLY DIRTY FLAGS THAT WERE SUCCESSFULLY FLUSHED
+            # ----------------------------------------------------------
+            self._clear_flushed_dirty(
+                self._dirty_users,
+                self._dirty_users_versions,
+                dirty_users,
+            )
+            self._clear_flushed_dirty(
+                self._dirty_runtime,
+                self._dirty_runtime_versions,
+                dirty_runtime,
+            )
 
     # ------------------------------------------------------------------
     # Plugin API

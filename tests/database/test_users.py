@@ -307,6 +307,28 @@ class RichDummyDB:
         return RichCursor()
 
 
+class MutatingRuntimeWriteDB(RichDummyDB):
+    def __init__(self):
+        super().__init__()
+        self.on_runtime_write = None
+        self.triggered = False
+        self.trigger_jid = None
+
+    async def execute(self, query, params=()):
+        result = await super().execute(query, params)
+        normalized = " ".join(query.split())
+        is_target_jid = self.trigger_jid is None or (params and params[0] == self.trigger_jid)
+        if (
+            normalized.startswith("INSERT INTO users_runtime")
+            and is_target_jid
+            and not self.triggered
+            and self.on_runtime_write is not None
+        ):
+            self.triggered = True
+            await self.on_runtime_write()
+        return result
+
+
 def _queries(db):
     return [query for query, _params in db.calls]
 
@@ -414,6 +436,42 @@ async def test_user_manager_flush_all_rolls_back_and_keeps_dirty_flags():
     queries = _queries(db)
     assert "ROLLBACK TO flush_checkpoint" in queries
     assert um._dirty_users == {"bad@jid"}
+
+
+@pytest.mark.asyncio
+async def test_flush_all_uses_dirty_snapshots_for_concurrent_runtime_updates():
+    db = MutatingRuntimeWriteDB()
+    um = UserManager(db)
+    store = um.plugin("race")
+    await store.set("first@jid", "before", 1)
+
+    async def mutate_during_flush():
+        await store.set("later@jid", "during", 2)
+
+    db.on_runtime_write = mutate_during_flush
+
+    await um.flush_all()
+
+    assert "first@jid" not in um._dirty_runtime
+    assert "later@jid" in um._dirty_runtime
+
+
+@pytest.mark.asyncio
+async def test_flush_all_keeps_same_jid_dirty_when_updated_during_flush():
+    db = MutatingRuntimeWriteDB()
+    db.trigger_jid = "same@jid"
+    um = UserManager(db)
+    store = um.plugin("race")
+    await store.set("same@jid", "value", 1)
+
+    async def mutate_same_jid_during_flush():
+        await store.set("same@jid", "value", 2)
+
+    db.on_runtime_write = mutate_same_jid_during_flush
+
+    await um.flush_all()
+
+    assert "same@jid" in um._dirty_runtime
 
 
 @pytest.mark.asyncio
