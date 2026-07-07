@@ -35,6 +35,49 @@ async def _set_data(bot, data: dict[str, Any]) -> None:
     _export_public_state(data)
 
 
+async def _flush_idlerpg_store(bot) -> None:
+    """Best-effort flush for restart-sensitive IdleRPG checkpoints."""
+    db = getattr(bot, "db", None)
+    flush = getattr(db, "flush", None)
+    if callable(flush):
+        result = flush()
+        if hasattr(result, "__await__"):
+            await result
+        return
+
+    users = getattr(db, "users", None)
+    flush_all = getattr(users, "flush_all", None)
+    if callable(flush_all):
+        result = flush_all()
+        if hasattr(result, "__await__"):
+            await result
+
+
+async def _checkpoint_room_clock(bot, room_jid: str, *, flush: bool = False) -> int:
+    """Persist a room clock boundary before starting/stopping a runtime task.
+
+    Room tasks are intentionally in-memory.  When a task is recreated after a
+    bot restart, plugin reload, or room toggle, the persisted ``last_tick`` may
+    be old.  If we let the next tick consume that whole gap, currently online
+    players would receive idle credit for time where the bot could not observe
+    room presence.  Store a fresh boundary instead and return the skipped gap
+    for diagnostics/tests.
+    """
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    now = _now()
+    try:
+        previous = int(room.get("last_tick", now) or now)
+    except (TypeError, ValueError):
+        previous = now
+    room["last_tick"] = now
+    room["last_task_checkpoint_at"] = now
+    await _set_data(bot, data)
+    if flush:
+        await _flush_idlerpg_store(bot)
+    return max(0, now - previous)
+
+
 def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     rooms = data.setdefault("rooms", {})
     if not isinstance(rooms, dict):

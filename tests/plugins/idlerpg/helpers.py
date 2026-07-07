@@ -21,8 +21,14 @@ class DummyStore:
 class DummyBot:
     def __init__(self):
         self.store = DummyStore()
+        self.flush_count = 0
+
+        async def flush():
+            self.flush_count += 1
+
         self.db = types.SimpleNamespace(
-            users=types.SimpleNamespace(plugin=lambda name: self.store)
+            users=types.SimpleNamespace(plugin=lambda name: self.store),
+            flush=flush,
         )
         self.replies = []
         self.reply = lambda msg, text, **kwargs: self.replies.append((text, kwargs))

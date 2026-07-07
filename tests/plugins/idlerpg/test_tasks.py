@@ -103,3 +103,57 @@ async def test_on_muc_presence_starts_task_only_when_enabled(monkeypatch):
     monkeypatch.setattr(idlerpg._core, "_is_enabled_for_room", raising_enabled)
     await idlerpg.on_muc_presence(bot, pres)
     assert ensured == ["room@conf"]
+
+
+@pytest.mark.asyncio
+async def test_task_start_checkpoints_room_clock_without_catchup(monkeypatch):
+    bot = DummyBot()
+    now = 2_000_000
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "next": 1000, "idled": 0},
+    )
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {
+        "rooms": {
+            "room@conf": {
+                "players": {"alice@envs.net": player},
+                "last_tick": now - 3600,
+            }
+        }
+    }
+
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(
+        idlerpg,
+        "create_plugin_task",
+        lambda _bot, _plugin, coro, name=None: DummyTask(coro, name),
+    )
+
+    task = await idlerpg._ensure_game_task(bot, "room@conf")
+
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    assert isinstance(task, DummyTask)
+    assert room["last_tick"] == now
+    assert room["last_task_checkpoint_at"] == now
+    assert room["players"]["alice@envs.net"]["idled"] == 0
+    assert room["players"]["alice@envs.net"]["next"] == 1000
+    assert bot.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_on_unload_checkpoints_active_room_and_flushes(monkeypatch):
+    bot = DummyBot()
+    now = 2_100_000
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {
+        "rooms": {"room@conf": {"players": {}, "last_tick": now - 120}}
+    }
+    idlerpg.ROOM_TASKS["room@conf"] = DummyTask(name="room@conf")
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+
+    await idlerpg.on_unload(bot)
+
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    assert room["last_tick"] == now
+    assert room["last_task_checkpoint_at"] == now
+    assert "room@conf" not in idlerpg.ROOM_TASKS
+    assert bot.flush_count == 1

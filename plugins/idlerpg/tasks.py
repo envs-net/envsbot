@@ -5,6 +5,7 @@ import asyncio
 import random
 from functools import partial
 from utils.task_supervisor import create_plugin_task
+from .state import _checkpoint_room_clock, _flush_idlerpg_store
 
 
 async def _ensure_game_task(bot, room_jid: str) -> asyncio.Task | None:
@@ -13,6 +14,7 @@ async def _ensure_game_task(bot, room_jid: str) -> asyncio.Task | None:
         return task
     if task and task.done():
         ROOM_TASKS.pop(room_jid, None)
+    await _checkpoint_room_clock(bot, room_jid, flush=True)
     ROOM_TASKS[room_jid] = create_plugin_task(
         bot,
         PLUGIN_NAME,
@@ -193,6 +195,10 @@ async def on_load(bot):
 
 
 async def on_unload(bot):
-    for room_jid in list(ROOM_TASKS):
+    active_rooms = list(ROOM_TASKS)
+    for room_jid in active_rooms:
+        await _checkpoint_room_clock(bot, room_jid)
         await _cancel_room_task(room_jid)
+    if active_rooms:
+        await _flush_idlerpg_store(bot)
     log.info("[IDLERPG] Plugin unloaded")
