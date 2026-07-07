@@ -6,6 +6,7 @@ import ast
 import os
 import pprint
 from collections.abc import Iterable, Sequence
+from contextlib import suppress
 
 from utils.command import Role, command
 from utils.config import (
@@ -171,14 +172,14 @@ def _write_config_text_atomic(path, text: str) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(tmp_path, path)
-    try:
+    # Directory fsync is best-effort: some platforms/filesystems do not
+    # support opening directories, but the atomic replace above is complete.
+    with suppress(OSError):
         dir_fd = os.open(path.parent, os.O_DIRECTORY)
         try:
             os.fsync(dir_fd)
         finally:
             os.close(dir_fd)
-    except OSError:
-        pass
 
 
 def _update_config_file_assignment(display_key: str, value: object) -> None:
