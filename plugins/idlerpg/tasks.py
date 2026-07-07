@@ -8,18 +8,75 @@ from utils.task_supervisor import create_plugin_task
 from .state import _checkpoint_room_clock, _flush_idlerpg_store
 
 
+def _room_jid_from_task_name(name: str) -> str | None:
+    """Return the IdleRPG room JID represented by a supervised task name.
+
+    Older builds used ``idlerpg-<room>`` while newer builds use the plain
+    room JID.  Topic-update tasks intentionally use ``idlerpg-topic-<room>``
+    and are not room game-loop workers.
+    """
+    if name.startswith("idlerpg-topic-"):
+        return None
+    if name.startswith("idlerpg-"):
+        legacy_name = name.removeprefix("idlerpg-")
+        return legacy_name if "@" in legacy_name else None
+    if "@" in name:
+        return name
+    return None
+
+
+async def _cancel_duplicate_supervised_room_tasks(
+    bot,
+    room_jid: str,
+    *,
+    keep: asyncio.Task | None = None,
+) -> int:
+    """Cancel supervised duplicate game-loop tasks for one room.
+
+    During upgrades or plugin reloads, a previously supervised room task can
+    remain tracked even though the split package's ``ROOM_TASKS`` mapping no
+    longer owns it.  Without this reconciliation, the task status command can
+    show two running IdleRPG loops for one room.
+    """
+    supervisor = getattr(bot, "tasks", None)
+    task_meta = getattr(supervisor, "_tasks", None)
+    cancel_task = getattr(supervisor, "cancel_task", None)
+    if not isinstance(task_meta, dict) or not callable(cancel_task):
+        return 0
+
+    cancelled = 0
+    for task, meta in tuple(task_meta.items()):
+        if task is keep or task.done():
+            continue
+        if not isinstance(meta, dict) or meta.get("plugin") != PLUGIN_NAME:
+            continue
+        task_room = _room_jid_from_task_name(str(meta.get("name") or ""))
+        if task_room != room_jid:
+            continue
+        await cancel_task(task)
+        cancelled += 1
+    return cancelled
+
+
 async def _ensure_game_task(bot, room_jid: str) -> asyncio.Task | None:
+    room_jid = str(room_jid)
     task = ROOM_TASKS.get(room_jid)
     if task and not task.done():
+        await _cancel_duplicate_supervised_room_tasks(bot, room_jid, keep=task)
         return task
     if task and task.done():
         ROOM_TASKS.pop(room_jid, None)
+
+    await _cancel_duplicate_supervised_room_tasks(bot, room_jid)
     await _checkpoint_room_clock(bot, room_jid, flush=True)
     ROOM_TASKS[room_jid] = create_plugin_task(
         bot,
         PLUGIN_NAME,
         _game_loop(bot, room_jid),
-        name=f"idlerpg-{room_jid}",
+        name=room_jid,
+    )
+    await _cancel_duplicate_supervised_room_tasks(
+        bot, room_jid, keep=ROOM_TASKS[room_jid]
     )
     return ROOM_TASKS[room_jid]
 

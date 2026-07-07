@@ -5,6 +5,7 @@ from .helpers import (
     idlerpg,
     pytest,
 )
+from utils.task_supervisor import TaskSupervisor
 
 
 @pytest.mark.asyncio
@@ -47,6 +48,48 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
 
     bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = None
     assert await idlerpg._enabled_rooms(bot) == {}
+
+
+@pytest.mark.asyncio
+async def test_ensure_game_task_cleans_duplicate_supervised_room_tasks():
+    bot = DummyBot()
+    bot.tasks = TaskSupervisor()
+
+    def create_task(plugin, coro, name=None):
+        return bot.tasks.create(plugin, coro, name=name)
+
+    bot.bot_plugins.create_task = create_task
+
+    async def legacy_loop():
+        await asyncio.sleep(3600)
+
+    legacy = bot.tasks.create(
+        idlerpg.PLUGIN_NAME,
+        legacy_loop(),
+        name="idlerpg-room@conf",
+    )
+
+    task = await idlerpg._ensure_game_task(bot, "room@conf")
+    snapshot = bot.tasks.snapshot()
+
+    assert legacy.cancelled()
+    assert idlerpg.ROOM_TASKS["room@conf"] is task
+    assert [(item.plugin, item.name, item.status) for item in snapshot] == [
+        (idlerpg.PLUGIN_NAME, "room@conf", "running")
+    ]
+
+    await idlerpg._ensure_game_task(bot, "room@conf")
+    assert [(item.plugin, item.name, item.status) for item in bot.tasks.snapshot()] == [
+        (idlerpg.PLUGIN_NAME, "room@conf", "running")
+    ]
+    await idlerpg._cancel_room_task("room@conf")
+
+
+def test_room_jid_from_task_name_ignores_topic_tasks():
+    assert idlerpg._room_jid_from_task_name("idlerpg-room@conf") == "room@conf"
+    assert idlerpg._room_jid_from_task_name("room@conf") == "room@conf"
+    assert idlerpg._room_jid_from_task_name("idlerpg-topic-room@conf") is None
+    assert idlerpg._room_jid_from_task_name("idlerpg-index") is None
 
 
 @pytest.mark.asyncio
