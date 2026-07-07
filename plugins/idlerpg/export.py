@@ -178,6 +178,8 @@ def _public_rules() -> dict[str, Any]:
         "alignment_event_weight": ALIGNMENT_EVENT_WEIGHT,
         "critical_strike_chance": CRITICAL_STRIKE_CHANCE,
         "item_drop_chance": ITEM_DROP_CHANCE,
+        "manual_duel_max_distance": MANUAL_DUEL_MAX_DISTANCE,
+        "manual_duel_cooldown_seconds": MANUAL_DUEL_COOLDOWN_SECONDS,
         "announce_login": ANNOUNCE_LOGIN,
         "announce_top_interval": ANNOUNCE_TOP_INTERVAL,
         "announce_top_limit": ANNOUNCE_TOP_LIMIT,

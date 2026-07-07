@@ -24,4 +24,6 @@ def test_public_rules_include_new_options():
     assert rules["topic_custom_text"]
     assert "item_damage_event_weight" in rules
     assert "item_steal_event_weight" in rules
+    assert rules["manual_duel_max_distance"] == idlerpg.MANUAL_DUEL_MAX_DISTANCE
+    assert rules["manual_duel_cooldown_seconds"] == idlerpg.MANUAL_DUEL_COOLDOWN_SECONDS
     assert "season_achievement_gates_enabled" in rules
