@@ -138,6 +138,11 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         item("topic_custom_text", "idlerpg_topic_custom_text", ""),
         "",
     ) or export_public_base_url or "IdleRPG"
+    map_step_per_second = item(
+        "map_step_per_second",
+        "idlerpg_map_step_per_second",
+        item("map_step_per_tick", "idlerpg_map_step_per_tick", 1),
+    )
 
     return {
         "TICK_SECONDS": _to_int(item("tick_seconds", "idlerpg_tick_seconds", 60) or 60, 60),
@@ -188,7 +193,10 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "SEASON_DURATION_DAYS": _to_int(item("season_duration_days", "idlerpg_season_duration_days", 90) or 0, 0),
         "SEASON_RESET_ON_ROLLOVER": _to_bool(item("season_reset_on_rollover", "idlerpg_season_reset_on_rollover", False), False),
         "SEASON_HOF_SIZE": _to_int(item("season_hof_size", "idlerpg_season_hof_size", 10) or 10, 10),
-        "MAP_STEP_PER_TICK": _to_int(item("map_step_per_tick", "idlerpg_map_step_per_tick", 5) or 0, 0),
+        "MAP_STEP_PER_SECOND": _to_int(map_step_per_second or 0, 0),
+        "MAP_STEP_PER_TICK": _to_int(map_step_per_second or 0, 0),
+        "GRID_BATTLE_ENABLED": _to_bool(item("grid_battle_enabled", "idlerpg_grid_battle_enabled", True), True),
+        "QUEST_GRID_STEP_SECONDS": _to_int(item("quest_grid_step_seconds", "idlerpg_quest_grid_step_seconds", 2) or 2, 2),
         "COUNT_COMMAND_MESSAGES": _to_bool(item("count_command_messages", "idlerpg_count_command_messages", False), False),
         "ANNOUNCE_LOGIN": _to_bool(item("announce_login", "idlerpg_announce_login", True), True),
         "ANNOUNCE_TOP_INTERVAL": _to_int(item("announce_top_interval", "idlerpg_announce_top_interval", 21600) or 0, 0),

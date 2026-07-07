@@ -100,6 +100,39 @@ def _duel_distance(attacker: dict[str, Any], defender: dict[str, Any]) -> float:
     return math.hypot(ax - dx, ay - dy)
 
 
+def _grid_position(player: dict[str, Any]) -> tuple[int, int]:
+    return (_clamp_grid_coord(player.get("x", 0), MAP_X), _clamp_grid_coord(player.get("y", 0), MAP_Y))
+
+
+def _maybe_run_grid_battle(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> bool:
+    """Run an original-style grid encounter if players occupy one point.
+
+    Classic IdleRPG gives an encounter a 1 / online-player-count chance to
+    become a normal battle when two players meet on the grid.  At most one grid
+    battle is emitted per tick to keep room output manageable.
+    """
+    if not GRID_BATTLE_ENABLED or len(players) < 2:
+        return False
+
+    by_position: dict[tuple[int, int], list[tuple[str, dict[str, Any]]]] = {}
+    for jid, player in players:
+        by_position.setdefault(_grid_position(player), []).append((jid, player))
+
+    for occupants in by_position.values():
+        if len(occupants) < 2:
+            continue
+        if random.random() >= (1 / len(players)):
+            continue
+        attacker, defender = random.sample(occupants, 2)
+        _run_duel_between(attacker[1], defender[1], messages, room)
+        return True
+    return False
+
+
 def _run_duel_between(
     attacker: dict[str, Any],
     defender: dict[str, Any],

@@ -1,4 +1,5 @@
 from .helpers import (
+    JOINED_ROOMS,
     idlerpg,
     types,
 )
@@ -85,3 +86,36 @@ def test_normalize_player_does_not_consume_rng_for_existing_coordinates(monkeypa
 
     assert player["x"] == 12
     assert player["y"] == 34
+
+
+def test_original_style_grid_movement_and_quest_direction(monkeypatch):
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "x": 10, "y": 10},
+    )
+    choices = iter([1, 0, -1, 1, 0, 1])
+    monkeypatch.setattr(idlerpg, "MAP_STEP_PER_SECOND", 1)
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: next(choices))
+
+    idlerpg._move_player(player, 3)
+    assert (player["x"], player["y"]) == (10, 12)
+
+    quest = {"active": True, "questers": ["alice@envs.net"], "route": [[14, 16]], "route_index": 0}
+    monkeypatch.setattr(idlerpg, "QUEST_GRID_STEP_SECONDS", 2)
+    idlerpg._move_player(player, 4, quest=quest, jid="alice@envs.net")
+    assert (player["x"], player["y"]) == (12, 14)
+
+
+def test_quest_target_helpers_validate_route_and_online_state():
+    quest = {"active": True, "questers": ["alice@envs.net"], "route": [[5, 6], [7, 8]], "route_index": 1}
+    player = idlerpg._normalize_player("alice@envs.net", {"name": "Alice", "x": 7, "y": 8})
+    room_players = {"alice@envs.net": player}
+    JOINED_ROOMS["room@conf"] = {"nicks": {"Alice": {"jid": "alice@envs.net"}}}
+
+    assert idlerpg._active_quest_target(quest) == (7, 8)
+    assert idlerpg._questers_at_target(room_players, quest) is True
+    assert idlerpg._questers_at_target(room_players, quest, room_jid="room@conf") is True
+
+    JOINED_ROOMS["room@conf"] = {"nicks": {}}
+    assert idlerpg._questers_at_target(room_players, quest, room_jid="room@conf") is False
+    assert idlerpg._active_quest_target({"active": False, "route": [[1, 2]]}) is None

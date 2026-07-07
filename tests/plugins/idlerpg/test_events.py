@@ -97,3 +97,33 @@ def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypa
     asyncio.run(idlerpg._maybe_run_random_event(room, "room@conf", messages))
 
     assert messages == ["fate"]
+
+
+def test_original_style_grid_battle_only_when_players_meet(monkeypatch):
+    room = idlerpg._blank_room()
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    away = idlerpg._normalize_player(
+        "away@envs.net",
+        {"name": "Away", "level": 10, "next": 1000, "x": 40, "y": 42},
+    )
+    players = [("alice@envs.net", alice), ("bob@envs.net", bob), ("away@envs.net", away)]
+    messages: list[str] = []
+
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: list(seq)[:count])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: stop)
+
+    assert idlerpg._maybe_run_grid_battle(players, messages, room) is True
+    assert any("has challenged" in message for message in messages)
+
+    messages.clear()
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    assert idlerpg._maybe_run_grid_battle(players, messages, room) is False
+    assert messages == []

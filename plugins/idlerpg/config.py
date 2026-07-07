@@ -222,7 +222,33 @@ SEASON_RESET_ON_ROLLOVER = bool(_cfg.get("season_reset_on_rollover", config.get(
 SEASON_HOF_SIZE = int(_cfg.get("season_hof_size", config.get("idlerpg_season_hof_size", 10)) or 10)
 
 
-MAP_STEP_PER_TICK = int(_cfg.get("map_step_per_tick", config.get("idlerpg_map_step_per_tick", 5)) or 0)
+MAP_STEP_PER_SECOND = int(
+    _cfg.get(
+        "map_step_per_second",
+        config.get(
+            "idlerpg_map_step_per_second",
+            _cfg.get("map_step_per_tick", config.get("idlerpg_map_step_per_tick", 1)),
+        ),
+    )
+    or 0
+)
+
+
+# Backwards-compatible alias for older tests/config users.  The movement model
+# is now original-style grid walking, so this value means grid points per
+# simulated second rather than one large jump per tick.
+MAP_STEP_PER_TICK = MAP_STEP_PER_SECOND
+
+
+GRID_BATTLE_ENABLED = bool(
+    _cfg.get("grid_battle_enabled", config.get("idlerpg_grid_battle_enabled", True))
+)
+
+
+QUEST_GRID_STEP_SECONDS = int(
+    _cfg.get("quest_grid_step_seconds", config.get("idlerpg_quest_grid_step_seconds", 2))
+    or 2
+)
 
 
 COUNT_COMMAND_MESSAGES = bool(
@@ -343,7 +369,10 @@ __all__ = [
     'SEASON_DURATION_DAYS',
     'SEASON_RESET_ON_ROLLOVER',
     'SEASON_HOF_SIZE',
+    'MAP_STEP_PER_SECOND',
     'MAP_STEP_PER_TICK',
+    'GRID_BATTLE_ENABLED',
+    'QUEST_GRID_STEP_SECONDS',
     'COUNT_COMMAND_MESSAGES',
     'ANNOUNCE_LOGIN',
     'ANNOUNCE_TOP_INTERVAL',

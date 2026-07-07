@@ -54,3 +54,25 @@ def test_apply_runtime_config_replaces_limiter_when_rate_limit_changes():
     assert bot.rate_limiter is not old_limiter
     assert bot.rate_limiter.capacity == 6.0
     assert any("rate limiter" in note for note in notes)
+
+
+def test_idlerpg_runtime_values_include_original_grid_options():
+    values = runtime._idlerpg_values({
+        "idlerpg": {
+            "map_step_per_second": "2",
+            "grid_battle_enabled": False,
+            "quest_grid_step_seconds": "5",
+        }
+    })
+
+    assert values["MAP_STEP_PER_SECOND"] == 2
+    assert values["MAP_STEP_PER_TICK"] == 2
+    assert values["GRID_BATTLE_ENABLED"] is False
+    assert values["QUEST_GRID_STEP_SECONDS"] == 5
+
+
+def test_idlerpg_runtime_values_support_legacy_map_step_alias():
+    values = runtime._idlerpg_values({"idlerpg": {"map_step_per_tick": "3"}})
+
+    assert values["MAP_STEP_PER_SECOND"] == 3
+    assert values["MAP_STEP_PER_TICK"] == 3

@@ -445,9 +445,12 @@ Use the absolute path directly instead:
 
 ## Map
 
-Each character has a coordinate on the room map. Online players move a little on
-every game tick. Active quests include route coordinates that are exported in
-`map.json` and can be rendered by the website.
+Each character has a coordinate on the room map. The movement model follows the
+classic IdleRPG grid system: online players are simulated once per elapsed
+second, with equal chances to step left, right or neither and equal chances to
+step up, down or neither. Active grid quests include route coordinates that are
+exported in `map.json` and can be rendered by the website. Questers walk toward
+the current quest point more slowly than normal random movement.
 
 ```text
 ,idlerpg map
@@ -480,7 +483,9 @@ Relevant settings:
 IDLERPG = {
     "map_x": 500,
     "map_y": 500,
-    "map_step_per_tick": 5,
+    "map_step_per_second": 1,
+    "grid_battle_enabled": True,
+    "quest_grid_step_seconds": 2,
 }
 ```
 
@@ -488,7 +493,10 @@ IDLERPG = {
 | --- | ---: | --- |
 | `map_x` | `500` | Width of the virtual game map. Exported as `width` in `map.json`. |
 | `map_y` | `500` | Height of the virtual game map. Exported as `height` in `map.json`. |
-| `map_step_per_tick` | `5` | Maximum movement step for online players per game tick. Set to `0` to keep coordinates static. |
+| `map_step_per_second` | `1` | Grid step size for original-style per-second random walking. Set to `0` to keep coordinates static. |
+| `map_step_per_tick` | `1` | Legacy alias for `map_step_per_second`; kept for old configs. |
+| `grid_battle_enabled` | `True` | Allow original-style grid encounters when multiple online players meet on the same coordinate. |
+| `quest_grid_step_seconds` | `2` | Seconds per directed quest step. Higher values make grid quests slower. |
 
 ## Seasons and Hall of Fame
 
@@ -611,13 +619,14 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 | `quest_min_level` | `40` | Minimum level for players to be selected for quests. |
 | `quest_interval` | `21600` | Minimum time in seconds between quest start attempts. The default is 6 hours. |
 | `quest_min_duration` | `43200` | Minimum quest duration in seconds. The default is 12 hours. |
-| `quest_max_duration` | `86400` | Maximum quest duration in seconds. The default is 24 hours. |
+| `quest_max_duration` | `86400` | Maximum grid quest deadline in seconds. The default is 24 hours. If the route is not completed before the deadline, online players receive a p15 quest penalty. |
 
 ### Export, map and seasons
 
 These options are documented in the sections above: `export_enabled`,
 `export_path`, `export_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
-`map_step_per_tick`, `season_enabled`, `season_duration_days`,
+`map_step_per_second`, `map_step_per_tick`, `grid_battle_enabled`,
+`quest_grid_step_seconds`, `season_enabled`, `season_duration_days`,
 `season_reset_on_rollover`, `season_hof_size`, `event_log_limit`,
 `event_retention_days`, and `export_event_limit`.
 

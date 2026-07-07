@@ -383,8 +383,8 @@ def test_season_rollover_and_player_movement(monkeypatch):
     room["season"] = {"id": "old", "started_at": idlerpg._now() - 10, "ends_at": idlerpg._now() - 1}
     monkeypatch.setattr(idlerpg, "SEASON_ENABLED", True)
     monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 1)
-    monkeypatch.setattr(idlerpg, "MAP_STEP_PER_TICK", 1)
-    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: 1)
+    monkeypatch.setattr(idlerpg, "MAP_STEP_PER_SECOND", 1)
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[-1])
 
     old_pos = (player["x"], player["y"])
     messages = []
@@ -621,9 +621,13 @@ async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
     )
     room["players"][first_jid]["unique_items"] = {"pair of boots": "The Boots of Silent Idling"}
     before = int(room["players"][first_jid]["next"])
+    for point in room["quest"]["route"]:
+        for jid in room["quest"]["questers"]:
+            room["players"][jid]["x"] = point[0]
+            room["players"][jid]["y"] = point[1]
+        messages.clear()
+        await idlerpg._maybe_run_quest(room, room_jid, messages)
     room["quest"]["complete_at"] = 999
-    messages.clear()
-    await idlerpg._maybe_run_quest(room, room_jid, messages)
     assert room["quest"]["active"] is False
     assert room["players"][first_jid]["next"] == int(before * 70 / 100)
     assert "quest_hero" in room["players"][first_jid]["achievements"]

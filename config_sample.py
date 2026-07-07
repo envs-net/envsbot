@@ -331,9 +331,15 @@ IDLERPG = {
     "page_size": 10,
     "map_x": 500,
     "map_y": 500,
-    "map_step_per_tick": 5,
+    # Original-style grid movement: every simulated second, online players
+    # have equal chances to step left/right/neither and up/down/neither.
+    "map_step_per_second": 1,
+    # Legacy alias; prefer map_step_per_second for new configs.
+    "map_step_per_tick": 1,
+    "grid_battle_enabled": True,
+    "quest_grid_step_seconds": 2,
 
-    # Quest timing. Quest durations are seconds.
+    # Quest timing. Grid quests must reach route points before this deadline.
     "quest_min_level": 40,
     "quest_interval": 21600,
     "quest_min_duration": 43200,

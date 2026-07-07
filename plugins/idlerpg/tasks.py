@@ -170,7 +170,8 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
     online_jids = _online_jids(room_jid)
     messages: list[str] = []
     _maybe_rollover_season(room_jid, room, messages)
-    movement_steps = max(1, delta // max(1, TICK_SECONDS))
+    online_players: list[tuple[str, dict]] = []
+    active_quest = room.get("quest") if isinstance(room.get("quest"), dict) else None
     for jid, raw_player in list(players.items()):
         if not isinstance(raw_player, dict):
             players.pop(jid, None)
@@ -185,7 +186,8 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
         player["idled"] = int(player.get("idled", 0)) + delta
         player["last_seen"] = now
         _check_level_achievements(player, room)
-        _move_player(player, movement_steps)
+        _move_player(player, delta, quest=active_quest, jid=str(jid))
+        online_players.append((str(jid), player))
         leveled = False
         while int(player.get("next", 0)) <= 0:
             player["level"] = int(player.get("level", 0)) + 1
@@ -205,6 +207,7 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
                 messages.append(f"🏷️ {_display_player(player)} has unlocked the rare title pool at level 75.")
             if random.random() < ITEM_CHANCE:
                 messages.append(_grant_level_item(player, room))
+    _maybe_run_grid_battle(online_players, messages, room)
     _maybe_periodic_announcements(bot, room_jid, room, messages)
     await _maybe_run_random_event(room, room_jid, messages)
     await _maybe_run_quest(room, room_jid, messages)
