@@ -8,6 +8,25 @@ from utils.task_supervisor import create_plugin_task
 from .state import _checkpoint_room_clock, _flush_idlerpg_store
 
 
+_ROOM_TASK_LOCKS: dict[str, asyncio.Lock] = {}
+_ROOM_TICK_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _room_lock(locks: dict[str, asyncio.Lock], room_jid: str) -> asyncio.Lock:
+    room_key = str(room_jid)
+    lock = locks.get(room_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[room_key] = lock
+    return lock
+
+
+def _clear_room_locks(room_jid: str) -> None:
+    room_key = str(room_jid)
+    _ROOM_TASK_LOCKS.pop(room_key, None)
+    _ROOM_TICK_LOCKS.pop(room_key, None)
+
+
 def _room_jid_from_task_name(name: str) -> str | None:
     """Return the IdleRPG room JID represented by a supervised task name.
 
@@ -60,6 +79,12 @@ async def _cancel_duplicate_supervised_room_tasks(
 
 async def _ensure_game_task(bot, room_jid: str) -> asyncio.Task | None:
     room_jid = str(room_jid)
+    async with _room_lock(_ROOM_TASK_LOCKS, room_jid):
+        return await _ensure_game_task_locked(bot, room_jid)
+
+
+async def _ensure_game_task_locked(bot, room_jid: str) -> asyncio.Task | None:
+    room_jid = str(room_jid)
     task = ROOM_TASKS.get(room_jid)
     if task and not task.done():
         await _cancel_duplicate_supervised_room_tasks(bot, room_jid, keep=task)
@@ -89,6 +114,7 @@ async def _cancel_room_task(room_jid: str) -> None:
             await task
         except asyncio.CancelledError:
             log.debug("[IDLERPG] Room task for %s cancelled cleanly", room_jid)
+    _clear_room_locks(room_jid)
 
 
 async def _start_enabled_room_tasks(bot) -> None:
@@ -119,6 +145,12 @@ async def _game_loop(bot, room_jid: str) -> None:
 
 
 async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
+    room_jid = str(room_jid)
+    async with _room_lock(_ROOM_TICK_LOCKS, room_jid):
+        await _tick_room_locked(bot, room_jid, announce=announce)
+
+
+async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> None:
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
     now = _now()

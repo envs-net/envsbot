@@ -94,6 +94,8 @@ class DummyMsg:
 @pytest.fixture(autouse=True)
 def clear_idlerpg_state():
     idlerpg.ROOM_TASKS.clear()
+    getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
+    getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
     JOINED_ROOMS.clear()
     idlerpg._core.JOINED_ROOMS = JOINED_ROOMS
     JOINED_ROOMS["room@conf"] = {
@@ -105,6 +107,8 @@ def clear_idlerpg_state():
     }
     yield
     idlerpg.ROOM_TASKS.clear()
+    getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
+    getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
     JOINED_ROOMS.clear()
 
 

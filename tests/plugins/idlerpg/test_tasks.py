@@ -1,3 +1,6 @@
+import asyncio
+import copy
+
 from .helpers import (
     DummyBot,
     DummyMsg,
@@ -83,6 +86,98 @@ async def test_ensure_game_task_cleans_duplicate_supervised_room_tasks():
         (idlerpg.PLUGIN_NAME, "room@conf", "running")
     ]
     await idlerpg._cancel_room_task("room@conf")
+
+
+@pytest.mark.asyncio
+async def test_ensure_game_task_serializes_concurrent_start(monkeypatch):
+    bot = DummyBot()
+    bot.tasks = TaskSupervisor()
+
+    def create_task(plugin, coro, name=None):
+        return bot.tasks.create(plugin, coro, name=name)
+
+    bot.bot_plugins.create_task = create_task
+    checkpoint_calls = 0
+
+    async def slow_checkpoint(_bot, _room_jid, *, flush=False):
+        nonlocal checkpoint_calls
+        checkpoint_calls += 1
+        await asyncio.sleep(0.01)
+        return 0
+
+    monkeypatch.setattr(idlerpg, "_checkpoint_room_clock", slow_checkpoint)
+
+    first, second = await asyncio.gather(
+        idlerpg._ensure_game_task(bot, "room@conf"),
+        idlerpg._ensure_game_task(bot, "room@conf"),
+    )
+
+    assert first is second
+    assert checkpoint_calls == 1
+    assert [(item.plugin, item.name, item.status) for item in bot.tasks.snapshot()] == [
+        (idlerpg.PLUGIN_NAME, "room@conf", "running")
+    ]
+
+    await idlerpg._cancel_room_task("room@conf")
+
+
+@pytest.mark.asyncio
+async def test_tick_room_serializes_concurrent_announcements(monkeypatch):
+    class CopyingStore(type(DummyBot().store)):
+        async def get_global(self, key, default=None):
+            return copy.deepcopy(self.globals.get(key, default))
+
+        async def set_global(self, key, value):
+            await asyncio.sleep(0)
+            self.globals[key] = copy.deepcopy(value)
+
+    bot = DummyBot()
+    bot.store = CopyingStore()
+    now = 3_000_000
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 0,
+            "next": 60,
+            "idled": 0,
+            "x": 1,
+            "y": 1,
+        },
+    )
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {
+        "rooms": {
+            "room@conf": {
+                "players": {"alice@envs.net": player},
+                "last_tick": now - 60,
+                "next_top_announce_at": now + 3600,
+                "next_topic_update_at": now + 3600,
+                "events": [],
+            }
+        }
+    }
+
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    monkeypatch.setattr(idlerpg, "_export_public_state", lambda _data: None)
+
+    await asyncio.gather(
+        idlerpg._tick_room(bot, "room@conf", announce=True),
+        idlerpg._tick_room(bot, "room@conf", announce=True),
+    )
+
+    replies = [text for text, _kwargs in bot.replies if "has reached level" in text]
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    stored_player = room["players"]["alice@envs.net"]
+
+    assert replies == [
+        "🏆 Alice has reached level 1! Next level in 0 days, 00:11:36."
+    ]
+    assert stored_player["level"] == 1
+    assert stored_player["idled"] == 60
+    assert room["last_tick"] == now
+    assert len(room["events"]) == 1
 
 
 def test_room_jid_from_task_name_ignores_topic_tasks():
