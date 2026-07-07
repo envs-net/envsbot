@@ -64,31 +64,35 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
         event_roll -= weight
 
     if selected == "battle":
-        _run_pvp_battle(players, messages)
+        _run_pvp_battle(players, messages, room)
         return
     if selected == "team_battle":
-        _run_team_battle(players, messages)
+        _run_team_battle(players, messages, room)
         return
     if selected == "item":
-        _run_item_blessing(players, messages)
+        _run_item_blessing(players, messages, room)
         return
     if selected == "item_damage":
         before = len(messages)
-        _run_item_damage(players, messages)
+        _run_item_damage(players, messages, room)
         if len(messages) > before:
             return
     if selected == "item_steal":
         before = len(messages)
-        _run_item_swap(players, messages)
+        _run_item_swap(players, messages, room)
         if len(messages) > before:
             return
-    if selected == "alignment" and _run_alignment_bonus(players, messages):
+    if selected == "alignment" and _run_alignment_bonus(players, messages, room):
         return
 
-    _run_godsend_or_calamity(players, messages)
+    _run_godsend_or_calamity(players, messages, room)
 
 
-def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+def _run_pvp_battle(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     pair = _choose_two_players(players)
     if pair is None:
         return
@@ -112,7 +116,7 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
         messages.append(_next_level_line(attacker))
         winner, loser = attacker, defender
         _award(winner, "battle_winner")
-        _inc_stat(winner, "battles_won", 1)
+        _inc_stat(winner, "battles_won", 1, room)
     else:
         amount = _battle_clock_delta(attacker, defender, "loss")
         changed = _add_time(attacker, amount)
@@ -124,13 +128,17 @@ def _run_pvp_battle(players: list[tuple[str, dict[str, Any]]], messages: list[st
         messages.append(_next_level_line(attacker))
         winner, loser = defender, attacker
         _award(winner, "battle_winner")
-        _inc_stat(winner, "battles_won", 1)
+        _inc_stat(winner, "battles_won", 1, room)
 
     _maybe_critical_strike(winner, loser, messages)
-    _maybe_battle_item_drop(winner, loser, messages)
+    _maybe_battle_item_drop(winner, loser, messages, room)
 
 
-def _run_team_battle(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+def _run_team_battle(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     if len(players) < 6:
         return
     selected = random.sample(players, 6)
@@ -150,7 +158,7 @@ def _run_team_battle(players: list[tuple[str, dict[str, Any]]], messages: list[s
     for _jid, player in winners:
         _remove_time(player, changed)
         _award(player, "team_battle_winner")
-        _inc_stat(player, "team_battles_won", 1)
+        _inc_stat(player, "team_battles_won", 1, room)
     for _jid, player in losers:
         _add_time(player, changed)
     messages.append(
@@ -162,7 +170,11 @@ def _run_team_battle(players: list[tuple[str, dict[str, Any]]], messages: list[s
         messages.append(_next_level_line(player))
 
 
-def _run_alignment_bonus(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> bool:
+def _run_alignment_bonus(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> bool:
     groups: dict[str, list[dict[str, Any]]] = {"g": [], "n": [], "e": []}
     for _jid, player in players:
         alignment = str(player.get("alignment") or "n")[:1].lower()
@@ -188,12 +200,16 @@ def _run_alignment_bonus(players: list[tuple[str, dict[str, Any]]], messages: li
         amount = _percent_amount(player, bonus_percent)
         _remove_time(player, amount)
         _award(player, "alignment_blessed")
-        _inc_stat(player, "alignment_events", 1)
+        _inc_stat(player, "alignment_events", 1, room)
         messages.append(_next_level_line(player))
     return True
 
 
-def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+def _run_godsend_or_calamity(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     _jid, player = random.choice(players)
     name = _display_player(player)
     level = int(player.get("level", 0) or 0)
@@ -205,7 +221,7 @@ def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages
             int(player.get("penalties", {}).get("calamity", 0) or 0) + changed
         )
         _award(player, "unlucky")
-        _inc_stat(player, "calamities", 1)
+        _inc_stat(player, "calamities", 1, room)
         messages.append(
             f"💥 {name} {random.choice(CALAMITIES)} near {_player_region(player)}. This terrible calamity has slowed them "
             f"{_duration_clock(changed)} from level {level + 1}."
@@ -216,7 +232,7 @@ def _run_godsend_or_calamity(players: list[tuple[str, dict[str, Any]]], messages
         amount = _adjust_percent_amount(amount, player, "godsend_bonus", increase=True)
         changed = _remove_time(player, amount)
         _award(player, "lucky")
-        _inc_stat(player, "godsends", 1)
+        _inc_stat(player, "godsends", 1, room)
         messages.append(
             f"🌟 {name} {random.choice(GODSENDS)} near {_player_region(player)}. This wondrous godsend has accelerated them "
             f"{_duration_clock(changed)} towards level {level + 1}."

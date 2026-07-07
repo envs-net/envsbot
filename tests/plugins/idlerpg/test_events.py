@@ -85,12 +85,12 @@ def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypa
     monkeypatch.setattr(
         idlerpg,
         "_run_item_blessing",
-        lambda _players, _messages: _messages.append("item"),
+        lambda _players, _messages, _room=None: _messages.append("item"),
     )
     monkeypatch.setattr(
         idlerpg,
         "_run_godsend_or_calamity",
-        lambda _players, _messages: _messages.append("fate"),
+        lambda _players, _messages, _room=None: _messages.append("fate"),
     )
 
     messages = []

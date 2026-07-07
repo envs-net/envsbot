@@ -992,3 +992,63 @@ async def test_login_announcement_and_manual_top_command(monkeypatch):
         True,
     )
     assert "CustomText #1" in bot.replies[-1][0]
+
+
+def test_achievement_awards_respect_season_gate_on_stat_updates(monkeypatch):
+    now = 2_000_000_000
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "fresh", "started_at": now, "ends_at": 0}
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 75,
+            "next": 1000,
+            "stats": {"quests_completed": 2},
+        },
+    )
+
+    idlerpg._inc_stat(player, "quests_completed", 1, room)
+
+    assert player["stats"]["quests_completed"] == 3
+    assert "level_10" in player["achievements"]
+    assert "level_25" in player["achievements"]
+    for gated in {"level_50", "level_reward_50", "level_75", "level_reward_75", "quest_walker"}:
+        assert gated not in player["achievements"]
+
+    room["season"]["started_at"] = now - 8 * 86400
+    idlerpg._check_level_achievements(player, room)
+
+    for gated in {"level_50", "level_reward_50", "level_75", "level_reward_75", "quest_walker"}:
+        assert gated in player["achievements"]
+
+
+@pytest.mark.asyncio
+async def test_level_reward_badges_do_not_bypass_season_gate_on_tick(monkeypatch):
+    now = 2_000_000_000
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    bot = DummyBot()
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "fresh", "started_at": now, "ends_at": 0}
+    room["last_tick"] = now - max(1, idlerpg.TICK_SECONDS)
+    room["players"]["alice@envs.net"] = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 49,
+            "next": 1,
+            "logged_out": False,
+        },
+    )
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {"rooms": {"room@conf": room}}
+
+    await idlerpg._tick_room(bot, "room@conf", announce=True)
+
+    player = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]["players"]["alice@envs.net"]
+    assert player["level"] >= 50
+    assert "level_reward_50" not in player["achievements"]
+    assert not any("reward badge" in text for text, _kwargs in bot.replies)

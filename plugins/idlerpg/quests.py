@@ -26,7 +26,7 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
                 reward_percent = QUEST_REWARD_PERCENT + _unique_bonus_percent(player, "quest_reward_bonus")
                 player["next"] = int(int(player.get("next", 0)) * max(0, 100 - reward_percent) / 100)
                 _award(player, "quest_hero")
-                _inc_stat(player, "quests_completed", 1)
+                _inc_stat(player, "quests_completed", 1, room)
                 names.append(_display_player(player))
                 completed_players.append(player)
                 reward_per_player.append((player, reward_percent))

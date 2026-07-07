@@ -108,7 +108,7 @@ def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _grant_level_item(player: dict[str, Any]) -> str:
+def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None) -> str:
     unique = _roll_unique_item(player)
     items = player.setdefault("items", {})
     unique_items = player.setdefault("unique_items", {})
@@ -118,8 +118,7 @@ def _grant_level_item(player: dict[str, Any]) -> str:
         items[slot] = max(int(items.get(slot, 0) or 0), level)
         unique_items[slot] = str(unique["name"])
         _award(player, "unique_item")
-        _inc_stat(player, "unique_items_found", 1)
-        _check_level_achievements(player)
+        _inc_stat(player, "unique_items_found", 1, room)
         bonus = str(unique.get("bonus", "")).replace("_", " ")
         bonus_part = f" ({int(unique.get('bonus_percent', 0) or 0)}% {bonus})" if bonus else ""
         return f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}, near {_player_region(player)}{bonus_part}!"
@@ -128,7 +127,7 @@ def _grant_level_item(player: dict[str, Any]) -> str:
     if gain >= int(items.get(item, 0) or 0):
         items[item] = gain
         unique_items.pop(item, None)
-    _check_level_achievements(player)
+    _check_level_achievements(player, room)
     return f"✨ {_display_player(player)} found {item} level {gain} near {_player_region(player)}."
 
 
@@ -150,7 +149,12 @@ def _maybe_critical_strike(winner: dict[str, Any], loser: dict[str, Any], messag
     messages.append(_next_level_line(loser))
 
 
-def _maybe_battle_item_drop(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
+def _maybe_battle_item_drop(
+    winner: dict[str, Any],
+    loser: dict[str, Any],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     if random.random() >= ITEM_DROP_CHANCE:
         return
     winner_items = winner.setdefault("items", {})
@@ -181,6 +185,8 @@ def _maybe_battle_item_drop(winner: dict[str, Any], loser: dict[str, Any], messa
         loser_unique[item] = winner_unique_name
     else:
         loser_unique.pop(item, None)
+    _check_level_achievements(winner, room)
+    _check_level_achievements(loser, room)
     winner_name = _display_player(winner)
     loser_name = _display_player(loser)
     messages.append(
@@ -189,7 +195,11 @@ def _maybe_battle_item_drop(winner: dict[str, Any], loser: dict[str, Any], messa
     )
 
 
-def _run_item_blessing(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+def _run_item_blessing(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     _jid, player = random.choice(players)
     item = random.choice(ITEMS)
     items = player.setdefault("items", {})
@@ -202,15 +212,18 @@ def _run_item_blessing(players: list[tuple[str, dict[str, Any]]], messages: list
     items[item] = old_level + gain
     name = _display_player(player)
     _award(player, "item_blessed")
-    _inc_stat(player, "item_blessings", 1)
-    _check_level_achievements(player)
+    _inc_stat(player, "item_blessings", 1, room)
     messages.append(
         f"✨ {name}'s {item} has been blessed by a wandering enchanter near {_player_region(player)}! "
         f"{_possessive(name)} {item} gains {gain} level{'s' if gain != 1 else ''}."
     )
 
 
-def _run_item_damage(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+def _run_item_damage(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     candidates: list[tuple[dict[str, Any], str, int]] = []
     for _jid, player in players:
         items = player.setdefault("items", {})
@@ -230,7 +243,7 @@ def _run_item_damage(players: list[tuple[str, dict[str, Any]]], messages: list[s
     if new_level <= 0:
         player.setdefault("unique_items", {}).pop(item, None)
     _award(player, "item_damaged")
-    _inc_stat(player, "item_damage_events", 1)
+    _inc_stat(player, "item_damage_events", 1, room)
     name = _display_player(player)
     messages.append(
         f"🪨 {name} slipped and damaged their {item} near {_player_region(player)}! "
@@ -238,7 +251,11 @@ def _run_item_damage(players: list[tuple[str, dict[str, Any]]], messages: list[s
     )
 
 
-def _run_item_swap(players: list[tuple[str, dict[str, Any]]], messages: list[str]) -> None:
+def _run_item_swap(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     pair = _choose_two_players(players)
     if pair is None:
         return
@@ -275,7 +292,9 @@ def _run_item_swap(players: list[tuple[str, dict[str, Any]]], messages: list[str
     else:
         loser_unique.pop(item, None)
     _award(winner, "item_swapped")
-    _inc_stat(winner, "item_swaps_won", 1)
+    _inc_stat(winner, "item_swaps_won", 1, room)
+    _check_level_achievements(winner, room)
+    _check_level_achievements(loser, room)
     winner_name = _display_player(winner)
     loser_name = _display_player(loser)
     messages.append(

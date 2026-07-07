@@ -86,7 +86,7 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
             continue
         player = _normalize_player(str(jid), raw_player)
         if player.get("logged_out"):
-            _maybe_apply_pending_logout_penalty(player, messages)
+            _maybe_apply_pending_logout_penalty(player, messages, room)
             continue
         if str(jid) not in online_jids:
             continue
@@ -101,17 +101,19 @@ async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
             player["next"] = int(player.get("next", 0)) + _ttl_for_level(player["level"])
             leveled = True
         if leveled:
+            previous_achievements = set(player.get("achievements", []))
             _check_level_achievements(player, room)
+            new_achievements = set(player.get("achievements", [])) - previous_achievements
             messages.append(
                 f"🏆 {_display_character(player)} has reached level {player['level']}! "
                 f"Next level in {_duration_clock(player['next'])}."
             )
-            if int(player.get("level", 0) or 0) >= LEVEL_REWARD_MIN_LEVEL and _award(player, "level_reward_50"):
+            if "level_reward_50" in new_achievements:
                 messages.append(f"🎖️ {_display_player(player)} has unlocked the level {LEVEL_REWARD_MIN_LEVEL} reward badge.")
-            if int(player.get("level", 0) or 0) >= 75 and _award(player, "level_reward_75"):
+            if "level_reward_75" in new_achievements:
                 messages.append(f"🏷️ {_display_player(player)} has unlocked the rare title pool at level 75.")
             if random.random() < ITEM_CHANCE:
-                messages.append(_grant_level_item(player))
+                messages.append(_grant_level_item(player, room))
     _maybe_periodic_announcements(bot, room_jid, room, messages)
     await _maybe_run_random_event(room, room_jid, messages)
     await _maybe_run_quest(room, room_jid, messages)

@@ -92,7 +92,7 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
             player["pending_logout_penalty"] = {}
             reply_suffix = " Logout grace used; no logout penalty was applied."
         else:
-            changed = _apply_logout_penalty(player)
+            changed = _apply_logout_penalty(player, room)
             reply_suffix = f" Logout penalty applied: {_duration_clock(changed)}. " + _next_level_line(player)
     player["logged_out"] = False
     player["last_login"] = _now()
@@ -144,7 +144,7 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
             "to avoid the logout penalty.",
         )
         return
-    changed = _apply_logout_penalty(player)
+    changed = _apply_logout_penalty(player, room)
     _record_event(room, "logout", f"{name} logged out. {_duration_clock(changed)} was added to their clock.", players=[name])
     await _set_data(bot, data)
     _reply(

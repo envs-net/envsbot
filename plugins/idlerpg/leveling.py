@@ -53,10 +53,15 @@ def _stats(player: dict[str, Any]) -> dict[str, int]:
     return cleaned
 
 
-def _inc_stat(player: dict[str, Any], key: str, amount: int = 1) -> None:
+def _inc_stat(
+    player: dict[str, Any],
+    key: str,
+    amount: int = 1,
+    room: dict[str, Any] | None = None,
+) -> None:
     stats = _stats(player)
     stats[key] = max(0, int(stats.get(key, 0) or 0) + int(amount or 0))
-    _check_level_achievements(player)
+    _check_level_achievements(player, room)
 
 
 def _achievement_catalog() -> list[dict[str, str]]:
@@ -102,6 +107,7 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
         _award(player, "level_25")
     if level >= 50 and _season_gate_passed(room, 3):
         _award(player, "level_50")
+    if level >= LEVEL_REWARD_MIN_LEVEL and _season_gate_passed(room, 3):
         _award(player, "level_reward_50")
     if level >= 75 and _season_gate_passed(room, 7):
         _award(player, "level_75")
@@ -137,23 +143,27 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
         _award(player, "artifact_finder")
 
 
-def _apply_logout_penalty(player: dict[str, Any]) -> int:
+def _apply_logout_penalty(player: dict[str, Any], room: dict[str, Any] | None = None) -> int:
     changed = _add_time(player, _penalty_amount_for(player, LOGOUT_PENALTY, "logout"))
     penalties = player.setdefault("penalties", {})
     penalties["logout"] = int(penalties.get("logout", 0) or 0) + changed
     player["pending_logout_penalty"] = {}
-    _inc_stat(player, "logouts", 1)
+    _inc_stat(player, "logouts", 1, room)
     return changed
 
 
-def _maybe_apply_pending_logout_penalty(player: dict[str, Any], messages: list[str]) -> None:
+def _maybe_apply_pending_logout_penalty(
+    player: dict[str, Any],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
     pending = player.get("pending_logout_penalty")
     if not isinstance(pending, dict) or not pending:
         return
     due_at = int(pending.get("due_at", 0) or 0)
     if due_at > _now():
         return
-    changed = _apply_logout_penalty(player)
+    changed = _apply_logout_penalty(player, room)
     name = _display_player(player)
     messages.append(
         f"👋 {name} stayed logged out past the grace period. "
@@ -182,7 +192,7 @@ async def _penalize_player(
     penalties = player.setdefault("penalties", {})
     penalties[reason] = int(penalties.get(reason, 0) or 0) + changed
     if reason == "message":
-        _inc_stat(player, "messages", 1)
+        _inc_stat(player, "messages", 1, room)
     await _set_data(bot, data)
     if announce and changed:
         _system_reply(
