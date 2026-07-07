@@ -138,7 +138,8 @@ The game loop can also trigger rare classic IdleRPG-style events:
 - PvP battles between online players
 - team battles between two groups of online players
 - critical strikes that add time to the defeated player's clock
-- item drops and swaps after battles
+- level-up battles, with classic odds below/above level 25
+- rare item drops and swaps after battles
 - unique envs.net-flavoured items at higher levels
 - item blessings that improve a random item
 - item damage events that fairly reduce an existing item a little
@@ -170,8 +171,12 @@ IDLERPG = {
     "item_damage_event_weight": 0.08,
     "item_steal_event_weight": 0.04,
     "alignment_event_weight": 0.10,
-    "critical_strike_chance": 0.10,
-    "item_drop_chance": 0.12,
+    "critical_strike_chance": 1 / 35,
+    "critical_strike_chance_good": 1 / 50,
+    "critical_strike_chance_evil": 1 / 20,
+    "item_drop_chance": 0.02,
+    "level_battle_chance_below_25": 0.25,
+    "level_battle_chance_at_25": 1.0,
     "unique_items_enabled": True,
     "unique_item_min_level": 25,
     "unique_item_chance": 0.025,
@@ -235,15 +240,17 @@ IDLERPG = {
 
 ## Quests
 
-When enough online players have reached the configured minimum level, the bot can
-start a room quest. Quest completion removes 25% of the participating players'
-remaining timer burden.
+When enough online players have reached the configured minimum level and have
+been online long enough, the bot can start a room quest. By default the online
+time requirement is 10 hours, matching classic IdleRPG. Quest completion removes
+25% of the participating players' remaining timer burden.
 
 Relevant settings:
 
 ```python
 IDLERPG = {
     "quest_min_level": 40,
+    "quest_min_online_seconds": 36000,
     "quest_interval": 21600,
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
@@ -557,7 +564,7 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | --- | ---: | --- |
 | `tick_seconds` | `60` | Game-loop interval in seconds. Each tick advances online players, moves map positions and may trigger random events. |
 | `rp_base` | `600` | Base time-to-level in seconds. Level 0 starts with this value. |
-| `rp_step` | `1.16` | Exponential level scaling. Higher values make later levels take longer. Formula: `TTL = rp_base * (rp_step ** current_level)`. |
+| `rp_step` | `1.16` | Exponential level scaling through level 60. From level 61 onward the classic IdleRPG rule uses the level-60 TTL plus one additional day per level. |
 
 ### Penalties
 
@@ -588,8 +595,12 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `item_damage_event_weight` | `0.08` | Relative weight for item damage events. |
 | `item_steal_event_weight` | `0.04` | Relative weight for fair item swap/steal events. |
 | `alignment_event_weight` | `0.10` | Relative weight for alignment-based group events. |
-| `critical_strike_chance` | `0.10` | Chance after a battle that the winner lands a critical strike against the opponent. |
-| `item_drop_chance` | `0.12` | Chance after a battle that an item is dropped/swapped. |
+| `critical_strike_chance` | `1 / 35` | Neutral critical-strike chance after a battle. |
+| `critical_strike_chance_good` | `1 / 50` | Good players' classic critical-strike chance. |
+| `critical_strike_chance_evil` | `1 / 20` | Evil players' classic critical-strike chance. |
+| `item_drop_chance` | `0.02` | Chance after a battle that the winner steals/swaps one better item from the loser. |
+| `level_battle_chance_below_25` | `0.25` | Chance that a level-up below level 25 triggers a battle. |
+| `level_battle_chance_at_25` | `1.0` | Chance that a level-up at level 25 or higher triggers a battle. |
 | `unique_items_enabled` | `True` | Enables rare named unique items. |
 | `unique_item_min_level` | `25` | Minimum character level before unique items may appear. |
 | `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item. Unique items may grant small bonuses such as battle power, godsend rewards, reduced penalties or stronger quest rewards. |
@@ -617,6 +628,7 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `quest_min_level` | `40` | Minimum level for players to be selected for quests. |
+| `quest_min_online_seconds` | `36000` | Minimum continuous online time before a player can be selected for a quest. The default is 10 hours, matching classic IdleRPG behaviour. |
 | `quest_interval` | `21600` | Minimum time in seconds between quest start attempts. The default is 6 hours. |
 | `quest_min_duration` | `43200` | Minimum quest duration in seconds. The default is 12 hours. |
 | `quest_max_duration` | `86400` | Maximum grid quest deadline in seconds. The default is 24 hours. If the route is not completed before the deadline, online players receive a p15 quest penalty. |
@@ -626,7 +638,7 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 These options are documented in the sections above: `export_enabled`,
 `export_path`, `export_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
 `map_step_per_second`, `map_step_per_tick`, `grid_battle_enabled`,
-`quest_grid_step_seconds`, `season_enabled`, `season_duration_days`,
+`quest_grid_step_seconds`, `quest_min_online_seconds`, `season_enabled`, `season_duration_days`,
 `season_reset_on_rollover`, `season_hof_size`, `event_log_limit`,
 `event_retention_days`, and `export_event_limit`.
 

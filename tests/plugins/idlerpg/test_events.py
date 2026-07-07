@@ -5,6 +5,29 @@ from .helpers import (
 )
 
 
+def test_original_alignment_battle_power_and_critical_chances(monkeypatch):
+    base_items = {"weapon": 100}
+    neutral = idlerpg._normalize_player("n@envs.net", {"name": "Neutral", "level": 1, "alignment": "n", "items": base_items})
+    good = idlerpg._normalize_player("g@envs.net", {"name": "Good", "level": 1, "alignment": "g", "items": base_items})
+    evil = idlerpg._normalize_player("e@envs.net", {"name": "Evil", "level": 1, "alignment": "e", "items": base_items})
+
+    assert idlerpg._battle_power(good) == idlerpg._battle_power(neutral) + 10
+    assert idlerpg._battle_power(evil) == idlerpg._battle_power(neutral) - 10
+    assert idlerpg._critical_strike_chance(neutral) == idlerpg.CRITICAL_STRIKE_CHANCE
+    assert idlerpg._critical_strike_chance(good) == idlerpg.CRITICAL_STRIKE_CHANCE_GOOD
+    assert idlerpg._critical_strike_chance(evil) == idlerpg.CRITICAL_STRIKE_CHANCE_EVIL
+
+    loser = idlerpg._normalize_player("l@envs.net", {"name": "Loser", "next": 1000})
+    messages: list[str] = []
+    monkeypatch.setattr(idlerpg.random, "random", lambda: idlerpg.CRITICAL_STRIKE_CHANCE_GOOD + 0.001)
+    idlerpg._maybe_critical_strike(good, loser, messages)
+    assert messages == []
+    monkeypatch.setattr(idlerpg.random, "random", lambda: idlerpg.CRITICAL_STRIKE_CHANCE_EVIL - 0.001)
+    monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: low)
+    idlerpg._maybe_critical_strike(evil, loser, messages)
+    assert any("Critical Strike" in line for line in messages)
+
+
 def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
     alice = idlerpg._normalize_player(
         "alice@envs.net",

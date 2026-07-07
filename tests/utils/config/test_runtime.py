@@ -76,3 +76,15 @@ def test_idlerpg_runtime_values_support_legacy_map_step_alias():
 
     assert values["MAP_STEP_PER_SECOND"] == 3
     assert values["MAP_STEP_PER_TICK"] == 3
+
+
+def test_idlerpg_runtime_values_include_original_balance_options():
+    values = runtime._idlerpg_values({"idlerpg": {}})
+
+    assert values["CRITICAL_STRIKE_CHANCE"] == 1 / 35
+    assert values["CRITICAL_STRIKE_CHANCE_GOOD"] == 1 / 50
+    assert values["CRITICAL_STRIKE_CHANCE_EVIL"] == 1 / 20
+    assert values["ITEM_DROP_CHANCE"] == 0.02
+    assert values["QUEST_MIN_ONLINE_SECONDS"] == 36000
+    assert values["LEVEL_BATTLE_CHANCE_BELOW_25"] == 0.25
+    assert values["LEVEL_BATTLE_CHANCE_AT_25"] == 1.0

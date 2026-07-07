@@ -99,12 +99,22 @@ ALIGNMENT_EVENT_WEIGHT = float(
 
 
 CRITICAL_STRIKE_CHANCE = float(
-    _cfg.get("critical_strike_chance", config.get("idlerpg_critical_strike_chance", 0.10)) or 0.10
+    _cfg.get("critical_strike_chance", config.get("idlerpg_critical_strike_chance", 1 / 35)) or (1 / 35)
+)
+
+
+CRITICAL_STRIKE_CHANCE_GOOD = float(
+    _cfg.get("critical_strike_chance_good", config.get("idlerpg_critical_strike_chance_good", 1 / 50)) or (1 / 50)
+)
+
+
+CRITICAL_STRIKE_CHANCE_EVIL = float(
+    _cfg.get("critical_strike_chance_evil", config.get("idlerpg_critical_strike_chance_evil", 1 / 20)) or (1 / 20)
 )
 
 
 ITEM_DROP_CHANCE = float(
-    _cfg.get("item_drop_chance", config.get("idlerpg_item_drop_chance", 0.12)) or 0.12
+    _cfg.get("item_drop_chance", config.get("idlerpg_item_drop_chance", 0.02)) or 0.02
 )
 
 
@@ -160,6 +170,11 @@ ALIGNMENT_BONUS_PERCENT = int(
 
 QUEST_REWARD_PERCENT = int(
     _cfg.get("quest_reward_percent", config.get("idlerpg_quest_reward_percent", 25)) or 25
+)
+
+
+QUEST_MIN_ONLINE_SECONDS = int(
+    _cfg.get("quest_min_online_seconds", config.get("idlerpg_quest_min_online_seconds", 36000)) or 0
 )
 
 
@@ -296,6 +311,16 @@ ITEM_STEAL_EVENT_WEIGHT = float(
 )
 
 
+LEVEL_BATTLE_CHANCE_BELOW_25 = float(
+    _cfg.get("level_battle_chance_below_25", config.get("idlerpg_level_battle_chance_below_25", 0.25)) or 0.25
+)
+
+
+LEVEL_BATTLE_CHANCE_AT_25 = float(
+    _cfg.get("level_battle_chance_at_25", config.get("idlerpg_level_battle_chance_at_25", 1.0)) or 1.0
+)
+
+
 LEVEL_REWARD_MIN_LEVEL = int(
     _cfg.get("level_reward_min_level", config.get("idlerpg_level_reward_min_level", 50)) or 50
 )
@@ -342,6 +367,8 @@ __all__ = [
     'ITEM_EVENT_WEIGHT',
     'ALIGNMENT_EVENT_WEIGHT',
     'CRITICAL_STRIKE_CHANCE',
+    'CRITICAL_STRIKE_CHANCE_GOOD',
+    'CRITICAL_STRIKE_CHANCE_EVIL',
     'ITEM_DROP_CHANCE',
     'TEAM_BATTLE_EVENT_WEIGHT',
     'BATTLE_WIN_MIN_PERCENT',
@@ -354,6 +381,7 @@ __all__ = [
     'CALAMITY_MAX_PERCENT',
     'ALIGNMENT_BONUS_PERCENT',
     'QUEST_REWARD_PERCENT',
+    'QUEST_MIN_ONLINE_SECONDS',
     'TEAM_BATTLE_PERCENT',
     'UNIQUE_ITEMS_ENABLED',
     'UNIQUE_ITEM_MIN_LEVEL',
@@ -382,6 +410,8 @@ __all__ = [
     'TOPIC_CUSTOM_TEXT',
     'ITEM_DAMAGE_EVENT_WEIGHT',
     'ITEM_STEAL_EVENT_WEIGHT',
+    'LEVEL_BATTLE_CHANCE_BELOW_25',
+    'LEVEL_BATTLE_CHANCE_AT_25',
     'LEVEL_REWARD_MIN_LEVEL',
     'SEASON_ACHIEVEMENT_GATES_ENABLED',
     'MANUAL_DUEL_MAX_DISTANCE',

@@ -132,7 +132,16 @@ async def test_quest_and_runtime_state(monkeypatch):
     room = data["rooms"]["room@conf"]
     for idx in range(4):
         jid = f"u{idx}@envs.net"
-        room["players"][jid] = idlerpg._normalize_player(jid, {"name": f"U{idx}", "class": "idler", "level": 40, "next": 100})
+        room["players"][jid] = idlerpg._normalize_player(
+            jid,
+            {
+                "name": f"U{idx}",
+                "class": "idler",
+                "level": 40,
+                "next": 100,
+                "last_login": idlerpg._now() - idlerpg.QUEST_MIN_ONLINE_SECONDS,
+            },
+        )
         JOINED_ROOMS["room@conf"]["nicks"][f"U{idx}"] = {"jid": jid, "affiliation": "member"}
     bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = data
     monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
@@ -574,6 +583,42 @@ def test_event_retention_sanitizes_and_limits(monkeypatch):
     assert [event["text"] for event in idlerpg._room_events(room)] == ["kept"]
 
 
+def test_quest_candidates_require_original_online_time(monkeypatch):
+    room_jid = "room@conf"
+    now = 50_000
+    eligible = idlerpg._normalize_player(
+        "eligible@envs.net",
+        {"name": "Eligible", "level": idlerpg.QUEST_MIN_LEVEL, "last_login": now - idlerpg.QUEST_MIN_ONLINE_SECONDS},
+    )
+    too_fresh = idlerpg._normalize_player(
+        "fresh@envs.net",
+        {"name": "Fresh", "level": idlerpg.QUEST_MIN_LEVEL, "last_login": now - idlerpg.QUEST_MIN_ONLINE_SECONDS + 1},
+    )
+    too_low = idlerpg._normalize_player(
+        "low@envs.net",
+        {"name": "Low", "level": idlerpg.QUEST_MIN_LEVEL - 1, "last_login": now - idlerpg.QUEST_MIN_ONLINE_SECONDS},
+    )
+    JOINED_ROOMS[room_jid] = {
+        "nicks": {
+            "Eligible": {"jid": "eligible@envs.net"},
+            "Fresh": {"jid": "fresh@envs.net"},
+            "Low": {"jid": "low@envs.net"},
+        }
+    }
+
+    assert idlerpg._quest_candidate_is_eligible(room_jid, "eligible@envs.net", eligible, now) is True
+    assert idlerpg._quest_candidate_is_eligible(room_jid, "fresh@envs.net", too_fresh, now) is False
+    assert idlerpg._quest_candidate_is_eligible(room_jid, "low@envs.net", too_low, now) is False
+
+    fallback = idlerpg._normalize_player(
+        "fallback@envs.net",
+        {"name": "Fallback", "level": idlerpg.QUEST_MIN_LEVEL, "idled": idlerpg.QUEST_MIN_ONLINE_SECONDS},
+    )
+    fallback["last_login"] = now + 60
+    JOINED_ROOMS[room_jid]["nicks"]["Fallback"] = {"jid": "fallback@envs.net"}
+    assert idlerpg._quest_candidate_is_eligible(room_jid, "fallback@envs.net", fallback, now) is True
+
+
 @pytest.mark.asyncio
 async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
     room = idlerpg._blank_room()
@@ -591,6 +636,7 @@ async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
                 "next": 1000,
                 "x": 320,
                 "y": 240,
+                "idled": idlerpg.QUEST_MIN_ONLINE_SECONDS,
             },
         )
     room["quest"] = {"active": False, "next_at": 0}
@@ -685,10 +731,13 @@ def test_battle_amount_alignment_factors_and_logout_penalty(monkeypatch):
     neutral = {"name": "Neo", "level": 5, "next": 1000, "alignment": "n", "stats": {}}
     unknown = {"name": "Myst", "level": 5, "next": 1000, "alignment": "x", "stats": {}}
 
-    assert idlerpg._battle_amount(evil, 100, "win") == 110
-    assert idlerpg._battle_amount(good, 100, "loss") == 90
-    assert idlerpg._battle_amount(neutral, 100, "win") == 97
+    assert idlerpg._battle_amount(evil, 100, "win") == 100
+    assert idlerpg._battle_amount(good, 100, "loss") == 100
+    assert idlerpg._battle_amount(neutral, 100, "win") == 100
     assert idlerpg._battle_amount(unknown, 100, "win") == 100
+    assert idlerpg._alignment_battle_factor(good) == 1.10
+    assert idlerpg._alignment_battle_factor(evil) == 0.90
+    assert idlerpg._alignment_battle_factor(neutral) == 1.0
 
     monkeypatch.setattr(idlerpg, "LOGOUT_PENALTY", 20)
     changed = idlerpg._apply_logout_penalty(neutral)

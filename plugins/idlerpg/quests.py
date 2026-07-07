@@ -5,6 +5,32 @@ import random
 from typing import Any
 
 
+def _quest_online_seconds(player: dict[str, Any], now: int) -> int:
+    try:
+        last_login = int(player.get("last_login", 0) or 0)
+    except (TypeError, ValueError):
+        last_login = 0
+    if 0 < last_login <= int(now):
+        return max(0, int(now) - last_login)
+    try:
+        return max(0, int(player.get("idled", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _quest_candidate_is_eligible(
+    room_jid: str,
+    jid: str,
+    player: dict[str, Any],
+    now: int,
+) -> bool:
+    return (
+        _is_player_online(room_jid, jid, player)
+        and int(player.get("level", 0) or 0) >= QUEST_MIN_LEVEL
+        and _quest_online_seconds(player, now) >= max(0, int(QUEST_MIN_ONLINE_SECONDS or 0))
+    )
+
+
 def _quest_reward_players(
     room: dict[str, Any],
     quest: dict[str, Any],
@@ -118,8 +144,7 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
         str(jid)
         for jid, player in room.get("players", {}).items()
         if isinstance(player, dict)
-        and _is_player_online(room_jid, str(jid), player)
-        and int(player.get("level", 0) or 0) >= QUEST_MIN_LEVEL
+        and _quest_candidate_is_eligible(room_jid, str(jid), player, now)
     ]
     if len(candidates) < 4:
         quest["next_at"] = now + QUEST_INTERVAL

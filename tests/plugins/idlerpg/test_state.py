@@ -30,6 +30,30 @@ def test_idlerpg_small_helper_edges(monkeypatch):
     assert idlerpg._penalty_for(50, 100) == 10
 
 
+def test_original_ttl_switches_to_linear_after_level_60():
+    level_60 = int(idlerpg.RP_BASE * (idlerpg.RP_STEP ** 60))
+    assert idlerpg._ttl_for_level(60) == level_60
+    assert idlerpg._ttl_for_level(61) == level_60 + 86400
+    assert idlerpg._ttl_for_level(63) == level_60 + (3 * 86400)
+
+
+def test_original_weighted_item_roll_uses_one_point_five_level_cap(monkeypatch):
+    captured = {}
+
+    def fake_choices(population, *, weights, k):
+        captured["population"] = list(population)
+        captured["weights"] = list(weights)
+        captured["k"] = k
+        return [captured["population"][-1]]
+
+    monkeypatch.setattr(idlerpg.random, "choices", fake_choices)
+
+    assert idlerpg._roll_weighted_item_level(10) == 15
+    assert captured["population"] == list(range(1, 16))
+    assert captured["k"] == 1
+    assert captured["weights"][0] > captured["weights"][-1]
+
+
 def test_idlerpg_player_normalization_and_lookup_edges(monkeypatch):
     monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: stop)
     player = idlerpg._normalize_player(

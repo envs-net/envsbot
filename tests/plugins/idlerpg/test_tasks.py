@@ -5,6 +5,7 @@ from .helpers import (
     DummyBot,
     DummyMsg,
     DummyTask,
+    JOINED_ROOMS,
     idlerpg,
     pytest,
 )
@@ -178,6 +179,49 @@ async def test_tick_room_serializes_concurrent_announcements(monkeypatch):
     assert stored_player["idled"] == 60
     assert room["last_tick"] == now
     assert len(room["events"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_level_up_triggers_original_level_battle(monkeypatch):
+    bot = DummyBot()
+    now = 4_000_000
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 24, "next": 60, "x": 1, "y": 1},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "level": 24, "next": 1000, "x": 2, "y": 2},
+    )
+    JOINED_ROOMS["room@conf"]["nicks"]["Bob"] = {"jid": "bob@envs.net"}
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {
+        "rooms": {
+            "room@conf": {
+                "players": {"alice@envs.net": alice, "bob@envs.net": bob},
+                "last_tick": now - 60,
+                "next_top_announce_at": now + 3600,
+                "next_topic_update_at": now + 3600,
+                "events": [],
+            }
+        }
+    }
+
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg, "ITEM_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg, "GRID_BATTLE_ENABLED", False)
+    monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg, "LEVEL_BATTLE_CHANCE_AT_25", 1.0)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.99)
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    rolls = iter([9999, 0])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(idlerpg, "_export_public_state", lambda _data: None)
+
+    await idlerpg._tick_room(bot, "room@conf", announce=False)
+
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    assert room["players"]["alice@envs.net"]["level"] == 25
+    assert any("has challenged Bob" in event["text"] for event in room["events"])
 
 
 def test_room_jid_from_task_name_ignores_topic_tasks():

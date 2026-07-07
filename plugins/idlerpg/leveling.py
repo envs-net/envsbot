@@ -19,7 +19,17 @@ def _remove_time(player: dict[str, Any], amount: int | float) -> int:
 
 
 def _ttl_for_level(level: int) -> int:
-    return max(1, int(RP_BASE * (RP_STEP ** max(0, int(level)))))
+    """Return the original IdleRPG TTL for a level.
+
+    Classic IdleRPG uses ``600 * 1.16^level`` through level 60 and then
+    switches to a linear +1 day increment for each level beyond 60.  The
+    linear high-level tail avoids exponential values becoming absurdly huge.
+    """
+    level = max(0, int(level))
+    if level <= 60:
+        return max(1, int(RP_BASE * (RP_STEP ** level)))
+    level_60_ttl = max(1, int(RP_BASE * (RP_STEP ** 60)))
+    return level_60_ttl + ((level - 60) * 86400)
 
 
 def _penalty_for(level: int, base: int) -> int:

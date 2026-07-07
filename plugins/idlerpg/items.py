@@ -61,9 +61,19 @@ def _item_sum(player: dict[str, Any]) -> int:
     return total
 
 
+def _alignment_item_sum_factor(player: dict[str, Any]) -> float:
+    alignment = str(player.get("alignment") or "n")[:1].lower()
+    if alignment == "g":
+        return 1.10
+    if alignment == "e":
+        return 0.90
+    return 1.0
+
+
 def _battle_power(player: dict[str, Any]) -> int:
     level = max(0, int(player.get("level", 0) or 0))
-    base = max(1, level * 10 + _item_sum(player) + 1)
+    item_sum = int(_item_sum(player) * _alignment_item_sum_factor(player))
+    base = max(1, level * 10 + item_sum + 1)
     return max(1, int(base * (100 + _unique_bonus_percent(player, "battle_bonus")) / 100))
 
 
@@ -80,13 +90,19 @@ def _battle_percent(opponent: dict[str, Any], outcome: str) -> float:
 
 
 def _battle_clock_delta(player: dict[str, Any], opponent: dict[str, Any], outcome: str) -> int:
-    return max(1, int(_percent_amount(player, _battle_percent(opponent, outcome)) * _alignment_battle_factor(player, outcome)))
+    return max(1, int(_percent_amount(player, _battle_percent(opponent, outcome))))
 
 
 def _random_percent_amount(player: dict[str, Any], min_percent: int, max_percent: int) -> int:
     low = min(int(min_percent), int(max_percent))
     high = max(int(min_percent), int(max_percent))
     return _percent_amount(player, random.randint(low, high))
+
+
+def _roll_weighted_item_level(player_level: int) -> int:
+    max_level = max(1, int(max(1, player_level) * 1.5))
+    weights = [1 / (1.4 ** level) for level in range(1, max_level + 1)]
+    return int(random.choices(range(1, max_level + 1), weights=weights, k=1)[0])
 
 
 def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
@@ -123,7 +139,7 @@ def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None
         bonus_part = f" ({int(unique.get('bonus_percent', 0) or 0)}% {bonus})" if bonus else ""
         return f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}, near {_player_region(player)}{bonus_part}!"
     item = random.choice(ITEMS)
-    gain = max(1, int(player.get("level", 0) or 0) + random.randint(0, 3))
+    gain = _roll_weighted_item_level(int(player.get("level", 0) or 0))
     if gain >= int(items.get(item, 0) or 0):
         items[item] = gain
         unique_items.pop(item, None)
@@ -131,8 +147,17 @@ def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None
     return f"✨ {_display_player(player)} found {item} level {gain} near {_player_region(player)}."
 
 
+def _critical_strike_chance(player: dict[str, Any]) -> float:
+    alignment = str(player.get("alignment") or "n")[:1].lower()
+    if alignment == "g":
+        return max(0.0, float(CRITICAL_STRIKE_CHANCE_GOOD))
+    if alignment == "e":
+        return max(0.0, float(CRITICAL_STRIKE_CHANCE_EVIL))
+    return max(0.0, float(CRITICAL_STRIKE_CHANCE))
+
+
 def _maybe_critical_strike(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
-    if random.random() >= CRITICAL_STRIKE_CHANCE:
+    if random.random() >= _critical_strike_chance(winner):
         return
     _award(winner, "critical_striker")
     winner_name = _display_player(winner)

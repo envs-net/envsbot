@@ -27,6 +27,24 @@ def _clear_room_locks(room_jid: str) -> None:
     _ROOM_TICK_LOCKS.pop(room_key, None)
 
 
+def _maybe_run_level_battle(
+    player: dict,
+    online_players: list[tuple[str, dict]],
+    messages: list[str],
+    room: dict | None = None,
+) -> bool:
+    opponents = [candidate for _jid, candidate in online_players if candidate is not player]
+    if not opponents:
+        return False
+    level = max(0, int(player.get("level", 0) or 0))
+    chance = LEVEL_BATTLE_CHANCE_AT_25 if level >= 25 else LEVEL_BATTLE_CHANCE_BELOW_25
+    if random.random() >= max(0.0, float(chance)):
+        return False
+    defender = random.choice(opponents)
+    _run_duel_between(player, defender, messages, room)
+    return True
+
+
 def _room_jid_from_task_name(name: str) -> str | None:
     """Return the IdleRPG room JID represented by a supervised task name.
 
@@ -171,6 +189,7 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
     messages: list[str] = []
     _maybe_rollover_season(room_jid, room, messages)
     online_players: list[tuple[str, dict]] = []
+    pending_level_battles: list[dict] = []
     active_quest = room.get("quest") if isinstance(room.get("quest"), dict) else None
     for jid, raw_player in list(players.items()):
         if not isinstance(raw_player, dict):
@@ -207,6 +226,9 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
                 messages.append(f"🏷️ {_display_player(player)} has unlocked the rare title pool at level 75.")
             if random.random() < ITEM_CHANCE:
                 messages.append(_grant_level_item(player, room))
+            pending_level_battles.append(player)
+    for player in pending_level_battles:
+        _maybe_run_level_battle(player, online_players, messages, room)
     _maybe_run_grid_battle(online_players, messages, room)
     _maybe_periodic_announcements(bot, room_jid, room, messages)
     await _maybe_run_random_event(room, room_jid, messages)

@@ -340,7 +340,10 @@ IDLERPG = {
     "quest_grid_step_seconds": 2,
 
     # Quest timing. Grid quests must reach route points before this deadline.
+    # Classic IdleRPG requires questers to be experienced and online for more
+    # than ten hours before they can be selected.
     "quest_min_level": 40,
+    "quest_min_online_seconds": 36000,
     "quest_interval": 21600,
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
@@ -355,8 +358,15 @@ IDLERPG = {
     "item_damage_event_weight": 0.08,
     "item_steal_event_weight": 0.04,
     "alignment_event_weight": 0.10,
-    "critical_strike_chance": 0.10,
-    "item_drop_chance": 0.12,
+    # Classic critical-strike odds: neutral 1/35, good 1/50, evil 1/20.
+    "critical_strike_chance": 1 / 35,
+    "critical_strike_chance_good": 1 / 50,
+    "critical_strike_chance_evil": 1 / 20,
+    # Battle item stealing is intentionally rare in the original game.
+    "item_drop_chance": 0.02,
+    # Level-up battles: 25% below level 25, always from level 25 onward.
+    "level_battle_chance_below_25": 0.25,
+    "level_battle_chance_at_25": 1.0,
 
     # Balancing percentages. Battle win/loss percentages are minimum values;
     # opponent level can increase them. Godsend/calamity/critical ranges are
