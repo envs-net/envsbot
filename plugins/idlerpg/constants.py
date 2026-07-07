@@ -221,5 +221,16 @@ QUEST_TEXTS = (
 _ALIGNMENT_NAMES = {"g": "good", "n": "neutral", "e": "evil"}
 
 __all__ = [
-    "_ALIGNMENT_NAMES",
+    'PLUGIN_META',
+    'IDLERPG_ENABLED_KEY',
+    'IDLERPG_DATA_KEY',
+    'PLUGIN_NAME',
+    'ACHIEVEMENTS',
+    'ITEMS',
+    'UNIQUE_ITEMS',
+    'MAP_REGIONS',
+    'CALAMITIES',
+    'GODSENDS',
+    'QUEST_TEXTS',
+    '_ALIGNMENT_NAMES',
 ]

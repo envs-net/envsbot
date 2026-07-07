@@ -71,3 +71,19 @@ RSS_MAX_ENTRIES_PER_POLL = max(
     1,
     int(config.get("rss_max_entries_per_poll", 10) or 10),
 )
+
+__all__ = [
+    'PLUGIN_META',
+    'RSS_KEY',
+    'DEFAULT_POLL_INTERVAL',
+    'RSS_RETRY_INITIAL_DELAY',
+    'RSS_RETRY_BACKOFF_MULTIPLIER',
+    'MAX_BACKOFF_TIME',
+    'RSS_USER_AGENT',
+    'RSS_FETCH_TIMEOUT_SECONDS',
+    'RSS_MAX_REDIRECTS',
+    'RSS_MAX_READ_BYTES',
+    'ALLOW_PRIVATE_FETCH_URLS',
+    'RSS_LIST_PAGE_SIZE',
+    'RSS_MAX_ENTRIES_PER_POLL',
+]

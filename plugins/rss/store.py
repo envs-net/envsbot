@@ -173,3 +173,18 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "active_tasks": sum(1 for task in CHECK_TASKS.values() if not task.done()),
         "retry_backoff": retrying,
     }
+
+__all__ = [
+    'log',
+    '_flush_user_store',
+    'get_rss_store',
+    '_set_retry_state',
+    '_apply_retry_state',
+    '_reset_retry_state',
+    '_retry_delay',
+    '_sleep_for_retry',
+    '_format_retry_status',
+    '_reset_feed_retry',
+    'cleanup_room_state',
+    'get_runtime_state',
+]

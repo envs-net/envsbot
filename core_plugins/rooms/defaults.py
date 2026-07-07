@@ -215,3 +215,16 @@ async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
 
     log.info("[ROOMS] displaying plugin settings for room %s", room_jid)
     bot.reply(msg, lines)
+
+__all__ = [
+    'PLUGIN_META',
+    'INTERNAL_PLUGIN_DEFAULTS',
+    'PLUGIN_DEFAULTS',
+    'PLUGIN_STORE_CONFIG',
+    'ROOM_TOGGLE_STORES',
+    '_normalize_room_plugin_default_name',
+    '_coerce_room_plugin_default',
+    'get_room_plugin_defaults',
+    '_cleanup_room_plugin_state',
+    'cmd_room_plugins',
+]

@@ -6,6 +6,16 @@ import json
 import os
 from pathlib import Path
 
+from .defaults import (
+    BASE_DIR,
+    CONFIG_FILENAME,
+    DEFAULT_CONFIG,
+    LEGACY_CONFIG_FILENAME,
+    NORMALIZED_CONFIG_KEYS,
+    PYTHON_CONFIG_KEY_MAP,
+)
+from .errors import ConfigError
+
 
 def _config_path_from_env() -> Path | None:
     configured = os.environ.get("ENVSBOT_CONFIG")

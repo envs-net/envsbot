@@ -40,3 +40,14 @@ PLUGIN_META = {
     "description": "User management with caching, nick lookup and logging",
     "category": "core",
 }
+
+__all__ = [
+    'log',
+    'prefix',
+    'MAX_ROOM_NICKS',
+    'ASSIGNABLE_ROLES',
+    'ROLE_NAMES',
+    'GRANTABLE_PLUGINS',
+    'GRANTS_FIELD',
+    'PLUGIN_META',
+]

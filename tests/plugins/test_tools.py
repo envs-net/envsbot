@@ -3,8 +3,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import plugins.tools as tools
 
-pytest_plugins = ("pytest_asyncio",)
-
 
 @pytest.fixture
 def bot():

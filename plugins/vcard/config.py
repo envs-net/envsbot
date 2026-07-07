@@ -17,3 +17,9 @@ PLUGIN_META = {
 
 
 log = logging.getLogger(__name__)
+
+__all__ = [
+    'VCARD_KEY',
+    'PLUGIN_META',
+    'log',
+]

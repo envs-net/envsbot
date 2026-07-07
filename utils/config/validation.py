@@ -6,6 +6,8 @@ from pathlib import Path
 from zoneinfo import available_timezones
 import slixmpp
 
+from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
+
 
 def _validate_string(value, key, errors, allow_empty=False):
     if not isinstance(value, str):
@@ -72,7 +74,6 @@ def _validate_numeric_ranges(cfg, errors):
         "updatecheck_timeout_seconds",
         "urlcheck_fetch_timeout_seconds",
         "rss_retry_backoff_multiplier",
-        "rss_similarity_threshold",
         "sed_regex_timeout",
         "xkcd_index_request_delay_seconds",
         "xkcd_http_timeout",

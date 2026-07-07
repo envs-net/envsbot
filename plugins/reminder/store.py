@@ -632,3 +632,24 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "active_tasks": sum(1 for task in ACTIVE_REMINDERS.values() if not task.done()),
         "enabled": int(REMINDER_ENABLED),
     }
+
+__all__ = [
+    'log',
+    'PLUGIN_META',
+    'ACTIVE_REMINDERS',
+    'REMINDER_ENABLED',
+    'REMINDER_KEY',
+    'REMINDER_DB_READY',
+    'get_reminder_store',
+    '_get_room_reminder_state',
+    '_handle_reminder_control_command',
+    '_init_reminder_db',
+    '_create_reminder',
+    '_delete_reminder',
+    'schedule_reminder_task',
+    '_restore_pending_reminders',
+    'remind_command',
+    'delete_reminder',
+    'on_ready',
+    'get_runtime_state',
+]
