@@ -85,6 +85,7 @@ def _validate_numeric_ranges(cfg, errors):
         "rss_max_backoff_time",
         "rss_max_entries_per_poll",
         "rss_max_read_bytes",
+        "rss_template_max_length",
         "rss_max_redirects",
         "rss_retry_initial_delay",
         "sed_cache_size",

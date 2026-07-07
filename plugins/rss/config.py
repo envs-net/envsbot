@@ -13,6 +13,24 @@ PLUGIN_META = {
 
 
 RSS_KEY = "RSS"
+RSS_TEMPLATES_KEY = "RSS_TEMPLATES"
+
+DEFAULT_RSS_TEMPLATE = "[RSS] ($feed_title) $title$summary_line\n$link"
+RSS_TEMPLATE_MAX_LENGTH = max(
+    1,
+    int(config.get("rss_template_max_length", 1000) or 1000),
+)
+RSS_TEMPLATE_VARIABLES = frozenset({
+    "feed_title",
+    "title",
+    "summary",
+    "summary_line",
+    "link",
+    "feed_url",
+    "feed_link",
+    "id",
+    "date",
+})
 
 
 DEFAULT_POLL_INTERVAL = int(config.get("rss_global_query_interval", 1200) or 1200)
@@ -75,6 +93,10 @@ RSS_MAX_ENTRIES_PER_POLL = max(
 __all__ = [
     'PLUGIN_META',
     'RSS_KEY',
+    'RSS_TEMPLATES_KEY',
+    'DEFAULT_RSS_TEMPLATE',
+    'RSS_TEMPLATE_MAX_LENGTH',
+    'RSS_TEMPLATE_VARIABLES',
     'DEFAULT_POLL_INTERVAL',
     'RSS_RETRY_INITIAL_DELAY',
     'RSS_RETRY_BACKOFF_MULTIPLIER',

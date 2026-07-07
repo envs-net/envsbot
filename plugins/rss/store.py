@@ -3,8 +3,15 @@
 import asyncio
 import logging
 
+from .config import RSS_TEMPLATES_KEY
+
 
 log = logging.getLogger(__name__)
+
+
+def _normalize_template_room_jid(room: str) -> str:
+    """Normalize a room JID used for RSS template storage."""
+    return str(room or "").strip().lower()
 
 
 async def _flush_user_store(bot):
@@ -33,6 +40,50 @@ async def _set_retry_state(bot, store, url, error_count, next_retry):
         url,
         lambda feed: _apply_retry_state(feed, error_count, next_retry),
     )
+
+
+async def get_room_templates(store) -> dict[str, str]:
+    """Return custom RSS templates keyed by normalized room JID."""
+    templates = await store.get_global(RSS_TEMPLATES_KEY, default={})
+    if not isinstance(templates, dict):
+        return {}
+    return {
+        _normalize_template_room_jid(room): str(template)
+        for room, template in templates.items()
+        if _normalize_template_room_jid(room) and isinstance(template, str)
+    }
+
+
+async def save_room_templates(store, templates: dict[str, str]) -> None:
+    """Persist custom RSS room templates."""
+    normalized = {
+        _normalize_template_room_jid(room): str(template)
+        for room, template in templates.items()
+        if _normalize_template_room_jid(room) and isinstance(template, str)
+    }
+    await store.set_global(RSS_TEMPLATES_KEY, normalized)
+
+
+async def get_room_template(store, room: str) -> str | None:
+    """Return the custom RSS template for a room, if one is configured."""
+    templates = await get_room_templates(store)
+    return templates.get(_normalize_template_room_jid(room))
+
+
+async def set_room_template(store, room: str, template: str) -> None:
+    """Set a custom RSS template for one room."""
+    templates = await get_room_templates(store)
+    templates[_normalize_template_room_jid(room)] = template
+    await save_room_templates(store, templates)
+
+
+async def unset_room_template(store, room: str) -> bool:
+    """Remove a custom RSS template for one room."""
+    templates = await get_room_templates(store)
+    removed = templates.pop(_normalize_template_room_jid(room), None) is not None
+    if removed:
+        await save_room_templates(store, templates)
+    return removed
 
 
 def _apply_retry_state(feed, error_count, next_retry):
@@ -110,10 +161,10 @@ async def _reset_feed_retry(bot, msg, url, store):
 
 async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
     """Remove a deleted room from all RSS subscriptions."""
-    target = _normalize_room_jid(room_jid)
+    target = _normalize_template_room_jid(room_jid)
     store = await get_rss_store(bot)
     feeds = await get_feeds(store)
-    summary = {"subscriptions": 0, "feeds": 0}
+    summary = {"subscriptions": 0, "feeds": 0, "templates": 0}
     changed = False
     removed_urls = []
 
@@ -123,7 +174,10 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         rooms = feed.get("rooms")
         if not isinstance(rooms, list):
             continue
-        remaining = [room for room in rooms if _normalize_room_jid(room) != target]
+        remaining = [
+            room for room in rooms
+            if _normalize_template_room_jid(room) != target
+        ]
         removed = len(rooms) - len(remaining)
         if removed <= 0:
             continue
@@ -140,6 +194,11 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         await save_feeds(store, feeds)
         for url in removed_urls:
             await _cancel_feed_task(bot, url)
+
+    templates = await get_room_templates(store)
+    if templates.pop(target, None) is not None:
+        summary["templates"] = 1
+        await save_room_templates(store, templates)
 
     return summary
 
@@ -178,6 +237,11 @@ __all__ = [
     'log',
     '_flush_user_store',
     'get_rss_store',
+    'get_room_templates',
+    'save_room_templates',
+    'get_room_template',
+    'set_room_template',
+    'unset_room_template',
     '_set_retry_state',
     '_apply_retry_state',
     '_reset_retry_state',

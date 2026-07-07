@@ -197,6 +197,15 @@ Common maintenance commands:
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
+Room owners/admins can customize RSS post formatting per room. The default output stays unchanged unless a template is set. Supported variables include `$feed_title`, `$title`, `$summary`, `$summary_line`, `$link`, `$feed_url`, `$feed_link`, `$id`, and `$date`. Use `\n` for a newline and `$$` for a literal dollar sign.
+
+```text
+,rss template
+,rss template set 📰 $feed_title: $title\n$link
+,rss template test [$feed_title] $title
+,rss template unset
+```
+
 ## 8. Room-scoped plugin grants
 
 Global bot roles are not always needed. You can delegate selected room-scoped plugin permissions to a user:

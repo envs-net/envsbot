@@ -89,3 +89,19 @@ def test_set_mapping_value_supports_dict_and_attribute_objects():
     feed_object = SimpleNamespace()
     rss._set_mapping_value(feed_object, "id", "urn:feed")
     assert feed_object.id == "urn:feed"
+
+
+@pytest.mark.asyncio
+async def test_rss_room_template_store_helpers(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+
+    await rss.set_room_template(store, "Room@Conference.Example.org", "$title")
+
+    assert await rss.get_room_template(store, "room@conference.example.org") == "$title"
+    assert await rss.get_room_templates(store) == {
+        "room@conference.example.org": "$title",
+    }
+    assert await rss.unset_room_template(store, "room@conference.example.org") is True
+    assert await rss.unset_room_template(store, "room@conference.example.org") is False
+    assert await rss.get_room_templates(store) == {}

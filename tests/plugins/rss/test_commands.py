@@ -477,3 +477,72 @@ async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, ma
     assert rss.RSS_KEY not in bot.plugin_store
     rss.fetch_feed.assert_not_awaited()
     assert "RSS plugin grant" in bot.replies[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_rss_template_show_set_test_unset(make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+
+    await rss.rss_command(bot, "jid", "nick", ["template"], msg, True)
+    assert "RSS template for room@conference.example.org (default)" in bot.replies[-1][1]
+    assert "$summary_line" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "set", "📰", "$feed_title:", "$title\\n$link"],
+        msg,
+        True,
+    )
+    assert "RSS template set" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_TEMPLATES_KEY][room] == "📰 $feed_title: $title\n$link"
+
+    await rss.rss_command(bot, "jid", "nick", ["template", "show"], msg, True)
+    assert "(custom)" in bot.replies[-1][1]
+    assert "📰 $feed_title" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "test", "[$feed_title]", "$title"],
+        msg,
+        True,
+    )
+    assert "RSS template preview" in bot.replies[-1][1]
+    assert "[Example Feed] Example entry" in bot.replies[-1][1]
+
+    await rss.rss_command(bot, "jid", "nick", ["template", "unset"], msg, True)
+    assert "reset to default" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_TEMPLATES_KEY] == {}
+
+
+@pytest.mark.asyncio
+async def test_rss_template_validates_unknown_vars_and_direct_room(make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+    room = "room@conference.example.org"
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "set", room, "$missing"],
+        msg,
+        False,
+    )
+    assert "Unknown template variable: $missing" in bot.replies[-1][1]
+    assert rss.RSS_TEMPLATES_KEY not in bot.plugin_store
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "set", room, "$title", "via", "$feed_title"],
+        msg,
+        False,
+    )
+    assert bot.plugin_store[rss.RSS_TEMPLATES_KEY][room] == "$title via $feed_title"

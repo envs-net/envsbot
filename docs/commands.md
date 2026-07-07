@@ -1665,7 +1665,7 @@ Manage RSS feed subscriptions for rooms.
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|delete|remove|del|rm|retry|reset|list> ...`
+Usage: `,rss <add|delete|remove|del|rm|retry|reset|list|template> ...`
 
 Examples:
 
@@ -1676,6 +1676,10 @@ Examples:
 - `,rss retry all`
 - `,rss reset all`
 - `,rss retry https://example.org/feed.rss room@conference.example.org`
+- `,rss template`
+- `,rss template set 📰 $feed_title: $title\n$link`
+- `,rss template test [$feed_title] $title`
+- `,rss template unset`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`
 

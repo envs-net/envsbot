@@ -260,6 +260,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "RSS_FETCH_TIMEOUT_SECONDS": "rss_fetch_timeout_seconds",
     "RSS_MAX_REDIRECTS": "rss_max_redirects",
     "RSS_MAX_READ_BYTES": "rss_max_read_bytes",
+    "RSS_TEMPLATE_MAX_LENGTH": "rss_template_max_length",
     "URLCHECK_WAIT_SECONDS": "urlcheck_wait_seconds",
     "URLCHECK_FETCH_TIMEOUT_SECONDS": "urlcheck_fetch_timeout_seconds",
     "URLCHECK_MAX_REDIRECTS": "urlcheck_max_redirects",
@@ -412,6 +413,7 @@ CONFIG_DISPLAY_SECTIONS = (
             "RSS_FETCH_TIMEOUT_SECONDS",
             "RSS_MAX_REDIRECTS",
             "RSS_MAX_READ_BYTES",
+            "RSS_TEMPLATE_MAX_LENGTH",
         ),
     ),
     (

@@ -229,6 +229,9 @@ RSS_FETCH_TIMEOUT_SECONDS = HTTP_TIMEOUT_SECONDS
 RSS_MAX_REDIRECTS = 5
 RSS_MAX_READ_BYTES = 1048576
 
+# Maximum length of a per-room RSS message template configured with ,rss template.
+RSS_TEMPLATE_MAX_LENGTH = 1000
+
 
 # ================= BIRTHDAY NOTIFY =================
 

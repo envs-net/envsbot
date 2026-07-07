@@ -7,6 +7,50 @@ from utils.url_safety import FetchURLTooLarge
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins.users import user_has_room_plugin_grant
 from utils.audit import audit_event
+from .config import (
+    DEFAULT_POLL_INTERVAL,
+    RSS_MAX_ENTRIES_PER_POLL,
+    RSS_MAX_READ_BYTES,
+)
+from .fetch import (
+    _cancel_feed_task,
+    _entry_is_new,
+    _extract_entry_link,
+    _filter_feeds_for_room,
+    _format_feed_fetch_error,
+    _format_feed_list,
+    _get_entry_id,
+    _get_latest_entry_id,
+    _log_feed_fetch_error,
+    _normalize_url,
+    _resolve_relative_url,
+    _set_feed_field,
+    entry_get,
+    fetch_feed,
+    get_feeds,
+    html_to_text_with_links,
+    save_feeds,
+)
+from .formatting import (
+    DEFAULT_RSS_TEMPLATE,
+    _SAMPLE_TEMPLATE_CONTEXT,
+    _build_rss_message_from_context,
+    _build_rss_template_context,
+    _entry_date,
+    _normalize_rss_template_input,
+    _rss_template_usage,
+    _rss_template_variables_text,
+    _validate_rss_template,
+)
+from .store import (
+    _apply_retry_state,
+    _reset_feed_retry,
+    get_room_template,
+    log,
+    set_room_template,
+    unset_room_template,
+)
+from .tasks import ensure_task
 
 
 def _command_prefix(bot=None) -> str:
@@ -183,7 +227,7 @@ def _collect_new_entries(parsed, last_id, max_entries=None):
     return new_entries
 
 
-async def burst_recent_entries(bot, feed, room, burst_num):
+async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=""):
     """
     Burst the last N entries of the given feed to the room.
     """
@@ -206,12 +250,18 @@ async def burst_recent_entries(bot, feed, room, burst_num):
         entry_link = _resolve_relative_url(feed_link, entry_link)
         entry_link = _normalize_url(entry_link)
 
-        if _should_include_description(entry_title, entry_desc):
-            msg_text = f"[RSS] ({title}) {entry_title} - {entry_desc}\n"
-        else:
-            msg_text = f"[RSS] ({title}) {entry_title}\n"
-
-        msg_text += f"{entry_link}"
+        context = _build_rss_template_context(
+            feed_title=title,
+            entry_title=entry_title,
+            entry_desc=entry_desc,
+            entry_link=entry_link,
+            feed_url=feed_url or feed_link,
+            feed_link=feed_link,
+            entry_id=entry_id,
+            entry_date=_entry_date(entry),
+        )
+        template = await get_room_template(store, room) if store else None
+        msg_text = _build_rss_message_from_context(context, template)
 
         bot.reply(
             {
@@ -231,6 +281,134 @@ async def burst_recent_entries(bot, feed, room, burst_num):
     return last_id
 
 
+def _split_template_room_args(msg, is_room: bool, args: list[str]):
+    """Return ``(room, rest)`` for RSS template subcommands."""
+    rest = list(args)
+    explicit_room = None
+    if rest and _looks_like_room_arg(rest[0]):
+        explicit_room = rest.pop(0)
+    return _room_for_feed_command(msg, is_room, explicit_room=explicit_room), rest
+
+
+def _join_template_args(parts: list[str]) -> str:
+    """Build a template string from command arguments."""
+    return _normalize_rss_template_input(" ".join(str(part) for part in parts))
+
+
+def _sample_rss_template_preview(template: str) -> str:
+    """Render a template using example RSS data."""
+    return _build_rss_message_from_context(_SAMPLE_TEMPLATE_CONTEXT, template)
+
+
+async def _sender_can_manage_template(
+    bot, sender_jid: str, room: str | None
+) -> bool:
+    """Return True when sender may view or change a room RSS template."""
+    if not room:
+        return False
+    return await _sender_can_manage_rss_room(bot, sender_jid, room)
+
+
+async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
+    """Handle room-scoped RSS template commands."""
+    if not args:
+        action = "show"
+        rest = []
+    else:
+        first = str(args[0]).strip().lower()
+        if first in {"show", "get"}:
+            action = "show"
+            rest = list(args[1:])
+        elif first in {"set", "unset", "reset", "test"}:
+            action = "unset" if first == "reset" else first
+            rest = list(args[1:])
+        else:
+            action = "show"
+            rest = list(args)
+
+    room, rest = _split_template_room_args(msg, is_room, rest)
+    if not room:
+        bot.reply(msg, _rss_template_usage(bot))
+        return
+
+    if not await _sender_can_manage_template(bot, sender_jid, room):
+        bot.reply(
+            msg,
+            "🔴 You need a global moderator role, or an RSS plugin grant "
+            f"and owner/admin affiliation in {room}.",
+        )
+        return
+
+    if action == "show":
+        if rest:
+            bot.reply(msg, _rss_template_usage(bot))
+            return
+        template = await get_room_template(store, room)
+        source = "custom" if template else "default"
+        template = template or DEFAULT_RSS_TEMPLATE
+        bot.reply(
+            msg,
+            f"🧩 RSS template for {room} ({source}):\n"
+            f"{template}\n\n{_rss_template_variables_text()}",
+        )
+        return
+
+    if action == "unset":
+        if rest:
+            bot.reply(msg, _rss_template_usage(bot))
+            return
+        removed = await unset_room_template(store, room)
+        if removed:
+            bot.reply(msg, f"✅ RSS template reset to default for {room}.")
+            await audit_event(
+                bot,
+                "rss_template_unset",
+                actor=sender_jid,
+                target=room,
+            )
+        else:
+            bot.reply(msg, f"ℹ️ {room} already uses the default RSS template.")
+        return
+
+    if action == "test":
+        template = _join_template_args(rest) if rest else (
+            await get_room_template(store, room) or DEFAULT_RSS_TEMPLATE
+        )
+        error = _validate_rss_template(template)
+        if error:
+            bot.reply(msg, f"🔴 {error}\n{_rss_template_variables_text()}")
+            return
+        bot.reply(
+            msg,
+            f"🧪 RSS template preview for {room}:\n"
+            f"{_sample_rss_template_preview(template)}",
+        )
+        return
+
+    if action == "set":
+        template = _join_template_args(rest)
+        error = _validate_rss_template(template)
+        if error:
+            bot.reply(msg, f"🔴 {error}\n{_rss_template_variables_text()}")
+            return
+        await set_room_template(store, room, template)
+        bot.reply(
+            msg,
+            f"✅ RSS template set for {room}.\n"
+            f"Preview:\n{_sample_rss_template_preview(template)}",
+        )
+        await audit_event(
+            bot,
+            "rss_template_set",
+            actor=sender_jid,
+            target=room,
+            details={"length": len(template)},
+        )
+        return
+
+    bot.reply(msg, _rss_template_usage(bot))
+
+
 @command("rss", role=Role.USER)
 async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -244,6 +422,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss delete|remove|del|rm <feedurl> [room_jid|all]
     {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss list [room_jid] [page|all|last]
+    {prefix}rss template [show|set|unset|test] [room_jid] [template]
     """
     store = bot.db.users.plugin("rss")
 
@@ -251,12 +430,18 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(
             msg,
             f"Usage: {_command_prefix(bot)}rss "
-            "<add|delete|remove|del|rm|retry|reset|list> ...",
+            "<add|delete|remove|del|rm|retry|reset|list|template> ...",
         )
         return
 
     sub = args[0].lower()
     room = _room_for_feed_command(msg, is_room)
+
+    if sub == "template":
+        await _rss_template_command(
+            bot, sender_jid, msg, is_room, args[1:], store
+        )
+        return
 
     # Add feed to room
     if sub == "add":
@@ -451,7 +636,8 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         bot.reply(
             msg,
-            "Unknown subcommand. Use add, delete, remove, retry, reset, or list.",
+            "Unknown subcommand. Use add, delete, remove, retry, "
+            "reset, list, or template.",
         )
 
 
@@ -467,8 +653,9 @@ async def _add_feed(bot, msg, url, store, room):
 
             # Burst last N (default 5) items to this room
             burst_num = config.get("max_new_feed_entries", 5)
-            last_id = await burst_recent_entries(bot, feed,
-                                                 room, burst_num)
+            last_id = await burst_recent_entries(
+                bot, feed, room, burst_num, store=store, feed_url=url
+            )
 
             # After burst, remember last_id so next poll ignores
             # already-shown history.
@@ -518,7 +705,9 @@ async def _add_feed(bot, msg, url, store, room):
             try:
                 feed = await fetch_feed(url)
                 burst_num = config.get("max_new_feed_entries", 5)
-                await burst_recent_entries(bot, feed, room, burst_num)
+                await burst_recent_entries(
+                    bot, feed, room, burst_num, store=store, feed_url=url
+                )
             except Exception as e:
                 _log_feed_fetch_error(
                     "Failed to fetch or parse feed during burst to new room",

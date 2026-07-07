@@ -626,7 +626,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "rss": {
         "short": "Manage RSS feed subscriptions for rooms.",
-        "usage": "{prefix}rss <add|delete|remove|del|rm|retry|reset|list> ...",
+        "usage": "{prefix}rss <add|delete|remove|del|rm|retry|reset|list|template> ...",
         "examples": [
             "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
             "{prefix}rss list room@conference.example.org",
@@ -635,6 +635,10 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
             "{prefix}rss retry all",
             "{prefix}rss reset all",
             "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
+            "{prefix}rss template",
+            "{prefix}rss template set 📰 $feed_title: $title\n$link",
+            "{prefix}rss template test [$feed_title] $title",
+            "{prefix}rss template unset",
             "{prefix}rss delete https://example.org/feed.rss",
             "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",
         ],
