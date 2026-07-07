@@ -10,6 +10,37 @@ from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
 from .errors import ConfigError
 
 
+AVAILABLE_TIMEZONES = available_timezones()
+
+
+def _is_config_int(value: object) -> bool:
+    """Return True for real integers, but not bool values."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_config_number(value: object) -> bool:
+    """Return True for int/float config values, but not bool values."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _matches_expected_type(value: object, expected_type: object) -> bool:
+    expected_types = (
+        expected_type if isinstance(expected_type, tuple) else (expected_type,)
+    )
+
+    for typ in expected_types:
+        if typ is int and _is_config_int(value):
+            return True
+        if typ is float and isinstance(value, float):
+            return True
+        if typ is bool and isinstance(value, bool):
+            return True
+        if typ not in {int, float, bool} and isinstance(value, typ):
+            return True
+
+    return False
+
+
 def _validate_string(value, key, errors, allow_empty=False):
     if not isinstance(value, str):
         errors.append(f"{key}: expected string, got {type(value).__name__}")
@@ -37,90 +68,85 @@ def _validate_jid(value, key, errors):
 
 
 def _validate_numeric_ranges(cfg, errors):
-    if "rss_global_query_interval" in cfg:
-        value = cfg["rss_global_query_interval"]
-        if isinstance(value, int) and value <= 0:
-            errors.append("rss_global_query_interval: must be greater than 0")
-
-    if "max_new_feed_entries" in cfg:
-        value = cfg["max_new_feed_entries"]
-        if isinstance(value, int) and value < 0:
-            errors.append("max_new_feed_entries: must be 0 or greater")
-
-    if "rss_max_entries_per_poll" in cfg:
-        value = cfg["rss_max_entries_per_poll"]
-        if isinstance(value, int) and value <= 0:
-            errors.append("rss_max_entries_per_poll: must be greater than 0")
-
-    if "port" in cfg:
-        value = cfg["port"]
-        if isinstance(value, int) and not (1 <= value <= 65535):
-            errors.append("port: must be between 1 and 65535")
-
-    if "reminder_max_age_days" in cfg:
-        value = cfg["reminder_max_age_days"]
-        if isinstance(value, int) and value <= 0:
-            errors.append("reminder_max_age_days: must be greater than 0")
-
-    if "version_check_interval" in cfg:
-        value = cfg["version_check_interval"]
-        if isinstance(value, int) and value < 60:
-            errors.append("version_check_interval: must be at least 60")
-
+    positive_integer_keys = {
+        "backup_keep",
+        "birthday_cache_ttl_seconds",
+        "birthday_check_interval_seconds",
+        "birthday_initial_scan_delay_seconds",
+        "karma_delay_seconds",
+        "pin_page_size",
+        "pin_recent_cache_size",
+        "poll_max_history_per_room",
+        "poll_max_option_len",
+        "poll_max_options",
+        "poll_max_question_len",
+        "reminder_max_age_days",
+        "rss_global_query_interval",
+        "rss_max_backoff_time",
+        "rss_max_entries_per_poll",
+        "rss_max_read_bytes",
+        "rss_max_redirects",
+        "rss_retry_initial_delay",
+        "sed_cache_size",
+        "sed_max_input_length",
+        "sed_max_output_length",
+        "sed_max_pattern_length",
+        "sed_max_replacement_length",
+        "tell_delivery_delay_seconds",
+        "urlcheck_max_read_bytes",
+        "urlcheck_max_redirects",
+        "urlcheck_wait_seconds",
+        "xkcd_check_interval",
+        "xkcd_index_start_delay_seconds",
+    }
     positive_number_keys = {
         "http_timeout_seconds",
         "rss_fetch_timeout_seconds",
-        "xmpp_query_timeout_seconds",
-        "vcard_fetch_timeout_seconds",
-        "updatecheck_timeout_seconds",
-        "urlcheck_fetch_timeout_seconds",
         "rss_retry_backoff_multiplier",
         "sed_regex_timeout",
-        "xkcd_index_request_delay_seconds",
+        "updatecheck_timeout_seconds",
+        "urlcheck_fetch_timeout_seconds",
+        "vcard_fetch_timeout_seconds",
+        "xmpp_query_timeout_seconds",
         "xkcd_http_timeout",
+        "xkcd_index_request_delay_seconds",
     }
-    positive_int_keys = {
-        "urlcheck_wait_seconds",
-        "urlcheck_max_redirects",
-        "urlcheck_max_read_bytes",
-        "rss_max_redirects",
-        "rss_max_read_bytes",
-        "rss_retry_initial_delay",
-        "rss_max_backoff_time",
-        "birthday_cache_ttl_seconds",
-        "birthday_initial_scan_delay_seconds",
-        "birthday_check_interval_seconds",
-        "sed_max_pattern_length",
-        "sed_max_replacement_length",
-        "sed_max_input_length",
-        "sed_max_output_length",
-        "sed_cache_size",
-        "poll_max_options",
-        "poll_max_question_len",
-        "poll_max_option_len",
-        "poll_max_history_per_room",
-        "pin_page_size",
-        "pin_recent_cache_size",
-        "karma_delay_seconds",
-        "tell_delivery_delay_seconds",
-        "xkcd_check_interval",
-        "xkcd_index_start_delay_seconds",
-        "backup_keep",
-    }
+    zero_or_greater_integer_keys = {"max_new_feed_entries"}
+    range_integer_keys = {"port": (1, 65535)}
+    min_integer_keys = {"version_check_interval": 60}
+    range_number_keys = {"rss_similarity_threshold": (0, 1)}
+
+    for key in positive_integer_keys:
+        value = cfg.get(key)
+        if _is_config_int(value) and value <= 0:
+            errors.append(f"{key}: must be greater than 0")
 
     for key in positive_number_keys:
         value = cfg.get(key)
-        if isinstance(value, (int, float)) and value <= 0:
+        if _is_config_number(value) and value <= 0:
             errors.append(f"{key}: must be greater than 0")
 
-    for key in positive_int_keys:
+    for key in zero_or_greater_integer_keys:
         value = cfg.get(key)
-        if isinstance(value, int) and value <= 0:
-            errors.append(f"{key}: must be greater than 0")
+        if _is_config_int(value) and value < 0:
+            errors.append(f"{key}: must be 0 or greater")
 
-    similarity = cfg.get("rss_similarity_threshold")
-    if isinstance(similarity, (int, float)) and not (0 < similarity <= 1):
-        errors.append("rss_similarity_threshold: must be greater than 0 and at most 1")
+    for key, (minimum, maximum) in range_integer_keys.items():
+        value = cfg.get(key)
+        if _is_config_int(value) and not (minimum <= value <= maximum):
+            errors.append(f"{key}: must be between {minimum} and {maximum}")
+
+    for key, minimum in min_integer_keys.items():
+        value = cfg.get(key)
+        if _is_config_int(value) and value < minimum:
+            errors.append(f"{key}: must be at least {minimum}")
+
+    for key, (minimum, maximum) in range_number_keys.items():
+        value = cfg.get(key)
+        if _is_config_number(value) and not (minimum < value <= maximum):
+            errors.append(
+                f"{key}: must be greater than {minimum} and at most {maximum}"
+            )
 
 
 def _validate_timezone(cfg, errors):
@@ -133,7 +159,7 @@ def _validate_timezone(cfg, errors):
     if not isinstance(timezone, str):
         return
 
-    if timezone not in available_timezones():
+    if timezone not in AVAILABLE_TIMEZONES:
         errors.append(
             "timezone: must be a valid IANA timezone, e.g. Europe/Berlin")
 
@@ -218,7 +244,7 @@ def check_optional_keys(cfg):
         expected_types = (
             expected_type if isinstance(expected_type, tuple) else (expected_type,)
         )
-        if not isinstance(value, expected_types):
+        if not _matches_expected_type(value, expected_types):
             expected_names = " or ".join(t.__name__ for t in expected_types)
             errors.append(
                 f"{key}: expected {expected_names}, "

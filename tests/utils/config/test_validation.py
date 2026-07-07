@@ -261,6 +261,22 @@ def test_validate_config_rejects_invalid_port_range(port):
     assert "port: must be between 1 and 65535" in str(exc.value)
 
 
+def test_validate_config_rejects_bool_for_integer_options():
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config({"port": True, "backup_keep": False})
+
+    msg = str(exc.value)
+    assert "port: expected int" in msg
+    assert "backup_keep: expected int" in msg
+
+
+def test_validate_config_rejects_bool_for_number_options():
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config({"rss_similarity_threshold": True})
+
+    assert "rss_similarity_threshold: expected int or float" in str(exc.value)
+
+
 def test_validate_config_rejects_invalid_timezone():
     cfg = {
         "jid": "bot@example.org",
