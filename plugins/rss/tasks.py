@@ -1,25 +1,6 @@
 """Split module for plugins/rss.py: tasks."""
 
 import asyncio
-import logging
-import time
-import html
-import hashlib
-from difflib import SequenceMatcher
-from urllib.parse import urljoin, urlparse
-import aiohttp
-from bs4 import BeautifulSoup
-from utils.command import command, Role
-from utils.config import config
-from core_plugins._core import paginate_items
-from utils.url_safety import (
-    FetchURLTooLarge,
-    UnsafeFetchURL,
-    validate_fetch_url_async,
-)
-from core_plugins.rooms import JOINED_ROOMS
-from core_plugins.users import user_has_room_plugin_grant
-from utils.audit import audit_event
 from utils.task_supervisor import create_plugin_task
 
 

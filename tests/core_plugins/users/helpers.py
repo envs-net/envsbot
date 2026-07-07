@@ -84,3 +84,22 @@ def build_mock_bot():
     def factory():
         return _make_mock_bot()
     return factory
+
+
+__all__ = [
+    "pytest",
+    "asyncio",
+    "AsyncMock",
+    "MagicMock",
+    "patch",
+    "types",
+    "users_mod",
+    "core_plugins",
+    "_make_mock_bot",
+    "assert_reply_contains",
+    "FakeUserManager",
+    "mock_bot",
+    "mock_msg",
+    "patch_joined_rooms",
+    "build_mock_bot",
+]

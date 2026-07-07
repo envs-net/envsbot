@@ -1,4 +1,4 @@
-from .helpers import *  # noqa: F401,F403
+from .helpers import config_mod
 
 
 def test_config_display_sections_follow_sample_order_and_names():

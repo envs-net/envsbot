@@ -1,4 +1,7 @@
-from .helpers import *  # noqa: F401,F403
+from .helpers import (
+    config_mod,
+    logging,
+)
 
 
 def test_setup_logging_creates_log_dir_and_file(tmp_path, monkeypatch):

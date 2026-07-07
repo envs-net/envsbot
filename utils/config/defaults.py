@@ -1,15 +1,7 @@
 """Split module for utils/config.py: defaults."""
 
 from __future__ import annotations
-import importlib.util
-import json
-import logging
-import os
-import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from zoneinfo import available_timezones
-import slixmpp
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -486,3 +478,7 @@ _LOWER_TO_PYTHON_CONFIG_KEY = {
     normalized_key: python_key
     for python_key, normalized_key in PYTHON_CONFIG_KEY_MAP.items()
 }
+
+__all__ = [
+    "_LOWER_TO_PYTHON_CONFIG_KEY",
+]

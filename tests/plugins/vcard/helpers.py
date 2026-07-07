@@ -96,13 +96,14 @@ class RichDummyVcard:
 
 
 __all__ = [
-    "AsyncMock",
-    "ORIGINAL_GET_VCARD",
-    "RichDummyVcard",
+    "pytest",
     "SimpleNamespace",
+    "ET",
+    "AsyncMock",
+    "vcard",
+    "ORIGINAL_GET_VCARD",
     "fake_bot",
     "msg",
     "patch_get_vcard",
-    "pytest",
-    "vcard",
+    "RichDummyVcard",
 ]

@@ -1,26 +1,8 @@
 """Split module for core_plugins/rooms.py: commands."""
 
-import asyncio
-import inspect
-import logging
-import time
-from xml.etree import ElementTree as ET
-from functools import partial
-from slixmpp import JID
 from utils.command import command, Role
-from utils.config import config
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
-from utils.xmpp_notify import (
-    ensure_notification_target_joined,
-    notification_message_type,
-)
-from utils.room_features import (
-    format_room_feature_line,
-    get_room_feature,
-    list_room_features,
-    set_room_feature,
-)
 
 
 async def autojoin_rooms(bot):

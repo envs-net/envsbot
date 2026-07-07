@@ -1,15 +1,8 @@
 """Split module for core_plugins/users.py: permissions."""
 
-import logging
-import asyncio
-import inspect
-from functools import partial
-from datetime import datetime, timezone
-from slixmpp import JID
 from utils.config import config
 from utils.command import command, Role, role_from_int
 from utils.formatting import format_page, parse_page_args
-from utils.audit import audit_event
 
 
 def _owner_jid() -> str | None:

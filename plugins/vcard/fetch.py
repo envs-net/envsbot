@@ -1,14 +1,6 @@
 """Split module for plugins/vcard.py: fetch."""
 
-import logging
-import textwrap
-import pytz
-import datetime
-import urllib
-from slixmpp.exceptions import IqError
 from core_plugins import _core
-from utils.command import command, Role
-from utils.config import config
 from core_plugins.rooms import JOINED_ROOMS
 
 

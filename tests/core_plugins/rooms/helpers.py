@@ -195,3 +195,36 @@ class ExplodingMappingPlugin:
 
     def __getitem__(self, key):
         raise KeyError(key)
+
+
+__all__ = [
+    "rooms",
+    "pytest",
+    "MagicMock",
+    "AsyncMock",
+    "patch",
+    "types",
+    "rss_plugin",
+    "xkcd_plugin",
+    "pin_plugin",
+    "poll_plugin",
+    "PresenceStub",
+    "make_presence_stub",
+    "logging",
+    "ROOM_JID",
+    "BOT_JID",
+    "BOT_NICK",
+    "USER_NICK",
+    "USER_JID",
+    "make_presence",
+    "patch_reply_methods",
+    "cleanup_joined_rooms",
+    "fake_bot",
+    "fake_msg",
+    "DummyPluginStore",
+    "InviteMessage",
+    "PluginStanza",
+    "FallbackPluginStanza",
+    "MappingOnlyPlugin",
+    "ExplodingMappingPlugin",
+]

@@ -110,3 +110,20 @@ async def _register_alice(bot, msg):
         msg,
         True,
     )
+
+
+__all__ = [
+    "asyncio",
+    "itertools",
+    "types",
+    "pytest",
+    "idlerpg",
+    "JOINED_ROOMS",
+    "Role",
+    "DummyStore",
+    "DummyBot",
+    "DummyTask",
+    "DummyMsg",
+    "clear_idlerpg_state",
+    "_register_alice",
+]

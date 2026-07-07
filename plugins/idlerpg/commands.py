@@ -1,22 +1,11 @@
 """Split module for plugins/idlerpg.py: commands."""
 
 from __future__ import annotations
-import asyncio
-import json
-import logging
 import random
-import re
 import time
-from pathlib import Path
-from functools import partial
-from typing import Any
 from utils.audit import audit_event
-from utils.command import Role, command
-from utils.config import BASE_DIR, config
 from utils.formatting import format_page, parse_page_args
-from utils.task_supervisor import create_plugin_task
 from core_plugins import _core
-from core_plugins.rooms import JOINED_ROOMS
 
 
 async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:

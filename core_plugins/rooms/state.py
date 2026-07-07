@@ -1,26 +1,8 @@
 """Split module for core_plugins/rooms.py: state."""
 
-import asyncio
 import inspect
 import logging
-import time
-from xml.etree import ElementTree as ET
-from functools import partial
-from slixmpp import JID
-from utils.command import command, Role
-from utils.config import config
-from utils.formatting import format_page, parse_page_args
-from utils.audit import audit_event
-from utils.xmpp_notify import (
-    ensure_notification_target_joined,
-    notification_message_type,
-)
-from utils.room_features import (
-    format_room_feature_line,
-    get_room_feature,
-    list_room_features,
-    set_room_feature,
-)
+from utils.room_features import list_room_features
 
 
 log = logging.getLogger(__name__)
@@ -283,3 +265,9 @@ async def _room_diagnose_lines(bot, room_jid: str) -> list[str]:
             ) or "no room state"
             lines.append(f"• {plugin}: {summary}")
     return lines
+
+__all__ = [
+    "_DIRECT_INVITE_NS",
+    "_MUC_USER_NS",
+    "_WARNED_ROOM_PLUGIN_DEFAULT_KEYS",
+]

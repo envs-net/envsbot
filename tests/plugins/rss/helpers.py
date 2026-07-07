@@ -89,9 +89,22 @@ def clear_rss_runtime_state():
     yield
     rss.CHECK_TASKS.clear()
 
+
 __all__ = [
-    name
-    for name in globals()
-    if not name.startswith("_")
+    "pytest",
+    "asyncio",
+    "logging",
+    "AsyncMock",
+    "SimpleNamespace",
+    "rss",
+    "core_plugins",
+    "Role",
+    "TaskSupervisor",
+    "patch_config",
+    "_reply_text",
+    "Entry",
+    "make_bot",
+    "_RssPendingTask",
+    "_RssDoneTask",
+    "clear_rss_runtime_state",
 ]
-__all__ += ["_reply_text", "_RssPendingTask", "_RssDoneTask"]

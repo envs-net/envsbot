@@ -1,20 +1,9 @@
 """Split module for plugins/reminder.py: commands."""
 
-import asyncio
 import datetime
-import logging
 import pytz
 from utils.command import command, Role
-from utils.config import config
-from core_plugins._core import (
-    handle_room_toggle_command,
-    get_user_tzinfo,
-    JOINED_ROOMS,
-    _is_muc_pm,
-    _normalize_bare_jid,
-    parse_duration,
-)
-from utils.task_supervisor import create_plugin_task
+from core_plugins._core import get_user_tzinfo
 
 
 def _utcnow() -> datetime.datetime:
