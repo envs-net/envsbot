@@ -597,8 +597,7 @@ async def _handle_announce_top(bot, sender_jid: str, msg, is_room: bool) -> None
         return
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
-    for line in _format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT):
-        _system_reply(bot, room_jid, line)
+    _system_reply(bot, room_jid, "\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT)))
     room["next_top_announce_at"] = _now() + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0
     await _set_data(bot, data)
     _reply(bot, msg, "✅ IdleRPG top players announced.")

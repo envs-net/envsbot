@@ -42,7 +42,7 @@ async def _flush_idlerpg_store(bot) -> None:
     if callable(flush):
         result = flush()
         if hasattr(result, "__await__"):
-            await result
+            _ = await result
         return
 
     users = getattr(db, "users", None)
@@ -50,7 +50,7 @@ async def _flush_idlerpg_store(bot) -> None:
     if callable(flush_all):
         result = flush_all()
         if hasattr(result, "__await__"):
-            await result
+            _ = await result
 
 
 async def _checkpoint_room_clock(bot, room_jid: str, *, flush: bool = False) -> int:

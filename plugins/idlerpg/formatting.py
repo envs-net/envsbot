@@ -174,7 +174,7 @@ def _maybe_periodic_announcements(bot, room_jid: str, room: dict[str, Any], mess
     if ANNOUNCE_TOP_INTERVAL > 0:
         next_at = int(room.get("next_top_announce_at", 0) or 0)
         if now >= next_at:
-            messages.extend(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT))
+            messages.append("\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT)))
             room["next_top_announce_at"] = now + ANNOUNCE_TOP_INTERVAL
     if UPDATE_ROOM_TOPIC and TOPIC_UPDATE_INTERVAL > 0:
         next_at = int(room.get("next_topic_update_at", 0) or 0)

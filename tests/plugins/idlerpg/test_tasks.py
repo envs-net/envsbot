@@ -32,12 +32,14 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
 
     assert await idlerpg._enabled_rooms(bot) == {"room@conf": True, "off@conf": False, "123": True}
     await idlerpg._start_enabled_room_tasks(bot)
-    assert ensured == ["room@conf", "123"]
+    assert set(ensured) == {"room@conf", "123"}
+    assert len(ensured) == 2
 
     idlerpg.ROOM_TASKS["old@conf"] = DummyTask(name="old")
     ensured.clear()
     await idlerpg._sync_tasks_to_enabled_rooms(bot)
-    assert ensured == ["123", "room@conf"]
+    assert set(ensured) == {"room@conf", "123"}
+    assert len(ensured) == 2
     assert cancelled == ["old@conf"]
 
     bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = "broken"

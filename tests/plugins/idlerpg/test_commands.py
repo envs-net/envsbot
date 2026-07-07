@@ -416,6 +416,7 @@ async def test_events_export_has_no_raw_jids_and_events_command(tmp_path, monkey
 
     room_dir = tmp_path / "room_at_conf"
     assert (room_dir / "events.json").exists()
+    assert (room_dir / "players.json").exists()
     payload = (room_dir / "players.json").read_text(encoding="utf-8")
     events_payload = (room_dir / "events.json").read_text(encoding="utf-8")
     assert "alice@envs.net" not in payload
@@ -979,7 +980,9 @@ async def test_login_announcement_and_manual_top_command(monkeypatch):
     admin_msg = DummyMsg(resource="Admin")
     bot.replies.clear()
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["announce", "top"], admin_msg, True)
-    assert any("IdleRPG Top Players" in text for text, _kwargs in bot.replies)
+    top_replies = [text for text, _kwargs in bot.replies if "IdleRPG Top Players" in text]
+    assert len(top_replies) == 1
+    assert "\n" in top_replies[0]
     assert "announced" in bot.replies[-1][0]
 
     bot.replies.clear()
