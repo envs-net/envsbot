@@ -435,6 +435,7 @@ async def test_user_manager_flush_all_rolls_back_and_keeps_dirty_flags():
 
     queries = _queries(db)
     assert "ROLLBACK TO flush_checkpoint" in queries
+    assert "RELEASE flush_checkpoint" in queries
     assert um._dirty_users == {"bad@jid"}
 
 
@@ -472,6 +473,45 @@ async def test_flush_all_keeps_same_jid_dirty_when_updated_during_flush():
     await um.flush_all()
 
     assert "same@jid" in um._dirty_runtime
+
+
+@pytest.mark.asyncio
+async def test_flush_all_skips_runtime_row_deleted_during_flush(monkeypatch):
+    db = MutatingRuntimeWriteDB()
+    db.trigger_jid = "trigger@jid"
+    um = UserManager(db)
+    store = um.plugin("race")
+    await store.set("trigger@jid", "value", 1)
+    await store.set("deleted@jid", "value", 2)
+
+    original_snapshot = um._dirty_snapshot
+
+    def ordered_snapshot(dirty, versions):
+        if dirty is um._dirty_runtime:
+            return {
+                "trigger@jid": versions.get("trigger@jid", 0),
+                "deleted@jid": versions.get("deleted@jid", 0),
+            }
+        return original_snapshot(dirty, versions)
+
+    monkeypatch.setattr(um, "_dirty_snapshot", ordered_snapshot)
+
+    async def delete_during_flush():
+        await um.delete("deleted@jid")
+
+    db.on_runtime_write = delete_during_flush
+
+    await um.flush_all()
+
+    runtime_writes = [
+        params[0]
+        for query, params in db.calls
+        if query.startswith("INSERT INTO users_runtime")
+    ]
+    assert "trigger@jid" in runtime_writes
+    assert "deleted@jid" not in runtime_writes
+    assert "deleted@jid" not in um._dirty_runtime
+    assert "deleted@jid" not in um._runtime_cache
 
 
 @pytest.mark.asyncio

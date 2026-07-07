@@ -262,18 +262,27 @@ class TaskSupervisor:
         return was_running
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
-        """Cancel all running tasks owned by a plugin.
+        """Cancel all tasks owned by a plugin and prune finished noise.
+
+        Plugins often cancel their own workers in ``on_unload`` before the
+        manager calls into the supervisor.  Those tasks are already done by the
+        time we get here, so looking only at running tasks leaves stale
+        ``cancelled`` entries in ``tasks all``.  Snapshot all tasks for the
+        plugin, cancel only the running ones, then prune every non-failed task.
 
         Returns:
             Number of running tasks that were requested to cancel.
         """
-        tasks = [
-            task for task in self._by_plugin.get(plugin, set()) if not task.done()
+        plugin_tasks = [
+            task
+            for task, meta in tuple(self._tasks.items())
+            if meta.get("plugin") == plugin
         ]
-        for task in tasks:
+        running_tasks = [task for task in plugin_tasks if not task.done()]
+        for task in running_tasks:
             task.cancel()
-        if tasks:
-            gather_future = asyncio.gather(*tasks, return_exceptions=True)
+        if running_tasks:
+            gather_future = asyncio.gather(*running_tasks, return_exceptions=True)
             results: list[Any] = []
             try:
                 results = await asyncio.wait_for(gather_future, timeout=timeout)
@@ -286,14 +295,14 @@ class TaskSupervisor:
                         "[TASKS] Timed-out gather future cancelled during cleanup"
                     )
 
-                pending = {task for task in tasks if not task.done()}
+                pending = {task for task in running_tasks if not task.done()}
                 for task in pending:
                     log.warning(
                         "[TASKS] Plugin task did not stop in time: %s",
                         task.get_name(),
                     )
 
-                finished = [task for task in tasks if task.done()]
+                finished = [task for task in running_tasks if task.done()]
                 if finished:
                     results = await asyncio.gather(*finished, return_exceptions=True)
                 else:
@@ -308,9 +317,9 @@ class TaskSupervisor:
                         exc_info=result,
                     )
 
-            for task in tasks:
-                self._prune_task_unless_failed(task)
-        return len(tasks)
+        for task in plugin_tasks:
+            self._prune_task_unless_failed(task)
+        return len(running_tasks)
 
     async def cancel_all(self, *, timeout: float = 5.0) -> int:
         """Cancel all running supervised tasks.

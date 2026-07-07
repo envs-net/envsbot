@@ -560,9 +560,22 @@ class UserManager:
                 # ------------------------------------------------------
                 # 2. RUNTIME
                 # ------------------------------------------------------
-                for jid in dirty_runtime:
-                    data = self._runtime_cache.get(jid) or {"plugins": {}}
-                    await self._write_runtime(jid, data)
+                for jid, version in dirty_runtime.items():
+                    # If a user was deleted while this flush was in progress,
+                    # delete() removes both the dirty flag and the cached blob.
+                    # Do not recreate an empty users_runtime row from an old
+                    # snapshot in that case.  If the same jid was modified
+                    # again, the dirty version changes and we persist the
+                    # current cache while leaving it dirty for the next flush.
+                    is_still_dirty = jid in self._dirty_runtime
+                    is_same_version = self._dirty_runtime_versions.get(jid) == version
+                    data = self._runtime_cache.get(jid)
+                    if data is None and not is_still_dirty:
+                        continue
+                    if data is None:
+                        data = {"plugins": {}}
+                    if is_still_dirty or is_same_version:
+                        await self._write_runtime(jid, data)
 
                 # Commit transaction
                 await self.db.execute("RELEASE flush_checkpoint")
@@ -571,6 +584,7 @@ class UserManager:
             except Exception:
                 try:
                     await self.db.execute("ROLLBACK TO flush_checkpoint")
+                    await self.db.execute("RELEASE flush_checkpoint")
                 except Exception as rollback_exc:
                     log.debug(
                         "[DB] Rollback after flush failure also failed: %s",

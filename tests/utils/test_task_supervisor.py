@@ -101,6 +101,26 @@ async def test_cancel_plugin_removes_cancelled_tasks_from_tracking():
 
 
 @pytest.mark.asyncio
+async def test_cancel_plugin_prunes_tasks_cancelled_by_plugin_hook():
+    supervisor = TaskSupervisor()
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    task = supervisor.create("example", sleeper(), name="hook-cancelled")
+    task.cancel()
+    result = await asyncio.gather(task, return_exceptions=True)
+    assert isinstance(result[0], asyncio.CancelledError)
+    await asyncio.sleep(0)
+
+    assert supervisor.snapshot(include_done=True)[0].status == "cancelled"
+    assert await supervisor.cancel_plugin("example", timeout=1.0) == 0
+    assert supervisor.snapshot(include_done=True) == []
+    assert supervisor.summary() == (0, 0, 0)
+
+
+@pytest.mark.asyncio
 async def test_cancel_task_removes_single_cancelled_task_from_tracking():
     supervisor = TaskSupervisor()
 
