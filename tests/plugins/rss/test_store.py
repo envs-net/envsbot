@@ -225,3 +225,14 @@ async def test_rss_feed_template_noop_and_cleanup_helpers(make_bot):
     assert await rss.unset_feed_templates_for_room(store, other_room) == 1
     assert other_room not in store[rss.RSS_FEED_TEMPLATES_KEY]
     assert await rss.unset_feed_templates_for_room(store, other_room) == 0
+
+
+def test_normalize_template_room_jid_cases():
+    from plugins.rss.store import _normalize_template_room_jid
+
+    assert _normalize_template_room_jid(None) == ""
+    assert _normalize_template_room_jid("") == ""
+    assert _normalize_template_room_jid("   ") == ""
+    assert _normalize_template_room_jid(
+        " Room@Conference.Example.org "
+    ) == "room@conference.example.org"

@@ -1,0 +1,56 @@
+from types import SimpleNamespace
+
+import utils.config.runtime as runtime
+
+
+def test_rate_limiter_from_config_uses_defaults():
+    limiter = runtime._rate_limiter_from_config({})
+
+    assert limiter.capacity == 4.0
+    assert limiter.refill_amount == 1.0
+    assert limiter.refill_interval == 0.5
+    assert limiter.deny_window == 10.0
+    assert limiter.deny_threshold == 6
+    assert limiter.base_block_seconds == 30.0
+    assert limiter.backoff_multiplier == 2.0
+    assert limiter.max_block_seconds == 3600.0
+    assert limiter.notify_cooldown == 10.0
+
+
+def test_rate_limiter_from_config_uses_all_configured_values():
+    limiter = runtime._rate_limiter_from_config({
+        "command_rate_limit_capacity": "9",
+        "command_rate_limit_refill_amount": "3",
+        "command_rate_limit_refill_interval_seconds": "1.25",
+        "command_rate_limit_deny_window_seconds": "12.5",
+        "command_rate_limit_deny_threshold": "7",
+        "command_rate_limit_base_block_seconds": "45.5",
+        "command_rate_limit_backoff_multiplier": "3.5",
+        "command_rate_limit_max_block_seconds": "7200.5",
+        "command_rate_limit_notify_cooldown_seconds": "20.25",
+    })
+
+    assert limiter.capacity == 9.0
+    assert limiter.refill_amount == 3.0
+    assert limiter.refill_interval == 1.25
+    assert limiter.deny_window == 12.5
+    assert limiter.deny_threshold == 7
+    assert limiter.base_block_seconds == 45.5
+    assert limiter.backoff_multiplier == 3.5
+    assert limiter.max_block_seconds == 7200.5
+    assert limiter.notify_cooldown == 20.25
+
+
+def test_apply_runtime_config_replaces_limiter_when_rate_limit_changes():
+    old_limiter = object()
+    bot = SimpleNamespace(prefix=",", nick="Bot", rate_limiter=old_limiter)
+
+    notes = runtime.apply_runtime_config(
+        bot,
+        {"prefix": ",", "nick": "Bot", "command_rate_limit_capacity": 4},
+        {"prefix": ",", "nick": "Bot", "command_rate_limit_capacity": 6},
+    )
+
+    assert bot.rate_limiter is not old_limiter
+    assert bot.rate_limiter.capacity == 6.0
+    assert any("rate limiter" in note for note in notes)

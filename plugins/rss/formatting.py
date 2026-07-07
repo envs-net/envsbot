@@ -30,9 +30,6 @@ def _template_command_prefix(bot=None) -> str:
     return str(getattr(bot, "prefix", None) or config.get("prefix", ",") or ",")
 
 
-def _normalize_template_room_jid(room: str) -> str:
-    return str(room or "").strip().lower()
-
 
 _SAMPLE_TEMPLATE_CONTEXT = {
     "feed_title": "Example Feed",
