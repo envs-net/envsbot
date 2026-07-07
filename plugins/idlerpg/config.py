@@ -280,6 +280,16 @@ SEASON_ACHIEVEMENT_GATES_ENABLED = bool(
 )
 
 
+MANUAL_DUEL_MAX_DISTANCE = int(
+    _cfg.get("manual_duel_max_distance", config.get("idlerpg_manual_duel_max_distance", 10)) or 10
+)
+
+
+MANUAL_DUEL_COOLDOWN_SECONDS = int(
+    _cfg.get("manual_duel_cooldown_seconds", config.get("idlerpg_manual_duel_cooldown_seconds", 3600)) or 0
+)
+
+
 ROOM_TASKS: dict[str, asyncio.Task] = {}
 
 __all__ = [
@@ -345,5 +355,7 @@ __all__ = [
     'ITEM_STEAL_EVENT_WEIGHT',
     'LEVEL_REWARD_MIN_LEVEL',
     'SEASON_ACHIEVEMENT_GATES_ENABLED',
+    'MANUAL_DUEL_MAX_DISTANCE',
+    'MANUAL_DUEL_COOLDOWN_SECONDS',
     'ROOM_TASKS',
 ]

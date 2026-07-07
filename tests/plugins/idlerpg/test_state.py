@@ -71,3 +71,17 @@ def test_idlerpg_player_normalization_and_lookup_edges(monkeypatch):
     assert idlerpg._find_player(room, "alice@envs.net") == ("alice@envs.net", player)
     assert idlerpg._find_player(room, "Alice") == ("alice@envs.net", player)
     assert idlerpg._find_player(room, "missing") == (None, None)
+
+
+def test_normalize_player_does_not_consume_rng_for_existing_coordinates(monkeypatch):
+    def fail_randint(_start, _stop):
+        raise AssertionError("coordinate RNG should not be used when coordinates already exist")
+
+    monkeypatch.setattr(idlerpg.random, "randint", fail_randint)
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "class": "sysadmin", "x": 12, "y": 34},
+    )
+
+    assert player["x"] == 12
+    assert player["y"] == 34

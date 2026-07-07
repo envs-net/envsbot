@@ -1055,3 +1055,76 @@ async def test_level_reward_badges_do_not_bypass_season_gate_on_tick(monkeypatch
     assert player["level"] >= 50
     assert "level_reward_50" not in player["achievements"]
     assert not any("reward badge" in text for text, _kwargs in bot.replies)
+
+
+@pytest.mark.asyncio
+async def test_manual_duel_nearby_online_players_and_cooldown(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    JOINED_ROOMS["room@conf"]["nicks"]["Bob"] = {
+        "jid": "bob@envs.net",
+        "affiliation": "member",
+    }
+
+    await _register_alice(bot, msg)
+    await idlerpg._handle_register(
+        bot,
+        "bob@envs.net",
+        ["register", "Bob", "wizard"],
+        DummyMsg(resource="Bob"),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    alice = room["players"]["alice@envs.net"]
+    bob = room["players"]["bob@envs.net"]
+    alice.update({"x": 10, "y": 10, "level": 10, "next": 1000})
+    bob.update({"x": 16, "y": 18, "level": 10, "next": 1000})
+    monkeypatch.setattr(idlerpg, "MANUAL_DUEL_MAX_DISTANCE", 10)
+    monkeypatch.setattr(idlerpg, "MANUAL_DUEL_COOLDOWN_SECONDS", 3600)
+    rolls = iter([999, 0])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "@~Bob"], msg, True)
+
+    assert "Alice" in bot.replies[-1][0]
+    assert "challenged Bob" in bot.replies[-1][0]
+    assert "to a duel" in bot.replies[-1][0]
+    assert alice["next"] < 1000
+    assert alice["last_manual_duel_at"] == bob["last_manual_duel_at"]
+    assert any(event.get("kind") == "duel" for event in room["events"])
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["challenge", "Bob"], msg, True)
+    assert "can duel again" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_manual_duel_rejects_far_offline_and_self(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    JOINED_ROOMS["room@conf"]["nicks"]["Bob"] = {
+        "jid": "bob@envs.net",
+        "affiliation": "member",
+    }
+    await _register_alice(bot, msg)
+    await idlerpg._handle_register(
+        bot,
+        "bob@envs.net",
+        ["register", "Bob", "wizard"],
+        DummyMsg(resource="Bob"),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["players"]["alice@envs.net"].update({"x": 0, "y": 0})
+    room["players"]["bob@envs.net"].update({"x": 500, "y": 500})
+    monkeypatch.setattr(idlerpg, "MANUAL_DUEL_MAX_DISTANCE", 10)
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Alice"], msg, True)
+    assert "cannot duel yourself" in bot.replies[-1][0]
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Bob"], msg, True)
+    assert "too far away" in bot.replies[-1][0]
+
+    room["players"]["bob@envs.net"].update({"x": 1, "y": 1, "logged_out": True})
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Bob"], msg, True)
+    assert "not online" in bot.replies[-1][0]

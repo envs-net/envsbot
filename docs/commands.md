@@ -1317,6 +1317,7 @@ Examples:
 - `,idlerpg top`
 - `,idlerpg quest`
 - `,idlerpg map`
+- `,idlerpg duel Sven`
 - `,idlerpg profile Sven`
 - `,idlerpg events`
 - `,idlerpg achievements list`

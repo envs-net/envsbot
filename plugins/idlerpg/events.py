@@ -1,6 +1,7 @@
 """Split module for plugins/idlerpg.py: events."""
 
 from __future__ import annotations
+import math
 import random
 from typing import Any
 
@@ -88,15 +89,26 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
     _run_godsend_or_calamity(players, messages, room)
 
 
-def _run_pvp_battle(
-    players: list[tuple[str, dict[str, Any]]],
+def _duel_distance(attacker: dict[str, Any], defender: dict[str, Any]) -> float:
+    try:
+        ax = int(attacker.get("x", 0) or 0)
+        ay = int(attacker.get("y", 0) or 0)
+        dx = int(defender.get("x", 0) or 0)
+        dy = int(defender.get("y", 0) or 0)
+    except (TypeError, ValueError):
+        return float("inf")
+    return math.hypot(ax - dx, ay - dy)
+
+
+def _run_duel_between(
+    attacker: dict[str, Any],
+    defender: dict[str, Any],
     messages: list[str],
     room: dict[str, Any] | None = None,
-) -> None:
-    pair = _choose_two_players(players)
-    if pair is None:
-        return
-    (_attacker_jid, attacker), (_defender_jid, defender) = pair
+    *,
+    manual: bool = False,
+    distance: float | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     attacker_power = _battle_power(attacker)
     defender_power = _battle_power(defender)
     attacker_roll = random.randint(0, attacker_power)
@@ -104,13 +116,15 @@ def _run_pvp_battle(
     attacker_won = attacker_roll >= defender_roll
     attacker_name = _display_player(attacker)
     defender_name = _display_player(defender)
+    distance_part = f" at distance {distance:.1f}" if manual and distance is not None else ""
 
     if attacker_won:
         amount = _battle_clock_delta(attacker, defender, "win")
         changed = _remove_time(attacker, amount)
         messages.append(
             f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
-            f"{defender_name} [{defender_roll}/{defender_power}] in combat and won! "
+            f"{defender_name} [{defender_roll}/{defender_power}] "
+            f"{'to a duel' if manual else 'in combat'}{distance_part} and won! "
             f"{_duration_clock(changed)} is removed from {_possessive(attacker_name)} clock."
         )
         messages.append(_next_level_line(attacker))
@@ -122,7 +136,8 @@ def _run_pvp_battle(
         changed = _add_time(attacker, amount)
         messages.append(
             f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
-            f"{defender_name} [{defender_roll}/{defender_power}] in combat and lost! "
+            f"{defender_name} [{defender_roll}/{defender_power}] "
+            f"{'to a duel' if manual else 'in combat'}{distance_part} and lost! "
             f"{_duration_clock(changed)} is added to {_possessive(attacker_name)} clock."
         )
         messages.append(_next_level_line(attacker))
@@ -132,6 +147,30 @@ def _run_pvp_battle(
 
     _maybe_critical_strike(winner, loser, messages)
     _maybe_battle_item_drop(winner, loser, messages, room)
+    return winner, loser
+
+
+def _run_manual_duel(
+    attacker: dict[str, Any],
+    defender: dict[str, Any],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+    *,
+    distance: float | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return _run_duel_between(attacker, defender, messages, room, manual=True, distance=distance)
+
+
+def _run_pvp_battle(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> None:
+    pair = _choose_two_players(players)
+    if pair is None:
+        return
+    (_attacker_jid, attacker), (_defender_jid, defender) = pair
+    _run_duel_between(attacker, defender, messages, room)
 
 
 def _run_team_battle(

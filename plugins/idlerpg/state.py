@@ -105,6 +105,15 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     return room
 
 
+def _player_coordinate(player: dict[str, Any], key: str, max_value: int) -> int:
+    if key not in player:
+        return random.randint(0, max_value)
+    try:
+        return int(player.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
     now = _now()
     items = player.get("items")
@@ -176,8 +185,8 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         "logged_out_at": int(player.get("logged_out_at", 0) or 0),
         "achievements": achievements,
         "title": title,
-        "x": int(player.get("x", random.randint(0, MAP_X)) or 0),
-        "y": int(player.get("y", random.randint(0, MAP_Y)) or 0),
+        "x": _player_coordinate(player, "x", MAP_X),
+        "y": _player_coordinate(player, "y", MAP_Y),
         "logged_out": bool(player.get("logged_out", False)),
     })
     if player["alignment"] not in {"g", "n", "e"}:

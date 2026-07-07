@@ -364,6 +364,12 @@ IDLERPG = {
     "quest_reward_percent": 25,
     "team_battle_percent": 20,
 
+    # Manual duels let nearby online players challenge each other. Distance is
+    # measured on the IdleRPG map; cooldown applies to both duelists to avoid
+    # spam and dogpiling.
+    "manual_duel_max_distance": 10,
+    "manual_duel_cooldown_seconds": 3600,
+
     # Unique envs.net-flavoured items can appear at higher levels and grant
     # small bonuses such as reduced penalties or slightly stronger battles.
     "unique_items_enabled": True,

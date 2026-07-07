@@ -3,6 +3,7 @@
 from __future__ import annotations
 import random
 import time
+from typing import Any
 from utils.audit import audit_event
 from utils.formatting import format_page, parse_page_args
 from core_plugins import _core
@@ -254,6 +255,103 @@ async def _handle_items(bot, sender_jid: str, args: list[str], msg, is_room: boo
                 suffix += f" ({bonus['bonus_percent']}% {str(bonus['bonus']).replace('_', ' ')})"
         lines.append(f"{name}: {level}{suffix}")
     _reply(bot, msg, f"🎒 Items for {player['name']}\n" + "\n".join(lines))
+
+
+def _clean_duel_target(value: str) -> str:
+    # XMPP clients often render mentions as @nick or @~nick.  Character names
+    # cannot contain spaces, so keep the first token and strip mention markers.
+    token = str(value or "").strip().split(maxsplit=1)[0] if str(value or "").strip() else ""
+    return token.strip("@~:,.!?")
+
+
+def _manual_duel_cooldown_remaining(player: dict[str, Any], now: int) -> int:
+    cooldown = max(0, int(MANUAL_DUEL_COOLDOWN_SECONDS or 0))
+    if cooldown <= 0:
+        return 0
+    try:
+        last = int(player.get("last_manual_duel_at", 0) or 0)
+    except (TypeError, ValueError):
+        last = 0
+    return max(0, cooldown - max(0, now - last))
+
+
+async def _handle_duel(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _room_from_context(msg, is_room)
+    if not room_jid:
+        _reply(bot, msg, "ℹ️ Duels are room-scoped. Use them from a game room or MUC PM.")
+        return
+    if len(args) < 2:
+        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg duel <character>")
+        return
+
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    attacker_jid, attacker = _find_player(room, sender_jid)
+    if not attacker or not attacker_jid:
+        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        return
+    target_name = _clean_duel_target(args[1])
+    defender_jid, defender = _find_player(room, target_name)
+    if not defender or not defender_jid:
+        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        return
+    if str(defender_jid) == str(attacker_jid):
+        _reply(bot, msg, "❌ You cannot duel yourself.")
+        return
+
+    attacker = _normalize_player(str(attacker_jid), attacker)
+    defender = _normalize_player(str(defender_jid), defender)
+    if not _is_player_online(room_jid, str(attacker_jid), attacker):
+        _reply(bot, msg, "ℹ️ You need to be online in the game room to duel.")
+        return
+    if not _is_player_online(room_jid, str(defender_jid), defender):
+        _reply(bot, msg, f"ℹ️ {_display_player(defender)} is not online in the game room.")
+        return
+
+    max_distance = max(0, int(MANUAL_DUEL_MAX_DISTANCE or 0))
+    distance = _duel_distance(attacker, defender)
+    if distance > max_distance:
+        _reply(
+            bot,
+            msg,
+            f"🗺️ {_display_player(defender)} is too far away for a duel "
+            f"(distance {distance:.1f}, max {max_distance}). Use `{_command_prefix(bot)}idlerpg map` to find nearby players.",
+        )
+        return
+
+    now = _now()
+    attacker_wait = _manual_duel_cooldown_remaining(attacker, now)
+    if attacker_wait:
+        _reply(bot, msg, f"⏳ You can duel again in {_duration_clock(attacker_wait)}.")
+        return
+    defender_wait = _manual_duel_cooldown_remaining(defender, now)
+    if defender_wait:
+        _reply(bot, msg, f"⏳ {_display_player(defender)} can be dueled again in {_duration_clock(defender_wait)}.")
+        return
+
+    messages: list[str] = []
+    _run_manual_duel(attacker, defender, messages, room, distance=distance)
+    attacker["last_manual_duel_at"] = now
+    defender["last_manual_duel_at"] = now
+    _inc_stat(attacker, "manual_duels_started", 1, room)
+    _inc_stat(defender, "manual_duels_received", 1, room)
+    if messages:
+        _record_event(
+            room,
+            "duel",
+            messages[0],
+            players=[_display_player(attacker), _display_player(defender)],
+            data={"distance": round(distance, 2)},
+        )
+    await _set_data(bot, data)
+    await audit_event(
+        bot,
+        "idlerpg_duel",
+        actor=sender_jid,
+        target=room_jid,
+        details={"attacker": _display_player(attacker), "defender": _display_player(defender)},
+    )
+    _reply(bot, msg, "\n".join(messages))
 
 
 async def _handle_align(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
@@ -766,6 +864,8 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
         await _handle_events(bot, args, msg, is_room)
     elif subcmd in {"stats", "balance"}:
         await _handle_stats(bot, sender, msg, is_room)
+    elif subcmd in {"duel", "challenge"}:
+        await _handle_duel(bot, sender, args, msg, is_room)
     elif subcmd == "title":
         await _handle_title(bot, sender, args, msg, is_room)
     elif subcmd == "map":

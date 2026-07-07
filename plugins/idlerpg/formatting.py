@@ -206,6 +206,7 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg achievements list\n"
         f"{prefix}idlerpg stats  # room owners/admins\n"
         f"{prefix}idlerpg align <good|neutral|evil>\n"
+        f"{prefix}idlerpg duel <character>\n"
         f"{prefix}idlerpg quest\n"
         f"{prefix}idlerpg login|logout|remove-me"
     )

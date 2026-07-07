@@ -51,6 +51,7 @@ Use these in the game room or from a MUC private message to the bot:
 ,idlerpg events [page|last|all]
 ,idlerpg season
 ,idlerpg align <good|neutral|evil>
+,idlerpg duel <character>
 ,idlerpg quest
 ,idlerpg login
 ,idlerpg logout
@@ -59,6 +60,8 @@ Use these in the game room or from a MUC private message to the bot:
 
 
 `status` always shows character progress. Use `,idlerpg enabled` to inspect whether the game is enabled in the current room.
+
+Manual duels are optional player-triggered battles. Both characters must be online, not logged out, within the configured map distance, and outside their duel cooldown. The default maximum distance is 10 map units and the default cooldown is 1 hour for both duelists.
 
 Aliases:
 
@@ -78,6 +81,7 @@ Examples:
 ,idlerpg events
 ,idlerpg map
 ,idlerpg align good
+,idlerpg duel Sven
 ```
 
 ## How leveling works
@@ -189,8 +193,12 @@ IDLERPG = {
     "alignment_bonus_percent": 7,
     "quest_reward_percent": 25,
     "team_battle_percent": 20,
+    "manual_duel_max_distance": 10,
+    "manual_duel_cooldown_seconds": 3600,
 }
 ```
+
+`manual_duel_max_distance` limits player-triggered duels to nearby characters on the map. `manual_duel_cooldown_seconds` applies to both duelists after a manual duel so one player cannot be challenged repeatedly.
 
 `battle_win_min_percent` and `battle_loss_min_percent` are minimum values. The
 opponent's level can increase the final battle percentage. Critical strikes,
