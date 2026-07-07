@@ -37,5 +37,5 @@ sys.modules[__name__].__class__ = _SplitPackageModule
 # Avoid leaking temporary loop variables into the public package namespace.
 # Command registration scans module attributes; a leaked _value can otherwise
 # expose the last decorated command a second time.
-del _name, _names, _value
+del _name, _names, _value, _part
 del import_module, sys, types

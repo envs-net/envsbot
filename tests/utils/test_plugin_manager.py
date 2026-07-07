@@ -55,7 +55,8 @@ def test_split_package_command_facades_register_once(monkeypatch):
 
     for plugin_name, (module_name, expected_command) in modules.items():
         module = importlib.import_module(module_name)
-        assert not hasattr(module, "_value")
+        for temporary_name in ("_part", "_value"):
+            assert not hasattr(module, temporary_name)
 
         handlers: dict[int, list[str]] = {}
         for attr_name, obj in inspect.getmembers(module):
