@@ -1,6 +1,7 @@
 """Split module for plugins/idlerpg.py: state."""
 
 from __future__ import annotations
+import inspect
 import random
 from typing import Any
 from utils.command import Role
@@ -41,16 +42,20 @@ async def _flush_idlerpg_store(bot) -> None:
     flush = getattr(db, "flush", None)
     if callable(flush):
         result = flush()
-        if hasattr(result, "__await__"):
-            _ = await result
+        if inspect.isawaitable(result):
+            result = await result
+        if result is not None:
+            return
         return
 
     users = getattr(db, "users", None)
     flush_all = getattr(users, "flush_all", None)
     if callable(flush_all):
         result = flush_all()
-        if hasattr(result, "__await__"):
-            _ = await result
+        if inspect.isawaitable(result):
+            result = await result
+        if result is not None:
+            return
 
 
 async def _checkpoint_room_clock(bot, room_jid: str, *, flush: bool = False) -> int:

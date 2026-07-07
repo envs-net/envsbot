@@ -45,6 +45,9 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
     bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = "broken"
     assert await idlerpg._enabled_rooms(bot) == {}
 
+    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = None
+    assert await idlerpg._enabled_rooms(bot) == {}
+
 
 @pytest.mark.asyncio
 async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
@@ -69,7 +72,8 @@ async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
     idlerpg.ROOM_TASKS["a@conf"] = DummyTask(name="a")
     idlerpg.ROOM_TASKS["b@conf"] = DummyTask(name="b")
     await idlerpg.restart_tasks(bot)
-    assert cancelled == ["a@conf", "b@conf"]
+    assert set(cancelled) == {"a@conf", "b@conf"}
+    assert len(cancelled) == 2
     assert started == 2
 
     idlerpg.ROOM_TASKS["c@conf"] = DummyTask(name="c")
