@@ -1,3 +1,5 @@
+import importlib
+import inspect
 import types
 from unittest.mock import AsyncMock, MagicMock
 
@@ -5,6 +7,7 @@ import pytest
 
 from utils import plugin_manager
 from utils.plugin_manager import PluginManager
+from utils.command import CommandRegistry
 
 
 class FakeBot:
@@ -34,6 +37,37 @@ def make_fake_plugin(meta=None, has_hooks=True):
     setattr(mod, "BOT_EVENTS", [])
     setattr(mod, "__name__", meta.get("name", "fake_plugin"))
     return mod
+
+
+def test_split_package_command_facades_register_once(monkeypatch):
+    registry = CommandRegistry()
+    monkeypatch.setattr(plugin_manager, "COMMANDS", registry)
+    pm = PluginManager(bot=FakeBot())
+
+    modules = {
+        "rooms": ("core_plugins.rooms", "rooms list"),
+        "users": ("core_plugins.users", "users delete"),
+        "idlerpg": ("plugins.idlerpg", "idlerpg"),
+        "reminder": ("plugins.reminder", "remind"),
+        "rss": ("plugins.rss", "rss"),
+        "vcard": ("plugins.vcard", "birthday"),
+    }
+
+    for plugin_name, (module_name, expected_command) in modules.items():
+        module = importlib.import_module(module_name)
+        assert not hasattr(module, "_value")
+
+        handlers: dict[int, list[str]] = {}
+        for attr_name, obj in inspect.getmembers(module):
+            if callable(obj) and hasattr(obj, "_command_names"):
+                handlers.setdefault(id(obj), []).append(attr_name)
+        duplicates = {
+            id_: names for id_, names in handlers.items() if len(names) > 1
+        }
+        assert duplicates == {}
+
+        pm._register_commands(plugin_name, module)
+        assert tuple(expected_command.split()) in registry.index
 
 
 @pytest.mark.asyncio

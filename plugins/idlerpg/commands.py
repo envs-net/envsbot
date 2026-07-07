@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 import time
 from typing import Any
+from utils.command import Role, command
 from utils.audit import audit_event
 from utils.formatting import format_page, parse_page_args
 from core_plugins import _core
@@ -811,6 +812,29 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
     return True
 
 
+@command(
+    "idlerpg",
+    role=Role.USER,
+    aliases=["irpg", "idle"],
+    short="Play IdleRPG in a MUC",
+    usage="{prefix}idlerpg <on|off|enabled|register|status|top|players|profile|duel|events|stats|map|season|...>",
+    examples=[
+        "{prefix}idlerpg register Sven sysadmin",
+        "{prefix}idlerpg enabled",
+        "{prefix}idlerpg status",
+        "{prefix}idlerpg top",
+        "{prefix}idlerpg duel Alice",
+        "{prefix}idlerpg quest",
+        "{prefix}idlerpg map",
+        "{prefix}idlerpg profile Sven",
+        "{prefix}idlerpg events",
+        "{prefix}idlerpg stats",
+        "{prefix}idlerpg announce top",
+        "{prefix}idlerpg topic update IdleRPG",
+    ],
+    category="fun",
+    context="groupchat / MUC PM",
+)
 async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
     subcmd = args[0].lower() if args else ""
     # ``status`` is reserved for character status. Use ``enabled`` to inspect
