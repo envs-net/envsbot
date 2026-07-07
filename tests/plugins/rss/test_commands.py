@@ -681,3 +681,156 @@ async def test_rss_template_validates_unknown_vars_and_direct_room(make_bot):
         False,
     )
     assert bot.plugin_store[rss.RSS_TEMPLATES_KEY][room] == "$title via $feed_title"
+
+
+def test_rss_template_scope_and_sample_helpers(make_bot):
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.rss"
+    public_msg = {"from": SimpleNamespace(bare=room, resource="nick"), "type": "groupchat"}
+    private_msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    assert rss._looks_like_feed_arg(url) is True
+    assert rss._looks_like_feed_arg(room) is False
+    assert rss._looks_like_feed_arg("") is False
+
+    assert rss._split_template_scope_args(public_msg, True, [url, "$title"]) == (
+        room,
+        url,
+        ["$title"],
+    )
+    assert rss._split_template_scope_args(private_msg, False, [room, url, "$title"]) == (
+        room,
+        url,
+        ["$title"],
+    )
+    assert rss._split_template_scope_args(private_msg, False, [url]) == (
+        None,
+        url,
+        [],
+    )
+
+    assert rss._sample_template_context_for_feed(None, url)["feed_url"] == url
+    assert rss._sample_template_context_for_feed(
+        {"title": "Real Feed", "link": "https://example.org/"},
+        url,
+    )["feed_title"] == "Real Feed"
+    assert rss._sample_rss_template_preview("$feed_title $feed_url", None, url) == (
+        f"Example Feed {url}"
+    )
+    assert rss._join_template_args([" $title", "via", "$feed_title "]) == (
+        "$title via $feed_title"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_template_command_usage_permission_and_error_paths(make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    await rss.rss_command(bot, "admin@example.org", "admin", ["template"], msg, False)
+    assert "Usage:" in bot.replies[-1][1]
+
+    bot.get_user_role = AsyncMock(return_value=Role.USER)
+    await rss.rss_command(
+        bot,
+        "user@example.org",
+        "user",
+        ["template", "show", room],
+        msg,
+        False,
+    )
+    assert "RSS plugin grant" in bot.replies[-1][1]
+
+    bot.get_user_role = AsyncMock(return_value=Role.MODERATOR)
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "show", room, "extra"],
+        msg,
+        False,
+    )
+    assert "Usage:" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "unset", room, "extra"],
+        msg,
+        False,
+    )
+    assert "Usage:" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "unset", room],
+        msg,
+        False,
+    )
+    assert "already uses the default" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "set", room],
+        msg,
+        False,
+    )
+    assert "Template must not be empty" in bot.replies[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_rss_feed_template_command_private_room_and_default_paths(make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.rss"
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {"title": "Feed", "link": "https://example.org/", "rooms": [room]}
+    }
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "show", room, url],
+        msg,
+        False,
+    )
+    assert "(default)" in bot.replies[-1][1]
+    assert rss.DEFAULT_RSS_TEMPLATE in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "test", room, url, "${broken"],
+        msg,
+        False,
+    )
+    assert "Invalid template syntax" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "set", room, url, "$title"],
+        msg,
+        False,
+    )
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY][room][url] == "$title"
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "reset", room, url],
+        msg,
+        False,
+    )
+    assert "RSS feed template reset" in bot.replies[-1][1]

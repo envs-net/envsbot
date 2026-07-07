@@ -141,3 +141,87 @@ async def test_rss_room_template_store_helpers(make_bot):
         "https://example.org/feed.xml",
     ) is False
     assert await rss.get_feed_templates(store) == {}
+
+
+@pytest.mark.asyncio
+async def test_rss_template_store_sanitizes_invalid_shapes(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    store[rss.RSS_TEMPLATES_KEY] = {
+        " Room@Conference.Example.org ": "$title",
+        "": "ignored",
+        "bad@conference.example.org": 42,
+    }
+    store[rss.RSS_FEED_TEMPLATES_KEY] = {
+        " Room@Conference.Example.org ": {
+            " https://example.org/feed.xml ": "FEED $title",
+            "": "ignored",
+            "https://example.org/bad.xml": object(),
+        },
+        "bad@conference.example.org": "not a mapping",
+        "": {"https://example.org/ignored.xml": "$title"},
+    }
+
+    assert await rss.get_room_templates(store) == {
+        "room@conference.example.org": "$title",
+    }
+    assert await rss.get_feed_templates(store) == {
+        "room@conference.example.org": {
+            "https://example.org/feed.xml": "FEED $title",
+        }
+    }
+
+    await rss.save_room_templates(store, {
+        " Room@Conference.Example.org ": "$title",
+        "": "ignored",
+        "bad@conference.example.org": 42,
+    })
+    await rss.save_feed_templates(store, {
+        " Room@Conference.Example.org ": {
+            " https://example.org/feed.xml ": "FEED $title",
+            "": "ignored",
+            "https://example.org/bad.xml": object(),
+        },
+        "bad@conference.example.org": "not a mapping",
+    })
+
+    assert store[rss.RSS_TEMPLATES_KEY] == {
+        "room@conference.example.org": "$title",
+    }
+    assert store[rss.RSS_FEED_TEMPLATES_KEY] == {
+        "room@conference.example.org": {
+            "https://example.org/feed.xml": "FEED $title",
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_rss_feed_template_noop_and_cleanup_helpers(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/feed.xml"
+    other_url = "https://example.org/other.xml"
+    room = "room@conference.example.org"
+    other_room = "other@conference.example.org"
+
+    await rss.set_room_template(store, "", "$title")
+    assert store[rss.RSS_TEMPLATES_KEY] == {}
+
+    await rss.set_feed_template(store, "", url, "$title")
+    await rss.set_feed_template(store, room, "", "$title")
+    assert store.get(rss.RSS_FEED_TEMPLATES_KEY, {}) == {}
+
+    await rss.set_feed_template(store, room, url, "ROOM FEED $title")
+    await rss.set_feed_template(store, room, other_url, "OTHER FEED $title")
+    await rss.set_feed_template(store, other_room, url, "OTHER ROOM $title")
+
+    assert await rss.unset_feed_templates_for_feed(store, url) == 2
+    assert store[rss.RSS_FEED_TEMPLATES_KEY] == {
+        room: {other_url: "OTHER FEED $title"},
+    }
+    assert await rss.unset_feed_templates_for_feed(store, url) == 0
+
+    await rss.set_feed_template(store, other_room, other_url, "OTHER ROOM $title")
+    assert await rss.unset_feed_templates_for_room(store, other_room) == 1
+    assert other_room not in store[rss.RSS_FEED_TEMPLATES_KEY]
+    assert await rss.unset_feed_templates_for_room(store, other_room) == 0
