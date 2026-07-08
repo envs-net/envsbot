@@ -1,5 +1,5 @@
 """
-Pin messages in a room and list/show/delete stored pins.
+Pin messages in a room and list/show/search/delete stored pins.
 
 Usage
 -----
@@ -12,6 +12,8 @@ For clients without reply support:
 
 Manage pins:
     {prefix}pin list [page]
+    {prefix}pin search <query> [page]
+    {prefix}pin find <query> [page]
     {prefix}pin show <id>
     {prefix}pin delete <id>
 
@@ -52,7 +54,7 @@ log = logging.getLogger(__name__)
 PLUGIN_META = {
     "name": "pin",
     "version": "1.3.0",
-    "description": "Pin room messages with paging and non-reply fallback.",
+    "description": "Pin room messages with paging, search and non-reply fallback.",
     "category": "utility",
     "requires": ["rooms", "_core"],
 }
@@ -111,6 +113,7 @@ def _is_pin_generated_text(text: str | None) -> bool:
         stripped.startswith("📌 Pinned message as #")
         or stripped.startswith("📌 Pins for ")
         or stripped.startswith("📌 Pin #")
+        or stripped.startswith("📌 Pin search for ")
     )
 
 
@@ -252,6 +255,61 @@ def _format_pin_line(entry: dict[str, Any]) -> str:
                             or "—", max_lines=1, max_chars=240)
     return (f"• #{pin_id} by {actor_nick} at {created_at} "
             f"| target: {target_nick} | {preview}")
+
+
+def _parse_pin_search_args(args: list[Any]) -> tuple[str, int] | None:
+    """Return ``(query, page)`` for ``pin search/find`` arguments.
+
+    A trailing positive integer is treated as the page only when there is at
+    least one non-page query token before it, so ``pin search 123`` still
+    searches for ``123``.
+    """
+    if len(args) < 2:
+        return None
+
+    query_parts = [str(part).strip() for part in args[1:] if str(part).strip()]
+    if not query_parts:
+        return None
+
+    page = 1
+    if len(query_parts) > 1:
+        try:
+            parsed_page = int(query_parts[-1])
+        except ValueError:
+            parsed_page = None
+        if parsed_page and parsed_page > 0:
+            page = parsed_page
+            query_parts = query_parts[:-1]
+
+    query = " ".join(query_parts).strip()
+    if not query:
+        return None
+
+    return query, page
+
+
+def _pin_search_haystack(entry: dict[str, Any]) -> str:
+    pin_id = entry.get("id", "")
+    values = [
+        str(pin_id),
+        f"#{pin_id}" if pin_id != "" else "",
+        entry.get("actor_nick"),
+        entry.get("target_nick"),
+        entry.get("preview"),
+        entry.get("target_text"),
+        entry.get("source"),
+        _format_timestamp(entry.get("created_at")),
+    ]
+    return "\n".join(str(value) for value in values if value).casefold()
+
+
+def _pin_matches_query(entry: dict[str, Any], query: str) -> bool:
+    terms = [term.casefold() for term in str(query).split() if term.strip()]
+    if not terms:
+        return False
+
+    haystack = _pin_search_haystack(entry)
+    return all(term in haystack for term in terms)
 
 
 def _find_pin(bucket: dict[str, Any], pin_id: int) -> dict[str, Any] | None:
@@ -531,6 +589,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
             (
                 f"Usage: {_prefix()}pin add [last [n]] | {_prefix()}pin "
                 "list [page] | "
+                f"{_prefix()}pin search <query> [page] | "
                 f"{_prefix()}pin show <id> | "
                 f"{_prefix()}pin delete <id> | {_prefix()}pin on|off|status"
             ),
@@ -566,6 +625,10 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
         await _pin_command_list(bot, msg, room, args)
         return
 
+    if subcmd in {"search", "find"}:
+        await _pin_command_search(bot, msg, room, args)
+        return
+
     if subcmd == "show":
         await _pin_command_show(bot, msg, room, args)
         return
@@ -579,7 +642,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
             msg,
             (
                 f"Unknown subcommand '{subcmd}'. "
-                f"Use {_prefix()}pin add|list|show|delete|on|off|status"
+                f"Use {_prefix()}pin add|list|search|show|delete|on|off|status"
             ),
             mention=False,
         )
@@ -620,6 +683,53 @@ async def _pin_command_list(bot, msg, room, args):
     if page < total_pages:
         lines.append("")
         lines.append(f"Use {_prefix()}pin list {page + 1} for the next page.")
+
+    bot.reply(msg, lines, mention=False)
+
+
+async def _pin_command_search(bot, msg, room, args):
+    if not await _is_enabled_for_room(bot, PIN_ENABLED_KEY, "pin", room):
+        bot.reply(msg, "ℹ️ Pin plugin is disabled in this room.")
+        return
+
+    parsed = _parse_pin_search_args(args)
+    if parsed is None:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin search <query> [page]")
+        return
+
+    query, page = parsed
+    state = await _load_pin_data(bot)
+    bucket = _room_bucket(state, room)
+    pins = list(bucket.get(PINS_FIELD, []))
+    matches = [entry for entry in pins if _pin_matches_query(entry, query)]
+    matches.sort(key=lambda x: int(x.get("id", 0)), reverse=True)
+
+    if not matches:
+        bot.reply(
+            msg,
+            f'📌 No pins matching "{query}" found for this room.',
+            mention=False,
+        )
+        return
+
+    page_items, page, total_pages, total = paginate_items(
+        matches,
+        page,
+        PAGE_SIZE,
+    )
+
+    lines = [
+        f'📌 Pin search for {room}: "{query}" ({total} matches) - '
+        f"Page {page}/{total_pages}",
+        "",
+    ]
+    lines.extend(_format_pin_line(entry) for entry in page_items)
+
+    if page < total_pages:
+        lines.append("")
+        lines.append(
+            f"Use {_prefix()}pin search {query} {page + 1} for the next page."
+        )
 
     bot.reply(msg, lines, mention=False)
 

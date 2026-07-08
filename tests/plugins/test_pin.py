@@ -509,3 +509,118 @@ async def test_pin_runtime_state_global_and_room(monkeypatch):
     assert await pin.get_runtime_state(bot, "missing@conf") == {"rooms": 0, "pins": 0}
     assert await pin.get_runtime_state(bot) == {"rooms": 2, "pins": 3}
 
+
+
+def _reply_text(reply_mock):
+    value = reply_mock.call_args[0][1]
+    if isinstance(value, list):
+        return "\n".join(str(item) for item in value)
+    return str(value)
+
+
+def test_pin_search_helpers_parse_and_match_expected_fields():
+    entry = {
+        "id": 12,
+        "actor_nick": "Creme",
+        "created_at": 1234567890,
+        "target_nick": "Bob",
+        "preview": "Mail setup overview",
+        "target_text": "Use IMAP on mail.envs.net with your shell password.",
+        "source": "reply-cache",
+    }
+
+    assert pin._parse_pin_search_args(["search"]) is None
+    assert pin._parse_pin_search_args(["search", "123"]) == ("123", 1)
+    assert pin._parse_pin_search_args(["search", "mail", "2"]) == ("mail", 2)
+    assert pin._parse_pin_search_args(["find", "ssh", "key"]) == ("ssh key", 1)
+
+    assert pin._pin_matches_query(entry, "MAIL imap")
+    assert pin._pin_matches_query(entry, "creme")
+    assert pin._pin_matches_query(entry, "bob")
+    assert pin._pin_matches_query(entry, "reply-cache")
+    assert pin._pin_matches_query(entry, "#12")
+    assert pin._pin_matches_query(entry, "2009")
+    assert not pin._pin_matches_query(entry, "postgres")
+    assert not pin._pin_matches_query(entry, "")
+    assert pin._is_pin_generated_text("📌 Pin search for room: \"mail\"")
+
+
+@pytest.mark.asyncio
+async def test_pin_command_search_matches_all_terms_and_paginates(bot, make_msg, monkeypatch, room_jid):
+    msg = make_msg(is_room=True)
+    entries = [
+        {
+            "id": 1,
+            "actor_nick": "alice",
+            "created_at": 1234567890,
+            "target_nick": "bob",
+            "preview": "Mail setup",
+            "target_text": "Configure IMAP and SMTP.",
+            "source": "quote",
+        },
+        {
+            "id": 2,
+            "actor_nick": "carol",
+            "created_at": 1234567891,
+            "target_nick": "dave",
+            "preview": "SSH key upload",
+            "target_text": "Put your public key into the web panel.",
+            "source": "last-1",
+        },
+        {
+            "id": 3,
+            "actor_nick": "erin",
+            "created_at": 1234567892,
+            "target_nick": "frank",
+            "preview": "Mail alias",
+            "target_text": "Mail aliases are managed via users.envs.net.",
+            "source": "reply-cache",
+        },
+    ]
+    state = {room_jid: {pin.PINS_FIELD: entries}}
+    monkeypatch.setattr(pin, "_is_enabled_for_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+    monkeypatch.setattr(pin, "PAGE_SIZE", 1)
+
+    await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "mail"], msg, True)
+    out = _reply_text(bot.reply)
+    assert "Pin search" in out
+    assert "\"mail\" (2 matches) - Page 1/2" in out
+    assert "#3" in out
+    assert "Use ,pin search mail 2" in out
+    assert "#1" not in out
+
+    bot.reply.reset_mock()
+    await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "mail", "2"], msg, True)
+    out = _reply_text(bot.reply)
+    assert "Page 2/2" in out
+    assert "#1" in out
+    assert "#3" not in out
+
+    bot.reply.reset_mock()
+    await pin.pin_command(bot, "alice@example.com", "Alice", ["find", "mail", "alias"], msg, True)
+    out = _reply_text(bot.reply)
+    assert "\"mail alias\" (1 matches)" in out
+    assert "#3" in out
+    assert "#1" not in out
+
+
+@pytest.mark.asyncio
+async def test_pin_command_search_usage_no_matches_and_disabled(bot, make_msg, monkeypatch, room_jid):
+    msg = make_msg(is_room=True)
+    state = {room_jid: {pin.PINS_FIELD: [{"id": 1, "preview": "Mail setup"}]}}
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+    enabled = AsyncMock(return_value=True)
+    monkeypatch.setattr(pin, "_is_enabled_for_room", enabled)
+
+    await pin.pin_command(bot, "alice@example.com", "Alice", ["search"], msg, True)
+    assert "Usage: ,pin search <query> [page]" in _reply_text(bot.reply)
+
+    bot.reply.reset_mock()
+    await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "postgres"], msg, True)
+    assert 'No pins matching "postgres"' in _reply_text(bot.reply)
+
+    bot.reply.reset_mock()
+    enabled.return_value = False
+    await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "mail"], msg, True)
+    assert "disabled in this room" in _reply_text(bot.reply)

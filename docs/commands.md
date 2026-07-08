@@ -88,7 +88,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `idlerpg` | `plugins` | `fun` | IdleRPG game for MUCs, inspired by the classic IRC game |
 | `info` | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. |
 | `karma` | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- |
-| `pin` | `plugins` | `utility` | Pin room messages with paging and non-reply fallback. |
+| `pin` | `plugins` | `utility` | Pin room messages with paging, search and non-reply fallback. |
 | `poll` | `plugins` | `utility` | Room polls with voting, history and auto-close |
 | `reminder` | `plugins` | `utility` | Schedule and manage reminders |
 | `rss` | `plugins` | `info` | RSS/Atom feed watcher and poster |
@@ -195,7 +195,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,birthday_notify` | `user` | `room or MUC PM` | Enable, disable or show birthday notifications for a room. |
-| `,pin` | `user` | `any` | Pin, list or delete room pins. |
+| `,pin` | `user` | `any` | Pin, list, search or delete room pins. |
 | `,poll` | `user` | `any` | Create and manage polls. |
 | `,rooms add` | `admin` | `private chat / MUC PM` | Add or update a stored room configuration. |
 | `,rooms delete` | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
@@ -1557,21 +1557,23 @@ Examples:
 Source: `plugins`
 Category: `utility`
 
-Pin room messages with paging and non-reply fallback.
+Pin room messages with paging, search and non-reply fallback.
 
 #### `,pin`
 
-Pin, list or delete room pins.
+Pin, list, search or delete room pins.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,pin <add|list|show|delete|on|off|status> ...`
+Usage: `,pin <add|list|search|find|show|delete|on|off|status> ...`
 
 Examples:
 
 - `,pin status`
 - `,pin list`
+- `,pin search mail`
+- `,pin search ssh key`
 - `,rooms enable pin`
 
 ### poll
