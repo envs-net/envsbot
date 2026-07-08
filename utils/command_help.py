@@ -205,7 +205,7 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
     },
     "plugin list": {
         "short": "List loaded and available core/optional plugins.",
-        "usage": "{prefix}plugins [all|page|last]",
+        "usage": "{prefix}plugin list [all|page|last]",
         "examples": [
             "{prefix}plugins",
             "{prefix}plugins all",
@@ -872,7 +872,4 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
 
 def metadata_for(name: str) -> CommandMetadata | None:
     """Return structured metadata for a command name, or None if unknown."""
-    metadata = COMMAND_HELP.get(name.lower())
-    if metadata is None:
-        return None
-    return metadata
+    return COMMAND_HELP.get(name.lower())

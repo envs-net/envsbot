@@ -801,7 +801,7 @@ def test_plugin_command_aliases_are_documented_for_shortcut():
 
     assert "plugins" in plugin_commands.plugin_list._command_names
     assert command_help.COMMAND_HELP["plugin list"]["usage"] == (
-        "{prefix}plugins [all|page|last]"
+        "{prefix}plugin list [all|page|last]"
     )
     assert (
         "{prefix}plugins"

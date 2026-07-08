@@ -718,7 +718,7 @@ List loaded and available core/optional plugins.
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `core`<br>
-Usage: `,plugins [all|page|last]`
+Usage: `,plugin list [all|page|last]`
 
 Aliases: `,plugins`, `,plugins list`
 
