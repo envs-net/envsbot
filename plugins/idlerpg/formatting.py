@@ -76,8 +76,11 @@ def _next_level_line(player: dict[str, Any]) -> str:
 
 
 def _created_at(player: dict[str, Any]) -> int:
+    value = player.get("created_at")
+    if value is None:
+        return 0
     try:
-        return max(0, int(player.get("created_at", 0) or 0))
+        return max(0, int(value))
     except (TypeError, ValueError):
         return 0
 

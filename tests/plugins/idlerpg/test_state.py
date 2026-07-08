@@ -30,6 +30,55 @@ def test_idlerpg_small_helper_edges(monkeypatch):
     assert idlerpg._penalty_for(50, 100) == 10
 
 
+def test_playtime_formatting_helpers_handle_edges(monkeypatch):
+    assert idlerpg._created_at({"created_at": "123"}) == 123
+    assert idlerpg._created_at({"created_at": -5}) == 0
+    assert idlerpg._created_at({"created_at": "bad"}) == 0
+    assert idlerpg._created_at({"created_at": None}) == 0
+    assert idlerpg._created_at({}) == 0
+
+    monkeypatch.setattr(idlerpg, "_now", lambda: 200)
+    assert idlerpg._played_for({}) == "unknown"
+    assert idlerpg._played_for({"created_at": "bad"}) == "unknown"
+    assert idlerpg._played_for({"created_at": 1}) == "0 days, 00:03:19"
+    assert idlerpg._played_for({"created_at": 100}) == "0 days, 00:01:40"
+    assert idlerpg._played_for({"created_at": 200}) == "0 days, 00:00:00"
+
+
+def test_playing_since_uses_expected_timestamp_format(monkeypatch):
+    sentinel_times = {1: object(), 123: object()}
+    calls = []
+
+    def fake_localtime(value):
+        assert value in sentinel_times
+        calls.append(("localtime", value))
+        return sentinel_times[value]
+
+    def fake_strftime(fmt, value):
+        assert fmt == "%Y-%m-%d %H:%M:%S %Z"
+        assert value in sentinel_times.values()
+        calls.append(("strftime", fmt, value))
+        return f"formatted-{fmt}-{id(value)}"
+
+    monkeypatch.setattr(idlerpg.time, "localtime", fake_localtime)
+    monkeypatch.setattr(idlerpg.time, "strftime", fake_strftime)
+
+    assert idlerpg._playing_since({}) == "unknown"
+    assert idlerpg._playing_since({"created_at": "bad"}) == "unknown"
+    assert idlerpg._playing_since({"created_at": 1}) == (
+        f"formatted-%Y-%m-%d %H:%M:%S %Z-{id(sentinel_times[1])}"
+    )
+    assert idlerpg._playing_since({"created_at": 123}) == (
+        f"formatted-%Y-%m-%d %H:%M:%S %Z-{id(sentinel_times[123])}"
+    )
+    assert calls == [
+        ("localtime", 1),
+        ("strftime", "%Y-%m-%d %H:%M:%S %Z", sentinel_times[1]),
+        ("localtime", 123),
+        ("strftime", "%Y-%m-%d %H:%M:%S %Z", sentinel_times[123]),
+    ]
+
+
 def test_original_ttl_switches_to_linear_after_level_60():
     level_60 = int(idlerpg.RP_BASE * (idlerpg.RP_STEP ** 60))
     assert idlerpg._ttl_for_level(60) == level_60
