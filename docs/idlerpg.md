@@ -245,6 +245,16 @@ been online long enough, the bot can start a room quest. By default the online
 time requirement is 10 hours, matching classic IdleRPG. Quest completion removes
 25% of the participating players' remaining timer burden.
 
+The bot supports both classic quest types:
+
+- **Grid quests**: four questers automatically walk toward route points on the
+  world map. If they do not finish before the configured deadline, all online
+  users receive a p15 quest penalty.
+- **Time quests**: four questers must simply keep idling until a random 12-24h
+  timer ends. Any message/logout/manual penalty against a quester fails the
+  quest and all online users receive a p15 quest penalty. Logout grace still
+  applies, so short XMPP reconnects do not immediately destroy a time quest.
+
 Relevant settings:
 
 ```python
@@ -252,8 +262,14 @@ IDLERPG = {
     "quest_min_level": 40,
     "quest_min_online_seconds": 36000,
     "quest_interval": 21600,
+    "quest_grid_enabled": True,
+    "quest_grid_weight": 0.5,
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
+    "quest_time_enabled": True,
+    "quest_time_weight": 0.5,
+    "quest_time_min_duration": 43200,
+    "quest_time_max_duration": 86400,
 }
 ```
 
@@ -630,15 +646,23 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 | `quest_min_level` | `40` | Minimum level for players to be selected for quests. |
 | `quest_min_online_seconds` | `36000` | Minimum continuous online time before a player can be selected for a quest. The default is 10 hours, matching classic IdleRPG behaviour. |
 | `quest_interval` | `21600` | Minimum time in seconds between quest start attempts. The default is 6 hours. |
-| `quest_min_duration` | `43200` | Minimum quest duration in seconds. The default is 12 hours. |
+| `quest_grid_enabled` | `True` | Enable grid-based route quests. |
+| `quest_grid_weight` | `0.5` | Relative selection weight for grid quests when both quest types are enabled. |
+| `quest_min_duration` | `43200` | Minimum grid quest deadline in seconds. The default is 12 hours. |
 | `quest_max_duration` | `86400` | Maximum grid quest deadline in seconds. The default is 24 hours. If the route is not completed before the deadline, online players receive a p15 quest penalty. |
+| `quest_time_enabled` | `True` | Enable time-based idle endurance quests. |
+| `quest_time_weight` | `0.5` | Relative selection weight for time quests when both quest types are enabled. |
+| `quest_time_min_duration` | `43200` | Minimum time-based quest duration in seconds. The default is 12 hours. |
+| `quest_time_max_duration` | `86400` | Maximum time-based quest duration in seconds. The default is 24 hours. |
 
 ### Export, map and seasons
 
 These options are documented in the sections above: `export_enabled`,
 `export_path`, `export_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
 `map_step_per_second`, `map_step_per_tick`, `grid_battle_enabled`,
-`quest_grid_step_seconds`, `quest_min_online_seconds`, `season_enabled`, `season_duration_days`,
+`quest_grid_step_seconds`, `quest_min_online_seconds`, `quest_grid_enabled`, `quest_grid_weight`,
+`quest_time_enabled`, `quest_time_weight`, `quest_time_min_duration`, `quest_time_max_duration`,
+`season_enabled`, `season_duration_days`,
 `season_reset_on_rollover`, `season_hof_size`, `event_log_limit`,
 `event_retention_days`, and `export_event_limit`.
 

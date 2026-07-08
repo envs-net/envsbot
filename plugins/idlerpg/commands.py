@@ -95,7 +95,21 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
             reply_suffix = " Logout grace used; no logout penalty was applied."
         else:
             changed = _apply_logout_penalty(player, room)
+            quest_messages: list[str] = []
+            if changed:
+                _maybe_fail_time_quest_for_penalty(
+                    room,
+                    room_jid,
+                    sender_jid,
+                    _now(),
+                    quest_messages,
+                    reason="logout",
+                )
+                for text in quest_messages:
+                    _record_event(room, "quest", text)
             reply_suffix = f" Logout penalty applied: {_duration_clock(changed)}. " + _next_level_line(player)
+            for text in quest_messages:
+                _system_reply(bot, room_jid, text)
     player["logged_out"] = False
     player["last_login"] = _now()
     player["last_seen"] = _now()
@@ -148,6 +162,18 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
         return
     changed = _apply_logout_penalty(player, room)
     _record_event(room, "logout", f"{name} logged out. {_duration_clock(changed)} was added to their clock.", players=[name])
+    quest_messages: list[str] = []
+    if changed:
+        _maybe_fail_time_quest_for_penalty(
+            room,
+            room_jid,
+            sender_jid,
+            _now(),
+            quest_messages,
+            reason="logout",
+        )
+        for text in quest_messages:
+            _record_event(room, "quest", text)
     await _set_data(bot, data)
     _reply(
         bot,
@@ -156,6 +182,8 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
         f"{_possessive(name)} clock. "
         + _next_level_line(player),
     )
+    for text in quest_messages:
+        _system_reply(bot, room_jid, text)
 
 
 async def _handle_status(bot, args: list[str], msg, is_room: bool) -> None:
@@ -390,11 +418,18 @@ async def _handle_quest(bot, msg, is_room: bool) -> None:
         return
     players = room.get("players", {})
     names = [players[jid].get("name", jid) for jid in quest.get("questers", []) if jid in players]
+    quest_kind = _quest_type(quest)
+    remaining = _duration(int(quest.get("complete_at", 0) or 0) - _now())
+    if quest_kind == "time":
+        detail = "No quester may receive a penalty before the timer ends."
+    else:
+        target = _active_quest_target(quest)
+        detail = f"Current target: [{target[0]},{target[1]}]." if target else "No active route target."
     _reply(
         bot,
         msg,
-        f"🧭 {', '.join(names)} are on a quest to {quest.get('text', 'adventure')}. "
-        f"Completes in {_duration(int(quest.get('complete_at', 0) or 0) - _now())}.",
+        f"🧭 {', '.join(names)} are on a quest ({quest_kind}-based) to {quest.get('text', 'adventure')}. "
+        f"Completes in {remaining}. {detail}",
     )
 
 

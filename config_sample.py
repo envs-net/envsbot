@@ -339,14 +339,24 @@ IDLERPG = {
     "grid_battle_enabled": True,
     "quest_grid_step_seconds": 2,
 
-    # Quest timing. Grid quests must reach route points before this deadline.
-    # Classic IdleRPG requires questers to be experienced and online for more
-    # than ten hours before they can be selected.
+    # Quest timing. Classic IdleRPG has two quest types: grid quests, where
+    # questers walk to map points, and time quests, where questers must avoid
+    # all penalties for a random 12-24 hour duration. Questers must be
+    # experienced and online for more than ten hours before selection.
     "quest_min_level": 40,
     "quest_min_online_seconds": 36000,
     "quest_interval": 21600,
+    # Grid quest deadline. If the route is not completed in time, all online
+    # users receive a p15 quest penalty.
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
+    "quest_grid_enabled": True,
+    "quest_grid_weight": 0.5,
+    # Time quest duration. Any penalty against a quester fails the quest.
+    "quest_time_enabled": True,
+    "quest_time_weight": 0.5,
+    "quest_time_min_duration": 43200,
+    "quest_time_max_duration": 86400,
 
     # Random events. event_chance is checked once per game tick and room.
     # Event weights are relative to each other.

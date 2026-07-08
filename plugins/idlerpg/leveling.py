@@ -166,6 +166,9 @@ def _maybe_apply_pending_logout_penalty(
     player: dict[str, Any],
     messages: list[str],
     room: dict[str, Any] | None = None,
+    *,
+    room_jid: str | None = None,
+    jid: str | None = None,
 ) -> None:
     pending = player.get("pending_logout_penalty")
     if not isinstance(pending, dict) or not pending:
@@ -180,6 +183,15 @@ def _maybe_apply_pending_logout_penalty(
         f"{_duration_clock(changed)} is added to {_possessive(name)} clock."
     )
     messages.append(_next_level_line(player))
+    if room is not None and room_jid and jid and changed:
+        _maybe_fail_time_quest_for_penalty(
+            room,
+            str(room_jid),
+            str(jid),
+            _now(),
+            messages,
+            reason="logout",
+        )
 
 
 async def _penalize_player(
@@ -203,6 +215,18 @@ async def _penalize_player(
     penalties[reason] = int(penalties.get(reason, 0) or 0) + changed
     if reason == "message":
         _inc_stat(player, "messages", 1, room)
+    quest_messages: list[str] = []
+    if changed:
+        _maybe_fail_time_quest_for_penalty(
+            room,
+            room_jid,
+            str(_player_jid or jid),
+            _now(),
+            quest_messages,
+            reason=reason,
+        )
+        for text in quest_messages:
+            _record_event(room, "quest", text)
     await _set_data(bot, data)
     if announce and changed:
         _system_reply(
@@ -211,4 +235,6 @@ async def _penalize_player(
             f"⏳ {_display_player(player)} is penalized {_duration_clock(changed)} for {reason}. "
             + _next_level_line(player),
         )
+    for text in quest_messages:
+        _system_reply(bot, room_jid, text)
     return changed

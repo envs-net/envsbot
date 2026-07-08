@@ -78,6 +78,26 @@ def test_idlerpg_runtime_values_support_legacy_map_step_alias():
     assert values["MAP_STEP_PER_TICK"] == 3
 
 
+def test_idlerpg_runtime_values_include_time_quest_options():
+    values = runtime._idlerpg_values({
+        "idlerpg": {
+            "quest_time_enabled": False,
+            "quest_grid_enabled": True,
+            "quest_time_weight": "0.75",
+            "quest_grid_weight": "0.25",
+            "quest_time_min_duration": "111",
+            "quest_time_max_duration": "222",
+        }
+    })
+
+    assert values["QUEST_TIME_ENABLED"] is False
+    assert values["QUEST_GRID_ENABLED"] is True
+    assert values["QUEST_TIME_WEIGHT"] == 0.75
+    assert values["QUEST_GRID_WEIGHT"] == 0.25
+    assert values["QUEST_TIME_MIN_DURATION"] == 111
+    assert values["QUEST_TIME_MAX_DURATION"] == 222
+
+
 def test_idlerpg_runtime_values_include_original_balance_options():
     values = runtime._idlerpg_values({"idlerpg": {}})
 

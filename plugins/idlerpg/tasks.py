@@ -197,7 +197,13 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
             continue
         player = _normalize_player(str(jid), raw_player)
         if player.get("logged_out"):
-            _maybe_apply_pending_logout_penalty(player, messages, room)
+            _maybe_apply_pending_logout_penalty(
+                player,
+                messages,
+                room,
+                room_jid=room_jid,
+                jid=str(jid),
+            )
             continue
         if str(jid) not in online_jids:
             continue

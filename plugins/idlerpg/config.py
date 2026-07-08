@@ -73,6 +73,36 @@ QUEST_MAX_DURATION = int(
 )
 
 
+QUEST_TIME_ENABLED = bool(
+    _cfg.get("quest_time_enabled", config.get("idlerpg_quest_time_enabled", True))
+)
+
+
+QUEST_GRID_ENABLED = bool(
+    _cfg.get("quest_grid_enabled", config.get("idlerpg_quest_grid_enabled", True))
+)
+
+
+QUEST_TIME_WEIGHT = float(
+    _cfg.get("quest_time_weight", config.get("idlerpg_quest_time_weight", 0.5)) or 0.0
+)
+
+
+QUEST_GRID_WEIGHT = float(
+    _cfg.get("quest_grid_weight", config.get("idlerpg_quest_grid_weight", 0.5)) or 0.0
+)
+
+
+QUEST_TIME_MIN_DURATION = int(
+    _cfg.get("quest_time_min_duration", config.get("idlerpg_quest_time_min_duration", 43200)) or 43200
+)
+
+
+QUEST_TIME_MAX_DURATION = int(
+    _cfg.get("quest_time_max_duration", config.get("idlerpg_quest_time_max_duration", 86400)) or 86400
+)
+
+
 EVENT_CHANCE = float(
     _cfg.get("event_chance", config.get("idlerpg_event_chance", 0.01)) or 0.01
 )
@@ -361,6 +391,12 @@ __all__ = [
     'QUEST_INTERVAL',
     'QUEST_MIN_DURATION',
     'QUEST_MAX_DURATION',
+    'QUEST_TIME_ENABLED',
+    'QUEST_GRID_ENABLED',
+    'QUEST_TIME_WEIGHT',
+    'QUEST_GRID_WEIGHT',
+    'QUEST_TIME_MIN_DURATION',
+    'QUEST_TIME_MAX_DURATION',
     'EVENT_CHANCE',
     'ITEM_CHANCE',
     'BATTLE_EVENT_WEIGHT',

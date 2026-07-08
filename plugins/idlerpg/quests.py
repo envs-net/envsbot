@@ -31,6 +31,62 @@ def _quest_candidate_is_eligible(
     )
 
 
+def _quest_type(quest: dict[str, Any] | None) -> str:
+    """Return the active quest type, keeping older persisted quests usable."""
+    if not isinstance(quest, dict):
+        return "grid"
+    explicit = str(quest.get("type") or "").strip().lower()
+    if explicit in {"grid", "time"}:
+        return explicit
+    return "grid" if _quest_route_points(quest) else "time"
+
+
+def _quest_type_weights() -> list[tuple[str, float]]:
+    """Return enabled quest types with sane positive fallback weights."""
+    raw: list[tuple[str, float]] = []
+    if QUEST_GRID_ENABLED:
+        raw.append(("grid", max(0.0, float(QUEST_GRID_WEIGHT or 0.0))))
+    if QUEST_TIME_ENABLED:
+        raw.append(("time", max(0.0, float(QUEST_TIME_WEIGHT or 0.0))))
+    if not raw:
+        return []
+    if sum(weight for _kind, weight in raw) <= 0:
+        return [(kind, 1.0) for kind, _weight in raw]
+    return raw
+
+
+def _choose_quest_type() -> str | None:
+    choices = _quest_type_weights()
+    if not choices:
+        return None
+    total = sum(weight for _kind, weight in choices)
+    pick = random.random() * total
+    seen = 0.0
+    for kind, weight in choices:
+        seen += weight
+        if pick <= seen:
+            return kind
+    return choices[-1][0]
+
+
+def _quest_participants_online(
+    room: dict[str, Any],
+    room_jid: str,
+    quest: dict[str, Any],
+) -> bool:
+    players = room.get("players", {})
+    if not isinstance(players, dict):
+        return False
+    questers = [str(jid) for jid in quest.get("questers", [])]
+    if not questers:
+        return False
+    for jid in questers:
+        player = players.get(jid)
+        if not isinstance(player, dict) or not _is_player_online(room_jid, jid, player):
+            return False
+    return True
+
+
 def _quest_reward_players(
     room: dict[str, Any],
     quest: dict[str, Any],
@@ -58,8 +114,9 @@ def _complete_quest(room: dict[str, Any], quest: dict[str, Any], now: int, messa
     if names:
         rewards = sorted({percent for _player, percent in reward_per_player})
         reward_text = f"{rewards[0]}%" if len(rewards) == 1 else f"{min(rewards)}-{max(rewards)}%"
+        quest_label = "time-based quest" if _quest_type(quest) == "time" else "quest"
         messages.append(
-            f"🧭 {', '.join(names)} completed their quest! "
+            f"🧭 {', '.join(names)} completed their {quest_label}! "
             f"{reward_text} of their burden is removed."
         )
         for player in completed_players:
@@ -67,7 +124,16 @@ def _complete_quest(room: dict[str, Any], quest: dict[str, Any], now: int, messa
     room["quest"] = {"active": False, "next_at": now + QUEST_INTERVAL}
 
 
-def _fail_quest(room: dict[str, Any], room_jid: str, now: int, messages: list[str]) -> None:
+def _fail_quest(
+    room: dict[str, Any],
+    room_jid: str,
+    now: int,
+    messages: list[str],
+    *,
+    detail: str | None = None,
+) -> None:
+    quest = room.get("quest") if isinstance(room.get("quest"), dict) else {}
+    quest_kind = _quest_type(quest)
     players = room.get("players", {})
     penalized: list[str] = []
     for jid, player in players.items():
@@ -79,14 +145,67 @@ def _fail_quest(room: dict[str, Any], room_jid: str, now: int, messages: list[st
             penalties["quest"] = int(penalties.get("quest", 0) or 0) + changed
         _inc_stat(player, "quest_failures", 1, room)
         penalized.append(_display_player(player))
-    if penalized:
-        messages.append(
-            f"🧭 The quest failed before the route was completed. "
-            f"{', '.join(penalized)} receive a p15 penalty."
-        )
+    if detail:
+        base = detail.rstrip(".") + "."
+    elif quest_kind == "time":
+        base = "The time-based quest failed before the party could finish idling."
     else:
-        messages.append("🧭 The quest failed before the route was completed.")
+        base = "The quest failed before the route was completed."
+    if penalized:
+        messages.append(f"🧭 {base} {', '.join(penalized)} receive a p15 penalty.")
+    else:
+        messages.append(f"🧭 {base}")
     room["quest"] = {"active": False, "next_at": now + QUEST_INTERVAL}
+
+
+def _maybe_fail_time_quest_for_penalty(
+    room: dict[str, Any],
+    room_jid: str,
+    jid: str,
+    now: int,
+    messages: list[str],
+    *,
+    reason: str = "penalty",
+) -> bool:
+    quest = room.get("quest") if isinstance(room.get("quest"), dict) else None
+    if not isinstance(quest, dict) or not quest.get("active") or _quest_type(quest) != "time":
+        return False
+    if str(jid) not in {str(value) for value in quest.get("questers", [])}:
+        return False
+    player = room.get("players", {}).get(str(jid)) if isinstance(room.get("players"), dict) else None
+    name = _display_player(player) if isinstance(player, dict) else str(jid)
+    reason_text = str(reason or "penalty").replace("_", " ")
+    _fail_quest(
+        room,
+        room_jid,
+        now,
+        messages,
+        detail=f"{name} received a {reason_text} penalty, so the time-based quest failed",
+    )
+    return True
+
+
+def _maybe_complete_time_quest(
+    room: dict[str, Any],
+    room_jid: str,
+    quest: dict[str, Any],
+    now: int,
+    messages: list[str],
+) -> bool:
+    """Complete or fail an active time-based quest when its timer expires."""
+    if now < int(quest.get("complete_at", 0) or 0):
+        return True
+    if not _quest_participants_online(room, room_jid, quest):
+        _fail_quest(
+            room,
+            room_jid,
+            now,
+            messages,
+            detail="The time-based quest reached its end, but not all questers were still online",
+        )
+        return True
+    _complete_quest(room, quest, now, messages)
+    return True
 
 
 def _maybe_advance_grid_quest(
@@ -104,7 +223,13 @@ def _maybe_advance_grid_quest(
     points = _quest_route_points(quest)
     if not points:
         if now >= int(quest.get("complete_at", 0) or 0):
-            _complete_quest(room, quest, now, messages)
+            _fail_quest(
+                room,
+                room_jid,
+                now,
+                messages,
+                detail="The grid quest had no route to complete",
+            )
         return True
 
     if _questers_at_target(room.get("players", {}), quest, room_jid=room_jid):
@@ -126,6 +251,85 @@ def _maybe_advance_grid_quest(
     return True
 
 
+def _quester_names(room: dict[str, Any], questers: list[str]) -> list[str]:
+    names = []
+    players = room.get("players", {}) if isinstance(room.get("players"), dict) else {}
+    for jid in questers:
+        player = players.get(jid)
+        if isinstance(player, dict):
+            _award(player, "quester")
+            names.append(str(player.get("name", jid)))
+    return names
+
+
+def _start_time_quest(
+    room: dict[str, Any],
+    room_jid: str,
+    questers: list[str],
+    quest_text: str,
+    now: int,
+    messages: list[str],
+) -> None:
+    min_duration = max(1, int(QUEST_TIME_MIN_DURATION or 1))
+    max_duration = max(min_duration, int(QUEST_TIME_MAX_DURATION or min_duration))
+    duration = random.randint(min_duration, max_duration)
+    room["quest"] = {
+        "active": True,
+        "type": "time",
+        "questers": questers,
+        "text": quest_text,
+        "started_at": now,
+        "complete_at": now + duration,
+    }
+    names = _quester_names(room, questers)
+    quest_url = _public_url(_room_slug(room_jid), "map.json")
+    url_part = f" See {quest_url} to monitor the quest." if quest_url else ""
+    messages.append(
+        f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
+        f"This is a time-based quest: no quester may receive a penalty for {_duration_clock(duration)}."
+        f"{url_part}"
+    )
+
+
+def _start_grid_quest(
+    room: dict[str, Any],
+    room_jid: str,
+    questers: list[str],
+    quest_text: str,
+    now: int,
+    messages: list[str],
+) -> None:
+    min_duration = max(1, int(QUEST_MIN_DURATION or 1))
+    max_duration = max(min_duration, int(QUEST_MAX_DURATION or min_duration))
+    duration = random.randint(min_duration, max_duration)
+    route = [
+        [random.randint(0, MAP_X), random.randint(0, MAP_Y)],
+        [random.randint(0, MAP_X), random.randint(0, MAP_Y)],
+    ]
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "questers": questers,
+        "text": quest_text,
+        "started_at": now,
+        "complete_at": now + duration,
+        "route": route,
+        "route_index": 0,
+    }
+    names = _quester_names(room, questers)
+    first_region = _map_region_name(route[0][0], route[0][1])
+    second_region = _map_region_name(route[1][0], route[1][1])
+    quest_url = _public_url(_room_slug(room_jid), "map.json")
+    url_part = f" See {quest_url} to monitor their journey." if quest_url else ""
+    messages.append(
+        f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
+        f"This is a grid-based quest: participants must first reach "
+        f"[{route[0][0]},{route[0][1]}] near {first_region}, then "
+        f"[{route[1][0]},{route[1][1]}] near {second_region}. "
+        f"Quest deadline in {_duration_clock(duration)}.{url_part}"
+    )
+
+
 async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[str]) -> None:
     quest = room.setdefault("quest", {"active": False, "next_at": _now() + QUEST_INTERVAL})
     now = _now()
@@ -134,10 +338,18 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
         room["quest"] = quest
 
     if quest.get("active"):
-        _maybe_advance_grid_quest(room, room_jid, quest, now, messages)
+        if _quest_type(quest) == "time":
+            _maybe_complete_time_quest(room, room_jid, quest, now, messages)
+        else:
+            _maybe_advance_grid_quest(room, room_jid, quest, now, messages)
         return
 
     if now < int(quest.get("next_at", now + QUEST_INTERVAL) or 0):
+        return
+
+    quest_type = _choose_quest_type()
+    if quest_type is None:
+        quest["next_at"] = now + QUEST_INTERVAL
         return
 
     candidates = [
@@ -151,34 +363,8 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
         return
     random.shuffle(candidates)
     questers = candidates[:4]
-    duration = random.randint(max(1, QUEST_MIN_DURATION), max(QUEST_MIN_DURATION, QUEST_MAX_DURATION))
     quest_text = random.choice(QUEST_TEXTS)
-    route = [
-        [random.randint(0, MAP_X), random.randint(0, MAP_Y)],
-        [random.randint(0, MAP_X), random.randint(0, MAP_Y)],
-    ]
-    room["quest"] = {
-        "active": True,
-        "questers": questers,
-        "text": quest_text,
-        "started_at": now,
-        "complete_at": now + duration,
-        "route": route,
-        "route_index": 0,
-    }
-    names = []
-    for jid in questers:
-        player = room["players"].get(jid)
-        if isinstance(player, dict):
-            _award(player, "quester")
-            names.append(player.get("name", jid))
-    first_region = _map_region_name(route[0][0], route[0][1])
-    second_region = _map_region_name(route[1][0], route[1][1])
-    quest_url = _public_url(_room_slug(room_jid), "map.json")
-    url_part = f" See {quest_url} to monitor their journey." if quest_url else ""
-    messages.append(
-        f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
-        f"Participants must first reach [{route[0][0]},{route[0][1]}] near {first_region}, "
-        f"then [{route[1][0]},{route[1][1]}] near {second_region}. "
-        f"Quest deadline in {_duration_clock(duration)}.{url_part}"
-    )
+    if quest_type == "time":
+        _start_time_quest(room, room_jid, questers, quest_text, now, messages)
+    else:
+        _start_grid_quest(room, room_jid, questers, quest_text, now, messages)

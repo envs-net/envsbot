@@ -641,6 +641,8 @@ async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
         )
     room["quest"] = {"active": False, "next_at": 0}
     monkeypatch.setattr(idlerpg, "_now", lambda: 1000)
+    monkeypatch.setattr(idlerpg, "QUEST_TIME_ENABLED", False)
+    monkeypatch.setattr(idlerpg, "QUEST_GRID_ENABLED", True)
     monkeypatch.setattr(idlerpg.random, "shuffle", lambda seq: None)
     monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: low)
     monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])

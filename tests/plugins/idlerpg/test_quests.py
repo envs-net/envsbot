@@ -56,7 +56,7 @@ def test_complete_quest_reports_reward_range_and_resets_next_time():
 
     quests._complete_quest(
         room,
-        {"active": True, "questers": ["alice@envs.net", "bob@envs.net"]},
+        {"active": True, "type": "grid", "questers": ["alice@envs.net", "bob@envs.net"]},
         1234,
         messages,
     )
@@ -75,7 +75,7 @@ def test_complete_quest_without_valid_questers_still_resets_state():
     room = idlerpg._blank_room()
     messages: list[str] = []
 
-    quests._complete_quest(room, {"active": True, "questers": ["missing@envs.net"]}, 55, messages)
+    quests._complete_quest(room, {"active": True, "type": "grid", "questers": ["missing@envs.net"]}, 55, messages)
 
     assert messages == []
     assert room["quest"] == {"active": False, "next_at": 55 + idlerpg.QUEST_INTERVAL}
@@ -112,6 +112,8 @@ def test_fail_quest_without_online_players_reports_plain_failure():
     room["players"] = {"alice@envs.net": idlerpg._normalize_player("alice@envs.net", {"name": "Alice"})}
     messages: list[str] = []
 
+    room["quest"] = {"active": True, "type": "grid", "route": [[1, 2]], "questers": ["alice@envs.net"]}
+
     quests._fail_quest(room, "room@conf", 42, messages)
 
     assert messages == ["🧭 The quest failed before the route was completed."]
@@ -122,7 +124,7 @@ def test_maybe_advance_grid_quest_without_route_waits_or_completes():
     room = idlerpg._blank_room()
     alice = _online_player("alice@envs.net", "Alice", next_ttl=1000)
     room["players"] = {"alice@envs.net": alice}
-    quest = {"active": True, "questers": ["alice@envs.net"], "complete_at": 500, "route": []}
+    quest = {"active": True, "type": "grid", "questers": ["alice@envs.net"], "complete_at": 500, "route": []}
     room["quest"] = quest
     messages: list[str] = []
 
@@ -133,7 +135,7 @@ def test_maybe_advance_grid_quest_without_route_waits_or_completes():
 
     assert quests._maybe_advance_grid_quest(room, "room@conf", quest, 500, messages) is True
     assert room["quest"] == {"active": False, "next_at": 500 + idlerpg.QUEST_INTERVAL}
-    assert messages[0] == "🧭 Alice completed their quest! 25% of their burden is removed."
+    assert messages[0] == "🧭 The grid quest had no route to complete. Alice receive a p15 penalty."
 
 
 def test_maybe_advance_grid_quest_advances_route_then_completes():
@@ -143,17 +145,20 @@ def test_maybe_advance_grid_quest_advances_route_then_completes():
     room["players"] = {"alice@envs.net": alice, "bob@envs.net": bob}
     quest = {
         "active": True,
+        "type": "grid",
         "questers": ["alice@envs.net", "bob@envs.net"],
         "complete_at": 9999,
         "route": [[1, 2], [3, 4]],
         "route_index": 0,
     }
+    room["quest"] = quest
     messages: list[str] = []
 
     assert quests._maybe_advance_grid_quest(room, "room@conf", quest, 100, messages) is True
     assert quest["route_index"] == 1
     assert messages == ["🧭 The quest party reached [1,2] and now heads for [3,4]."]
-    assert room["quest"]["active"] is False
+    assert room["quest"] is quest
+    assert room["quest"]["active"] is True
 
     messages.clear()
     alice["x"] = bob["x"] = 3
@@ -169,11 +174,13 @@ def test_maybe_advance_grid_quest_fails_expired_unfinished_route():
     room["players"] = {"alice@envs.net": alice}
     quest = {
         "active": True,
+        "type": "grid",
         "questers": ["alice@envs.net"],
         "complete_at": 50,
         "route": [[9, 9]],
         "route_index": 0,
     }
+    room["quest"] = quest
     messages: list[str] = []
 
     assert quests._maybe_advance_grid_quest(room, "room@conf", quest, 50, messages) is True
@@ -183,3 +190,116 @@ def test_maybe_advance_grid_quest_fails_expired_unfinished_route():
     assert messages == [
         "🧭 The quest failed before the route was completed. Alice receive a p15 penalty."
     ]
+
+
+def test_quest_type_weights_and_selection(monkeypatch):
+    monkeypatch.setattr(quests, "QUEST_GRID_ENABLED", True)
+    monkeypatch.setattr(quests, "QUEST_TIME_ENABLED", True)
+    monkeypatch.setattr(quests, "QUEST_GRID_WEIGHT", 0.25)
+    monkeypatch.setattr(quests, "QUEST_TIME_WEIGHT", 0.75)
+
+    assert quests._quest_type({"active": True, "type": "time"}) == "time"
+    assert quests._quest_type({"active": True, "route": [[1, 2]]}) == "grid"
+    assert quests._quest_type_weights() == [("grid", 0.25), ("time", 0.75)]
+
+    monkeypatch.setattr(quests.random, "random", lambda: 0.9)
+    assert quests._choose_quest_type() == "time"
+    monkeypatch.setattr(quests.random, "random", lambda: 0.1)
+    assert quests._choose_quest_type() == "grid"
+
+
+def test_quest_type_weights_disable_all(monkeypatch):
+    monkeypatch.setattr(quests, "QUEST_GRID_ENABLED", False)
+    monkeypatch.setattr(quests, "QUEST_TIME_ENABLED", False)
+
+    assert quests._quest_type_weights() == []
+    assert quests._choose_quest_type() is None
+
+
+def test_maybe_complete_time_quest_waits_completes_or_fails_when_offline():
+    JOINED_ROOMS["room@conf"] = {"nicks": {}}
+    room = idlerpg._blank_room()
+    alice = _online_player("alice@envs.net", "Alice", next_ttl=1000)
+    bob = _online_player("bob@envs.net", "Bob", next_ttl=800)
+    room["players"] = {"alice@envs.net": alice, "bob@envs.net": bob}
+    quest = {
+        "active": True,
+        "type": "time",
+        "questers": ["alice@envs.net", "bob@envs.net"],
+        "complete_at": 500,
+    }
+    room["quest"] = quest
+    messages: list[str] = []
+
+    assert quests._maybe_complete_time_quest(room, "room@conf", quest, 499, messages) is True
+    assert messages == []
+    assert room["quest"] is quest
+
+    assert quests._maybe_complete_time_quest(room, "room@conf", quest, 500, messages) is True
+    assert room["quest"] == {"active": False, "next_at": 500 + idlerpg.QUEST_INTERVAL}
+    assert messages[0] == "🧭 Alice, Bob completed their time-based quest! 25% of their burden is removed."
+
+    room = idlerpg._blank_room()
+    alice = _online_player("alice@envs.net", "Alice", level=1, next_ttl=100)
+    room["players"] = {"alice@envs.net": alice}
+    JOINED_ROOMS["room@conf"] = {"nicks": {}}
+    quest = {"active": True, "type": "time", "questers": ["alice@envs.net"], "complete_at": 10}
+    room["quest"] = quest
+    messages = []
+
+    assert quests._maybe_complete_time_quest(room, "room@conf", quest, 10, messages) is True
+    assert "not all questers were still online" in messages[0]
+
+
+def test_maybe_fail_time_quest_for_penalty_only_affects_time_questers():
+    room = idlerpg._blank_room()
+    alice = _online_player("alice@envs.net", "Alice", level=1, next_ttl=100)
+    bob = _online_player("bob@envs.net", "Bob", level=1, next_ttl=100)
+    room["players"] = {"alice@envs.net": alice, "bob@envs.net": bob}
+    room["quest"] = {
+        "active": True,
+        "type": "time",
+        "questers": ["alice@envs.net"],
+        "complete_at": 999,
+    }
+    messages: list[str] = []
+
+    assert quests._maybe_fail_time_quest_for_penalty(
+        room, "room@conf", "bob@envs.net", 100, messages, reason="message"
+    ) is False
+    assert room["quest"]["active"] is True
+
+    assert quests._maybe_fail_time_quest_for_penalty(
+        room, "room@conf", "alice@envs.net", 101, messages, reason="message"
+    ) is True
+    assert room["quest"] == {"active": False, "next_at": 101 + idlerpg.QUEST_INTERVAL}
+    assert "Alice received a message penalty" in messages[0]
+    assert alice["penalties"]["quest"] > 0
+    assert bob["penalties"]["quest"] > 0
+
+
+def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
+    room = idlerpg._blank_room()
+    players = {
+        f"p{i}@envs.net": _online_player(f"p{i}@envs.net", f"P{i}", x=10, y=10)
+        for i in range(4)
+    }
+    room["players"] = players
+    questers = list(players)
+    messages: list[str] = []
+
+    monkeypatch.setattr(quests.random, "randint", lambda low, high: low)
+    quests._start_time_quest(room, "room@conf", questers, "save the realm", 100, messages)
+
+    assert room["quest"]["type"] == "time"
+    assert room["quest"]["complete_at"] == 100 + idlerpg.QUEST_TIME_MIN_DURATION
+    assert "time-based quest" in messages[0]
+
+    values = iter([11, 12, 13, 14])
+    monkeypatch.setattr(quests.random, "randint", lambda low, high: next(values) if high == idlerpg.MAP_X or high == idlerpg.MAP_Y else low)
+    messages.clear()
+    quests._start_grid_quest(room, "room@conf", questers, "map the world", 200, messages)
+
+    assert room["quest"]["type"] == "grid"
+    assert room["quest"]["route"] == [[11, 12], [13, 14]]
+    assert "grid-based quest" in messages[0]

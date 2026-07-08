@@ -172,6 +172,12 @@ def _public_rules() -> dict[str, Any]:
         "map_step_per_tick": MAP_STEP_PER_TICK,
         "grid_battle_enabled": GRID_BATTLE_ENABLED,
         "quest_grid_step_seconds": QUEST_GRID_STEP_SECONDS,
+        "quest_time_enabled": QUEST_TIME_ENABLED,
+        "quest_grid_enabled": QUEST_GRID_ENABLED,
+        "quest_time_weight": QUEST_TIME_WEIGHT,
+        "quest_grid_weight": QUEST_GRID_WEIGHT,
+        "quest_time_min_duration": QUEST_TIME_MIN_DURATION,
+        "quest_time_max_duration": QUEST_TIME_MAX_DURATION,
         "event_chance": EVENT_CHANCE,
         "item_chance": ITEM_CHANCE,
         "battle_event_weight": BATTLE_EVENT_WEIGHT,
@@ -230,11 +236,15 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
     quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
     active_quest = None
     if quest.get("active"):
+        current_target = _active_quest_target(quest)
         active_quest = {
+            "type": _quest_type(quest),
             "text": quest.get("text", "adventure"),
             "started_at": int(quest.get("started_at", 0) or 0),
             "complete_at": int(quest.get("complete_at", 0) or 0),
             "route": quest.get("route", []),
+            "route_index": int(quest.get("route_index", 0) or 0),
+            "current_target": list(current_target) if current_target is not None else None,
             "questers": [
                 _display_player(room.get("players", {}).get(jid, {"name": jid}))
                 for jid in quest.get("questers", [])

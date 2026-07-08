@@ -456,7 +456,25 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
             <?php if ($view === 'quest'): ?>
                 <h2>Current Quest</h2>
                 <?php if ($quest): ?>
+                    <?php
+                    $quest_type = strtolower((string) ($quest['type'] ?? ''));
+                    if ($quest_type !== 'time' && $quest_type !== 'grid') {
+                        $quest_type = !empty($quest['route']) ? 'grid' : 'time';
+                    }
+                    $quest_remaining = max(0, ((int) ($quest['complete_at'] ?? 0)) - time());
+                    ?>
                     <p><strong>Quest:</strong> <?php echo h($quest['text'] ?? $quest['description'] ?? 'adventure'); ?></p>
+                    <p>
+                        <strong>Type:</strong> <?php echo h($quest_type); ?>-based
+                        <?php if (!empty($quest['complete_at'])): ?>
+                            · <strong>Time left:</strong> <?php echo h(idlerpg_ttl($quest_remaining)); ?>
+                        <?php endif; ?>
+                    </p>
+                    <?php if ($quest_type === 'time'): ?>
+                        <p class="muted">Time-based quest: no quester may receive a penalty before the timer ends.</p>
+                    <?php elseif (is_array($quest['current_target'] ?? null)): ?>
+                        <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]</p>
+                    <?php endif; ?>
                     <?php if (!empty($quest['questers']) && is_array($quest['questers'])): ?>
                         <table><thead><tr><th>#</th><th>Participant</th></tr></thead><tbody>
                         <?php foreach ($quest['questers'] as $index => $participant): $participant_name = is_array($participant) ? idlerpg_player_name($participant) : (string) $participant; ?>
@@ -470,7 +488,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 
             <?php if ($render_map || $view === 'map'): ?>
                 <h2><?php echo $view === 'map' ? 'World Map' : 'Quest Map'; ?></h2>
-                <p class="muted">Blue = online, red = offline, orange = quest point.</p>
+                <p class="muted">Blue = online, red = offline, orange = grid quest point. Time-based quests have no map route.</p>
                 <?php if (count($map_players) > 0): ?>
                     <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
                         <defs><pattern id="noise" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/></pattern></defs>
