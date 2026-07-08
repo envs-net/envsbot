@@ -875,4 +875,4 @@ def metadata_for(name: str) -> CommandMetadata | None:
     metadata = COMMAND_HELP.get(name.lower())
     if metadata is None:
         return None
-    return CommandMetadata(**metadata)
+    return metadata
