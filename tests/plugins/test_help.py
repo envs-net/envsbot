@@ -807,3 +807,12 @@ def test_plugin_command_aliases_are_documented_for_shortcut():
         "{prefix}plugins"
         in command_help.COMMAND_HELP["plugin list"]["examples"]
     )
+
+def test_weather_command_metadata_matches_city_zip_support():
+    metadata = command_help.COMMAND_HELP["weather"]
+
+    assert metadata["usage"] == "{prefix}weather [on|off|status|nick|city|zip]"
+    assert "vCard location" in metadata["short"]
+    assert "room nick" in metadata["short"]
+    assert "city/ZIP code" in metadata["short"]
+

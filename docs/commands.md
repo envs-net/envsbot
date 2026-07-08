@@ -245,7 +245,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,ts` | `user` | `any` | Convert a Unix timestamp to your configured timezone. |
 | `,urlcheck` | `user` | `room or MUC PM` | Enable, disable or show automatic URL checks in a room. |
 | `,utc` | `user` | `any` | Show current UTC time. |
-| `,weather` | `user` | `any` | Show weather from a user's vCard location or control room access. |
+| `,weather` | `user` | `any` | Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code; or control room access. |
 
 ### Xmpp
 
