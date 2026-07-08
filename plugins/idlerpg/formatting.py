@@ -75,6 +75,27 @@ def _next_level_line(player: dict[str, Any]) -> str:
     return f"{_display_player(player)} reaches next level in {_duration_clock(player.get('next', 0))}."
 
 
+def _created_at(player: dict[str, Any]) -> int:
+    try:
+        return max(0, int(player.get("created_at", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _played_for(player: dict[str, Any]) -> str:
+    created_at = _created_at(player)
+    if created_at <= 0:
+        return "unknown"
+    return _duration_clock(max(0, _now() - created_at))
+
+
+def _playing_since(player: dict[str, Any]) -> str:
+    created_at = _created_at(player)
+    if created_at <= 0:
+        return "unknown"
+    return time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(created_at))
+
+
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "", str(value or "").strip())[:30]
 

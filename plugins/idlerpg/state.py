@@ -248,7 +248,7 @@ def _format_player_status(room_jid: str, jid: str, player: dict[str, Any]) -> st
         f"{_display_player(player)}{title_part}, the level {player.get('level', 0)} "
         f"{player.get('class', 'idler')} ({_alignment_name(player.get('alignment'))}); "
         f"Status: {online}; TTL: {_duration(player.get('next', 0))}; "
-        f"Idled: {_duration(player.get('idled', 0))}; "
+        f"Playing: {_played_for(player)}; Idled: {_duration(player.get('idled', 0))}; "
         f"Map: [{player.get('x', 0)},{player.get('y', 0)}]; "
         f"Achievements: {len(player.get('achievements', []) if isinstance(player.get('achievements'), list) else [])}; "
         f"Item sum: {sum(int(v or 0) for v in player.get('items', {}).values())}"

@@ -68,10 +68,10 @@ def _inc_stat(
     key: str,
     amount: int = 1,
     room: dict[str, Any] | None = None,
-) -> None:
+) -> list[str]:
     stats = _stats(player)
     stats[key] = max(0, int(stats.get(key, 0) or 0) + int(amount or 0))
-    _check_level_achievements(player, room)
+    return _check_level_achievements(player, room)
 
 
 def _achievement_catalog() -> list[dict[str, str]]:
@@ -85,6 +85,29 @@ def _season_gate_passed(room: dict[str, Any] | None, required_days: int) -> bool
     if room is None or not SEASON_ACHIEVEMENT_GATES_ENABLED or required_days <= 0:
         return True
     return _season_age_days(room) >= required_days
+
+
+def _achievement_keys(player: dict[str, Any]) -> set[str]:
+    achievements = player.get("achievements")
+    if not isinstance(achievements, list):
+        return set()
+    return {str(value) for value in achievements if str(value) in ACHIEVEMENTS}
+
+
+def _achievement_announcement(player: dict[str, Any], achievement: str) -> str:
+    title = _achievement_title(achievement)
+    description = _achievement_description(achievement)
+    detail = f" — {description}" if description else ""
+    return f"🏅 {_display_player(player)} unlocked achievement: {title}{detail}."
+
+
+def _achievement_announcements(
+    player: dict[str, Any],
+    previous: set[str] | list[str] | tuple[str, ...],
+) -> list[str]:
+    previous_keys = {str(value) for value in previous if str(value) in ACHIEVEMENTS}
+    new_keys = sorted(_achievement_keys(player) - previous_keys)
+    return [_achievement_announcement(player, key) for key in new_keys]
 
 
 def _award(player: dict[str, Any], achievement: str) -> bool:
@@ -109,7 +132,8 @@ def _achievement_description(achievement: str) -> str:
     return ACHIEVEMENTS.get(achievement, (achievement, ""))[1]
 
 
-def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | None = None) -> None:
+def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | None = None) -> list[str]:
+    previous = _achievement_keys(player)
     level = int(player.get("level", 0) or 0)
     if level >= 10:
         _award(player, "level_10")
@@ -151,6 +175,7 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
     unique_items = player.get("unique_items", {})
     if isinstance(unique_items, dict) and len(unique_items) >= 3:
         _award(player, "artifact_finder")
+    return sorted(_achievement_keys(player) - previous)
 
 
 def _apply_logout_penalty(player: dict[str, Any], room: dict[str, Any] | None = None) -> int:

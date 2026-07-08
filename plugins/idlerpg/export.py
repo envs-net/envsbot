@@ -30,6 +30,7 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
         "time_to_level": int(player.get("next", 0) or 0),
         "alignment": _alignment_name(player.get("alignment")),
         "idled": int(player.get("idled", 0) or 0),
+        "played_for": max(0, _now() - _created_at(player)) if _created_at(player) > 0 else 0,
         "item_sum": _item_sum(player),
         "items": dict(player.get("items", {}) if isinstance(player.get("items"), dict) else {}),
         "unique_items": dict(player.get("unique_items", {}) if isinstance(player.get("unique_items"), dict) else {}),

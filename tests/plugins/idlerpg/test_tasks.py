@@ -182,6 +182,51 @@ async def test_tick_room_serializes_concurrent_announcements(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tick_announces_new_achievements(monkeypatch):
+    bot = DummyBot()
+    now = 5_000_000
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 9,
+            "next": 60,
+            "idled": 0,
+            "created_at": now - 86400,
+            "x": 1,
+            "y": 1,
+        },
+    )
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {
+        "rooms": {
+            "room@conf": {
+                "players": {"alice@envs.net": player},
+                "last_tick": now - 60,
+                "next_top_announce_at": now + 3600,
+                "next_topic_update_at": now + 3600,
+                "events": [],
+            }
+        }
+    }
+
+    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg, "ITEM_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg, "GRID_BATTLE_ENABLED", False)
+    monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    monkeypatch.setattr(idlerpg, "_export_public_state", lambda _data: None)
+
+    await idlerpg._tick_room(bot, "room@conf", announce=True)
+
+    replies = [text for text, _kwargs in bot.replies]
+    assert any("has reached level 10" in text for text in replies)
+    assert any("unlocked achievement: Novice Idler" in text for text in replies)
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    assert any("Novice Idler" in event["text"] for event in room["events"])
+
+
+@pytest.mark.asyncio
 async def test_level_up_triggers_original_level_battle(monkeypatch):
     bot = DummyBot()
     now = 4_000_000

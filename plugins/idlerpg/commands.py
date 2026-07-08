@@ -359,11 +359,17 @@ async def _handle_duel(bot, sender_jid: str, args: list[str], msg, is_room: bool
         return
 
     messages: list[str] = []
+    achievement_snapshots = {
+        str(attacker_jid): _achievement_keys(attacker),
+        str(defender_jid): _achievement_keys(defender),
+    }
     _run_manual_duel(attacker, defender, messages, room, distance=distance)
     attacker["last_manual_duel_at"] = now
     defender["last_manual_duel_at"] = now
     _inc_stat(attacker, "manual_duels_started", 1, room)
     _inc_stat(defender, "manual_duels_received", 1, room)
+    messages.extend(_achievement_announcements(attacker, achievement_snapshots.get(str(attacker_jid), set())))
+    messages.extend(_achievement_announcements(defender, achievement_snapshots.get(str(defender_jid), set())))
     if messages:
         _record_event(
             room,
@@ -454,6 +460,9 @@ async def _handle_profile(bot, sender_jid: str, args: list[str], msg, is_room: b
         f"Title: {title}",
         f"Level: {player.get('level', 0)}",
         f"TTL: {_duration_clock(player.get('next', 0))}",
+        f"Playing since: {_playing_since(player)}",
+        f"Playing for: {_played_for(player)}",
+        f"Idled online: {_duration_clock(player.get('idled', 0))}",
         f"Alignment: {_alignment_name(player.get('alignment'))}",
         f"Map: [{player.get('x', 0)},{player.get('y', 0)}] near {_player_region(player)}",
         f"Achievements: {len(achievements)}",
@@ -826,10 +835,14 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         if len(args) < 3 or not str(args[2]).isdigit():
             _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg setlevel <character> <level>")
             return True
+        previous_achievements = _achievement_keys(player)
         player["level"] = max(0, int(args[2]))
         player["next"] = _ttl_for_level(player["level"])
         _check_level_achievements(player, room)
         text = f"✅ Set {name} to level {player['level']}. " + _next_level_line(player)
+        achievement_lines = _achievement_announcements(player, previous_achievements)
+        if achievement_lines:
+            text += "\n" + "\n".join(achievement_lines)
     elif subcmd == "reset":
         player["level"] = 0
         player["next"] = _ttl_for_level(0)

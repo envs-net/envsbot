@@ -281,10 +281,16 @@ async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
     monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
     monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
     await _register_alice(bot, msg)
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["players"]["alice@envs.net"]["created_at"] = 1_000_000
+    monkeypatch.setattr(idlerpg, "_now", lambda: 1_090_061)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["profile"], msg, True)
 
     assert "Profile: Alice" in bot.replies[-1][0]
+    assert "Playing since:" in bot.replies[-1][0]
+    assert "Playing for: 1 days, 01:01:01" in bot.replies[-1][0]
+    assert "Idled online:" in bot.replies[-1][0]
     assert "Profile JSON: https://envs.net/idlerpg/room_at_conf/profiles/Alice.json" in bot.replies[-1][0]
 
 
@@ -316,7 +322,8 @@ async def test_export_command_writes_public_files(tmp_path, monkeypatch):
 
     assert (tmp_path / "index.json").exists()
     assert (tmp_path / "leaderboard.json").exists()
-    assert (tmp_path / "room_at_conf" / "profiles" / "Alice.json").exists()
+    profile_payload = (tmp_path / "room_at_conf" / "profiles" / "Alice.json").read_text()
+    assert '"played_for"' in profile_payload
 
 
 @pytest.mark.asyncio

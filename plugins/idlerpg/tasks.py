@@ -191,6 +191,11 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
     online_players: list[tuple[str, dict]] = []
     pending_level_battles: list[dict] = []
     active_quest = room.get("quest") if isinstance(room.get("quest"), dict) else None
+    achievement_snapshots = {
+        str(jid): _achievement_keys(player)
+        for jid, player in players.items()
+        if isinstance(player, dict)
+    }
     for jid, raw_player in list(players.items()):
         if not isinstance(raw_player, dict):
             players.pop(jid, None)
@@ -219,17 +224,11 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
             player["next"] = int(player.get("next", 0)) + _ttl_for_level(player["level"])
             leveled = True
         if leveled:
-            previous_achievements = set(player.get("achievements", []))
             _check_level_achievements(player, room)
-            new_achievements = set(player.get("achievements", [])) - previous_achievements
             messages.append(
                 f"🏆 {_display_character(player)} has reached level {player['level']}! "
                 f"Next level in {_duration_clock(player['next'])}."
             )
-            if "level_reward_50" in new_achievements:
-                messages.append(f"🎖️ {_display_player(player)} has unlocked the level {LEVEL_REWARD_MIN_LEVEL} reward badge.")
-            if "level_reward_75" in new_achievements:
-                messages.append(f"🏷️ {_display_player(player)} has unlocked the rare title pool at level 75.")
             if random.random() < ITEM_CHANCE:
                 messages.append(_grant_level_item(player, room))
             pending_level_battles.append(player)
@@ -239,12 +238,25 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
     _maybe_periodic_announcements(bot, room_jid, room, messages)
     await _maybe_run_random_event(room, room_jid, messages)
     await _maybe_run_quest(room, room_jid, messages)
+    achievement_messages: list[str] = []
+    for jid, player in players.items():
+        if isinstance(player, dict):
+            achievement_messages.extend(
+                _achievement_announcements(player, achievement_snapshots.get(str(jid), set()))
+            )
+    messages.extend(achievement_messages)
     for text in messages:
         _record_event(room, "game", text)
     await _set_data(bot, data)
     if announce:
+        announced: list[str] = []
         for text in messages[:8]:
             _system_reply(bot, room_jid, text)
+            announced.append(text)
+        for text in achievement_messages:
+            if text not in announced:
+                _system_reply(bot, room_jid, text)
+                announced.append(text)
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:

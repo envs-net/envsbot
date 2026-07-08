@@ -230,6 +230,34 @@ function idlerpg_achievement_count($player) {
     return is_array($player['achievements'] ?? null) ? count($player['achievements']) : 0;
 }
 
+function idlerpg_player_created_at($player) {
+    if (isset($player['created_at']) && is_numeric($player['created_at'])) {
+        return max(0, (int) $player['created_at']);
+    }
+    if (isset($player['registered_at']) && is_numeric($player['registered_at'])) {
+        return max(0, (int) $player['registered_at']);
+    }
+    return 0;
+}
+
+function idlerpg_player_played_seconds($player) {
+    if (isset($player['played_for']) && is_numeric($player['played_for'])) {
+        return max(0, (int) $player['played_for']);
+    }
+    $created_at = idlerpg_player_created_at($player);
+    return $created_at > 0 ? max(0, time() - $created_at) : 0;
+}
+
+function idlerpg_player_created_label($player) {
+    $created_at = idlerpg_player_created_at($player);
+    return $created_at > 0 ? idlerpg_time_value($created_at) : '';
+}
+
+function idlerpg_player_played_label($player) {
+    $played = idlerpg_player_played_seconds($player);
+    return $played > 0 ? idlerpg_ttl($played) : '';
+}
+
 function idlerpg_event_time($event) {
     $ts = (int) ($event['ts'] ?? 0);
     return $ts > 0 ? date('Y-m-d H:i', $ts) : '';
@@ -257,8 +285,10 @@ function idlerpg_render_events($events, $limit = 10) {
     }
     echo '<ol class="events">';
     foreach ($items as $event) {
+        $kind = strtolower((string) ($event['kind'] ?? 'event'));
+        $icon = str_contains($kind, 'achievement') ? '🏅 ' : '';
         echo '<li><span class="event-time">' . h(idlerpg_event_time($event)) . '</span> ';
-        echo '<span class="event-kind">[' . h($event['kind'] ?? 'event') . ']</span> ';
+        echo '<span class="event-kind">' . h($icon) . '[' . h($event['kind'] ?? 'event') . ']</span> ';
         echo h($event['text'] ?? '') . '</li>';
     }
     echo '</ol>';
@@ -427,6 +457,9 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                             <tr><th>Title</th><td><?php echo h($selected_profile['title'] ?? ''); ?></td></tr>
                             <tr><th>Level</th><td>lv.<?php echo h(idlerpg_player_level($selected_profile)); ?></td></tr>
                             <tr><th>Next level</th><td><?php echo h(idlerpg_ttl($selected_profile['ttl'] ?? 0)); ?></td></tr>
+                            <tr><th>Playing since</th><td><?php echo h(idlerpg_player_created_label($selected_profile) !== '' ? idlerpg_player_created_label($selected_profile) : 'unknown'); ?></td></tr>
+                            <tr><th>Playing for</th><td><?php echo h(idlerpg_player_played_label($selected_profile) !== '' ? idlerpg_player_played_label($selected_profile) : 'unknown'); ?></td></tr>
+                            <tr><th>Idled online</th><td><?php echo h(idlerpg_ttl($selected_profile['idled'] ?? 0)); ?></td></tr>
                             <tr><th>Alignment</th><td><?php echo h($selected_profile['alignment'] ?? 'neutral'); ?></td></tr>
                             <tr><th>Map</th><td>[<?php echo h((int) idlerpg_player_coord($selected_profile, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($selected_profile, 'y')); ?>]</td></tr>
                             <tr><th>Item sum</th><td><?php echo h($selected_profile['item_sum'] ?? 0); ?></td></tr>
