@@ -422,3 +422,52 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
         "restored": restored,
         "safety_backup": safety_backup.name,
     }
+
+
+def verify_backup(path: Path) -> dict[str, Any]:
+    """Verify a managed backup archive manifest and member checksums."""
+    path = path.resolve()
+    manifest = _read_manifest(path)
+    errors: list[str] = []
+    files = manifest.get("files", [])
+    with zipfile.ZipFile(path) as archive:
+        archive_test = archive.testzip()
+        if archive_test is not None:
+            errors.append(f"zip CRC failed for {archive_test}")
+        members = _safe_members(archive)
+        for item in files:
+            name = str(item.get("name") or "")
+            expected = str(item.get("sha256") or "")
+            if not name:
+                errors.append("manifest file without name")
+                continue
+            if name not in members:
+                errors.append(f"missing archive member: {name}")
+                continue
+            if expected:
+                digest = hashlib.sha256(archive.read(name)).hexdigest()
+                if digest != expected:
+                    errors.append(f"checksum mismatch: {name}")
+    return {
+        "name": path.name,
+        "ok": not errors,
+        "errors": errors,
+        "manifest": manifest,
+        "files": [str(item.get("name", "?")) for item in files],
+    }
+
+
+def restore_plan(archive_path: Path) -> dict[str, Any]:
+    """Return what restore_backup() would restore without writing files."""
+    archive_path = archive_path.resolve()
+    manifest = _read_manifest(archive_path)
+    targets = _target_paths()
+    with zipfile.ZipFile(archive_path) as archive:
+        members = _safe_members(archive)
+        entries = [entry for entry in RESTORE_ENTRIES if entry in members]
+    return {
+        "archive": archive_path.name,
+        "manifest": manifest,
+        "entries": entries,
+        "targets": {entry: str(targets[entry]) for entry in entries},
+    }

@@ -34,6 +34,7 @@ from utils.command import (
     Role,
     role_from_int,
 )
+from utils.command_execution import CommandExecutionContext, CommandExecutor
 from database.manager import DatabaseManager
 
 # === set up logging ===
@@ -184,6 +185,7 @@ class Bot(slixmpp.ClientXMPP):
         self.last_update_notified_version = None
         self.connection_start_time = None
         self.tasks = TaskSupervisor()
+        self.command_executor = CommandExecutor(self)
         self._startup_backup_done = False
 
         # Rate limiter (in-memory, per process)
@@ -896,21 +898,16 @@ class Bot(slixmpp.ClientXMPP):
             self.reply(msg, "🔴 Use this command in MUC Direct Message only.")
             return
 
-        try:
-            handler = getattr(cmd_obj, "handler", None)
-            if not handler:
-                log.error(f"[BOT]🔴 Command '{cmd_name}' has no handler")
-                return
-
-            result = handler(self, jid, nick, args, msg, is_room)
-            if inspect.isawaitable(result):
-                await result
-
-        except Exception as e:
-            log.exception("[BOT]🔴  Error while executing command"
-                          f" '{cmd_name}'")
-            self.reply(msg, self._command_error_message(user_role,
-                                                        cmd_name, e))
+        context = CommandExecutionContext(
+            command_name=cmd_name,
+            sender_jid=jid,
+            nick=nick,
+            room=room,
+            is_room=is_room,
+            role=user_role,
+            args=tuple(args),
+        )
+        await self.command_executor.execute(cmd_obj, context, msg)
 
 
 # --------------------------------------------------

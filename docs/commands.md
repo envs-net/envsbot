@@ -97,7 +97,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `tools` | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion |
 | `urlcheck` | `plugins` | `info` | URL title and YouTube info fetcher for groupchats |
 | `vcard` | `plugins` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only |
-| `weather` | `plugins` | `info` | Gives weather according to users location (supports MUCs and MUC DMs) |
+| `weather` | `plugins` | `info` | Gives weather according to users location or an explicit city/ZIP code |
 | `xkcd` | `plugins` | `fun` | XKCD comic fetcher and broadcaster with full indexing |
 | `xmpp` | `plugins` | `tools` | XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.) |
 
@@ -108,13 +108,17 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,audit action` | `admin` | `private recommended` | Show recent audit events for one action/event type. |
+| `,audit export` | `admin` | `private recommended` | Export recent audit events as JSON Lines. |
 | `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
+| `,audit prune` | `owner` | `private recommended` | Prune old audit events after confirmation. |
 | `,audit target` | `admin` | `private recommended` | Show recent audit events for one target value. |
 | `,audit user` | `admin` | `private recommended` | Show recent audit events for one actor JID. |
 | `,backup create` | `admin` | `private chat / MUC PM` | Create a managed ZIP backup archive. |
 | `,backup list` | `admin` | `private chat / MUC PM` | List managed backup archives. |
 | `,backup prune` | `admin` | `private chat / MUC PM` | Prune managed backup archives, with optional dry-run. |
+| `,backup restore-plan` | `owner` | `private recommended` | Show what a restore would overwrite without writing files. |
 | `,backup show` | `admin` | `private chat / MUC PM` | Show manifest details for one managed backup archive. |
+| `,backup verify` | `admin` | `private recommended` | Verify one managed backup archive. |
 | `,bot checkupdate` | `admin` | `private chat / MUC PM` | Check whether a newer EnvsBot release is available. |
 | `,bot restart` | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
@@ -126,7 +130,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config unset` | `admin` | `private chat / MUC PM` | Reset one runtime-writable config value to the config_sample.py default. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
-| `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks and backups. |
+| `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS. |
 | `,plugin diagnose` | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
 | `,plugin state` | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
 | `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
@@ -373,6 +377,22 @@ Examples:
 
 - `,audit action room_feature_changed`
 
+#### `,audit export`
+
+Export recent audit events as JSON Lines.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,audit export [limit]`
+
+Aliases: `,audits export`
+
+Examples:
+
+- `,audit export`
+- `,audit export 100`
+
 #### `,audit last`
 
 Show recent admin audit events.
@@ -388,6 +408,22 @@ Examples:
 
 - `,audit last`
 - `,audit last 2`
+
+#### `,audit prune`
+
+Prune old audit events after confirmation.
+
+Role: `owner`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,audit prune <days> [dry-run|confirm]`
+
+Aliases: `,audits prune`
+
+Examples:
+
+- `,audit prune 90 dry-run`
+- `,audit prune 90 confirm`
 
 #### `,audit target`
 
@@ -473,6 +509,21 @@ Examples:
 - `,backup prune dry-run`
 - `,backup prune keep 20 days 30`
 
+#### `,backup restore-plan`
+
+Show what a restore would overwrite without writing files.
+
+Role: `owner`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,backup restore-plan <archive|last>`
+
+Aliases: `,backup restore dry-run`, `,restore dry-run`
+
+Examples:
+
+- `,backup restore-plan last`
+
 #### `,backup show`
 
 Show manifest details for one managed backup archive.
@@ -485,6 +536,19 @@ Usage: `,backup show <archive|last>`
 Examples:
 
 - `,backup show last`
+
+#### `,backup verify`
+
+Verify one managed backup archive.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,backup verify <archive|last>`
+
+Examples:
+
+- `,backup verify last`
 
 #### `,restore`
 
@@ -522,6 +586,19 @@ Examples:
 - `,config diff`
 - `,config diff all`
 
+#### `,config reload`
+
+Reload config.py into the running bot where possible.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,config reload`
+
+Examples:
+
+- `,config reload`
+
 #### `,config search`
 
 Search visible config keys and values.
@@ -540,7 +617,7 @@ Examples:
 
 #### `,config set`
 
-Persist and apply one runtime-writable config value. A managed backup is created before editing `config.py` when the backup system is available. Startup-only and secret/protected keys are rejected.
+Persist and apply one runtime-writable config value.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
@@ -550,33 +627,6 @@ Usage: `,config set <KEY> <value>`
 Examples:
 
 - `,config set LOG_LEVEL DEBUG`
-- `,config set RSS_GLOBAL_QUERY_INTERVAL 900`
-
-#### `,config unset`
-
-Reset one runtime-writable config value to the `config_sample.py` default and apply it through the same reload path as `,config reload`.
-
-Role: `admin`<br>
-Context: `private chat / MUC PM`<br>
-Category: `admin`<br>
-Usage: `,config unset <KEY>`
-
-Examples:
-
-- `,config unset LOG_LEVEL`
-
-#### `,config reload`
-
-Reload config.py into the running bot where possible.
-
-Role: `admin`<br>
-Context: `private chat / MUC PM`<br>
-Category: `admin`<br>
-Usage: `,config reload`
-
-Examples:
-
-- `,config reload`
 
 #### `,config show`
 
@@ -593,6 +643,19 @@ Examples:
 
 - `,config show`
 - `,config show all`
+
+#### `,config unset`
+
+Reset one runtime-writable config value to the config_sample.py default.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,config unset <KEY>`
+
+Examples:
+
+- `,config unset LOG_LEVEL`
 
 #### `,config validate`
 
@@ -616,19 +679,21 @@ Operator health checks and runtime diagnostics.
 
 #### `,doctor`
 
-Run operator health checks for config, DB, rooms, plugins, tasks and backups.
+Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,doctor [full] [all|page|last]`
+Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|rss|all] [full] [page|last|all]`
 
 Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
 
 Examples:
 
 - `,doctor`
-- `,doctor full`
+- `,doctor all full`
+- `,doctor rss`
+- `,doctor tasks full`
 
 ### help
 
@@ -1351,7 +1416,7 @@ Play IdleRPG in a MUC
 Role: `user`<br>
 Context: `groupchat / MUC PM`<br>
 Category: `fun`<br>
-Usage: `,idlerpg <on|off|enabled|register|status|top|players|profile|events|achievements|stats|map|season|...>`
+Usage: `,idlerpg <on|off|enabled|register|status|top|players|profile|duel|events|stats|map|season|...>`
 
 Aliases: `,idle`, `,irpg`
 
@@ -1361,18 +1426,14 @@ Examples:
 - `,idlerpg enabled`
 - `,idlerpg status`
 - `,idlerpg top`
+- `,idlerpg duel Alice`
 - `,idlerpg quest`
 - `,idlerpg map`
-- `,idlerpg duel Sven`
 - `,idlerpg profile Sven`
 - `,idlerpg events`
-- `,idlerpg achievements list`
 - `,idlerpg stats`
-- `,idlerpg season extend 30d`
-- `,idlerpg season clear-end`
-- `,idlerpg hof clear confirm`
 - `,idlerpg announce top`
-- `,idlerpg topic update [custom text]`
+- `,idlerpg topic update IdleRPG`
 
 ### info
 
@@ -1679,12 +1740,10 @@ Examples:
 - `,rss reset all`
 - `,rss retry https://example.org/feed.rss room@conference.example.org`
 - `,rss template`
-- `,rss template set 📰 $feed_title: $title\n$link`
-- `,rss template set https://example.org/feed.rss [$feed_title] $title`
+- `,rss template set 📰 $feed_title: $title
+$link`
 - `,rss template test [$feed_title] $title`
-- `,rss template test https://example.org/feed.rss`
 - `,rss template unset`
-- `,rss template unset https://example.org/feed.rss`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`
 
@@ -2037,7 +2096,7 @@ Gives weather according to users location or an explicit city/ZIP code
 
 #### `,weather`
 
-Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code.
+Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code; or control room access.
 
 Role: `user`<br>
 Context: `any`<br>
@@ -2050,8 +2109,6 @@ Examples:
 
 - `,weather status`
 - `,weather Alice`
-- `,w Dresden`
-- `,w 01067`
 - `,rooms enable weather`
 
 ### xkcd

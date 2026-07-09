@@ -60,6 +60,16 @@ RESTART_NOTIFICATION_FILE = "/tmp/envsbot_restart_notification.json"
 # Command used by ,bot shutdown. Keep this as a list of arguments.
 STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
 
+# Command execution guardrails. Slow commands are logged; timed-out commands
+# return a friendly error and the traceback stays in the log.
+COMMAND_TIMEOUT_SECONDS = 30
+COMMAND_SLOW_LOG_SECONDS = 2.0
+
+# SQLite runtime tuning. WAL can improve read/write concurrency, but keep it
+# disabled unless your backup/maintenance workflow expects WAL sidecar files.
+DATABASE_BUSY_TIMEOUT_MS = 5000
+DATABASE_WAL_ENABLED = False
+
 
 # ================= BACKUPS =================
 

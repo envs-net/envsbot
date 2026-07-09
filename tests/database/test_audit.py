@@ -58,3 +58,27 @@ async def test_audit_log_list_filters_by_target_and_event(tmp_path):
         assert rows[0]["target"] == "rss"
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_audit_export_jsonl_and_prune(tmp_path):
+    db_path = tmp_path / "audit-export.sqlite"
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        audit = AuditLog(conn)
+        await audit.init()
+        await audit.append("old", actor="admin@example.org", details={"x": 1})
+        await conn.execute(
+            "UPDATE audit_log SET created_at = datetime('now', '-120 days') WHERE event = 'old'"
+        )
+        await conn.commit()
+        await audit.append("new", actor="admin@example.org", details={"y": 2})
+
+        payload = await audit.export_jsonl(limit=10)
+        assert '"event": "old"' in payload
+        assert '"event": "new"' in payload
+
+        assert await audit.prune_older_than(90, dry_run=True) == 1
+        assert await audit.prune_older_than(90) == 1
+        rows = await audit.list(limit=10)
+        assert [row["event"] for row in rows] == ["new"]

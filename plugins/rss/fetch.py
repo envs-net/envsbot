@@ -9,6 +9,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 from utils.config import config
 from core_plugins._core import paginate_items
+from utils.http_fetch import fetch_bytes
 from utils.url_safety import (
     FetchURLTooLarge,
     UnsafeFetchURL,
@@ -259,35 +260,17 @@ async def save_feeds(store, feeds):
 
 async def _fetch_feed_bytes(url: str) -> tuple[bytes, str, str]:
     """Fetch feed bytes with explicit timeout and redirect safety checks."""
-    headers = _get_feed_headers()
-    timeout = aiohttp.ClientTimeout(total=RSS_FETCH_TIMEOUT_SECONDS)
-    current_url = url
-
-    async with aiohttp.ClientSession(
-        timeout=timeout,
-        headers=headers,
-    ) as session:
-        for _ in range(RSS_MAX_REDIRECTS + 1):
-            current_url = await validate_fetch_url_async(
-                current_url,
-                allow_private=ALLOW_PRIVATE_FETCH_URLS,
-            )
-            async with session.get(current_url, allow_redirects=False) as resp:
-                if resp.status in (301, 302, 303, 307, 308):
-                    location = resp.headers.get("Location")
-                    if not location:
-                        raise UnsafeFetchURL(
-                            "redirect response without Location header"
-                        )
-                    current_url = urljoin(str(resp.url), location)
-                    continue
-
-                resp.raise_for_status()
-                body = await _read_limited_response(resp)
-                content_type = resp.headers.get("Content-Type", "")
-                return body, str(resp.url), content_type
-
-    raise UnsafeFetchURL("too many redirects")
+    result = await fetch_bytes(
+        url,
+        headers=_get_feed_headers(),
+        timeout_seconds=RSS_FETCH_TIMEOUT_SECONDS,
+        max_redirects=RSS_MAX_REDIRECTS,
+        max_bytes=RSS_MAX_READ_BYTES,
+        allow_private=ALLOW_PRIVATE_FETCH_URLS,
+        validator=validate_fetch_url_async,
+        session_factory=aiohttp.ClientSession,
+    )
+    return result.body, result.url, result.content_type
 
 
 def _github_feed_hint(url: str) -> str:

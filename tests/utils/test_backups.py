@@ -216,3 +216,35 @@ def test_parse_archive_created_at_handles_timezone_and_invalid_values():
 
     assert backups._parse_archive_created_at("not-a-date") is None
 
+
+
+def test_verify_backup_and_restore_plan(backup_env):
+    backup_env.backup_dir.mkdir(parents=True)
+    archive = backup_env.backup_dir / "envsbot-backup-20260101-000000-manual.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("bot.db", b"sqlite-data")
+        manifest = {
+            "app": "envsbot",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "reason": "manual",
+            "files": [
+                {
+                    "name": "bot.db",
+                    "size": len(b"sqlite-data"),
+                    "sha256": "8e40a0e8a5568b4c6ef4fb51f81a2ca2b7a8c4e4c4b733be3b8f2da4e6f8b19a",
+                }
+            ],
+            "missing": [],
+        }
+        # Keep checksum matching the actual bytes generated at runtime.
+        import hashlib
+        manifest["files"][0]["sha256"] = hashlib.sha256(b"sqlite-data").hexdigest()
+        zf.writestr("manifest.json", json.dumps(manifest))
+
+    result = backups.verify_backup(archive)
+    assert result["ok"] is True
+    assert result["files"] == ["bot.db"]
+
+    plan = backups.restore_plan(archive)
+    assert plan["entries"] == ["bot.db"]
+    assert plan["targets"]["bot.db"] == str(backup_env.db_path)

@@ -349,6 +349,18 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "retry_backoff": retrying,
     }
 
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return RSS feed health diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    lines = [
+        f"✅ RSS{scope}: feeds={state.get('feeds', 0)}, active_tasks={state.get('active_tasks', 0)}, retry_backoff={state.get('retry_backoff', 0)}"
+    ]
+    if int(state.get('retry_backoff', 0) or 0) > 0:
+        lines.append("🟡️ RSS: one or more feeds are currently in retry/backoff")
+    return lines
+
 __all__ = [
     'log',
     '_flush_user_store',
@@ -376,4 +388,5 @@ __all__ = [
     '_reset_feed_retry',
     'cleanup_room_state',
     'get_runtime_state',
+    'doctor',
 ]

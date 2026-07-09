@@ -66,8 +66,9 @@ def _summary_line(tasks: list[TaskInfo]) -> str:
 
 def _compact_task_line(task: TaskInfo) -> str:
     """Return one compact task line."""
+    heartbeat = f" | heartbeat={task.heartbeat_at}" if task.heartbeat_at and task.status == "running" else ""
     extra = f" | error={task.last_error}" if task.last_error else ""
-    return f"• {task.plugin}/{task.name} — {task.status}{extra}"
+    return f"• {task.plugin}/{task.name} — {task.status}{heartbeat}{extra}"
 
 
 def _full_task_lines(task: TaskInfo) -> list[str]:
@@ -78,6 +79,8 @@ def _full_task_lines(task: TaskInfo) -> list[str]:
         f"  created_at = {task.created_at}",
         f"  done_at = {task.done_at or '-'}",
         f"  cancelled = {task.cancelled}",
+        f"  heartbeat_at = {task.heartbeat_at or '-'}",
+        f"  restart_count = {task.restart_count}",
     ]
     if task.last_error:
         lines.append(f"  last_error = {task.last_error}")

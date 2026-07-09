@@ -81,3 +81,49 @@ class AuditLog:
             tuple(params),
         )
         return await cursor.fetchall()
+
+    async def export_jsonl(
+        self,
+        *,
+        limit: int = 100,
+        actor: str | None = None,
+        target: str | None = None,
+        event: str | None = None,
+    ) -> str:
+        """Return recent audit events as JSON Lines."""
+        rows = await self.list(limit=limit, actor=actor, target=target, event=event)
+        lines = []
+        for row in reversed(rows):
+            try:
+                details = json.loads(row["details"] or "{}")
+            except Exception:
+                details = {}
+            lines.append(json.dumps({
+                "id": row["id"],
+                "created_at": row["created_at"],
+                "event": row["event"],
+                "actor": row["actor"],
+                "target": row["target"],
+                "details": details,
+            }, sort_keys=True))
+        return "\n".join(lines)
+
+    async def prune_older_than(self, days: int, *, dry_run: bool = False) -> int:
+        """Delete audit events older than *days* and return affected count."""
+        days = max(1, int(days))
+        cursor = await self.conn.execute(
+            "SELECT COUNT(*) AS count FROM audit_log "
+            "WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        row = await cursor.fetchone()
+        count = int(row["count"] if hasattr(row, "keys") else row[0])
+        if dry_run or count == 0:
+            return count
+        await self.conn.execute(
+            "DELETE FROM audit_log WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+        )
+        await self.conn.commit()
+        return count
+

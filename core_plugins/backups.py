@@ -14,6 +14,8 @@ from utils.backups import (
     prune_old_backups,
     resolve_backup,
     restore_backup,
+    restore_plan,
+    verify_backup,
 )
 from utils.command import Role, command
 from utils.formatting import format_page, parse_page_args
@@ -197,6 +199,82 @@ async def backup_prune(bot, sender, nick, args, msg, is_room):
     if len(lines) == 2:
         lines.append("Nothing to prune.")
     bot.reply_ok(msg, "\n".join(lines))
+
+
+
+
+@command(
+    "backup verify",
+    role=Role.ADMIN,
+    short="Verify one managed backup archive.",
+    usage="{prefix}backup verify <archive|last>",
+    examples=["{prefix}backup verify last"],
+    category="admin",
+    context="private recommended",
+)
+async def backup_verify(bot, sender, nick, args, msg, is_room):
+    """Verify one managed backup archive."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{bot.prefix}backup verify <archive|last>")
+        return
+    try:
+        result = verify_backup(resolve_backup(args[0]))
+    except BackupError as exc:
+        bot.reply_error(msg, str(exc))
+        return
+    except Exception as exc:
+        log.exception("[BACKUP] Backup verification failed")
+        bot.reply_error(msg, f"Backup verification failed: {exc}")
+        return
+
+    lines = [
+        "📦 Backup verification",
+        f"Archive: {result['name']}",
+        f"Status: {'ok' if result['ok'] else 'failed'}",
+        f"Files: {', '.join(result['files']) if result['files'] else 'none'}",
+    ]
+    if result["errors"]:
+        lines.append("Errors:")
+        lines.extend(f"• {error}" for error in result["errors"])
+    text = "\n".join(lines)
+    if result["ok"]:
+        bot.reply_ok(msg, text)
+    else:
+        bot.reply_error(msg, text)
+
+
+@command(
+    "backup restore-plan",
+    role=Role.OWNER,
+    aliases=["restore dry-run", "backup restore dry-run"],
+    short="Show what a restore would overwrite without writing files.",
+    usage="{prefix}backup restore-plan <archive|last>",
+    examples=["{prefix}backup restore-plan last"],
+    category="admin",
+    context="private recommended",
+)
+async def backup_restore_plan(bot, sender, nick, args, msg, is_room):
+    """Show what a restore would overwrite without writing files."""
+    if len(args) != 1:
+        bot.reply_usage(msg, f"{bot.prefix}backup restore-plan <archive|last>")
+        return
+    try:
+        plan = restore_plan(resolve_backup(args[0]))
+    except BackupError as exc:
+        bot.reply_error(msg, str(exc))
+        return
+    lines = [
+        "📦 Backup restore dry-run",
+        f"Archive: {plan['archive']}",
+        f"Created: {plan['manifest'].get('created_at', 'unknown')}",
+        "Would restore:",
+    ]
+    if plan["entries"]:
+        for entry in plan["entries"]:
+            lines.append(f"• {entry} -> {plan['targets'][entry]}")
+    else:
+        lines.append("• nothing")
+    bot.reply(msg, lines)
 
 
 @command("restore", role=Role.OWNER, aliases=["backup restore"])

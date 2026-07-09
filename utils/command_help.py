@@ -106,9 +106,14 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "admin",
     },
     "doctor": {
-        "short": "Run operator health checks for config, DB, rooms, plugins, tasks and backups.",
-        "usage": "{prefix}doctor [full] [all|page|last]",
-        "examples": ["{prefix}doctor", "{prefix}doctor full"],
+        "short": "Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS.",
+        "usage": "{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|all] [full] [page|last|all]",
+        "examples": [
+            "{prefix}doctor",
+            "{prefix}doctor all full",
+            "{prefix}doctor rss",
+            "{prefix}doctor tasks full",
+        ],
         "context": "private chat / MUC PM",
         "category": "admin",
     },

@@ -2,6 +2,8 @@ import asyncio
 import logging
 import aiosqlite
 
+from utils.config import config
+
 from .users import UserManager
 from .rooms import Rooms
 from .audit import AuditLog
@@ -42,8 +44,16 @@ class DatabaseManager:
         self.conn = await aiosqlite.connect(self.path)
         self.conn.row_factory = aiosqlite.Row
 
-        # ✅ ENABLE FOREIGN KEYS HERE (global, correct place)
+        # SQLite runtime pragmas. Keep these near connect() so every process
+        # consistently applies them before table managers start using the DB.
         await self.conn.execute("PRAGMA foreign_keys = ON;")
+        try:
+            busy_timeout = max(0, int(config.get("database_busy_timeout_ms", 5000) or 0))
+        except Exception:
+            busy_timeout = 5000
+        await self.conn.execute(f"PRAGMA busy_timeout = {busy_timeout};")
+        if config.get("database_wal_enabled", False):
+            await self.conn.execute("PRAGMA journal_mode = WAL;")
 
         # (optional but clean)
         cursor = await self.conn.execute("PRAGMA foreign_keys;")
@@ -168,6 +178,23 @@ class DatabaseManager:
         """Manually flush cached data with retry logic."""
         if self.users:
             await self._flush_with_retry()
+
+    async def integrity_check(self) -> list[str]:
+        """Run SQLite PRAGMA integrity_check and return result rows."""
+        cursor = await self.conn.execute("PRAGMA integrity_check;")
+        rows = await cursor.fetchall()
+        result: list[str] = []
+        for row in rows:
+            try:
+                result.append(str(row[0]))
+            except Exception:
+                result.append(str(row))
+        return result
+
+    async def optimize(self) -> None:
+        """Run SQLite PRAGMA optimize for opportunistic maintenance."""
+        await self.conn.execute("PRAGMA optimize;")
+        await self.conn.commit()
 
     async def close(self):
         """

@@ -6,6 +6,7 @@ import json
 import logging
 from slixmpp import JID
 
+from utils.audit import audit_event
 from utils.command import Role, command
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
@@ -189,3 +190,73 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
         rows,
         empty=f"No audit events found for action {event}.",
     )
+
+@command(
+    "audit export",
+    role=Role.ADMIN,
+    aliases=["audits export"],
+    short="Export recent audit events as JSON Lines.",
+    usage="{prefix}audit export [limit]",
+    examples=["{prefix}audit export", "{prefix}audit export 100"],
+    category="admin",
+    context="private recommended",
+)
+async def audit_export(bot, sender, nick, args, msg, is_room):
+    """Export recent audit events as JSON Lines."""
+    limit = 100
+    if args:
+        try:
+            limit = max(1, min(int(args[0]), 500))
+        except ValueError:
+            bot.reply_usage(msg, f"{config.get('prefix', ',')}audit export [limit]")
+            return
+    audit_log = getattr(getattr(bot, "db", None), "audit", None)
+    exporter = getattr(audit_log, "export_jsonl", None)
+    if not callable(exporter):
+        bot.reply_error(msg, "Audit export is not available.")
+        return
+    payload = await exporter(limit=limit)
+    if not payload:
+        bot.reply(msg, "🧾 Audit export\nNo audit events found.")
+        return
+    bot.reply(msg, f"🧾 Audit export (JSONL, newest {limit})\n{payload}", no_store=True)
+
+
+@command(
+    "audit prune",
+    role=Role.OWNER,
+    aliases=["audits prune"],
+    short="Prune old audit events after confirmation.",
+    usage="{prefix}audit prune <days> [dry-run|confirm]",
+    examples=["{prefix}audit prune 90 dry-run", "{prefix}audit prune 90 confirm"],
+    category="admin",
+    context="private recommended",
+)
+async def audit_prune(bot, sender, nick, args, msg, is_room):
+    """Prune old audit events after confirmation."""
+    if len(args) != 2 or args[1].lower() not in {"dry-run", "dryrun", "check", "confirm"}:
+        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit prune <days> [dry-run|confirm]")
+        return
+    try:
+        days = max(1, int(args[0]))
+    except ValueError:
+        bot.reply_error(msg, "days must be a number")
+        return
+    dry_run = args[1].lower() in {"dry-run", "dryrun", "check"}
+    audit_log = getattr(getattr(bot, "db", None), "audit", None)
+    pruner = getattr(audit_log, "prune_older_than", None)
+    if not callable(pruner):
+        bot.reply_error(msg, "Audit pruning is not available.")
+        return
+    count = await pruner(days, dry_run=dry_run)
+    if dry_run:
+        bot.reply_info(msg, f"Audit prune dry-run: {count} event(s) older than {days} days would be deleted.")
+        return
+    await audit_event(
+        bot,
+        "audit_pruned",
+        actor=sender,
+        target="audit_log",
+        details={"days": days, "deleted": count},
+    )
+    bot.reply_ok(msg, f"Audit prune completed: deleted {count} event(s) older than {days} days.")

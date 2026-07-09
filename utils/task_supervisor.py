@@ -47,6 +47,8 @@ class TaskInfo:
     done_at: str | None
     cancelled: bool
     last_error: str | None
+    heartbeat_at: str | None = None
+    restart_count: int = 0
 
 
 def _is_test_mock(candidate: object) -> bool:
@@ -157,6 +159,8 @@ class TaskSupervisor:
             "created_at": _now(),
             "done_at": None,
             "last_error": None,
+            "heartbeat_at": _now(),
+            "restart_count": 0,
         }
         self._tasks[task] = meta
         self._by_plugin.setdefault(plugin, set()).add(task)
@@ -213,6 +217,45 @@ class TaskSupervisor:
         keep_for_diagnostics = has_error and task.done() and not task.cancelled()
         if not keep_for_diagnostics:
             self._forget_task(task)
+
+    def heartbeat(self, plugin: str, name: str | None = None) -> bool:
+        """Update heartbeat timestamp for a running task by plugin/name."""
+        for task, meta in tuple(self._tasks.items()):
+            if task.done():
+                continue
+            if meta.get("plugin") != plugin:
+                continue
+            if name is not None and meta.get("name") != name:
+                continue
+            meta["heartbeat_at"] = _now()
+            return True
+        return False
+
+    def touch(self, task: asyncio.Task[Any]) -> bool:
+        """Update heartbeat timestamp for a specific supervised task."""
+        meta = self._tasks.get(task)
+        if meta is None or task.done():
+            return False
+        meta["heartbeat_at"] = _now()
+        return True
+
+    def stale_tasks(self, *, max_age_seconds: float = 3600.0) -> list[TaskInfo]:
+        """Return running tasks whose heartbeat is older than max_age_seconds."""
+        now = datetime.now(timezone.utc)
+        stale: list[TaskInfo] = []
+        for info in self.snapshot(include_done=False):
+            if info.status != "running" or not info.heartbeat_at:
+                continue
+            try:
+                heartbeat = datetime.fromisoformat(info.heartbeat_at)
+                if heartbeat.tzinfo is None:
+                    heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+                age = (now - heartbeat.astimezone(timezone.utc)).total_seconds()
+            except Exception:
+                age = max_age_seconds + 1
+            if age > max_age_seconds:
+                stale.append(info)
+        return stale
 
     async def cancel_task(
         self,
@@ -363,6 +406,8 @@ class TaskSupervisor:
                     done_at=meta.get("done_at"),
                     cancelled=cancelled,
                     last_error=last_error,
+                    heartbeat_at=meta.get("heartbeat_at"),
+                    restart_count=int(meta.get("restart_count") or 0),
                 )
             )
         return sorted(items, key=lambda item: (item.plugin, item.name))

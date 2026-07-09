@@ -12,6 +12,8 @@ This module provides the PluginManager class, which is responsible for:
 All lifecycle operations are fully asynchronous and must be awaited.
 """
 
+from __future__ import annotations
+
 import asyncio
 import importlib
 import pkgutil
@@ -21,6 +23,7 @@ import logging
 from collections import deque
 
 from utils.command import COMMANDS, Role
+from utils.plugin_metadata import validate_plugin_metadata
 
 log = logging.getLogger(__name__)
 
@@ -531,6 +534,8 @@ class PluginManager:
 
             module = await self._import(self._module_path(name))
             meta = getattr(module, "PLUGIN_META", {})
+            for issue in validate_plugin_metadata(name, meta, core=self.is_core_plugin(name)):
+                log.warning("[PLUGIN] metadata %s", issue.format())
 
             # Load dependencies first
             for dep in meta.get("requires", []):
@@ -936,6 +941,49 @@ class PluginManager:
     # --------------------------------------------------
     # HELPERS
     # --------------------------------------------------
+
+    async def metadata_issues(self, name: str) -> list:
+        """Return metadata validation issues for one plugin."""
+        try:
+            module = self.plugins.get(name) or await self._import(self._module_path(name))
+            meta = getattr(module, "PLUGIN_META", {})
+        except Exception as exc:
+            from utils.plugin_metadata import PluginMetadataIssue
+            return [PluginMetadataIssue(name, "error", f"cannot import metadata: {exc}")]
+        return validate_plugin_metadata(name, meta, core=self.is_core_plugin(name))
+
+    async def all_metadata_issues(self) -> list:
+        """Return metadata validation issues for all discoverable plugins."""
+        issues = []
+        for name in self.discover():
+            issues.extend(await self.metadata_issues(name))
+        return issues
+
+    async def plugin_doctor(self, name: str, room_jid: str | None = None) -> list[str]:
+        """Return plugin-provided doctor lines for diagnostics."""
+        module = self.plugins.get(name)
+        if module is None:
+            return [f"🔴 {name}: not loaded"]
+        hook = getattr(module, "doctor", None)
+        if hook is None:
+            state = await self.plugin_state(name, room_jid=room_jid)
+            if not state:
+                return [f"ℹ️ {name}: no diagnostic hook"]
+            return [f"ℹ️ {name}: " + ", ".join(f"{k}={v}" for k, v in sorted(state.items()))]
+        if not callable(hook):
+            return [f"🔴 {name}: doctor hook is not callable"]
+        try:
+            result = hook(self.bot, room_jid=room_jid)
+            if inspect.isawaitable(result):
+                result = await result
+            if result is None:
+                return [f"✅ {name}: ok"]
+            if isinstance(result, str):
+                return [result]
+            return [str(line) for line in result]
+        except Exception as exc:
+            log.exception("[PLUGIN] doctor hook failed for %s", name)
+            return [f"🔴 {name}: doctor failed: {exc}"]
 
     async def get_plugin_info(self, name):
         """
