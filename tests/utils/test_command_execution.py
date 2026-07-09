@@ -8,11 +8,10 @@ import pytest
 
 import utils.command_execution as ce
 from utils.command import Role
-from utils.command_execution import CommandExecutionContext, CommandExecutor
 
 
 def _context(role=Role.ADMIN):
-    return CommandExecutionContext(
+    return ce.CommandExecutionContext(
         command_name="config set",
         sender_jid="admin@example.org",
         nick="admin",
@@ -28,7 +27,7 @@ async def test_command_executor_audits_admin_command(monkeypatch):
     monkeypatch.setitem(ce.config, "command_timeout_seconds", 5)
     bot = SimpleNamespace(audit=AsyncMock(), reply=MagicMock(), reply_error=MagicMock())
     bot._command_error_message = MagicMock(return_value="friendly error")
-    executor = CommandExecutor(bot)
+    executor = ce.CommandExecutor(bot)
     handler = AsyncMock()
     cmd = SimpleNamespace(handler=handler)
     msg = MagicMock()
@@ -47,7 +46,7 @@ async def test_command_executor_reports_timeout(monkeypatch):
     monkeypatch.setitem(ce.config, "command_timeout_seconds", 0.01)
     bot = SimpleNamespace(audit=AsyncMock(), reply=MagicMock(), reply_error=MagicMock())
     bot._command_error_message = MagicMock(return_value="friendly error")
-    executor = CommandExecutor(bot)
+    executor = ce.CommandExecutor(bot)
 
     async def slow(*_args):
         await asyncio.sleep(1)
@@ -67,7 +66,7 @@ async def test_command_executor_does_not_audit_regular_user(monkeypatch):
     bot._command_error_message = MagicMock(return_value="friendly error")
     handler = AsyncMock()
 
-    await CommandExecutor(bot).execute(
+    await ce.CommandExecutor(bot).execute(
         SimpleNamespace(handler=handler),
         _context(role=Role.USER),
         MagicMock(),

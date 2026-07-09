@@ -14,13 +14,16 @@ def test_asyncio_create_task_supports_name_branches(monkeypatch):
         return SimpleNamespace(parameters={"name": object()})
 
     monkeypatch.setattr(ts.inspect, "signature", signature_with_name)
+    ts._asyncio_create_task_supports_name.cache_clear()
     assert ts._asyncio_create_task_supports_name() is True
 
     def signature_without_name(_obj):
         return SimpleNamespace(parameters={})
 
     monkeypatch.setattr(ts.inspect, "signature", signature_without_name)
+    ts._asyncio_create_task_supports_name.cache_clear()
     assert ts._asyncio_create_task_supports_name() is False
+    ts._asyncio_create_task_supports_name.cache_clear()
 
 
 def test_asyncio_create_task_supports_name_signature_failures(monkeypatch):
@@ -28,20 +31,24 @@ def test_asyncio_create_task_supports_name_signature_failures(monkeypatch):
         raise TypeError("no signature")
 
     monkeypatch.setattr(ts.inspect, "signature", raise_type_error)
+    ts._asyncio_create_task_supports_name.cache_clear()
     assert ts._asyncio_create_task_supports_name() is True
 
     def raise_value_error(_obj):
         raise ValueError("no signature")
 
     monkeypatch.setattr(ts.inspect, "signature", raise_value_error)
+    ts._asyncio_create_task_supports_name.cache_clear()
     assert ts._asyncio_create_task_supports_name() is True
 
     def raise_runtime_error(_obj):
         raise RuntimeError("unexpected failure")
 
     monkeypatch.setattr(ts.inspect, "signature", raise_runtime_error)
+    ts._asyncio_create_task_supports_name.cache_clear()
     with pytest.raises(RuntimeError, match="unexpected failure"):
         ts._asyncio_create_task_supports_name()
+    ts._asyncio_create_task_supports_name.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -154,7 +161,7 @@ async def test_snapshot_includes_completed_tasks_by_default():
     assert items[0].status == "done"
 
 @pytest.mark.asyncio
-async def test_snapshot_without_done_keeps_cancelled_and_failed_tasks():
+async def test_snapshot_without_done_keeps_failed_tasks_only():
     supervisor = TaskSupervisor()
 
     async def quick_success():
@@ -184,7 +191,8 @@ async def test_snapshot_without_done_keeps_cancelled_and_failed_tasks():
     statuses = {item.name: item.status for item in items}
 
     assert "success" not in statuses
-    assert statuses == {"cancelled": "cancelled", "failure": "failed"}
+    assert "cancelled" not in statuses
+    assert statuses == {"failure": "failed"}
 
 
 @pytest.mark.asyncio

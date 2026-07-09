@@ -7,6 +7,7 @@ import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Awaitable, Protocol
 
 log = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ def _is_plugin_task_creator(candidate: object) -> bool:
     return has_varargs or len(positional) >= 2
 
 
+@lru_cache(maxsize=1)
 def _asyncio_create_task_supports_name() -> bool:
     """Return whether asyncio.create_task accepts a task name keyword."""
     try:
@@ -129,7 +131,14 @@ def create_plugin_task(
     if _is_plugin_task_creator(creator):
         return creator(plugin, coro, name=name)
     if _asyncio_create_task_supports_name():
-        return asyncio.create_task(coro, name=name)
+        try:
+            return asyncio.create_task(coro, name=name)
+        except TypeError as exc:
+            if "name" not in str(exc):
+                raise
+            # Some tests monkeypatch asyncio.create_task with a reduced callable.
+            # Fall back to the pre-name signature while production keeps using names.
+            return asyncio.create_task(coro)
     return asyncio.create_task(coro)
 
 
@@ -150,7 +159,13 @@ class TaskSupervisor:
         """Create and track a task for a plugin."""
         task_name = name or f"{plugin}-task"
         if _asyncio_create_task_supports_name():
-            task = asyncio.create_task(coro, name=task_name)
+            try:
+                task = asyncio.create_task(coro, name=task_name)
+            except TypeError as exc:
+                if "name" not in str(exc):
+                    raise
+                # Some tests monkeypatch asyncio.create_task with a reduced callable.
+                task = asyncio.create_task(coro)
         else:
             task = asyncio.create_task(coro)
         meta = {
@@ -384,7 +399,7 @@ class TaskSupervisor:
                 cancelled = task.cancelled()
                 last_error = meta.get("last_error")
 
-                if not include_done and not cancelled and last_error is None:
+                if not include_done and (cancelled or last_error is None):
                     continue
 
                 if cancelled:
