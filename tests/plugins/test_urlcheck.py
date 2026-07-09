@@ -317,6 +317,32 @@ def test_extract_urls_handles_multiple_code_blocks():
     ]
 
 
+def test_extract_urls_strips_trailing_prose_punctuation():
+    text = "See https://example.org/path, and https://example.net/end)."
+
+    assert urlcheck._extract_urls_from_message_text(text) == [
+        "https://example.org/path",
+        "https://example.net/end",
+    ]
+
+
+def test_extract_urls_handles_inline_code_fences():
+    text = "\n".join([
+        "https://example.org/before ```https://example.org/hidden``` https://example.org/after",
+        "```https://example.org/hidden-inline``` https://example.org/visible",
+        "```",
+        "https://example.org/hidden-block",
+        "``` https://example.org/reopened",
+    ])
+
+    assert urlcheck._extract_urls_from_message_text(text) == [
+        "https://example.org/before",
+        "https://example.org/after",
+        "https://example.org/visible",
+        "https://example.org/reopened",
+    ]
+
+
 def test_urlcheck_small_helpers_and_on_load(fake_bot):
     assert urlcheck.strip_html_tags("<b>Hello</b> <i>World</i>") == "Hello World"
     assert urlcheck.strip_html_tags(None) == ""
