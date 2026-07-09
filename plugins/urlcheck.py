@@ -24,11 +24,9 @@ a room (use MUC PM):
 
 """
 import re
-import aiohttp
-import asyncio
+import inspect
 import logging
 import html
-import requests
 
 import isodate
 
@@ -38,7 +36,8 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from utils.url_safety import UnsafeFetchURL, validate_fetch_url
+from utils.http_fetch import fetch_bytes, fetch_json, passthrough_validator
+from utils.url_safety import UnsafeFetchURL
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins._core import handle_room_toggle_command
 
@@ -223,10 +222,10 @@ async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):
     _url_timestamps[room][url] = now
 
     try:
-        loop = asyncio.get_running_loop()
-        final_url, status, ctype, title, content_size, mdesc = (
-                await loop.run_in_executor(None, fetch_url_title, url, 5)
-        )
+        fetch_result = fetch_url_title(url, 5)
+        if inspect.isawaitable(fetch_result):
+            fetch_result = await fetch_result
+        final_url, status, ctype, title, content_size, mdesc = fetch_result
 
         st = f"(Status: {status})" if status in [200, 403] else ""
 
@@ -403,95 +402,44 @@ def has_xep_0392_link_metadata(msg):
     )
 
 
-def fetch_url_title(url, max_redirects=None):
+async def fetch_url_title(url, max_redirects=None):
     """
     Fetch the final URL after redirects, status code, content type, title
-    and description.
-
-    This is a synchronous version using requests (intended for running via
-    run_in_executor).
+    and description using the shared HTTP utility.
     """
     parsed_orig = urlparse(url)
     orig_fragment = parsed_orig.fragment
     if max_redirects is None:
         max_redirects = URLCHECK_MAX_REDIRECTS
 
-    headers = {"User-Agent": URLCHECK_USER_AGENT}
-    url = validate_fetch_url(
+    result = await fetch_bytes(
         url,
+        headers={"User-Agent": URLCHECK_USER_AGENT},
+        timeout_seconds=URLCHECK_FETCH_TIMEOUT_SECONDS,
+        max_redirects=max_redirects,
+        max_bytes=URLCHECK_MAX_READ_BYTES,
         allow_private=ALLOW_PRIVATE_FETCH_URLS,
+        raise_for_status=False,
     )
 
-    session = requests.Session()
-    session.headers.update(headers)
-    # session.max_redirects is not available; handle manually with for loop
+    final_url = result.url
+    if orig_fragment:
+        parsed_final = urlparse(final_url)
+        final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
 
-    try:
-        for _ in range(max_redirects):
-            resp = session.get(url, allow_redirects=False, timeout=URLCHECK_FETCH_TIMEOUT_SECONDS,
-                               stream=True)
-            status = resp.status_code
-            ctype = resp.headers.get("Content-Type", "")
-            content_size = resp.headers.get("Content-Length")
-            try:
-                content_size = int(content_size) if content_size else None
-            except Exception:
-                content_size = None
+    ctype = result.content_type
+    if "text/html" in ctype:
+        buffer = result.body.decode("utf-8", errors="replace")
+        title_found, desc_found = extract_html_title_desc(buffer)
+        return (
+            final_url, result.status,
+            ctype, title_found, None, desc_found
+        )
 
-            # Handle redirect manually
-            if (status in (301, 302, 303, 307, 308)
-                    and "Location" in resp.headers):
-                url = urljoin(resp.url, resp.headers["Location"])
-                url = validate_fetch_url(
-                    url,
-                    allow_private=ALLOW_PRIVATE_FETCH_URLS,
-                )
-                try:
-                    resp.close()
-                except Exception as exc:
-                    log.debug("Ignoring error while closing redirect response: %s", exc)
-                continue
-
-            # Only try to find title/desc in text/html
-            if "text/html" in ctype:
-                # max_read = 65536  # 64KB max
-                buffer = ""
-                title_found = None
-                desc_found = None
-                for chunk in resp.iter_content(chunk_size=8192,
-                                               decode_unicode=True):
-                    buffer += chunk
-                    if title_found is None:
-                        title_found, _ = extract_html_title_desc(buffer)
-                    if desc_found is None:
-                        _, desc_found = extract_html_title_desc(buffer)
-                    if title_found and desc_found:
-                        break
-                    if len(buffer) >= URLCHECK_MAX_READ_BYTES:
-                        break
-                final_url = resp.url
-                if orig_fragment:
-                    parsed_final = urlparse(final_url)
-                    final_url = urlunparse(
-                        parsed_final._replace(fragment=orig_fragment))
-                return (
-                    final_url, status,
-                    ctype, title_found, None, desc_found
-                )
-            else:
-                final_url = resp.url
-                if orig_fragment:
-                    parsed_final = urlparse(final_url)
-                    final_url = urlunparse(
-                        parsed_final._replace(fragment=orig_fragment))
-                return (
-                    final_url, status, ctype,
-                    None, content_size, None
-                )
-
-        raise Exception("Too many redirects")
-    finally:
-        session.close()
+    return (
+        final_url, result.status, ctype,
+        None, len(result.body), None
+    )
 
 
 def extract_html_title_desc(html, is_wikipedia=False):
@@ -552,41 +500,45 @@ async def fetch_youtube_info(url):
         f"?id={video_id}&part=snippet,statistics,"
         f"contentDetails&key={api_key}"
     )
-    async with aiohttp.ClientSession() as session:
-        async with session.get(api_url, timeout=URLCHECK_FETCH_TIMEOUT_SECONDS) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
-            items = data.get("items", [])
-            if not items:
-                return None
-            info = items[0]
-            snippet = info["snippet"]
-            stats = info["statistics"]
-            content_details = info.get("contentDetails", {})
-            title = snippet.get("title", "")
-            uploader = snippet.get("channelTitle", "")
-            views = stats.get("viewCount", "0")
-            duration = content_details.get("duration", "")
-            upload_date = snippet.get("publishedAt", "")
-            # Format duration as 1h23m46s, 23m46s, or 46s
-            length_str = ""
-            if duration:
-                length_str = await _create_length_str(duration)
-            # Format upload date as "DD Mon YYYY" if possible
-            if upload_date:
-                try:
-                    upload_date = datetime.strptime(
-                        upload_date[:10], "%Y-%m-%d"
-                    ).strftime("%d %b %Y")
-                except Exception:
-                    upload_date = ""
-            return (
-                f'[YOUTUBE] "{title}" uploaded by {uploader} '
-                f'({length_str}) - Views: {views}'
-                + (f' - {upload_date}' if upload_date else ''),
-                title, uploader, length_str, views
-            )
+    result = await fetch_json(
+        api_url,
+        timeout_seconds=URLCHECK_FETCH_TIMEOUT_SECONDS,
+        max_bytes=262144,
+        validator=passthrough_validator,
+        raise_for_status=False,
+    )
+    if result.status != 200 or not isinstance(result.data, dict):
+        return None
+    items = result.data.get("items", [])
+    if not items:
+        return None
+    info = items[0]
+    snippet = info["snippet"]
+    stats = info["statistics"]
+    content_details = info.get("contentDetails", {})
+    title = snippet.get("title", "")
+    uploader = snippet.get("channelTitle", "")
+    views = stats.get("viewCount", "0")
+    duration = content_details.get("duration", "")
+    upload_date = snippet.get("publishedAt", "")
+    # Format duration as 1h23m46s, 23m46s, or 46s
+    length_str = ""
+    if duration:
+        length_str = await _create_length_str(duration)
+    # Format upload date as "DD Mon YYYY" if possible
+    if upload_date:
+        try:
+            upload_date = datetime.strptime(
+                upload_date[:10], "%Y-%m-%d"
+            ).strftime("%d %b %Y")
+        except Exception:
+            upload_date = ""
+    return (
+        f'[YOUTUBE] "{title}" uploaded by {uploader} '
+        f'({length_str}) - Views: {views}'
+        + (f' - {upload_date}' if upload_date else ''),
+        title, uploader, length_str, views
+    )
 
 
 async def on_load(bot):

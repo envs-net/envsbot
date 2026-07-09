@@ -1,6 +1,5 @@
 import pytest
 import types
-import asyncio
 import csv
 from plugins import info as info_plugin
 from unittest.mock import MagicMock
@@ -380,8 +379,6 @@ async def test_wikipedia_usage(dummy_bot, fake_room_msg):
 async def test_wikipedia_notfound(monkeypatch, dummy_bot, fake_room_msg):
     monkeypatch.setattr(
         info_plugin, "fetch_wikipedia_summary", lambda term: None)
-    orig = asyncio.get_event_loop
-    monkeypatch.setattr(info_plugin.asyncio, "get_event_loop", lambda: orig())
     await info_plugin.wikipedia_command(dummy_bot, "jid", "nick",
                                         ["somethingunreal"],
                                         fake_room_msg, True)
@@ -393,8 +390,6 @@ async def test_wikipedia_notfound(monkeypatch, dummy_bot, fake_room_msg):
 async def test_wikipedia_found(monkeypatch, dummy_bot, fake_room_msg):
     monkeypatch.setattr(info_plugin, "fetch_wikipedia_summary", lambda term: (
         "Python", "A summary", "http://wiki/Python"))
-    orig = asyncio.get_event_loop
-    monkeypatch.setattr(info_plugin.asyncio, "get_event_loop", lambda: orig())
     await info_plugin.wikipedia_command(dummy_bot, "jid", "nick",
                                         ["Python"], fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
@@ -411,53 +406,53 @@ async def test_information_command_toggle_on(dummy_bot, fake_room_msg):
     assert "Usage" in text or "usage" in text
 
 
-def test_fetch_wikipedia_summary_paths(monkeypatch):
-    class Resp:
+@pytest.mark.asyncio
+async def test_fetch_wikipedia_summary_paths(monkeypatch):
+    class FetchResult:
         def __init__(self, status, data):
-            self.status_code = status
-            self._data = data
-        def json(self):
-            return self._data
+            self.status = status
+            self.data = data
 
     calls = []
 
-    def fake_get(url, headers=None, timeout=None):
-        calls.append((url, headers, timeout))
-        return Resp(200, {
+    async def fake_fetch_json(url, **kwargs):
+        calls.append((url, kwargs))
+        return FetchResult(200, {
             "title": "Example",
             "extract": "Summary text",
             "content_urls": {"desktop": {"page": "https://example.org/wiki/Example"}},
         })
 
-    monkeypatch.setattr(info_plugin.requests, "get", fake_get)
-    assert info_plugin.fetch_wikipedia_summary("Example Page") == (
+    monkeypatch.setattr(info_plugin, "fetch_json", fake_fetch_json)
+    assert await info_plugin.fetch_wikipedia_summary("Example Page") == (
         "Example", "Summary text", "https://example.org/wiki/Example"
     )
     assert "Example%20Page" in calls[0][0]
-    assert calls[0][1]["User-Agent"] == info_plugin.INFO_HTTP_USER_AGENT
-    assert calls[0][2] == info_plugin.INFO_HTTP_TIMEOUT
+    assert calls[0][1]["headers"]["User-Agent"] == info_plugin.INFO_HTTP_USER_AGENT
+    assert calls[0][1]["timeout_seconds"] == info_plugin.INFO_HTTP_TIMEOUT
 
-    monkeypatch.setattr(
-        info_plugin.requests,
-        "get",
-        lambda *a, **k: Resp(200, {
+    async def disambiguation_fetch_json(*args, **kwargs):
+        return FetchResult(200, {
             "type": "disambiguation",
             "titles": {"canonical": "Example_(disambiguation)"},
-        }),
-    )
-    assert info_plugin.fetch_wikipedia_summary("Example") == (
+        })
+
+    monkeypatch.setattr(info_plugin, "fetch_json", disambiguation_fetch_json)
+    assert await info_plugin.fetch_wikipedia_summary("Example") == (
         "Example_(disambiguation)", "Disambiguation page", None
     )
 
-    monkeypatch.setattr(info_plugin.requests, "get", lambda *a, **k: Resp(404, {}))
-    assert info_plugin.fetch_wikipedia_summary("Missing") is None
+    async def missing_fetch_json(*args, **kwargs):
+        return FetchResult(404, {})
 
-    monkeypatch.setattr(
-        info_plugin.requests,
-        "get",
-        lambda *a, **k: Resp(200, {"title": "Incomplete"}),
-    )
-    assert info_plugin.fetch_wikipedia_summary("Incomplete") is None
+    monkeypatch.setattr(info_plugin, "fetch_json", missing_fetch_json)
+    assert await info_plugin.fetch_wikipedia_summary("Missing") is None
+
+    async def incomplete_fetch_json(*args, **kwargs):
+        return FetchResult(200, {"title": "Incomplete"})
+
+    monkeypatch.setattr(info_plugin, "fetch_json", incomplete_fetch_json)
+    assert await info_plugin.fetch_wikipedia_summary("Incomplete") is None
 
 @pytest.mark.asyncio
 async def test_info_store_getter_uses_information_store():

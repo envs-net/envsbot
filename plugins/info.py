@@ -20,8 +20,8 @@ Commands:
 """
 
 import aiohttp
-import asyncio
-import requests
+import inspect
+import urllib.parse
 import html
 import logging
 import re
@@ -32,6 +32,7 @@ from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
+from utils.http_fetch import fetch_json, passthrough_validator
 from core_plugins._core import (
     handle_room_toggle_command,
     _is_muc_pm,
@@ -116,30 +117,41 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
     url = f"https://{instance}/api/v1/accounts/lookup?acct={username}"
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=INFO_HTTP_TIMEOUT) as resp:
-                if resp.status != 200:
-                    log.warning("[FEDIVERSE] 🔴  User not found on instance.")
-                    bot.reply(msg, "🔴  User not found on this instance.")
-                    return
-                user = await resp.json()
-            user_id = user.get("id")
-            if not user_id:
-                log.warning("[FEDIVERSE] 🔴  Could not resolve user ID.")
-                bot.reply(msg, "🔴  Could not resolve user.")
-                return
-            timeline_url = (
-                f"https://{instance}/api/v1/accounts/{user_id}/statuses"
-                "?limit=1&exclude_replies=false&exclude_reblogs=false"
-            )
-            async with session.get(timeline_url, timeout=INFO_HTTP_TIMEOUT) as resp:
-                if resp.status != 200:
-                    log.warning(
-                        "[FEDIVERSE] 🔴  Could not fetch user timeline."
-                    )
-                    bot.reply(msg, "🔴  Could not fetch user timeline.")
-                    return
-                statuses = await resp.json()
+        user_result = await fetch_json(
+            url,
+            timeout_seconds=INFO_HTTP_TIMEOUT,
+            max_bytes=131072,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+        if user_result.status != 200:
+            log.warning("[FEDIVERSE] 🔴  User not found on instance.")
+            bot.reply(msg, "🔴  User not found on this instance.")
+            return
+        user = user_result.data
+        user_id = user.get("id") if isinstance(user, dict) else None
+        if not user_id:
+            log.warning("[FEDIVERSE] 🔴  Could not resolve user ID.")
+            bot.reply(msg, "🔴  Could not resolve user.")
+            return
+        timeline_url = (
+            f"https://{instance}/api/v1/accounts/{user_id}/statuses"
+            "?limit=1&exclude_replies=false&exclude_reblogs=false"
+        )
+        timeline_result = await fetch_json(
+            timeline_url,
+            timeout_seconds=INFO_HTTP_TIMEOUT,
+            max_bytes=262144,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+        if timeline_result.status != 200:
+            log.warning("[FEDIVERSE] 🔴  Could not fetch user timeline.")
+            bot.reply(msg, "🔴  Could not fetch user timeline.")
+            return
+        statuses = timeline_result.data
     except Exception:
         log.exception("[FEDIVERSE] 🚨 Error fetching from Fediverse.")
         bot.reply(msg, "🔴  Error fetching from Fediverse.")
@@ -197,13 +209,19 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
     url = UDICT_API_URL.format(term)
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=INFO_HTTP_TIMEOUT) as resp:
-                if resp.status != 200:
-                    log.warning("[UDICT] 🔴  Failed to fetch definition.")
-                    bot.reply(msg, "🔴  Failed to fetch definition.")
-                    return
-                data = await resp.json()
+        result = await fetch_json(
+            url,
+            timeout_seconds=INFO_HTTP_TIMEOUT,
+            max_bytes=262144,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+        if result.status != 200:
+            log.warning("[UDICT] 🔴  Failed to fetch definition.")
+            bot.reply(msg, "🔴  Failed to fetch definition.")
+            return
+        data = result.data
     except Exception:
         log.exception("[UDICT] 🚨 Error fetching from Urban Dictionary.")
         bot.reply(msg, "🔴  Error fetching from Urban Dictionary.")
@@ -239,22 +257,30 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{}"
 
 
-def fetch_wikipedia_summary(term):
+async def fetch_wikipedia_summary(term):
     """
     Query the Wikipedia REST API and return extracted data, or None on error.
     """
-    url = WIKIPEDIA_API_URL.format(requests.utils.quote(term))
-    resp = requests.get(url, headers={"User-Agent": INFO_HTTP_USER_AGENT}, timeout=INFO_HTTP_TIMEOUT)
-    if resp.status_code == 200:
-        data = resp.json()
+    url = WIKIPEDIA_API_URL.format(urllib.parse.quote(term))
+    result = await fetch_json(
+        url,
+        headers={"User-Agent": INFO_HTTP_USER_AGENT},
+        timeout_seconds=INFO_HTTP_TIMEOUT,
+        max_bytes=262144,
+        session_factory=aiohttp.ClientSession,
+        validator=passthrough_validator,
+        raise_for_status=False,
+    )
+    if result.status == 200 and isinstance(result.data, dict):
+        data = result.data
         title = data.get("title")
         summary = data.get("extract")
-        url = data.get("content_urls", {}).get("desktop", {}).get("page")
-        if title and summary and url:
-            return title, summary, url
+        page_url = data.get("content_urls", {}).get("desktop", {}).get("page")
+        if title and summary and page_url:
+            return title, summary, page_url
         # If it's a redirect/disambiguation, may contain other structure
-        elif data.get("type") == "disambiguation" and "titles" in data:
-            return data["titles"]["canonical"], "Disambiguation page", url
+        if data.get("type") == "disambiguation" and "titles" in data:
+            return data["titles"].get("canonical"), "Disambiguation page", page_url
     return None
 
 
@@ -277,10 +303,9 @@ async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     term = " ".join(args)
-    # Run blocking HTTP in executor
-    result = await asyncio.get_event_loop().run_in_executor(
-        None, fetch_wikipedia_summary, term
-    )
+    result = fetch_wikipedia_summary(term)
+    if inspect.isawaitable(result):
+        result = await result
 
     if result:
         title, summary, url = result

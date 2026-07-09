@@ -1,5 +1,6 @@
 import asyncio
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import plugins.xmpp as xmpp
@@ -265,24 +266,22 @@ async def test_cmd_xmpp_compliance(bot, msg):
     m = msg()
     bot.db.users.plugin.return_value.get_global = AsyncMock(
         return_value={"room@muc.example": True})
-    # Patch aiohttp.ClientSession to mock network
-    with patch("aiohttp.ClientSession.get") as mock_get:
-        resp = AsyncMock()
-        resp.status = 200
+    async def fake_fetch_text(url, **kwargs):
+        return SimpleNamespace(status=200, text="<html></html>")
 
-        class FakeSoup:
-            def find(self, *a, **kw):
-                class Score:
-                    def get_text(self, **_): return "110/120"
-                return Score()
-        resp.text.return_value = "<html></html>"
-        with patch("bs4.BeautifulSoup", return_value=FakeSoup()):
-            mock_get.return_value.__aenter__.return_value = resp
-            await xmpp.cmd_xmpp_compliance(bot, "jid", "nick",
-                                           ["conversations.im"], m, True)
-            bot.reply.assert_called()
-            assert "Compliance score" in "".join(
-                str(a) for a in bot.reply.call_args[0])
+    class FakeSoup:
+        def find(self, *a, **kw):
+            class Score:
+                def get_text(self, **_): return "110/120"
+            return Score()
+
+    with patch.object(xmpp, "fetch_text", fake_fetch_text), \
+            patch("bs4.BeautifulSoup", return_value=FakeSoup()):
+        await xmpp.cmd_xmpp_compliance(bot, "jid", "nick",
+                                       ["conversations.im"], m, True)
+        bot.reply.assert_called()
+        assert "Compliance score" in "".join(
+            str(a) for a in bot.reply.call_args[0])
 
 
 @pytest.mark.asyncio

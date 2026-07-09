@@ -25,10 +25,10 @@ Commands:
 """
 import time
 import slixmpp
-import aiohttp
 import asyncio
 from utils.command import command, Role
 from utils.config import config
+from utils.http_fetch import fetch_text, passthrough_validator
 from core_plugins._core import (
         handle_room_toggle_command,
         _is_muc_pm,
@@ -858,35 +858,34 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
                        f"'{domain}' from '{args[0]}'.")
 
     try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://compliance.conversations.im/server/{domain}/"
-            async with (
-                    session.get(url,
-                                timeout=aiohttp.ClientTimeout(total=XMPP_HTTP_TIMEOUT_SECONDS))
-                    as resp):
-                if resp.status == 200:
-                    from bs4 import BeautifulSoup
-                    html = await resp.text()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    score_elem = soup.find(class_='stat_result')
-                    if score_elem:
-                        score = score_elem.get_text(strip=True)
-                        result_url = (f"https://compliance.conversations.im"
-                                      f"/server/{domain}/")
-                        bot.reply(msg, f"✅ Compliance score for {domain}:"
-                                       f" **{score}**\nDetails: {result_url}")
-                    else:
-                        bot.reply(msg, "🔴 Could not extract compliance"
-                                       f" score for {domain}")
-                elif resp.status == 404:
-                    bot.reply(msg, f"🔴 Server '{domain}' not found"
-                                   " in compliance database")
-                else:
-                    bot.reply(msg, "🔴 Compliance database returned"
-                                   f"status {resp.status}")
+        url = f"https://compliance.conversations.im/server/{domain}/"
+        resp = await fetch_text(
+            url,
+            timeout_seconds=XMPP_HTTP_TIMEOUT_SECONDS,
+            max_bytes=262144,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+        if resp.status == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            score_elem = soup.find(class_='stat_result')
+            if score_elem:
+                score = score_elem.get_text(strip=True)
+                result_url = (f"https://compliance.conversations.im"
+                              f"/server/{domain}/")
+                bot.reply(msg, f"✅ Compliance score for {domain}:"
+                               f" **{score}**\nDetails: {result_url}")
+            else:
+                bot.reply(msg, "🔴 Could not extract compliance"
+                               f" score for {domain}")
+        elif resp.status == 404:
+            bot.reply(msg, f"🔴 Server '{domain}' not found"
+                           " in compliance database")
+        else:
+            bot.reply(msg, "🔴 Compliance database returned"
+                           f"status {resp.status}")
     except asyncio.TimeoutError:
         bot.reply(msg, "🔴 Compliance request timed out.")
-    except aiohttp.ClientError as e:
-        bot.reply(msg, f"🔴 Network error: {e}")
     except Exception as e:
         bot.reply(msg, f"🔴 Error: {e}")

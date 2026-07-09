@@ -20,6 +20,7 @@ from plugins import vcard
 from utils.command import command, Role
 # Intentionally exposed for tests and runtime settings.
 from utils.config import config
+from utils.http_fetch import fetch_text, passthrough_validator
 from core_plugins.rooms import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
@@ -320,20 +321,23 @@ async def _reply_with_weather_for_location(bot, msg, display_name, location):
     forecast_url, weather_url = _build_wttr_urls(location)
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                weather_url,
-                timeout=WEATHER_HTTP_TIMEOUT,
-            ) as resp:
-                if resp.status != 200:
-                    bot.reply(msg, f"🌦️ Failed to fetch weather for"
-                                   f" {display_name}.")
-                    log.warning(
-                        f"[WEATHER] 🌦️ HTTP error {resp.status} for"
-                        f" {display_name} at {location}"
-                    )
-                    return
-                weather = await resp.text()
+        result = await fetch_text(
+            weather_url,
+            timeout_seconds=WEATHER_HTTP_TIMEOUT,
+            max_bytes=8192,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+        if result.status != 200:
+            bot.reply(msg, f"🌦️ Failed to fetch weather for"
+                           f" {display_name}.")
+            log.warning(
+                f"[WEATHER] 🌦️ HTTP error {result.status} for"
+                f" {display_name} at {location}"
+            )
+            return
+        weather = result.text
     except Exception:
         bot.reply(msg, f"🌦️ Failed to fetch weather for {display_name}.")
         log.warning(

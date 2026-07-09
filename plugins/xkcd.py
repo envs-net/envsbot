@@ -27,6 +27,7 @@ from core_plugins import _core
 from core_plugins.rooms import JOINED_ROOMS
 from utils.command import Role, command
 from utils.config import config
+from utils.http_fetch import fetch_json, passthrough_validator
 
 from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
@@ -79,16 +80,18 @@ async def fetch_xkcd(url: str, session: aiohttp.ClientSession | None = None):
                           url, resp.status)
                 return None
 
-        async with aiohttp.ClientSession() as own_session:
-            async with own_session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=XKCD_HTTP_TIMEOUT),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                log.debug("[XKCD] Non-200 response for %s: %s",
-                          url, resp.status)
-                return None
+        result = await fetch_json(
+            url,
+            timeout_seconds=XKCD_HTTP_TIMEOUT,
+            max_bytes=65536,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+        if result.status == 200:
+            return result.data
+        log.debug("[XKCD] Non-200 response for %s: %s", url, result.status)
+        return None
 
     except Exception as exc:
         log.warning("[XKCD] Failed to fetch %s: %s", url, exc)

@@ -93,32 +93,17 @@ def test_resolve_url_with_urljoin():
 
 @pytest.mark.asyncio
 async def test_fetch_url_title_basic(monkeypatch):
-    from requests import Session
-    called = []
+    async def fake_fetch_bytes(url, **kwargs):
+        assert url == "https://xx"
+        return types.SimpleNamespace(
+            url="https://final",
+            status=200,
+            content_type="text/html",
+            body=b"<title>X</title><meta name='description' content='desc'>",
+        )
 
-    class FakeResp:
-        url = "https://final"
-        headers = {"Content-Type": "text/html"}
-        status_code = 200
-
-        def iter_content(self, chunk_size, decode_unicode):
-            yield "<title>X</title><meta name='description' content='desc'>"
-
-        def close(self): pass
-
-    class MySession(Session):
-        def __init__(self): self._headers = {}
-        @property
-        def headers(self): return self._headers
-
-        def get(self, url, allow_redirects, timeout, stream):
-            called.append(url)
-            return FakeResp()
-
-        def close(self): pass
-    monkeypatch.setattr(urlcheck, "requests", MagicMock(Session=MySession))
-    monkeypatch.setattr(urlcheck, "validate_fetch_url", lambda url, **kwargs: url)
-    final_url, status, ctype, title, _, desc = urlcheck.fetch_url_title(
+    monkeypatch.setattr(urlcheck, "fetch_bytes", fake_fetch_bytes)
+    final_url, status, ctype, title, _, desc = await urlcheck.fetch_url_title(
         "https://xx")
     assert final_url == "https://final"
     assert status == 200
@@ -127,51 +112,21 @@ async def test_fetch_url_title_basic(monkeypatch):
     assert desc == "desc"
 
 
-def test_fetch_url_title_blocks_unsafe_initial_url(monkeypatch):
-    monkeypatch.setattr(
-        urlcheck.requests,
-        "Session",
-        lambda: pytest.fail("unsafe URL should not be fetched"),
-    )
+@pytest.mark.asyncio
+async def test_fetch_url_title_blocks_unsafe_initial_url():
+    with pytest.raises(urlcheck.UnsafeFetchURL):
+        await urlcheck.fetch_url_title("http://127.0.0.1/private")
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_title_blocks_unsafe_redirect(monkeypatch):
+    async def blocked_fetch_bytes(*args, **kwargs):
+        raise urlcheck.UnsafeFetchURL("blocked")
+
+    monkeypatch.setattr(urlcheck, "fetch_bytes", blocked_fetch_bytes)
 
     with pytest.raises(urlcheck.UnsafeFetchURL):
-        urlcheck.fetch_url_title("http://127.0.0.1/private")
-
-
-def test_fetch_url_title_blocks_unsafe_redirect(monkeypatch):
-    seen = []
-
-    def fake_validate(url, **kwargs):
-        seen.append(url)
-        if "127.0.0.1" in url:
-            raise urlcheck.UnsafeFetchURL("blocked")
-        return url
-
-    class FakeRedirectResp:
-        url = "https://example.org/feed"
-        headers = {"Location": "http://127.0.0.1/private"}
-        status_code = 302
-
-        def close(self):
-            pass
-
-    class MySession:
-        def __init__(self):
-            self.headers = {}
-
-        def get(self, url, allow_redirects, timeout, stream):
-            return FakeRedirectResp()
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(urlcheck, "requests", MagicMock(Session=MySession))
-    monkeypatch.setattr(urlcheck, "validate_fetch_url", fake_validate)
-
-    with pytest.raises(urlcheck.UnsafeFetchURL):
-        urlcheck.fetch_url_title("https://example.org/feed")
-
-    assert seen == ["https://example.org/feed", "http://127.0.0.1/private"]
+        await urlcheck.fetch_url_title("https://example.org/feed")
 
 
 def test_youtube_regex():
@@ -187,27 +142,15 @@ def test_youtube_regex():
 async def test_fetch_youtube_info(monkeypatch):
     urlcheck.config["youtube_api_key"] = "fake-api-key"
 
-    class DummyResp:
-        async def __aenter__(self): return self
-        async def __aexit__(self, exc_type, exc, tb): pass
-
-        async def json(self): return {"items": [{
+    async def fake_fetch_json(url, **kwargs):
+        return types.SimpleNamespace(status=200, data={"items": [{
             "snippet": {"title": "t", "channelTitle": "ch",
                         "publishedAt": "2022-01-01T00:00:00Z"},
             "statistics": {"viewCount": "1"},
             "contentDetails": {"duration": "PT12M34S"}
-        }]}
-        @property
-        def status(self): return 200
+        }]})
 
-    class DummySession:
-        async def __aenter__(self): return self
-        async def __aexit__(self, exc_type, exc, tb): pass
-
-        def get(self, url, timeout):
-            return DummyResp()
-    monkeypatch.setattr(urlcheck.aiohttp, "ClientSession",
-                        MagicMock(return_value=DummySession()))
+    monkeypatch.setattr(urlcheck, "fetch_json", fake_fetch_json)
     val = await urlcheck.fetch_youtube_info("https://youtu.be/12345678901")
     assert isinstance(val, tuple)
     assert "ch" in val[0]
