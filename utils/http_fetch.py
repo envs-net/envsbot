@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from urllib.parse import urljoin
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
+from urllib.parse import urljoin
 
 import aiohttp
 
@@ -46,7 +46,6 @@ class HTTPJsonResult:
     status: int
 
 
-
 async def passthrough_validator(url: str, **_: Any) -> str:
     """Return URL unchanged for fixed, operator-controlled API endpoints."""
     return str(url)
@@ -78,21 +77,18 @@ def _session_from_factory(
 def _session_get(session: aiohttp.ClientSession, url: str, timeout: aiohttp.ClientTimeout):
     """Call session.get with fallbacks for small test doubles."""
     try:
-        return session.get(url, allow_redirects=False)
+        return session.get(url, timeout=timeout, allow_redirects=False)
     except TypeError:
-        try:
-            return session.get(url, timeout=timeout, allow_redirects=False)
-        except TypeError:
-            return session.get(url, allow_redirects=False)
+        return session.get(url, allow_redirects=False)
 
 
 def _response_url(resp: aiohttp.ClientResponse, fallback_url: str) -> str:
     return str(getattr(resp, "url", fallback_url) or fallback_url)
 
 
-def _response_headers(resp: aiohttp.ClientResponse) -> dict[str, str]:
+def _response_headers(resp: aiohttp.ClientResponse) -> Mapping[str, str]:
     headers = getattr(resp, "headers", None)
-    return headers if isinstance(headers, dict) else {}
+    return headers if isinstance(headers, Mapping) else {}
 
 
 def _response_content_type(resp: aiohttp.ClientResponse) -> str:
@@ -199,7 +195,7 @@ async def fetch_bytes(
                     content_type=_response_content_type(resp),
                     status=status,
                 )
-    raise UnsafeFetchURL("too many redirects")
+        raise UnsafeFetchURL("too many redirects")
 
 
 async def fetch_text(
@@ -222,7 +218,7 @@ async def fetch_json(url: str, **kwargs: Any) -> HTTPJsonResult:
     """Fetch URL and decode the response body as JSON."""
     result = await fetch_text(url, **kwargs)
     return HTTPJsonResult(
-        data=json.loads(result.text or "null"),
+        data=json.loads(result.text),
         url=result.url,
         content_type=result.content_type,
         status=result.status,
