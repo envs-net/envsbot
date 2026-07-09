@@ -76,7 +76,7 @@ async def test_fetch_xkcd_success(monkeypatch):
     class DummySession:
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
-        def get(self, url, timeout=None): return DummyResp()
+        def get(self, url, timeout=None, allow_redirects=False): return DummyResp()
 
     monkeypatch.setattr(aiohttp, "ClientSession", DummySession)
     url = "https://xkcd.com/1/info.0.json"
@@ -95,7 +95,7 @@ async def test_fetch_xkcd_http_error(monkeypatch):
     class DummySession:
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
-        def get(self, url, timeout=None): return DummyResp()
+        def get(self, url, timeout=None, allow_redirects=False): return DummyResp()
 
     monkeypatch.setattr(aiohttp, "ClientSession", DummySession)
     data = await xkcd.fetch_xkcd("https://xkcd.com/404/info.0.json")
@@ -107,7 +107,7 @@ async def test_fetch_xkcd_exception(monkeypatch):
     class DummySession:
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
-        def get(self, url, timeout=None): raise Exception("fail")
+        def get(self, url, timeout=None, allow_redirects=False): raise Exception("fail")
     monkeypatch.setattr(aiohttp, "ClientSession", DummySession)
     data = await xkcd.fetch_xkcd("https://xkcd.com/1/info.0.json")
     assert data is None

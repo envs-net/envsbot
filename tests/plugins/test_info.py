@@ -30,7 +30,7 @@ class DummyAioSession:
     async def __aenter__(self): return self
     async def __aexit__(self, exc_type, exc, tb): pass
 
-    def get(self, url, timeout=None):
+    def get(self, url, timeout=None, allow_redirects=False):
         for key in self.resp_map:
             if key in url:
                 return self.resp_map[key]

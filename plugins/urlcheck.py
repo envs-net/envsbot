@@ -30,7 +30,7 @@ import html
 
 import isodate
 
-from urllib.parse import urlparse, urlunparse, urljoin
+from urllib.parse import urlparse, urlunparse
 from datetime import datetime
 from functools import partial
 
@@ -176,15 +176,10 @@ async def on_groupchat_message(bot, msg):
 def _extract_urls_from_message_text(text):
     lines = []
     in_code_block = False
-    codeblock_started = False
 
     for line in text.splitlines():
-        if not codeblock_started and "```" in line:
-            in_code_block = True
-            codeblock_started = True
-            continue
-        if in_code_block and "```" in line:
-            in_code_block = False
+        if "```" in line:
+            in_code_block = not in_code_block
             continue
         if in_code_block:
             continue

@@ -297,6 +297,26 @@ async def test_on_groupchat_message_codeblock_and_quote_suppression(
     assert fake_bot._replies == []
 
 
+
+def test_extract_urls_handles_multiple_code_blocks():
+    text = "\n".join([
+        "https://example.org/one",
+        "```",
+        "https://example.org/hidden-one",
+        "```",
+        "https://example.org/two",
+        "```",
+        "https://example.org/hidden-two",
+        "```",
+        "> https://example.org/quoted",
+    ])
+
+    assert urlcheck._extract_urls_from_message_text(text) == [
+        "https://example.org/one",
+        "https://example.org/two",
+    ]
+
+
 def test_urlcheck_small_helpers_and_on_load(fake_bot):
     assert urlcheck.strip_html_tags("<b>Hello</b> <i>World</i>") == "Hello World"
     assert urlcheck.strip_html_tags(None) == ""

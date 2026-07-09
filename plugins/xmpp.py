@@ -854,7 +854,7 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
         return
 
     if "@" in args[0]:
-        bot.reply(msg, "Note: 'compliance' only works with domains. Using"
+        bot.reply(msg, "Note: 'compliance' only works with domains. Using "
                        f"'{domain}' from '{args[0]}'.")
 
     try:
@@ -883,7 +883,7 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
             bot.reply(msg, f"🔴 Server '{domain}' not found"
                            " in compliance database")
         else:
-            bot.reply(msg, "🔴 Compliance database returned"
+            bot.reply(msg, "🔴 Compliance database returned "
                            f"status {resp.status}")
     except asyncio.TimeoutError:
         bot.reply(msg, "🔴 Compliance request timed out.")

@@ -332,7 +332,6 @@ SLANG_REMOVALS_CSV = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "slang_removals.csv"
 )
 
-log = logging.getLogger(__name__)
 
 
 # --- CSV helpers ---

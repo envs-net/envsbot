@@ -81,9 +81,9 @@ def _session_get(session: aiohttp.ClientSession, url: str, timeout: aiohttp.Clie
         return session.get(url, allow_redirects=False)
     except TypeError:
         try:
-            return session.get(url, timeout=timeout)
+            return session.get(url, timeout=timeout, allow_redirects=False)
         except TypeError:
-            return session.get(url)
+            return session.get(url, allow_redirects=False)
 
 
 def _response_url(resp: aiohttp.ClientResponse, fallback_url: str) -> str:
