@@ -657,3 +657,54 @@ async def on_load(bot):
         "message",
         partial(on_message, bot),
     )
+
+
+def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+    if not room_jid:
+        return len(enabled_rooms)
+    target = str(room_jid).split('/', 1)[0].strip().lower()
+    return sum(
+        1 for room in enabled_rooms
+        if str(room).split('/', 1)[0].strip().lower() == target
+    )
+
+
+def _sed_cache_counts(room_jid: str | None = None) -> tuple[int, int]:
+    caches = getattr(_core, "_SHARED_MESSAGE_CACHES", {})
+    room_cache = caches.get(CACHE_NAMESPACE, {}) if hasattr(caches, "get") else {}
+    if not isinstance(room_cache, dict):
+        return 0, 0
+    if room_jid:
+        target = str(room_jid).split('/', 1)[0].strip().lower()
+        matching = [
+            entries for room, entries in room_cache.items()
+            if str(room).split('/', 1)[0].strip().lower() == target
+        ]
+        return len(matching), sum(len(entries) for entries in matching)
+    return len(room_cache), sum(len(entries) for entries in room_cache.values())
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
+    """Return small sed counters for diagnostics."""
+    enabled_rooms = await _core._get_enabled_rooms(bot, SED_KEY, "sed")
+    cached_rooms, cached_messages = _sed_cache_counts(room_jid)
+    return {
+        "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
+        "cached_rooms": cached_rooms,
+        "cached_messages": cached_messages,
+        "cache_size": SED_CACHE_SIZE,
+        "regex_timeout": REGEX_TIMEOUT,
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return sed plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Sed{scope}: enabled_rooms={state['enabled_rooms']}, "
+        f"cached_rooms={state['cached_rooms']}, "
+        f"cached_messages={state['cached_messages']}, "
+        f"cache_size={state['cache_size']}, "
+        f"regex_timeout={state['regex_timeout']:g}s"
+    ]

@@ -359,3 +359,143 @@ async def test_pin_runtime_state_and_doctor_counts_normalized_rooms(monkeypatch)
     assert await pin.get_runtime_state(bot, room_jid="missing@conf") == {"rooms": 0, "pins": 0}
     assert await pin.doctor(bot, room_jid="room@conf") == ["✅ Pin for room@conf: rooms=1, pins=2"]
     assert await pin.doctor(bot, room_jid="missing@conf") == ["ℹ️ Pin for missing@conf: no stored pins"]
+
+
+@pytest.mark.asyncio
+async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
+    import plugins.dice as dice
+    import plugins.info as info
+    import plugins.sed as sed
+    import plugins.tools as tools
+    import plugins.vcard as vcard
+    import plugins.xmpp as xmpp
+
+    stores = {
+        "dice": FakePluginStore({dice.DICE_KEY: {"Room@Conf/Nick": True, "other@conf": True}}),
+        "information": FakePluginStore({info.INFO_KEY: {"Room@Conf": True}}),
+        "sed": FakePluginStore({sed.SED_KEY: {"Room@Conf": True, "other@conf": True}}),
+        "tools": FakePluginStore({tools.TOOLS_KEY: {"Room@Conf": True}}),
+        "vcard": FakePluginStore({vcard.VCARD_KEY: {"Room@Conf": True}}),
+        "xmpp": FakePluginStore({xmpp.XMPP_KEY: {"Room@Conf": True, "disabled@conf": False}}),
+    }
+    bot = SimpleNamespace(
+        db=FakeDB(stores=stores),
+        plugin={"xep_0054": object()},
+    )
+
+    main_csv = tmp_path / "chat_slang.csv"
+    additions_csv = tmp_path / "slang_additions.csv"
+    removals_csv = tmp_path / "slang_removals.csv"
+    main_csv.write_text("brb,be right back\nbrb,be right back soon\nlol,laughing out loud\n", encoding="utf-8")
+    additions_csv.write_text("idk,I do not know\n", encoding="utf-8")
+    removals_csv.write_text("lol,laughing out loud\n", encoding="utf-8")
+    monkeypatch.setattr(info, "SLANG_CSV", str(main_csv))
+    monkeypatch.setattr(info, "SLANG_ADDITIONS_CSV", str(additions_csv))
+    monkeypatch.setattr(info, "SLANG_REMOVALS_CSV", str(removals_csv))
+
+    sed._core._SHARED_MESSAGE_CACHES[sed.CACHE_NAMESPACE].clear()
+    sed._core.cache_message(sed.CACHE_NAMESPACE, "room@conf", "alice", "hello", "stanza-1")
+
+    joined = {"room@conf": {"nicks": {"alice": {"jid": "alice@example.org"}}}}
+    monkeypatch.setattr(tools, "JOINED_ROOMS", joined)
+    monkeypatch.setattr(vcard, "JOINED_ROOMS", joined)
+    monkeypatch.setattr(xmpp, "JOINED_ROOMS", joined)
+
+    assert await dice.get_runtime_state(bot, "room@conf/nick") == {
+        "enabled_rooms": 1,
+        "max_dice": 10,
+        "max_sides": 100,
+    }
+    assert await dice.doctor(bot, "room@conf") == [
+        "✅ Dice for room@conf: enabled_rooms=1, limits=10d100"
+    ]
+
+    assert await info.get_runtime_state(bot, "room@conf") == {
+        "enabled_rooms": 1,
+        "acronyms": 2,
+        "definitions": 3,
+        "pending_additions": 1,
+        "pending_removals": 1,
+        "timeout": info.INFO_HTTP_TIMEOUT,
+    }
+    assert await info.doctor(bot, "room@conf") == [
+        f"✅ Info for room@conf: enabled_rooms=1, acronyms=2, definitions=3, "
+        f"pending_additions=1, pending_removals=1, timeout={info.INFO_HTTP_TIMEOUT:g}s"
+    ]
+
+    assert await sed.get_runtime_state(bot, "room@conf") == {
+        "enabled_rooms": 1,
+        "cached_rooms": 1,
+        "cached_messages": 1,
+        "cache_size": sed.SED_CACHE_SIZE,
+        "regex_timeout": sed.REGEX_TIMEOUT,
+    }
+    assert await sed.doctor(bot, "room@conf") == [
+        f"✅ Sed for room@conf: enabled_rooms=1, cached_rooms=1, "
+        f"cached_messages=1, cache_size={sed.SED_CACHE_SIZE}, regex_timeout={sed.REGEX_TIMEOUT:g}s"
+    ]
+
+    tools_state = await tools.get_runtime_state(bot, "room@conf")
+    assert tools_state["enabled_rooms"] == 1
+    assert tools_state["joined_rooms"] == 1
+    assert tools_state["tracked_nicks"] == 1
+    assert tools_state["timezones_known"] > 0
+    assert (await tools.doctor(bot, "room@conf"))[0].startswith(
+        "✅ Tools for room@conf: enabled_rooms=1, joined_rooms=1, tracked_nicks=1"
+    )
+
+    assert await vcard.get_runtime_state(bot, "room@conf") == {
+        "enabled_rooms": 1,
+        "joined_rooms": 1,
+        "tracked_nicks": 1,
+        "xep_0054_available": 1,
+        "fetch_timeout": 10.0,
+    }
+    assert await vcard.doctor(bot, "room@conf") == [
+        "✅ vCard for room@conf: enabled_rooms=1, joined_rooms=1, "
+        "tracked_nicks=1, xep_0054_available=1, fetch_timeout=10s"
+    ]
+
+    assert await xmpp.get_runtime_state(bot, "room@conf") == {
+        "enabled_rooms": 1,
+        "joined_rooms": 1,
+        "query_timeout": xmpp.XMPP_QUERY_TIMEOUT_SECONDS,
+        "http_timeout": xmpp.XMPP_HTTP_TIMEOUT_SECONDS,
+    }
+    assert await xmpp.doctor(bot, "room@conf") == [
+        f"✅ XMPP for room@conf: enabled_rooms=1, joined_rooms=1, "
+        f"query_timeout={xmpp.XMPP_QUERY_TIMEOUT_SECONDS:g}s, "
+        f"http_timeout={xmpp.XMPP_HTTP_TIMEOUT_SECONDS:g}s"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_poll_and_xkcd_doctor_hooks(monkeypatch):
+    import plugins.poll as poll
+    import plugins.xkcd as xkcd
+
+    monkeypatch.setattr(poll, "_get_data", AsyncMock(return_value={
+        "rooms": {
+            "room@conf": {"polls": {"1": {"status": "open"}, "2": {"status": "closed"}}},
+        }
+    }))
+    monkeypatch.setattr(poll, "AUTO_CLOSE_TASKS", {("room@conf", "1"): FakeTask(done=False)})
+    assert await poll.doctor(SimpleNamespace(), "room@conf") == [
+        "✅ Poll for room@conf: rooms=1, polls=2, active=1, auto_close_tasks=1"
+    ]
+
+    store = FakePluginStore({
+        xkcd.XKCD_KEY: {"rooms": ["Room@Conf", "other@conf"]},
+        xkcd.XKCD_INDEX_KEY: {"1": {}, "2": {}},
+    })
+    bot = SimpleNamespace(db=FakeDB(stores={"xkcd": store}))
+    monkeypatch.setattr(xkcd, "CHECK_TASK", FakeTask(done=False))
+    monkeypatch.setattr(xkcd, "INDEX_TASK", FakeTask(done=True))
+
+    assert await xkcd.doctor(bot, "room@conf") == [
+        "✅ XKCD for room@conf: legacy_rooms=1, indexed_comics=2"
+    ]
+    assert await xkcd.doctor(bot) == [
+        "✅ XKCD: legacy_rooms=2, indexed_comics=2, "
+        "check_task_running=1, index_task_running=0"
+    ]

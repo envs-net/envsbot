@@ -611,3 +611,54 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
                   + f" ({days_str} until next birthday)")
     except Exception:
         bot.reply(msg, f"🎂 Birthday for {display_name}: {value}")
+
+
+def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+    if not room_jid:
+        return len(enabled_rooms)
+    target = str(room_jid).split('/', 1)[0].strip().lower()
+    return sum(
+        1 for room in enabled_rooms
+        if str(room).split('/', 1)[0].strip().lower() == target
+    )
+
+
+def _joined_nick_count(room_jid: str | None = None) -> int:
+    if room_jid:
+        target = str(room_jid).split('/', 1)[0].strip().lower()
+        joined = JOINED_ROOMS.get(target, {})
+        nicks = joined.get("nicks", {}) if isinstance(joined, dict) else {}
+        return len(nicks) if isinstance(nicks, dict) else 0
+    total = 0
+    for joined in JOINED_ROOMS.values():
+        nicks = joined.get("nicks", {}) if isinstance(joined, dict) else {}
+        if isinstance(nicks, dict):
+            total += len(nicks)
+    return total
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
+    """Return small vCard counters for diagnostics."""
+    enabled_rooms = await _core._get_enabled_rooms(bot, VCARD_KEY, "vcard")
+    plugin_map = getattr(bot, "plugin", {}) or {}
+    return {
+        "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
+        "joined_rooms": 1 if room_jid and _joined_nick_count(room_jid) else (len(JOINED_ROOMS) if not room_jid else 0),
+        "tracked_nicks": _joined_nick_count(room_jid),
+        "xep_0054_available": int("xep_0054" in plugin_map),
+        "fetch_timeout": float(config.get("vcard_fetch_timeout_seconds", 10) or 10),
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return vCard plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    icon = "✅" if state["xep_0054_available"] else "⚠️"
+    return [
+        f"{icon} vCard{scope}: enabled_rooms={state['enabled_rooms']}, "
+        f"joined_rooms={state['joined_rooms']}, "
+        f"tracked_nicks={state['tracked_nicks']}, "
+        f"xep_0054_available={state['xep_0054_available']}, "
+        f"fetch_timeout={state['fetch_timeout']:g}s"
+    ]

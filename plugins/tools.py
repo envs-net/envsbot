@@ -664,3 +664,50 @@ async def seen_command(bot, sender_jid, nick, args, msg, is_room):
         log.exception(f"[SEEN] Unexpected error in seen command for '{nick}':"
                       f" {exc}")
         bot.reply(msg, "🔴 Unexpected error in seen command.")
+
+
+def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+    if not room_jid:
+        return len(enabled_rooms)
+    target = str(room_jid).split('/', 1)[0].strip().lower()
+    return sum(
+        1 for room in enabled_rooms
+        if str(room).split('/', 1)[0].strip().lower() == target
+    )
+
+
+def _joined_nick_count(room_jid: str | None = None) -> int:
+    if room_jid:
+        target = str(room_jid).split('/', 1)[0].strip().lower()
+        joined = JOINED_ROOMS.get(target, {})
+        nicks = joined.get("nicks", {}) if isinstance(joined, dict) else {}
+        return len(nicks) if isinstance(nicks, dict) else 0
+    total = 0
+    for joined in JOINED_ROOMS.values():
+        nicks = joined.get("nicks", {}) if isinstance(joined, dict) else {}
+        if isinstance(nicks, dict):
+            total += len(nicks)
+    return total
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small tools counters for diagnostics."""
+    enabled_rooms = await _get_enabled_rooms(bot, TOOLS_KEY, "tools")
+    return {
+        "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
+        "joined_rooms": 1 if room_jid and _joined_nick_count(room_jid) else (len(JOINED_ROOMS) if not room_jid else 0),
+        "tracked_nicks": _joined_nick_count(room_jid),
+        "timezones_known": len(pytz.all_timezones),
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return tools plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Tools{scope}: enabled_rooms={state['enabled_rooms']}, "
+        f"joined_rooms={state['joined_rooms']}, "
+        f"tracked_nicks={state['tracked_nicks']}, "
+        f"timezones_known={state['timezones_known']}"
+    ]

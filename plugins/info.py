@@ -915,3 +915,50 @@ async def information_command(bot, sender_jid, nick, args, msg, is_room):
 
 async def get_info_store(bot):
     return bot.db.users.plugin("information")
+
+
+def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+    if not room_jid:
+        return len(enabled_rooms)
+    target = str(room_jid).split('/', 1)[0].strip().lower()
+    return sum(
+        1 for room in enabled_rooms
+        if str(room).split('/', 1)[0].strip().lower() == target
+    )
+
+
+def _csv_row_count(path: str) -> int:
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return sum(1 for row in csv.reader(handle) if len(row) >= 2)
+    except OSError:
+        return 0
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
+    """Return small info-plugin counters for diagnostics."""
+    enabled_rooms = await _get_enabled_rooms(bot, INFO_KEY, "information")
+    definitions = load_main_definitions()
+    return {
+        "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
+        "acronyms": len(definitions),
+        "definitions": sum(len(items) for items in definitions.values()),
+        "pending_additions": _csv_row_count(SLANG_ADDITIONS_CSV),
+        "pending_removals": _csv_row_count(SLANG_REMOVALS_CSV),
+        "timeout": INFO_HTTP_TIMEOUT,
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return info plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Info{scope}: enabled_rooms={state['enabled_rooms']}, "
+        f"acronyms={state['acronyms']}, definitions={state['definitions']}, "
+        f"pending_additions={state['pending_additions']}, "
+        f"pending_removals={state['pending_removals']}, "
+        f"timeout={state['timeout']:g}s"
+    ]

@@ -191,3 +191,30 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
 
 async def get_dice_store(bot):
     return bot.db.users.plugin("dice")
+
+
+def _room_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+    if not room_jid:
+        return len(enabled_rooms)
+    target = str(room_jid).split('/', 1)[0].strip().lower()
+    return sum(1 for room in enabled_rooms if str(room).split('/', 1)[0].strip().lower() == target)
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return small dice counters for diagnostics."""
+    enabled_rooms = await _get_enabled_rooms(bot, DICE_KEY, "dice")
+    return {
+        "enabled_rooms": _room_enabled_count(enabled_rooms, room_jid),
+        "max_dice": 10,
+        "max_sides": 100,
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return dice plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Dice{scope}: enabled_rooms={state['enabled_rooms']}, "
+        f"limits={state['max_dice']}d{state['max_sides']}"
+    ]

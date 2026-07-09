@@ -979,3 +979,45 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🔴 Compliance request timed out.")
     except Exception as e:
         bot.reply(msg, f"🔴 Error: {e}")
+
+
+def _enabled_rooms_from_state(state) -> set[str]:
+    if not isinstance(state, dict):
+        return set()
+    return {
+        str(room).split('/', 1)[0].strip().lower()
+        for room, enabled in state.items()
+        if enabled is True
+    }
+
+
+def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+    if not room_jid:
+        return len(enabled_rooms)
+    target = str(room_jid).split('/', 1)[0].strip().lower()
+    return sum(1 for room in enabled_rooms if room == target)
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
+    """Return small XMPP plugin counters for diagnostics."""
+    store = await get_xmpp_store(bot)
+    enabled_state = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = _enabled_rooms_from_state(enabled_state)
+    return {
+        "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
+        "joined_rooms": len(JOINED_ROOMS) if room_jid is None else int(str(room_jid).split('/', 1)[0].strip().lower() in JOINED_ROOMS),
+        "query_timeout": XMPP_QUERY_TIMEOUT_SECONDS,
+        "http_timeout": XMPP_HTTP_TIMEOUT_SECONDS,
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return XMPP plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ XMPP{scope}: enabled_rooms={state['enabled_rooms']}, "
+        f"joined_rooms={state['joined_rooms']}, "
+        f"query_timeout={state['query_timeout']:g}s, "
+        f"http_timeout={state['http_timeout']:g}s"
+    ]

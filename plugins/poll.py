@@ -957,3 +957,13 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "active": active_polls,
         "auto_close_tasks": sum(1 for task in AUTO_CLOSE_TASKS.values() if not task.done()),
     }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return poll plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Poll{scope}: rooms={state['rooms']}, polls={state['polls']}, "
+        f"active={state['active']}, auto_close_tasks={state['auto_close_tasks']}"
+    ]

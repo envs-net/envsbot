@@ -928,3 +928,20 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "check_task_running": int(CHECK_TASK is not None and not CHECK_TASK.done()),
         "index_task_running": int(INDEX_TASK is not None and not INDEX_TASK.done()),
     }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return XKCD plugin health lines."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    if room_jid:
+        return [
+            f"✅ XKCD{scope}: legacy_rooms={state['legacy_rooms']}, "
+            f"indexed_comics={state['indexed_comics']}"
+        ]
+    return [
+        f"✅ XKCD: legacy_rooms={state['legacy_rooms']}, "
+        f"indexed_comics={state['indexed_comics']}, "
+        f"check_task_running={state['check_task_running']}, "
+        f"index_task_running={state['index_task_running']}"
+    ]
