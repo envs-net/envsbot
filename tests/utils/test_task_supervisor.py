@@ -364,7 +364,7 @@ async def test_stale_tasks_ignores_done_tasks_and_missing_heartbeats():
             await asyncio.sleep(60)
 
     done_task = supervisor.create("alpha", quick(), name="done")
-    await done_task
+    assert await done_task == "ok"
     running_without_heartbeat = supervisor.create("alpha", sleeper(), name="no-heartbeat")
     supervisor._tasks[running_without_heartbeat]["heartbeat_at"] = None
 
