@@ -3,7 +3,8 @@
 Command decorator metadata is now the single source of truth.  This module is
 kept only for older imports/tests that still ask for ``metadata_for()`` or
 ``COMMAND_HELP``; both are generated from decorated command records instead of
-being maintained manually.
+being maintained manually.  ``COMMAND_HELP`` is exposed lazily via
+``__getattr__`` so the registry remains the only concrete metadata store.
 """
 
 from __future__ import annotations
@@ -76,4 +77,9 @@ class _CommandHelpView(dict[str, CommandMetadata]):
         return key in self._data()
 
 
-COMMAND_HELP: dict[str, CommandMetadata] = _CommandHelpView()
+def __getattr__(name: str):
+    """Return lazily generated compatibility attributes."""
+    if name == "COMMAND_HELP":
+        return _CommandHelpView()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

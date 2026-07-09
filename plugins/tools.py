@@ -202,10 +202,12 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
             target_jid = str(info["jid"])
             display_name = nick
     else:
-        # Direct messages to bot are vorbidden
+        # Direct messages to bot are forbidden
         if args:
-            log.info(f"[VCARD] Direct message with args from '{
-                     msg['from'].bare}'")
+            log.info(
+                "[VCARD] Direct message with args from '%s'",
+                msg["from"].bare,
+            )
             bot.reply(
                 msg,
                 "🔴  In direct messages, you can only look up your own vCard."
@@ -288,8 +290,10 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         # Direct messages are not allowed
         if args:
-            log.info(f"[VCARD] Direct message with args from '{
-                     msg['from'].bare}'")
+            log.info(
+                "[VCARD] Direct message with args from '%s'",
+                msg["from"].bare,
+            )
             bot.reply(
                 msg,
                 "🔴  In direct messages, you can only look up your own vCard."
@@ -460,8 +464,10 @@ async def _seen_resolve_room_context(bot, sender_jid, nick, args, msg):
             mp = bot.plugin["xep_0045"]
             occupants = mp.get_roster(room_jid)
             if display_nick in occupants:
-                target_show = mp.get_jid_property(room_jid, display_nick,
-                                                  "show" or "online")
+                target_show = (
+                    mp.get_jid_property(room_jid, display_nick, "show")
+                    or "online"
+                )
                 target_status = mp.get_jid_property(room_jid, display_nick,
                                                     "status") or ""
                 target_emoji = bot.presence.emoji(target_show)
