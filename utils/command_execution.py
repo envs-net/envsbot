@@ -11,6 +11,7 @@ from typing import Any
 
 from utils.command import Role
 from utils.config import config
+from utils.logging_helpers import kv
 
 log = logging.getLogger(__name__)
 
@@ -126,11 +127,8 @@ class CommandExecutor:
             status = "timeout"
             error_text = f"timeout after {timeout:g}s"
             log.warning(
-                "[COMMAND] Command timed out: %s actor=%s room=%s timeout=%ss",
-                context.command_name,
-                context.sender_jid,
-                context.room,
-                timeout,
+                "[COMMAND] event=timeout %s",
+                kv(command=context.command_name, actor=context.sender_jid, room=context.room, timeout=f"{timeout:g}s"),
             )
             self.bot.reply_error(
                 msg,
@@ -156,12 +154,8 @@ class CommandExecutor:
             slow_threshold = self.slow_log_seconds()
             if slow_threshold > 0 and duration_ms >= int(slow_threshold * 1000):
                 log.info(
-                    "[COMMAND] Slow command: %s actor=%s room=%s duration=%dms status=%s",
-                    context.command_name,
-                    context.sender_jid,
-                    context.room,
-                    duration_ms,
-                    status,
+                    "[COMMAND] event=slow %s",
+                    kv(command=context.command_name, actor=context.sender_jid, room=context.room, duration_ms=duration_ms, status=status),
                 )
             await self._audit(
                 context,

@@ -140,3 +140,34 @@ COMMAND_RATE_LIMIT_REFILL_AMOUNT = 1
 COMMAND_RATE_LIMIT_REFILL_INTERVAL_SECONDS = 0.5
 COMMAND_RATE_LIMIT_BYPASS_ROLE = "moderator"
 ```
+
+## Local preflight check
+
+For deployments and upgrades, envsbot now has a local preflight mode that does
+not connect to XMPP:
+
+```bash
+python -m envsbot --check
+# or, when installed from the package:
+envsbot --check
+```
+
+The preflight checks that the config can be loaded, core packages import, the
+backup directory is writable, command documentation is generated from current
+metadata, and the SQLite database can be opened and checked.
+
+## Core runtime modules
+
+The top-level `envsbot.py` entrypoint now delegates most runtime behaviour to
+small `bot/` modules:
+
+- `bot.connection` for JID/resource/connect option handling
+- `bot.routing` for incoming MUC/private message routing
+- `bot.dispatch` for command resolution, rate limiting and permissions
+- `bot.messages` for reply formatting and safe sending
+- `bot.permissions` for role lookup and room-affiliation elevation
+- `bot.lifecycle` for startup, restart notifications and shutdown cleanup
+- `bot.audit` for best-effort audit writes
+
+These modules are intended to keep the runtime core easier to test while the
+public `envsbot.Bot` API remains compatible.

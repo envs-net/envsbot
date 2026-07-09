@@ -293,6 +293,35 @@ def _validate_sed_inputs(original_text: str, pattern: str, replacement: str,
     return original_text, pattern, replacement, flags_str, None
 
 
+
+def _apply_literal_sed_direct(original_text: str, pattern: str, replacement: str, flags_str: str):
+    """Apply literal-mode sed without process startup overhead."""
+    re_flags = 0
+    global_replace = False
+    for flag in flags_str.lower():
+        if flag == "i":
+            re_flags |= re.IGNORECASE
+        elif flag == "m":
+            re_flags |= re.MULTILINE
+        elif flag == "s":
+            re_flags |= re.DOTALL
+        elif flag == "g":
+            global_replace = True
+    count = 0 if global_replace else 1
+    try:
+        new_text, num_replacements = re.subn(
+            re.escape(pattern),
+            replacement,
+            original_text,
+            count=count,
+            flags=re_flags,
+        )
+    except re.error:
+        return None, 0
+    if len(new_text) > MAX_OUTPUT_LENGTH:
+        new_text = new_text[:MAX_OUTPUT_LENGTH] + "…"
+    return new_text, num_replacements
+
 def _multiprocessing_context():
     """Return a safe multiprocessing context for regex isolation.
 
@@ -378,6 +407,11 @@ def apply_sed(original_text: str, pattern: str, replacement: str,
         )
         if early_return is not None:
             return early_return
+
+        if "l" in flags_str.lower():
+            return _apply_literal_sed_direct(
+                original_text, pattern, replacement, flags_str
+            )
 
         result_queue, timeout_code, pattern = _run_sed_worker(
             original_text, pattern, replacement, flags_str

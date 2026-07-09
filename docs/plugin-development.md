@@ -274,3 +274,36 @@ pytest
 ```
 
 The CI pipeline runs these checks so generated docs and runtime help do not drift.
+
+## Shared core helpers
+
+New code should prefer the small shared utility modules over importing broad
+compatibility helpers from `core_plugins._core`:
+
+- `utils.xmpp_identity` for JID, MUC PM and room-permission helpers
+- `utils.message_cache` for stanza/message cache helpers
+- `utils.room_toggles` for room-scoped `on|off|status` command handling
+- `utils.command_context.CommandContext` for resolved command invocation state
+
+`core_plugins._core` remains available as a compatibility layer for existing
+plugins, but new helpers should be added to focused `utils/` modules.
+
+## Command registry source of truth
+
+Command decorators should carry the complete runtime metadata whenever possible:
+
+```python
+@command(
+    "example",
+    role=Role.USER,
+    short="Show an example.",
+    usage="{prefix}example [name]",
+    examples=["{prefix}example", "{prefix}example alice"],
+    category="tools",
+)
+async def cmd_example(bot, sender, nick, args, msg, is_room):
+    ...
+```
+
+`docs/commands.md` is generated from command metadata, and
+`scripts/check_command_docs.py` verifies that the committed file is current.

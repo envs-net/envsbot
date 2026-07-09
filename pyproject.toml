@@ -73,7 +73,7 @@ py-modules = ["envsbot", "config_sample", "vcard_sample"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core_plugins*", "plugins*", "database*", "utils*"]
+include = ["bot*", "core_plugins*", "plugins*", "database*", "utils*"]
 exclude = ["tests*", "mutants*"]
 
 [tool.setuptools.package-dir]
@@ -89,6 +89,7 @@ exclude = ["tests*", "mutants*"]
 # reliably auto-detect the code paths. Keep this explicit.
 source_paths = [
     "envsbot.py",
+    "bot/",
     "core_plugins/",
     "plugins/",
     "database/",
