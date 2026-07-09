@@ -161,30 +161,20 @@ def _section_lines(doc: str, title: str) -> list[str]:
 
 
 def _command_short(cmd_obj, prefix: str) -> str:
-    if getattr(cmd_obj, "short", ""):
-        return cmd_obj.short.format(prefix=prefix)
-    return _first_line(cmd_obj.handler.__doc__) or "No description available."
+    """Return the command summary from decorator metadata only."""
+    short = str(getattr(cmd_obj, "short", "") or "")
+    return short.format(prefix=prefix) if short else "No description available."
 
 
 def _command_usage(cmd_obj, prefix: str) -> list[str]:
-    if getattr(cmd_obj, "usage", ""):
-        return [cmd_obj.usage.format(prefix=prefix)]
-
-    doc = _clean_doc(cmd_obj.handler.__doc__, prefix)
-    usage = _section_lines(doc, "Usage")
-    if usage:
-        return usage
-
-    return [f"{prefix}{cmd_obj.name}"]
+    """Return usage lines from decorator metadata only."""
+    usage = str(getattr(cmd_obj, "usage", "") or "")
+    return [usage.format(prefix=prefix)] if usage else []
 
 
 def _command_examples(cmd_obj, prefix: str) -> list[str]:
-    examples = [e.format(prefix=prefix) for e in getattr(cmd_obj, "examples", [])]
-    if examples:
-        return examples
-
-    doc = _clean_doc(cmd_obj.handler.__doc__, prefix)
-    return _section_lines(doc, "Example") + _section_lines(doc, "Examples")
+    """Return examples from decorator metadata only."""
+    return [str(e).format(prefix=prefix) for e in getattr(cmd_obj, "examples", [])]
 
 
 def _role_label(role: Role) -> str:
@@ -506,10 +496,7 @@ async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
     "help",
     aliases=["h"],
     short="Show help for plugins and commands.",
-    usage=(
-        "{prefix}help [all|commands|plugins|roles|categories|"
-        "category <name>|room settings|<plugin>|{prefix}<command>]"
-    ),
+    usage="{prefix}help [all|commands|plugins|roles|categories|category <name>|room settings|<plugin>|{prefix}<command>]",
     examples=[
         "{prefix}help",
         "{prefix}help room settings",
@@ -519,6 +506,8 @@ async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
         "{prefix}help {prefix}users role",
         "{prefix}help category admin",
     ],
+    category="core",
+    context="any",
 )
 async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
     """Show help for plugins and commands."""
@@ -863,7 +852,11 @@ def _roles() -> list[str]:
     aliases=["h inroom"],
     short="Enable, disable or show room help availability.",
     usage="{prefix}help inroom <on|off|status>",
-    examples=["{prefix}help inroom on", "{prefix}help inroom status"],
+    examples=[
+        "{prefix}help inroom on",
+        "{prefix}help inroom status",
+    ],
+    category="core",
     context="room or MUC PM",
 )
 async def help_inroom_command(bot, sender_jid, sender_nick,

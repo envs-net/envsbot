@@ -7,7 +7,7 @@ import pytest
 
 import core_plugins.help as help_plugin
 import utils.command as command_utils
-import utils.command_help as command_help
+from utils.command_registry import decorated_command_records
 
 import utils.config
 utils.config.config["prefix"] = ","
@@ -90,10 +90,37 @@ def basic_plugins_and_commands(monkeypatch):
         """Help docstring."""
         return None
 
-    foo_cmd = command_utils.Command(name="foo", handler=foo_handler, role=command_utils.Role.USER,
-                      aliases=["fooz"])
-    bar_cmd = command_utils.Command(name="bar", handler=bar_handler, role=command_utils.Role.ADMIN)
-    help_cmd = command_utils.Command(name="help", handler=help_handler, role=command_utils.Role.USER)
+    foo_cmd = command_utils.Command(
+        name="foo",
+        handler=foo_handler,
+        role=command_utils.Role.USER,
+        aliases=["fooz"],
+        short="Foo command docstring",
+        usage="{prefix}foo [arg]",
+        examples=["{prefix}foo value"],
+        category="utility",
+        context="any",
+    )
+    bar_cmd = command_utils.Command(
+        name="bar",
+        handler=bar_handler,
+        role=command_utils.Role.ADMIN,
+        short="Bar command",
+        usage="{prefix}bar",
+        examples=["{prefix}bar"],
+        category="admin",
+        context="private chat / MUC PM",
+    )
+    help_cmd = command_utils.Command(
+        name="help",
+        handler=help_handler,
+        role=command_utils.Role.USER,
+        short="Help command",
+        usage="{prefix}help",
+        examples=["{prefix}help"],
+        category="core",
+        context="any",
+    )
 
     plugins = {
         "foo": SimpleNamespace(__doc__="Foo plugin doc\nMore...",
@@ -220,7 +247,7 @@ async def test_plugin_help_happy_path(basic_plugins_and_commands):
     assert "Foo plugin doc" in reply
     # Command list
     assert "foo" in reply
-    assert ",foo [user]" in reply
+    assert ",foo [arg]" in reply
     assert "Command details:" in reply
     assert "Command: ,foo" in reply
     assert "Usage:" in reply
@@ -365,12 +392,16 @@ def test_docstring_and_formatting_helpers():
         handler=documented,
         role=command_utils.Role.MODERATOR,
         aliases=["demo", "d"],
+        short="Decorator short",
+        usage="{prefix}demo <arg>",
+        examples=["{prefix}demo value"],
         category="room_tools",
+        context="private chat / MUC PM",
     )
     assert help_plugin._clean_doc(None, ",") == ""
     assert help_plugin._first_line("\n\n  hello\n  world") == "hello"
-    assert help_plugin._command_usage(cmd, ",") == ["  ,demo <arg>"]
-    assert help_plugin._command_examples(cmd, ",") == ["  ,demo value"]
+    assert help_plugin._command_usage(cmd, ",") == [",demo <arg>"]
+    assert help_plugin._command_examples(cmd, ",") == [",demo value"]
     assert help_plugin._context_label(cmd) == "private chat / MUC PM"
     assert help_plugin._category_name(cmd) == "room_tools"
     assert help_plugin._category_title("room_tools") == "Room Tools"
@@ -583,7 +614,7 @@ async def test_cmd_help_dispatches_special_queries(basic_plugins_and_commands):
         (["roles"], "Roles"),
         (["categories"], "Help categories"),
         (["room", "settings"], "Room plugin settings"),
-        (["category", "other"], "Other commands"),
+        (["category", "utility"], "Utility commands"),
     ]:
         bot.replies.clear()
         await help_plugin.cmd_help(bot, "user@host", "Nick", args, DummyMsg(",help"), True)
@@ -708,15 +739,12 @@ async def test_help_store_getter_uses_help_plugin_store():
     bot.db.users.plugin.assert_called_once_with("help")
 
 
-def test_command_help_metadata_is_complete():
+def _command_decorator_metadata():
     root = Path(help_plugin.__file__).resolve().parents[1]
-    command_names = []
-    incomplete = []
-
     for rel in ("plugins", "core_plugins"):
-        for path in sorted((root / rel).glob("*.py")):
+        for path in sorted((root / rel).rglob("*.py")):
             tree = ast.parse(path.read_text())
-            for node in tree.body:
+            for node in ast.walk(tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
                 for decorator in node.decorator_list:
@@ -730,89 +758,63 @@ def test_command_help_metadata_is_complete():
                     )
                     if not is_command:
                         continue
-                    if (
-                        not decorator.args
-                        or not isinstance(decorator.args[0], ast.Constant)
-                    ):
+                    if not decorator.args or not isinstance(decorator.args[0], ast.Constant):
                         continue
-
-                    name = str(decorator.args[0].value)
-                    command_names.append(name)
-                    explicit_help = {kw.arg for kw in decorator.keywords} & {
-                        "short",
-                        "usage",
+                    yield path.relative_to(root), node.name, str(decorator.args[0].value), {
+                        kw.arg: kw.value for kw in decorator.keywords if kw.arg
                     }
-                    if name not in command_help.COMMAND_HELP and not explicit_help:
-                        incomplete.append(
-                            f"{path.relative_to(root)}:{node.name}:{name}"
-                        )
 
-    assert command_names
+
+def test_command_help_metadata_is_complete():
+    incomplete = []
+    count = 0
+    for rel_path, func_name, name, keywords in _command_decorator_metadata():
+        count += 1
+        missing = [
+            field
+            for field in ("short", "usage", "examples", "category", "context")
+            if field not in keywords
+        ]
+        if missing:
+            incomplete.append(f"{rel_path}:{func_name}:{name}: missing {', '.join(missing)}")
+    assert count
     assert not incomplete
 
 
 def test_command_help_metadata_has_usage_and_examples():
-    root = Path(help_plugin.__file__).resolve().parents[1]
     incomplete = []
-
-    for rel in ("plugins", "core_plugins"):
-        for path in sorted((root / rel).glob("*.py")):
-            tree = ast.parse(path.read_text())
-            for node in tree.body:
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                for decorator in node.decorator_list:
-                    if not isinstance(decorator, ast.Call):
-                        continue
-                    func = decorator.func
-                    is_command = (
-                        isinstance(func, ast.Name) and func.id == "command"
-                    ) or (
-                        isinstance(func, ast.Attribute) and func.attr == "command"
-                    )
-                    if not is_command:
-                        continue
-                    if (
-                        not decorator.args
-                        or not isinstance(decorator.args[0], ast.Constant)
-                    ):
-                        continue
-
-                    name = str(decorator.args[0].value).lower()
-                    keywords = {kw.arg: kw.value for kw in decorator.keywords}
-                    metadata = command_help.COMMAND_HELP.get(name, {})
-
-                    has_usage = bool(metadata.get("usage")) or "usage" in keywords
-                    has_examples = (
-                        bool(metadata.get("examples"))
-                        or "examples" in keywords
-                    )
-                    has_short = bool(metadata.get("short")) or "short" in keywords
-                    if not (has_usage and has_examples and has_short):
-                        incomplete.append(
-                            f"{path.relative_to(root)}:{node.name}:{name}"
-                        )
-
+    for rel_path, func_name, name, keywords in _command_decorator_metadata():
+        for field in ("short", "usage", "category", "context"):
+            node = keywords.get(field)
+            if not isinstance(node, ast.Constant) or not str(node.value).strip():
+                incomplete.append(f"{rel_path}:{func_name}:{name}: invalid {field}")
+        examples = keywords.get("examples")
+        if not isinstance(examples, (ast.List, ast.Tuple)) or not examples.elts:
+            incomplete.append(f"{rel_path}:{func_name}:{name}: invalid examples")
     assert not incomplete
+
+
+def _decorated_command_by_name(name: str):
+    for _plugin, _meta, cmd in decorated_command_records():
+        if cmd.name == name:
+            return cmd
+    raise AssertionError(f"missing command {name}")
 
 
 def test_plugin_command_aliases_are_documented_for_shortcut():
     import core_plugins.plugins as plugin_commands
 
+    cmd = _decorated_command_by_name("plugin list")
     assert "plugins" in plugin_commands.plugin_list._command_names
-    assert command_help.COMMAND_HELP["plugin list"]["usage"] == (
-        "{prefix}plugin list [all|page|last]"
-    )
-    assert (
-        "{prefix}plugins"
-        in command_help.COMMAND_HELP["plugin list"]["examples"]
-    )
+    assert cmd.usage == "{prefix}plugin list [all|page|last]"
+    assert "{prefix}plugins" in cmd.examples
+
 
 def test_weather_command_metadata_matches_city_zip_support():
-    metadata = command_help.COMMAND_HELP["weather"]
+    cmd = _decorated_command_by_name("weather")
 
-    assert metadata["usage"] == "{prefix}weather [on|off|status|nick|city|zip]"
-    assert "vCard location" in metadata["short"]
-    assert "room nick" in metadata["short"]
-    assert "city/ZIP code" in metadata["short"]
+    assert cmd.usage == "{prefix}weather [on|off|status|nick|city|zip]"
+    assert "vCard location" in cmd.short
+    assert "room nick" in cmd.short
+    assert "city/ZIP code" in cmd.short
 

@@ -50,7 +50,15 @@ PLUGIN_META = {
 }
 
 
-@command("tools", role=Role.MODERATOR)
+@command(
+    "tools",
+    role=Role.MODERATOR,
+    short="Enable, disable or show room access to utility commands.",
+    usage="{prefix}tools <on|off|status>",
+    examples=["{prefix}tools status"],
+    category="utility",
+    context="room or MUC PM",
+)
 async def information_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Toggle tools plugin features in the current room.
@@ -86,7 +94,16 @@ async def get_tools_store(bot):
     return bot.db.users.plugin("tools")
 
 
-@command("ping", role=Role.USER, aliases=["pong"])
+@command(
+    "ping",
+    role=Role.USER,
+    aliases=["pong"],
+    short="Check whether the bot is alive.",
+    usage="{prefix}ping",
+    examples=["{prefix}ping"],
+    category="utility",
+    context="any",
+)
 async def ping_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Respond with a pong message to confirm the bot is alive.
@@ -102,7 +119,15 @@ async def ping_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, "🏓 Pong!", ephemeral=False)
 
 
-@command("echo", role=Role.USER)
+@command(
+    "echo",
+    role=Role.USER,
+    short="Echo text back to you.",
+    usage="{prefix}echo <text>",
+    examples=["{prefix}echo hello"],
+    category="utility",
+    context="any",
+)
 async def echo_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Repeat a message back to the user.
@@ -129,7 +154,19 @@ async def echo_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, f"🔊 {message}", ephemeral=False)
 
 
-@command("time", role=Role.USER, aliases=["t"])
+@command(
+    "time",
+    role=Role.USER,
+    aliases=["t"],
+    short="Show the current time from a stored profile timezone.",
+    usage="{prefix}time [nick]",
+    examples=[
+        "{prefix}time",
+        "{prefix}time Alice",
+    ],
+    category="utility",
+    context="any",
+)
 async def time_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the current time in your configured timezone or another user's
@@ -202,7 +239,18 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
               ephemeral=False)
 
 
-@command("date", role=Role.USER)
+@command(
+    "date",
+    role=Role.USER,
+    short="Show the current date from a stored profile timezone.",
+    usage="{prefix}date [nick]",
+    examples=[
+        "{prefix}date",
+        "{prefix}date Alice",
+    ],
+    category="utility",
+    context="any",
+)
 async def date_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the current date in your configured timezone or another user's
@@ -276,7 +324,15 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
               ephemeral=False)
 
 
-@command("utc", role=Role.USER)
+@command(
+    "utc",
+    role=Role.USER,
+    short="Show current UTC time.",
+    usage="{prefix}utc",
+    examples=["{prefix}utc"],
+    category="utility",
+    context="any",
+)
 async def utc_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the current UTC time as a quick reference.
@@ -294,7 +350,15 @@ async def utc_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, f"🌍 Current UTC time: {formatted}", ephemeral=False)
 
 
-@command("ts", role=Role.USER)
+@command(
+    "ts",
+    role=Role.USER,
+    short="Convert a Unix timestamp to your configured timezone.",
+    usage="{prefix}ts <unix_timestamp>",
+    examples=["{prefix}ts 1704067200"],
+    category="utility",
+    context="any",
+)
 async def timestamp_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Convert a Unix timestamp to human-readable date and time in your timezone.
@@ -477,7 +541,16 @@ async def _seen_format_last_seen(last_seen_utc, timezone, display_nick):
         return str(last_seen_utc)
 
 
-@command(name="seen", role=Role.USER, aliases=["s"])
+@command(
+    "seen",
+    role=Role.USER,
+    aliases=["s"],
+    short="Show when a user was last seen.",
+    usage="{prefix}seen <nick|jid>",
+    examples=["{prefix}seen alice"],
+    category="utility",
+    context="any",
+)
 async def seen_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the last seen time and current presence for a given nickname.

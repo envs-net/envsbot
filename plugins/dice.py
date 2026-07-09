@@ -73,7 +73,20 @@ async def make_roll(bot, msg, expr) -> list | None:
     return [num, sides, rolls, mod_val, total, op, target]
 
 
-@command("dice", role=Role.USER, aliases=["roll", "r"])
+@command(
+    "dice",
+    role=Role.USER,
+    aliases=["roll", "r"],
+    short="Roll dice using common dice notation.",
+    usage="{prefix}dice <on|off|status|NdM [modifier] [operator] [target]>",
+    examples=[
+        "{prefix}dice status",
+        "{prefix}dice 2d6",
+        "{prefix}rooms enable dice",
+    ],
+    category="fun",
+    context="any",
+)
 async def dice_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Roll dice with optional modifier and success/failure condition.

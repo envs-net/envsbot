@@ -433,7 +433,20 @@ async def _restore_pending_reminders(bot) -> int:
     return restored
 
 
-@command("remind", role=Role.USER, aliases=["rem", "reminder"])
+@command(
+    "remind",
+    role=Role.USER,
+    aliases=["rem", "reminder"],
+    short="Create a reminder.",
+    usage="{prefix}remind <on|off|status|when> [text]",
+    examples=[
+        "{prefix}remind status",
+        "{prefix}remind 10m check logs",
+        "{prefix}rooms enable reminder",
+    ],
+    category="utility",
+    context="any",
+)
 async def remind_command(bot, sender_jid, nick, args, msg, is_room):
     """Set a new reminder."""
     prefix = config.get("prefix", ",")
@@ -537,8 +550,16 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "❌ Error creating reminder. Please try again.")
 
 
-@command("remind delete", role=Role.USER,
-         aliases=["remind rm", "remind cancel"])
+@command(
+    "remind delete",
+    role=Role.USER,
+    aliases=["remind rm", "remind cancel"],
+    short="Delete one reminder.",
+    usage="{prefix}remind delete <id>",
+    examples=["{prefix}remind delete 12"],
+    category="utility",
+    context="any",
+)
 async def delete_reminder(bot, sender_jid, nick, args, msg, is_room):
     """Delete or cancel a reminder by ID."""
     prefix = config.get("prefix", ",")

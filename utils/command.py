@@ -10,8 +10,6 @@ from enum import IntEnum
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-from utils.command_help import metadata_for
-
 
 class Role(IntEnum):
     """
@@ -240,24 +238,15 @@ def command(
     """
     Decorator to register a function as a command.
 
-    Parameters beyond name/role/aliases are optional structured help metadata.
-    They intentionally keep the existing decorator API compatible, so current
-    plugins do not need to be changed at once.
+    Structured help metadata is the command registry source of truth.
+    Repository commands are expected to provide ``short``, ``usage``,
+    ``examples``, ``category`` and ``context`` directly in the decorator;
+    CI/preflight checks fail when metadata is incomplete.
     """
     if aliases is None:
         aliases = []
-
-    defaults = metadata_for(name) or {}
-    if not short:
-        short = str(defaults.get("short", ""))
-    if not usage:
-        usage = str(defaults.get("usage", ""))
     if examples is None:
-        examples = list(defaults.get("examples", []) or [])
-    if not category:
-        category = str(defaults.get("category", ""))
-    if context == "any" and defaults.get("context"):
-        context = str(defaults.get("context"))
+        examples = []
 
     def decorator(func: Callable):
         """

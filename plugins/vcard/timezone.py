@@ -6,7 +6,16 @@ from utils.command import command, Role
 from utils.config import config
 
 
-@command("timezone set", role=Role.USER, aliases=["tz set"])
+@command(
+    "timezone set",
+    role=Role.USER,
+    aliases=["tz set"],
+    short="Set your timezone in the bot profile.",
+    usage="{prefix}timezone set <IANA timezone>",
+    examples=["{prefix}tz set Europe/Berlin"],
+    category="profile",
+    context="any",
+)
 async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
     """
     Set your TIMEZONE in Linux format eg. for '{prefix}time [nick]' command.
@@ -76,7 +85,16 @@ async def _get_vcard_timezone(bot, msg, jid, is_room, args):
     return await _core._get_user_timezone(bot, str(jid))
 
 
-@command("timezone", role=Role.USER, aliases=["tz"])
+@command(
+    "timezone",
+    role=Role.USER,
+    aliases=["tz"],
+    short="Show your configured timezone.",
+    usage="{prefix}timezone",
+    examples=["{prefix}tz"],
+    category="profile",
+    context="any",
+)
 async def get_timezone(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the TIMEZONE of a user from their DB entry (TZ not available

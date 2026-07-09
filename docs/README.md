@@ -42,7 +42,7 @@ Operational notes:
 
 ## Regenerate command reference
 
-Run this after changing command decorators or `utils/command_help.py`:
+Run this after changing command decorators:
 
 ```bash
 python scripts/generate_commands_md.py

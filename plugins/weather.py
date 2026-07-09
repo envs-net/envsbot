@@ -92,7 +92,20 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     scope = f" for {room_jid}" if room_jid else ""
     return [f"✅ Weather{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, timeout={WEATHER_HTTP_TIMEOUT:g}s"]
 
-@command("weather", role=Role.USER, aliases=["w"])
+@command(
+    "weather",
+    role=Role.USER,
+    aliases=["w"],
+    short="Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code; or control room access.",
+    usage="{prefix}weather [on|off|status|nick|city|zip]",
+    examples=[
+        "{prefix}weather status",
+        "{prefix}weather Alice",
+        "{prefix}rooms enable weather",
+    ],
+    category="utility",
+    context="any",
+)
 async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the current weather for a users location set in their vCard or

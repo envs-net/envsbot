@@ -80,7 +80,16 @@ def html_to_text_with_links(html_content):
     return html.unescape(text)
 
 
-@command("fediverse", role=Role.USER, aliases=["fedi"])
+@command(
+    "fediverse",
+    role=Role.USER,
+    aliases=["fedi"],
+    short="Show the latest public post from a Fediverse account.",
+    usage="{prefix}fediverse <@user@instance>",
+    examples=["{prefix}fedi @user@example.org"],
+    category="info",
+    context="any",
+)
 async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the latest public toot from a Fediverse user.
@@ -181,7 +190,16 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
 UDICT_API_URL = "https://api.urbandictionary.com/v0/define?term={}"
 
 
-@command("udict", role=Role.USER, aliases=["ud"])
+@command(
+    "udict",
+    role=Role.USER,
+    aliases=["ud"],
+    short="Search Urban Dictionary.",
+    usage="{prefix}udict <term>",
+    examples=["{prefix}ud xmpp"],
+    category="info",
+    context="any",
+)
 async def udict_search(bot, sender_jid, nick, args, msg, is_room):
     """
     Search Urban Dictionary for a term.
@@ -284,7 +302,16 @@ async def fetch_wikipedia_summary(term):
     return None
 
 
-@command("wikipedia", role=Role.USER, aliases=["wiki"])
+@command(
+    "wikipedia",
+    role=Role.USER,
+    aliases=["wiki"],
+    short="Search Wikipedia.",
+    usage="{prefix}wikipedia <term>",
+    examples=["{prefix}wiki XMPP"],
+    category="info",
+    context="any",
+)
 async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Lookup a summary for a term using Wikipedia.
@@ -416,7 +443,16 @@ def delete_from_csv(filename, matchfunc):
 
 # --- Acronym Commands ---
 
-@command("acronyms", aliases=["acro", "acronym"], role=Role.USER)
+@command(
+    "acronyms",
+    role=Role.USER,
+    aliases=["acro", "acronym"],
+    short="Look up stored acronym definitions.",
+    usage="{prefix}acronyms <acronym>",
+    examples=["{prefix}acro XMPP"],
+    category="info",
+    context="any",
+)
 async def acronyms_cmd(bot, sender, nick, args, msg, is_room):
     """
     Look up all definitions of a chat acronym from the main list.
@@ -459,7 +495,16 @@ async def acronyms_cmd(bot, sender, nick, args, msg, is_room):
         return None
 
 
-@command("acronyms add", aliases=["acro add", "acronym add"], role=Role.USER)
+@command(
+    "acronyms add",
+    role=Role.USER,
+    aliases=["acro add", "acronym add"],
+    short="Suggest a new acronym definition for admin review.",
+    usage="{prefix}acronyms add <acronym> <description>",
+    examples=["{prefix}acro add XMPP Extensible Messaging and Presence Protocol"],
+    category="info",
+    context="any",
+)
 async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
     """
     Suggest a new acronym/description. Entry will be reviewed by admins
@@ -519,8 +564,16 @@ async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
     return None
 
 
-@command("acronyms remove", aliases=["acro remove", "acronym remove"],
-         role=Role.USER)
+@command(
+    "acronyms remove",
+    role=Role.USER,
+    aliases=["acro remove", "acronym remove"],
+    short="Suggest removing one acronym definition for admin review.",
+    usage="{prefix}acronyms remove <acronym> <description>",
+    examples=["{prefix}acro remove XMPP old definition"],
+    category="info",
+    context="any",
+)
 async def acronyms_remove_cmd(bot, sender, nick, args, msg, is_room):
     """
     Suggest the removal of an existing acronym/description pair. Entry will
@@ -575,8 +628,16 @@ async def acronyms_remove_cmd(bot, sender, nick, args, msg, is_room):
     return None
 
 
-@command("acronyms list", aliases=["acro list", "acronym list"],
-         role=Role.ADMIN)
+@command(
+    "acronyms list",
+    role=Role.ADMIN,
+    aliases=["acro list", "acronym list"],
+    short="List pending acronym additions and removals.",
+    usage="{prefix}acronyms list",
+    examples=["{prefix}acro list"],
+    category="info",
+    context="any",
+)
 async def acronyms_list_cmd(bot, sender, nick, args, msg, is_room):
     """
     Display pending slang additions and removals with proposer nicknames for
@@ -625,8 +686,16 @@ async def acronyms_list_cmd(bot, sender, nick, args, msg, is_room):
     return None
 
 
-@command("acronyms merge", aliases=["acro merge", "acronym merge"],
-         role=Role.ADMIN)
+@command(
+    "acronyms merge",
+    role=Role.ADMIN,
+    aliases=["acro merge", "acronym merge"],
+    short="Apply pending acronym additions and removals.",
+    usage="{prefix}acronyms merge",
+    examples=["{prefix}acro merge"],
+    category="info",
+    context="any",
+)
 async def acronyms_merge_cmd(bot, sender, nick, args, msg, is_room):
     """
     Admin command to apply pending additions and removals to the main slang
@@ -699,8 +768,19 @@ async def acronyms_merge_cmd(bot, sender, nick, args, msg, is_room):
     return None
 
 
-@command("acronyms delete", aliases=["acro delete", "acronym delete"],
-         role=Role.ADMIN)
+@command(
+    "acronyms delete",
+    role=Role.ADMIN,
+    aliases=["acro delete", "acronym delete"],
+    short="Delete pending acronym suggestions by nick or definition.",
+    usage="{prefix}acronyms delete <nick|acronym description>",
+    examples=[
+        "{prefix}acro delete Alice",
+        "{prefix}acro delete XMPP old definition",
+    ],
+    category="info",
+    context="any",
+)
 async def acronyms_delete_cmd(bot, sender, nick, args, msg, is_room):
     """
     Admin command to delete from the suggestions/removals queue by
@@ -788,7 +868,15 @@ async def acronyms_delete_cmd(bot, sender, nick, args, msg, is_room):
 # ----------------- Information Plugin Toggle -----------------
 
 
-@command("info", role=Role.MODERATOR)
+@command(
+    "info",
+    role=Role.MODERATOR,
+    short="Enable, disable or show room access to information commands.",
+    usage="{prefix}info <on|off|status>",
+    examples=["{prefix}info status"],
+    category="info",
+    context="room or MUC PM",
+)
 async def information_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Toggle info plugin features in the current room.

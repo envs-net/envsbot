@@ -64,9 +64,10 @@ python scripts/generate_commands_md.py
 ## Help and generated command metadata
 
 The generated command reference and focused runtime help are driven by command
-decorator metadata plus the fallback entries in `utils/command_help.py`. Keep
-usage strings short and include room-context hints when commands behave
-differently in MUCs, MUC PMs or normal private chats.
+decorator metadata. The command registry is the source of truth for Help,
+`docs/commands.md`, preflight and CI checks. Keep usage strings short and
+include room-context hints when commands behave differently in MUCs, MUC PMs or
+normal private chats.
 
 Preferred command metadata lives directly on the decorator:
 
@@ -84,8 +85,9 @@ async def example_command(bot, sender_jid, nick, args, msg, is_room):
     ...
 ```
 
-When a command cannot carry all metadata in the decorator, add or update the
-matching fallback entry in `utils/command_help.py`.
+Every command must carry its metadata in the `@command(...)` decorator. New
+commands without `short`, `usage`, `examples`, `category` and `context` fail the
+command-docs check.
 
 ## Room feature toggles
 

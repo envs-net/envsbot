@@ -140,7 +140,22 @@ def _parse_task_args(args: list[str]) -> tuple[bool, str | None, str | None, Pag
     return full, plugin, status, page_request, None
 
 
-@command("tasks", role=Role.ADMIN, aliases=["bot tasks"])
+@command(
+    "tasks",
+    role=Role.ADMIN,
+    aliases=["bot tasks"],
+    short="Show supervised background task status.",
+    usage="{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last] | {prefix}tasks restart <plugin>",
+    examples=[
+        "{prefix}tasks",
+        "{prefix}tasks full",
+        "{prefix}tasks plugin rss",
+        "{prefix}tasks failed",
+        "{prefix}tasks restart rss",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def tasks_command(bot, sender, nick, args, msg, is_room):
     """Show supervised background task status."""
     if args and args[0].lower() == "restart":
@@ -193,7 +208,10 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
     aliases=["task list"],
     short="Show supervised background tasks.",
     usage="{prefix}tasks list [all|page|last]",
-    examples=["{prefix}tasks list", "{prefix}tasks list all"],
+    examples=[
+        "{prefix}tasks list",
+        "{prefix}tasks list all",
+    ],
     category="admin",
     context="private recommended",
 )

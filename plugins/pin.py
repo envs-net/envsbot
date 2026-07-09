@@ -619,7 +619,23 @@ async def _on_groupchat_message(bot, msg):
         log.exception("[PIN] Error in groupchat message cache handler")
 
 
-@command("pin", role=Role.USER)
+@command(
+    "pin",
+    role=Role.USER,
+    short="Pin, list, search, edit, tag or delete room pins.",
+    usage="{prefix}pin <add|list|search|find|show|edit|tags|delete|on|off|status> ...",
+    examples=[
+        "{prefix}pin status",
+        "{prefix}pin list",
+        "{prefix}pin search mail",
+        "{prefix}pin search ssh key",
+        "{prefix}pin edit 3 Updated room info",
+        "{prefix}pin tags 3 mail support",
+        "{prefix}rooms enable pin",
+    ],
+    category="rooms",
+    context="any",
+)
 async def pin_command(bot, sender_jid, nick, args, msg, is_room):
     if not args:
         bot.reply(

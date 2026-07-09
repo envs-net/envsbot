@@ -60,6 +60,15 @@ async def autojoin_rooms(bot):
     "rooms set_plugin_defaults",
     role=Role.USER,
     aliases=["room set_plugin_defaults", "rooms spd", "room spd"],
+    short="Restore room plugin toggles for a room; requires room admin/owner or bot moderator.",
+    usage="{prefix}rooms set_plugin_defaults [<room_jid>]",
+    examples=[
+        "{prefix}rooms set_plugin_defaults",
+        "{prefix}rooms spd",
+        "{prefix}rooms set_plugin_defaults room@conference.example.org",
+    ],
+    category="rooms",
+    context="room / MUC PM / private chat with <room_jid>",
 )
 async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
     """Reset room plugin toggles to their defaults."""
@@ -87,7 +96,16 @@ async def cmd_room_setdefaults(bot, sender_jid, nick, args, msg, is_room):
         log.exception("[ROOMS] Error restoring defaults for room %s", room_jid)
 
 
-@command("rooms diagnose", role=Role.ADMIN, aliases=["room diagnose", "rooms debug", "room debug"])
+@command(
+    "rooms diagnose",
+    role=Role.ADMIN,
+    aliases=["room diagnose", "rooms debug", "room debug"],
+    short="Show operational diagnostics for one room.",
+    usage="{prefix}rooms diagnose <room_jid>",
+    examples=["{prefix}rooms diagnose room@conference.example.org"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def cmd_room_diagnose(bot, sender_jid, nick, args, msg, is_room):
     """Show diagnostics for one configured or joined room."""
     if len(args) != 1:
@@ -105,6 +123,16 @@ async def cmd_room_diagnose(bot, sender_jid, nick, args, msg, is_room):
     "rooms enable",
     role=Role.USER,
     aliases=["room enable", "rooms feature enable", "room feature enable"],
+    short="Enable a room plugin toggle; requires room admin/owner or bot moderator.",
+    usage="{prefix}rooms enable [<room_jid>] <plugin>",
+    examples=[
+        "{prefix}rooms enable ducks",
+        "{prefix}rooms enable room@conference.example.org ducks",
+        "{prefix}rooms enable weather",
+        "{prefix}help room settings",
+    ],
+    category="rooms",
+    context="room / MUC PM / private chat with <room_jid>",
 )
 async def cmd_room_enable(bot, sender_jid, nick, args, msg, is_room):
     """Enable a room-scoped plugin for a room."""
@@ -115,13 +143,31 @@ async def cmd_room_enable(bot, sender_jid, nick, args, msg, is_room):
     "rooms disable",
     role=Role.USER,
     aliases=["room disable", "rooms feature disable", "room feature disable"],
+    short="Disable a room plugin toggle; requires room admin/owner or bot moderator.",
+    usage="{prefix}rooms disable [<room_jid>] <plugin>",
+    examples=[
+        "{prefix}rooms disable ducks",
+        "{prefix}rooms disable room@conference.example.org ducks",
+        "{prefix}rooms disable xkcd",
+    ],
+    category="rooms",
+    context="room / MUC PM / private chat with <room_jid>",
 )
 async def cmd_room_disable(bot, sender_jid, nick, args, msg, is_room):
     """Disable a room-scoped plugin for a room."""
     await _handle_room_feature_toggle(bot, sender_jid, msg, is_room, args, enabled=False)
 
 
-@command("rooms add", role=Role.ADMIN, aliases=["room add"])
+@command(
+    "rooms add",
+    role=Role.ADMIN,
+    aliases=["room add"],
+    short="Add or update a stored room configuration.",
+    usage="{prefix}rooms add <room_jid> [nick] [autojoin]",
+    examples=["{prefix}rooms add test@conference.example.org EnvsBot true"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_add(bot, sender_jid, nick, args, msg, is_room):
     """
     Add a new room configuration to the database. Doesn't join immediately!
@@ -192,7 +238,16 @@ async def rooms_add(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, f"[ROOMS] 🔴 Room already exists: {room_jid}")
 
 
-@command("rooms update", role=Role.ADMIN, aliases=["room update"])
+@command(
+    "rooms update",
+    role=Role.ADMIN,
+    aliases=["room update"],
+    short="Update one field of a stored room.",
+    usage="{prefix}rooms update <room_jid> <nick|autojoin|status> <value>",
+    examples=["{prefix}rooms update test@conference.example.org autojoin true"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
     """
     Update a configuration field of a stored room.
@@ -262,7 +317,16 @@ async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
         )
 
 
-@command("rooms delete", role=Role.ADMIN, aliases=["room delete"])
+@command(
+    "rooms delete",
+    role=Role.ADMIN,
+    aliases=["room delete"],
+    short="Remove a stored room and leave it if currently joined.",
+    usage="{prefix}rooms delete <room_jid>",
+    examples=["{prefix}rooms delete test@conference.example.org"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
     """
     Remove a room configuration from the database.
@@ -365,7 +429,19 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         )
 
 
-@command("rooms list", role=Role.ADMIN, aliases=["room list"])
+@command(
+    "rooms list",
+    role=Role.ADMIN,
+    aliases=["room list"],
+    short="List stored rooms and currently joined rooms.",
+    usage="{prefix}rooms list [all|page|last]",
+    examples=[
+        "{prefix}rooms list",
+        "{prefix}rooms list all",
+    ],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
     """Show stored and currently joined rooms."""
 
@@ -423,7 +499,16 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
     )
 
 
-@command("rooms join", role=Role.ADMIN, aliases=["room join"])
+@command(
+    "rooms join",
+    role=Role.ADMIN,
+    aliases=["room join"],
+    short="Join a room immediately and store it if needed.",
+    usage="{prefix}rooms join <room_jid> [nick]",
+    examples=["{prefix}rooms join test@conference.example.org"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
     """
     Join a room immediately, add it to JOINED ROOMS and DB.
@@ -514,7 +599,16 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
         )
 
 
-@command("rooms leave", role=Role.ADMIN, aliases=["room leave"])
+@command(
+    "rooms leave",
+    role=Role.ADMIN,
+    aliases=["room leave"],
+    short="Leave a room without deleting its stored configuration.",
+    usage="{prefix}rooms leave <room_jid>",
+    examples=["{prefix}rooms leave test@conference.example.org"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
     """
     Leave a joined room immediately. Doesn't touch the database. Only deletes
@@ -576,7 +670,16 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
         )
 
 
-@command("rooms sync", role=Role.ADMIN, aliases=["room sync"])
+@command(
+    "rooms sync",
+    role=Role.ADMIN,
+    aliases=["room sync"],
+    short="Synchronize joined rooms with stored autojoin settings.",
+    usage="{prefix}rooms sync",
+    examples=["{prefix}rooms sync"],
+    category="rooms",
+    context="private chat / MUC PM",
+)
 async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
     """
     Synchronize runtime rooms with database configuration. Leaves all rooms

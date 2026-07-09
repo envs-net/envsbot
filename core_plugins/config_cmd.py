@@ -399,7 +399,19 @@ def _format_diff_lines(cfg: dict) -> list[str]:
     return entries
 
 
-@command("config show", role=Role.ADMIN, aliases=["config"])
+@command(
+    "config show",
+    role=Role.ADMIN,
+    aliases=["config"],
+    short="Show the effective config grouped like config_sample.py, with secrets redacted.",
+    usage="{prefix}config show [all|page|last]",
+    examples=[
+        "{prefix}config show",
+        "{prefix}config show all",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_show(bot, sender, nick, args, msg, is_room):
     """Show the effective config with secrets redacted."""
     page = parse_page_args(args)
@@ -415,7 +427,18 @@ async def config_show(bot, sender, nick, args, msg, is_room):
     )
 
 
-@command("config diff", role=Role.ADMIN)
+@command(
+    "config diff",
+    role=Role.ADMIN,
+    short="Show config values that differ from config_sample.py defaults.",
+    usage="{prefix}config diff [all|page|last]",
+    examples=[
+        "{prefix}config diff",
+        "{prefix}config diff all",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_diff(bot, sender, nick, args, msg, is_room):
     """Show config values that differ from config_sample.py defaults."""
     bot.reply(
@@ -425,7 +448,19 @@ async def config_diff(bot, sender, nick, args, msg, is_room):
 
 
 
-@command("config search", role=Role.ADMIN, aliases=["config find"])
+@command(
+    "config search",
+    role=Role.ADMIN,
+    aliases=["config find"],
+    short="Search visible config keys and values.",
+    usage="{prefix}config search/find <query>",
+    examples=[
+        "{prefix}config search rss",
+        "{prefix}config find timeout",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_search(bot, sender, nick, args, msg, is_room):
     """Search visible config keys and values by substring."""
     query = " ".join(str(arg).strip() for arg in args).strip()
@@ -453,7 +488,15 @@ async def config_search(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, "\n".join(lines))
 
 
-@command("config set", role=Role.ADMIN)
+@command(
+    "config set",
+    role=Role.ADMIN,
+    short="Persist and apply one runtime-writable config value.",
+    usage="{prefix}config set <KEY> <value>",
+    examples=["{prefix}config set LOG_LEVEL DEBUG"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_set(bot, sender, nick, args, msg, is_room):
     """Persist and apply one runtime-writable config value."""
     if len(args) < 2:
@@ -513,7 +556,15 @@ async def config_set(bot, sender, nick, args, msg, is_room):
     bot.reply_ok(msg, prefix + "\n\n" + reply)
 
 
-@command("config unset", role=Role.ADMIN)
+@command(
+    "config unset",
+    role=Role.ADMIN,
+    short="Reset one runtime-writable config value to the config_sample.py default.",
+    usage="{prefix}config unset <KEY>",
+    examples=["{prefix}config unset LOG_LEVEL"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_unset(bot, sender, nick, args, msg, is_room):
     """Reset one runtime-writable config value to config_sample.py default."""
     if len(args) != 1:
@@ -573,7 +624,15 @@ async def config_unset(bot, sender, nick, args, msg, is_room):
     bot.reply_ok(msg, prefix + "\n\n" + reply)
 
 
-@command("config validate", role=Role.ADMIN)
+@command(
+    "config validate",
+    role=Role.ADMIN,
+    short="Validate the current config.py file.",
+    usage="{prefix}config validate",
+    examples=["{prefix}config validate"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_validate(bot, sender, nick, args, msg, is_room):
     """Validate config.py."""
     try:
@@ -587,7 +646,15 @@ async def config_validate(bot, sender, nick, args, msg, is_room):
     bot.reply_ok(msg, "config.py is valid.")
 
 
-@command("config reload", role=Role.ADMIN)
+@command(
+    "config reload",
+    role=Role.ADMIN,
+    short="Reload config.py into the running bot where possible.",
+    usage="{prefix}config reload",
+    examples=["{prefix}config reload"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def config_reload(bot, sender, nick, args, msg, is_room):
     """Reload config.py into the running process where possible."""
     before = dict(config)

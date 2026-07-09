@@ -38,7 +38,17 @@ PLUGIN_META = {
 }
 
 
-@command("presence")
+@command(
+    "presence",
+    short="Show or control per-room access to presence lookup.",
+    usage="{prefix}presence [on|off|status]",
+    examples=[
+        "{prefix}presence",
+        "{prefix}presence status",
+    ],
+    category="info",
+    context="any",
+)
 async def presence_show(bot, sender_jid, nick, args, msg, is_room):
     """
     Display the current bot presence and status message.
@@ -107,7 +117,15 @@ async def presence_show(bot, sender_jid, nick, args, msg, is_room):
     )
 
 
-@command("presence set", role=Role.ADMIN)
+@command(
+    "presence set",
+    role=Role.ADMIN,
+    short="Set the bot presence state and status text.",
+    usage="{prefix}presence set <online|chat|away|xa|dnd> [message]",
+    examples=["{prefix}presence set away maintenance"],
+    category="info",
+    context="private chat / MUC PM",
+)
 async def presence_set(bot, sender_jid, nick, args, msg, is_room):
     """
     Change the bot presence and optional status message.

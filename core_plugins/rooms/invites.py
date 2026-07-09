@@ -480,7 +480,24 @@ async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
     await set_room_control_defaults(bot, room_jid)
 
 
-@command("rooms invite", role=Role.ADMIN, aliases=["room invite"])
+@command(
+    "rooms invite",
+    role=Role.ADMIN,
+    aliases=["room invite"],
+    short="List, accept, decline or clean up pending room invites.",
+    usage="{prefix}rooms invite list [all|page|last] | {prefix}rooms invite accept <id> | {prefix}rooms invite decline <id> | {prefix}rooms invite cleanup [all|expired]",
+    examples=[
+        "{prefix}rooms invite list",
+        "{prefix}rooms invite list all",
+        "{prefix}rooms invite accept 1",
+        "{prefix}rooms invite decline 1",
+        "{prefix}rooms invite cleanup",
+        "{prefix}rooms invite cleanup all",
+        "{prefix}rooms invite cleanup expired",
+    ],
+    category="rooms",
+    context="private chat / MUC PM / invite notify room",
+)
 async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
     """List, accept or decline pending room invites."""
     if not room_invites_enabled():

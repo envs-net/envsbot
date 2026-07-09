@@ -60,7 +60,16 @@ async def _get_all_pending_reminders(bot) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-@command("reminders", role=Role.USER, aliases=["rems", "remind list"])
+@command(
+    "reminders",
+    role=Role.USER,
+    aliases=["rems", "remind list"],
+    short="List your reminders.",
+    usage="{prefix}reminders [all|page|last]",
+    examples=["{prefix}reminders"],
+    category="utility",
+    context="any",
+)
 async def list_reminders(bot, sender_jid, nick, args, msg, is_room):
     """List all pending reminders for the current user."""
     try:

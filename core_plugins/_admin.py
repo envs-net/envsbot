@@ -469,7 +469,16 @@ def _reply_status_usage(bot, msg):
 # --------------
 # ADMIN COMMANDS
 # --------------
-@command("bot restart", role=Role.OWNER, aliases=["restart"])
+@command(
+    "bot restart",
+    role=Role.OWNER,
+    aliases=["restart"],
+    short="Restart the bot process gracefully.",
+    usage="{prefix}bot restart",
+    examples=["{prefix}bot restart"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def bot_restart(bot, sender, nick, args, msg, is_room):
     """
     Restart the entire bot process.
@@ -526,7 +535,16 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
         log.error("[ADMIN] Error closing database: %s", e)
 
 
-@command("bot shutdown", role=Role.OWNER, aliases=["shutdown"])
+@command(
+    "bot shutdown",
+    role=Role.OWNER,
+    aliases=["shutdown"],
+    short="Stop the bot using the configured stop command.",
+    usage="{prefix}bot shutdown",
+    examples=["{prefix}bot shutdown"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def bot_shutdown(bot, sender, nick, args, msg, is_room):
     """
     Gracefully shutdown the bot.
@@ -555,7 +573,19 @@ async def bot_shutdown(bot, sender, nick, args, msg, is_room):
     subprocess.run(stop_cmd)
 
 
-@command("bot version", role=Role.USER, aliases=["version"])
+@command(
+    "bot version",
+    role=Role.USER,
+    aliases=["version"],
+    short="Show the running EnvsBot version and latest checked release.",
+    usage="{prefix}bot version",
+    examples=[
+        "{prefix}bot version",
+        "{prefix}version",
+    ],
+    category="core",
+    context="any",
+)
 async def bot_version(bot, sender, nick, args, msg, is_room):
     """Show local and latest release version information.
 
@@ -585,6 +615,15 @@ async def bot_version(bot, sender, nick, args, msg, is_room):
     "bot checkupdate",
     role=Role.ADMIN,
     aliases=["checkupdate", "updatecheck", "bot updatecheck"],
+    short="Check whether a newer EnvsBot release is available.",
+    usage="{prefix}bot checkupdate",
+    examples=[
+        "{prefix}bot checkupdate",
+        "{prefix}checkupdate",
+        "{prefix}updatecheck",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
 )
 async def bot_checkupdate(bot, sender, nick, args, msg, is_room):
     """Check whether a newer EnvsBot release is available.
@@ -621,7 +660,20 @@ async def bot_checkupdate(bot, sender, nick, args, msg, is_room):
         )
 
 
-@command("bot status", role=Role.ADMIN, aliases=["bot info", "status"])
+@command(
+    "bot status",
+    role=Role.ADMIN,
+    aliases=["bot info", "status"],
+    short="Show bot, runtime, XMPP, plugin and database status.",
+    usage="{prefix}bot status [full]",
+    examples=[
+        "{prefix}bot status",
+        "{prefix}status",
+        "{prefix}bot status full",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def bot_status(bot, sender, nick, args, msg, is_room):
     """
     Display current bot status and statistics.

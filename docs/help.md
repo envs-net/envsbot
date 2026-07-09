@@ -165,7 +165,7 @@ Private chats and MUC PMs remain the preferred place for full help output.
 
 ## Updating command docs
 
-After changing command decorators or `utils/command_help.py`, regenerate the command reference:
+After changing command decorators, regenerate the command reference:
 
 ```bash
 python scripts/generate_commands_md.py

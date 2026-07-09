@@ -15,7 +15,16 @@ def _command_prefix(bot=None) -> str:
     )
 
 
-@command("users info", role=Role.ADMIN, aliases=["user info"])
+@command(
+    "users info",
+    role=Role.ADMIN,
+    aliases=["user info"],
+    short="Show user info by JID or known nickname.",
+    usage="{prefix}users info <jid|nick>",
+    examples=["{prefix}users info alice@example.org"],
+    category="users",
+    context="private chat / MUC PM",
+)
 async def users_info(bot, sender, nick, args, msg, is_room):
     """
     Show user info by JID or nickname from 'users' database table.
@@ -74,7 +83,16 @@ async def users_info(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, "🟡️ Failed to fetch user info.")
 
 
-@command("users list", role=Role.ADMIN, aliases=["user list"])
+@command(
+    "users list",
+    role=Role.ADMIN,
+    aliases=["user list"],
+    short="List users currently known in one joined room.",
+    usage="{prefix}users list [room_jid]",
+    examples=["{prefix}users list test@conference.example.org"],
+    category="users",
+    context="private chat only",
+)
 async def users_list(bot, sender, nick, args, msg, is_room):
     """
     List all users of a room. If no room JID is given, use the sender's bare
@@ -171,7 +189,16 @@ async def users_list(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, "🟡️ Failed to list users.")
 
 
-@command("users role", role=Role.ADMIN, aliases=["user role"])
+@command(
+    "users role",
+    role=Role.ADMIN,
+    aliases=["user role"],
+    short="Change a user's global bot role with hierarchy checks.",
+    usage="{prefix}users role <jid> <role>",
+    examples=["{prefix}users role alice@example.org trusted"],
+    category="users",
+    context="private chat / MUC PM",
+)
 async def users_update(bot, sender, nick, args, msg, is_room):
     """Update a user's role with owner/superadmin safety checks."""
     try:
@@ -268,6 +295,11 @@ async def users_update(bot, sender, nick, args, msg, is_room):
     "users revoke",
     role=Role.ADMIN,
     aliases=["user revoke", "users plugin revoke", "user plugin revoke"],
+    short="Revoke room-scoped plugin permissions from a user.",
+    usage="{prefix}users revoke <jid> <plugin> [plugin ...]",
+    examples=["{prefix}users revoke alice@example.org rss"],
+    category="users",
+    context="private chat / MUC PM",
 )
 async def users_revoke(bot, sender, nick, args, msg, is_room):
     """Revoke one or more room-scoped plugin permissions from a user."""
@@ -314,7 +346,16 @@ async def users_revoke(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, f"✅ Plugin grants for {target}: {grants}")
 
 
-@command("users delete", role=Role.ADMIN, aliases=["user delete"])
+@command(
+    "users delete",
+    role=Role.ADMIN,
+    aliases=["user delete"],
+    short="Delete one non-privileged user record and its runtime data.",
+    usage="{prefix}users delete <jid>",
+    examples=["{prefix}users delete alice@example.org"],
+    category="users",
+    context="private chat / MUC PM",
+)
 async def users_delete(bot, sender, nick, args, msg, is_room):
     """
     Delete a user. The user will be created again as soon as the bot gets aware

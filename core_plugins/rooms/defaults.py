@@ -186,6 +186,17 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
         "rooms features list",
         "room features list",
     ],
+    short="Show room plugin toggles; requires room admin/owner or bot moderator.",
+    usage="{prefix}rooms plugins [<room_jid>] [all|page|last]",
+    examples=[
+        "{prefix}rooms plugins",
+        "{prefix}rooms plugins all",
+        "{prefix}rooms plugins room@conference.example.org all",
+        "{prefix}help room settings",
+        "{prefix}help rooms settings",
+    ],
+    category="rooms",
+    context="room / MUC PM / private chat with <room_jid>",
 )
 async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
     """Show plugin setup for a room."""

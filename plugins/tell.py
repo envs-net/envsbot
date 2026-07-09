@@ -78,7 +78,18 @@ async def tell_fetch(bot, recv_jid):
     return messages
 
 
-@command("tell", role=Role.USER)
+@command(
+    "tell",
+    role=Role.USER,
+    short="Leave a message for another user.",
+    usage="{prefix}tell <on|off|status|nick: message>",
+    examples=[
+        "{prefix}tell status",
+        "{prefix}tell alice: I fixed it",
+    ],
+    category="utility",
+    context="any",
+)
 async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     """
 

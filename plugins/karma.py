@@ -211,7 +211,19 @@ async def _set_throttle(bot, msg, target_nick: str):
     entry[target_nick.lower()] = time.time()
 
 
-@command("karma", role=Role.USER)
+@command(
+    "karma",
+    role=Role.USER,
+    short="Show room-local karma scores and rankings.",
+    usage="{prefix}karma <on|off|status|top|bottom|nick>",
+    examples=[
+        "{prefix}karma status",
+        "{prefix}karma top",
+        "{prefix}karma xmpp",
+    ],
+    category="fun",
+    context="any",
+)
 async def karma_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Karma control and queries.

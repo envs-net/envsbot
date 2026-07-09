@@ -506,7 +506,29 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
     bot.reply(msg, _rss_template_usage(bot))
 
 
-@command("rss", role=Role.USER)
+@command(
+    "rss",
+    role=Role.USER,
+    short="Manage RSS feed subscriptions for rooms.",
+    usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|list|template> ...",
+    examples=[
+        "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
+        "{prefix}rss list room@conference.example.org",
+        "{prefix}rss list 2",
+        "{prefix}rss list all",
+        "{prefix}rss retry all",
+        "{prefix}rss reset all",
+        "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
+        "{prefix}rss template",
+        "{prefix}rss template set 📰 $feed_title: $title\n$link",
+        "{prefix}rss template test [$feed_title] $title",
+        "{prefix}rss template unset",
+        "{prefix}rss delete https://example.org/feed.rss",
+        "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",
+    ],
+    category="rooms",
+    context="any",
+)
 async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Manage RSS feeds.

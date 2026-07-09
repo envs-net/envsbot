@@ -18,7 +18,7 @@ git log --oneline --decorate -n 10
 ## Documentation
 
 Regenerate the command reference after changing command decorators or
-`utils/command_help.py`:
+command decorator metadata:
 
 ```bash
 python scripts/generate_commands_md.py

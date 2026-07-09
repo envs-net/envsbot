@@ -397,7 +397,21 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
     return full, tuple(sections or _DEFAULT_SECTIONS), page_args
 
 
-@command("doctor", role=Role.ADMIN, aliases=["bot doctor", "healthcheck", "bot health"])
+@command(
+    "doctor",
+    role=Role.ADMIN,
+    aliases=["bot doctor", "healthcheck", "bot health"],
+    short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS.",
+    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|all] [full] [page|last|all]",
+    examples=[
+        "{prefix}doctor",
+        "{prefix}doctor all full",
+        "{prefix}doctor rss",
+        "{prefix}doctor tasks full",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def doctor_command(bot, sender, nick, args, msg, is_room):
     """Run operator health checks."""
     full, sections, page_args = _parse_doctor_sections(args or [])

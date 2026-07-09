@@ -532,7 +532,19 @@ async def process_sed_correction(
     _sed_reply(bot, msg, response, is_room)
 
 
-@command("sed", role=Role.USER)
+@command(
+    "sed",
+    role=Role.USER,
+    short="Apply sed-style corrections or control room access to sed.",
+    usage="{prefix}s/old/new/ or {prefix}sed <on|off|status>",
+    examples=[
+        "{prefix}s/teh/the/",
+        "{prefix}sed status",
+        "{prefix}rooms enable sed",
+    ],
+    category="utility",
+    context="any",
+)
 async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
     """Handle sed corrections or enable/disable sed in a room."""
     if await _core.handle_room_toggle_command(

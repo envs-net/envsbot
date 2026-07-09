@@ -204,7 +204,11 @@ def _parse_export_args(args: list[str]) -> tuple[int, dict[str, str], str | None
     aliases=["audit", "audits last"],
     short="Show recent admin audit events.",
     usage="{prefix}audit last [all|page|last|limit <n>]",
-    examples=["{prefix}audit last", "{prefix}audit last 2", "{prefix}audit last limit 50"],
+    examples=[
+        "{prefix}audit last",
+        "{prefix}audit last 2",
+        "{prefix}audit last limit 50",
+    ],
     category="admin",
     context="private recommended",
 )
@@ -336,7 +340,10 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
     aliases=["audits export"],
     short="Export recent audit events as JSON Lines.",
     usage="{prefix}audit export [limit]",
-    examples=["{prefix}audit export", "{prefix}audit export 100"],
+    examples=[
+        "{prefix}audit export",
+        "{prefix}audit export 100",
+    ],
     category="admin",
     context="private recommended",
 )
@@ -368,7 +375,10 @@ async def audit_export(bot, sender, nick, args, msg, is_room):
     aliases=["audits prune"],
     short="Prune old audit events after confirmation.",
     usage="{prefix}audit prune <days> [dry-run|confirm]",
-    examples=["{prefix}audit prune 90 dry-run", "{prefix}audit prune 90 confirm"],
+    examples=[
+        "{prefix}audit prune 90 dry-run",
+        "{prefix}audit prune 90 confirm",
+    ],
     category="admin",
     context="private recommended",
 )

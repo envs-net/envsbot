@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import inspect
 import sys
 from pathlib import Path
 
@@ -13,36 +12,29 @@ if str(ROOT) not in sys.path:
 
 from utils.command import Role  # noqa: E402
 from utils.config import config  # noqa: E402
-from utils.command_registry import discover_command_modules, plugin_metadata  # noqa: E402
+from utils.command_registry import (  # noqa: E402
+    decorated_commands_from_module,
+    discover_command_modules,
+    plugin_metadata,
+)
 
 PREFIX = config.get("prefix", ",")
 
 
-def _clean(value: str | None) -> str:
-    return inspect.cleandoc(value or "").strip()
-
-
-def _first_line(doc: str | None) -> str:
-    for line in _clean(doc).splitlines():
-        line = line.strip()
-        if line:
-            return line.replace("{prefix}", PREFIX)
-    return "No description available."
-
-
 def _metadata(cmd):
-    short = getattr(cmd, "short", "") or _first_line(cmd.handler.__doc__)
-    usage = getattr(cmd, "usage", "") or f"{{prefix}}{cmd.name}"
-    examples = getattr(cmd, "examples", []) or []
-    context = getattr(cmd, "context", "any") or "any"
-    category = getattr(cmd, "category", "") or "other"
+    """Return docs metadata from the command decorator only."""
+    short = str(getattr(cmd, "short", ""))
+    usage = str(getattr(cmd, "usage", ""))
+    examples = list(getattr(cmd, "examples", []) or [])
+    context = str(getattr(cmd, "context", "any") or "any")
+    category = str(getattr(cmd, "category", "") or "other")
     return {
-        "short": str(short).replace("{prefix}", PREFIX),
-        "usage": str(usage).replace("{prefix}", PREFIX),
+        "short": short.replace("{prefix}", PREFIX),
+        "usage": usage.replace("{prefix}", PREFIX),
         "examples": [str(e).replace("{prefix}", PREFIX) for e in examples],
-        "context": str(context),
+        "context": context,
         "role": getattr(cmd, "role", Role.NONE),
-        "category": str(category).strip().lower() or "other",
+        "category": category.strip().lower() or "other",
     }
 
 
@@ -58,17 +50,8 @@ def _discover_plugins():
 
 
 def _commands_from_module(module):
-    seen = set()
-    commands = []
-    for _, obj in inspect.getmembers(module):
-        if not callable(obj) or not hasattr(obj, "__commands__"):
-            continue
-        for registered_name, cmd in getattr(obj, "__commands__", []):
-            if id(cmd) in seen or registered_name != cmd.name:
-                continue
-            seen.add(id(cmd))
-            commands.append(cmd)
-    return sorted(commands, key=lambda c: c.name)
+    """Return commands from the shared command registry discovery helper."""
+    return decorated_commands_from_module(module)
 
 
 def _category_title(category: str) -> str:

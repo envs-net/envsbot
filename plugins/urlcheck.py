@@ -124,7 +124,18 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
         f"✅ URLCheck{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, cached_urls={state.get('cached_urls', 0)}, max_redirects={URLCHECK_MAX_REDIRECTS}"
     ]
 
-@command("urlcheck", role=Role.USER)
+@command(
+    "urlcheck",
+    role=Role.USER,
+    short="Enable, disable or show automatic URL checks in a room.",
+    usage="{prefix}urlcheck <on|off|status>",
+    examples=[
+        "{prefix}urlcheck status",
+        "{prefix}rooms enable urlcheck",
+    ],
+    category="utility",
+    context="room or MUC PM",
+)
 async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Enable, disable or show URL checking status for this room.

@@ -150,7 +150,16 @@ def _validate_domain(domain: str) -> tuple[bool, str]:
     return True, ""
 
 
-@command("xmpp", role=Role.USER, aliases=["x"])
+@command(
+    "xmpp",
+    role=Role.USER,
+    aliases=["x"],
+    short="Enable, disable or show room access to XMPP lookup commands.",
+    usage="{prefix}xmpp <on|off|status>",
+    examples=["{prefix}xmpp status"],
+    category="xmpp",
+    context="room or MUC PM",
+)
 async def cmd_xmpp(bot, sender_jid, nick, args, msg, is_room):
     """
     Toggle xmpp commands on or off or show status.
@@ -178,7 +187,16 @@ async def cmd_xmpp(bot, sender_jid, nick, args, msg, is_room):
     return
 
 
-@command("xmpp help", role=Role.USER, aliases=["x help"])
+@command(
+    "xmpp help",
+    role=Role.USER,
+    aliases=["x help"],
+    short="Show help for XMPP lookup subcommands.",
+    usage="{prefix}xmpp help",
+    examples=["{prefix}x help"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
     """
     Display help message with all available XMPP commands.
@@ -196,7 +214,16 @@ async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, HELP_TEXT)
 
 
-@command("xmpp version", role=Role.USER, aliases=["x version"])
+@command(
+    "xmpp version",
+    role=Role.USER,
+    aliases=["x version"],
+    short="Query XMPP software version via XEP-0092.",
+    usage="{prefix}xmpp version <jid>",
+    examples=["{prefix}x version envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the software version of an XMPP server (XEP-0092).
@@ -298,7 +325,16 @@ def _get_iq_error_condition(exc):
     return err.get("condition", "unknown")
 
 
-@command("xmpp uptime", role=Role.USER, aliases=["x uptime"])
+@command(
+    "xmpp uptime",
+    role=Role.USER,
+    aliases=["x uptime"],
+    short="Query XMPP entity uptime.",
+    usage="{prefix}xmpp uptime <jid>",
+    examples=["{prefix}x uptime envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the uptime of an XMPP server (XEP-0012).
@@ -361,7 +397,16 @@ async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, f"🔴 Error: {e}")
 
 
-@command("xmpp items", role=Role.USER, aliases=["x items"])
+@command(
+    "xmpp items",
+    role=Role.USER,
+    aliases=["x items"],
+    short="List service discovery items.",
+    usage="{prefix}xmpp items <jid>",
+    examples=["{prefix}x items envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_items(bot, sender_jid, nick, args, msg, is_room):
     """
     List the service items of an XMPP server (XEP-0030).
@@ -412,7 +457,16 @@ async def cmd_xmpp_items(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, f"🔴 Error: {e}")
 
 
-@command("xmpp contact", role=Role.USER, aliases=["x contact"])
+@command(
+    "xmpp contact",
+    role=Role.USER,
+    aliases=["x contact"],
+    short="Show contact addresses from service discovery.",
+    usage="{prefix}xmpp contact <jid>",
+    examples=["{prefix}x contact envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_contact(bot, sender_jid, nick, args, msg, is_room):
     """
     Display contact information for an XMPP server (XEP-0030).
@@ -591,7 +645,16 @@ def _reply_xmpp_info_error(bot, msg, target, exc):
     bot.reply(msg, f"🔴 Error: {exc}")
 
 
-@command("xmpp info", role=Role.USER, aliases=["x info"])
+@command(
+    "xmpp info",
+    role=Role.USER,
+    aliases=["x info"],
+    short="Show service discovery identity/features.",
+    usage="{prefix}xmpp info <jid>",
+    examples=["{prefix}x info conference.envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_info(bot, sender_jid, nick, args, msg, is_room):
     """
     List the identities and features of an XMPP server/domain (XEP-0030).
@@ -624,7 +687,16 @@ async def cmd_xmpp_info(bot, sender_jid, nick, args, msg, is_room):
         _reply_xmpp_info_error(bot, msg, target, e)
 
 
-@command("xmpp ping", role=Role.USER, aliases=["x ping"])
+@command(
+    "xmpp ping",
+    role=Role.USER,
+    aliases=["x ping"],
+    short="Ping an XMPP entity.",
+    usage="{prefix}xmpp ping <jid>",
+    examples=["{prefix}x ping envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_ping(bot, sender_jid, nick, args, msg, is_room):
     """
     Ping an XMPP entity (JID or domain) and report round-trip time (XEP-0199).
@@ -755,7 +827,16 @@ def _build_xmpp_srv_result(domain, services, srv_records):
     return result
 
 
-@command("xmpp srv", role=Role.USER, aliases=["x srv"])
+@command(
+    "xmpp srv",
+    role=Role.USER,
+    aliases=["x srv"],
+    short="Look up XMPP DNS SRV records.",
+    usage="{prefix}xmpp srv <domain>",
+    examples=["{prefix}x srv envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
     """
     Perform DNS SRV lookups for XMPP services.
@@ -826,7 +907,16 @@ async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, f"🔴 DNS lookup failed: {e}")
 
 
-@command("xmpp compliance", role=Role.USER, aliases=["x compliance"])
+@command(
+    "xmpp compliance",
+    role=Role.USER,
+    aliases=["x compliance"],
+    short="Check XMPP compliance features via disco.",
+    usage="{prefix}xmpp compliance <jid>",
+    examples=["{prefix}x compliance envs.net"],
+    category="xmpp",
+    context="any",
+)
 async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the compliance score of a server from compliance.conversations.im.

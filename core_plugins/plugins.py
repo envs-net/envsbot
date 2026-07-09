@@ -50,7 +50,20 @@ def _plugin_command_names(name: str) -> list[str]:
         return []
 
 
-@command("plugin list", role=Role.ADMIN, aliases=["plugins", "plugins list"])
+@command(
+    "plugin list",
+    role=Role.ADMIN,
+    aliases=["plugins", "plugins list"],
+    short="List loaded and available core/optional plugins.",
+    usage="{prefix}plugin list [all|page|last]",
+    examples=[
+        "{prefix}plugins",
+        "{prefix}plugins all",
+        "{prefix}plugins list",
+    ],
+    category="core",
+    context="private chat / MUC PM",
+)
 async def plugin_list(bot, sender, nick, args, msg, is_room):
     """List all plugins grouped by category."""
     categories = await bot.bot_plugins.list_detailed()
@@ -86,7 +99,16 @@ async def plugin_list(bot, sender, nick, args, msg, is_room):
     )
 
 
-@command("plugin info", role=Role.ADMIN, aliases=["plugins info"])
+@command(
+    "plugin info",
+    role=Role.ADMIN,
+    aliases=["plugins info"],
+    short="Show metadata and source information for one plugin.",
+    usage="{prefix}plugin info <plugin>",
+    examples=["{prefix}plugin info rooms"],
+    category="core",
+    context="private chat / MUC PM",
+)
 async def plugin_info(bot, sender, nick, args, msg, is_room):
     """
     Shows metadata of a plugin, like name, version, description and requires.
@@ -119,7 +141,16 @@ async def plugin_info(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, "\n".join(lines))
 
 
-@command("plugin diagnose", role=Role.ADMIN, aliases=["plugins diagnose"])
+@command(
+    "plugin diagnose",
+    role=Role.ADMIN,
+    aliases=["plugins diagnose"],
+    short="Show diagnostics for one plugin, including hooks, commands and tasks.",
+    usage="{prefix}plugin diagnose <plugin>",
+    examples=["{prefix}plugin diagnose rss"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def plugin_diagnose(bot, sender, nick, args, msg, is_room):
     """Show diagnostics for one plugin."""
     if len(args) != 1:
@@ -167,7 +198,19 @@ async def plugin_diagnose(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, lines)
 
 
-@command("plugin state", role=Role.ADMIN, aliases=["plugins state"])
+@command(
+    "plugin state",
+    role=Role.ADMIN,
+    aliases=["plugins state"],
+    short="Show plugin-provided runtime state counters.",
+    usage="{prefix}plugin state <plugin> [room_jid]",
+    examples=[
+        "{prefix}plugin state rss",
+        "{prefix}plugin state poll room@conference.example.org",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def plugin_state(bot, sender, nick, args, msg, is_room):
     """Show plugin-provided runtime state."""
     if len(args) not in (1, 2):
@@ -187,7 +230,16 @@ async def plugin_state(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, [title, *_format_state_lines(state)])
 
 
-@command("plugin load", role=Role.ADMIN, aliases=["plugins load"])
+@command(
+    "plugin load",
+    role=Role.ADMIN,
+    aliases=["plugins load"],
+    short="Load one plugin or all plugins.",
+    usage="{prefix}plugin load <plugin|all>",
+    examples=["{prefix}plugin load weather"],
+    category="core",
+    context="private chat / MUC PM",
+)
 async def plugin_load(bot, sender, nick, args, msg, is_room):
     """
     Load a plugin or all plugins. Only if it's not already loaded.
@@ -216,7 +268,16 @@ async def plugin_load(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, f"Error loading '{target}': {e}")
 
 
-@command("plugin unload", role=Role.ADMIN, aliases=["plugins unload"])
+@command(
+    "plugin unload",
+    role=Role.ADMIN,
+    aliases=["plugins unload"],
+    short="Unload one optional plugin; core plugins are protected.",
+    usage="{prefix}plugin unload <plugin> [force]",
+    examples=["{prefix}plugin unload weather"],
+    category="core",
+    context="private chat / MUC PM",
+)
 async def plugin_unload(bot, sender, nick, args, msg, is_room):
     """
     Unload a plugin.
@@ -245,7 +306,19 @@ async def plugin_unload(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, message)
 
 
-@command("plugin reload", role=Role.ADMIN, aliases=["plugins reload"])
+@command(
+    "plugin reload",
+    role=Role.ADMIN,
+    aliases=["plugins reload"],
+    short="Reload one plugin or all plugins.",
+    usage="{prefix}plugin reload <plugin|all> [auto]",
+    examples=[
+        "{prefix}plugin reload help",
+        "{prefix}plugin reload all auto",
+    ],
+    category="core",
+    context="private chat / MUC PM",
+)
 async def plugin_reload(bot, sender_jid, nick, args, msg, is_room):
     """
     Reload a plugin or all plugins that are currently loaded.

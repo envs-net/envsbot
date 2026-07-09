@@ -251,7 +251,20 @@ async def _resolve_vcard_target(bot, msg, args, is_room, enabled_rooms):
     return jid, jid, "Direct Message"
 
 
-@command("vcard", role=Role.USER, aliases=["v"])
+@command(
+    "vcard",
+    role=Role.USER,
+    aliases=["v"],
+    short="Show vCard data or control room access to vCard lookups.",
+    usage="{prefix}vcard [on|off|status|nick]",
+    examples=[
+        "{prefix}vcard",
+        "{prefix}vcard status",
+        "{prefix}rooms enable vcard",
+    ],
+    category="profile",
+    context="any",
+)
 async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
     """
     Look up the vCard of a user by MUC nick (MUC JID only), never real JID!
@@ -322,7 +335,16 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
                   f" for '{target_nick}' ({muc_jid}): {e}")
 
 
-@command("fullname", role=Role.USER, aliases=["f"])
+@command(
+    "fullname",
+    role=Role.USER,
+    aliases=["f"],
+    short="Show the full name from a user's vCard.",
+    usage="{prefix}fullname [nick]",
+    examples=["{prefix}fullname Alice"],
+    category="profile",
+    context="any",
+)
 async def get_fullname(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the FULLNAME of a user from their vCard.
@@ -344,7 +366,16 @@ async def get_fullname(bot, sender_jid, nick, args, msg, is_room):
                            "FN", "Full Name")
 
 
-@command("nicknames", role=Role.USER, aliases=["nicks"])
+@command(
+    "nicknames",
+    role=Role.USER,
+    aliases=["nicks"],
+    short="Show nicknames from a user's vCard.",
+    usage="{prefix}nicknames [nick]",
+    examples=["{prefix}nicks Alice"],
+    category="profile",
+    context="any",
+)
 async def get_nicknames(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the nicknames from a user's vCard.
@@ -366,7 +397,16 @@ async def get_nicknames(bot, sender_jid, nick, args, msg, is_room):
                            "NICKNAME", "Nicknames")
 
 
-@command("organisations", role=Role.USER, aliases=["orgs"])
+@command(
+    "organisations",
+    role=Role.USER,
+    aliases=["orgs"],
+    short="Show organisations from a user's vCard.",
+    usage="{prefix}organisations [nick]",
+    examples=["{prefix}orgs Alice"],
+    category="profile",
+    context="any",
+)
 async def get_organisations(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the organisations from a user's vCard.
@@ -388,7 +428,15 @@ async def get_organisations(bot, sender_jid, nick, args, msg, is_room):
                            "ORG", "Organisations")
 
 
-@command("notes", role=Role.USER)
+@command(
+    "notes",
+    role=Role.USER,
+    short="Show notes from a user's vCard.",
+    usage="{prefix}notes [nick]",
+    examples=["{prefix}notes Alice"],
+    category="profile",
+    context="any",
+)
 async def get_notes(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the notes from a user's vCard.
@@ -409,7 +457,16 @@ async def get_notes(bot, sender_jid, nick, args, msg, is_room):
                            "NOTE", "Notes")
 
 
-@command("emails", role=Role.USER, aliases=["e"])
+@command(
+    "emails",
+    role=Role.USER,
+    aliases=["e"],
+    short="Show email addresses from a user's vCard.",
+    usage="{prefix}emails [nick]",
+    examples=["{prefix}emails Alice"],
+    category="profile",
+    context="any",
+)
 async def get_email(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the EMAILs of a user.
@@ -431,7 +488,16 @@ async def get_email(bot, sender_jid, nick, args, msg, is_room):
                            "EMAIL", "Emails")
 
 
-@command("urls", role=Role.USER, aliases=["u"])
+@command(
+    "urls",
+    role=Role.USER,
+    aliases=["u"],
+    short="Show URLs from a user's vCard.",
+    usage="{prefix}urls [nick]",
+    examples=["{prefix}urls Alice"],
+    category="profile",
+    context="any",
+)
 async def get_urls(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the URLS of a user.
@@ -453,7 +519,16 @@ async def get_urls(bot, sender_jid, nick, args, msg, is_room):
                            "URL", "URLs")
 
 
-@command("birthday", role=Role.USER, aliases=["b"])
+@command(
+    "birthday",
+    role=Role.USER,
+    aliases=["b"],
+    short="Show birthday data from a user's vCard.",
+    usage="{prefix}birthday [nick]",
+    examples=["{prefix}birthday Alice"],
+    category="profile",
+    context="any",
+)
 async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
     """
     Show the BIRTHDAY of a user and days until next birthday from their vCard.

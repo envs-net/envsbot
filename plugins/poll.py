@@ -743,7 +743,20 @@ async def _poll_handle_manage(
     _poll_reply(bot, msg, ("✅ " if success else "❌ ") + text)
 
 
-@command("poll", role=Role.USER)
+@command(
+    "poll",
+    role=Role.USER,
+    short="Create and manage polls.",
+    usage="{prefix}poll <on|off|status|create|list|show|result|history|vote|close|cancel|delete> ...",
+    examples=[
+        "{prefix}poll status",
+        "{prefix}poll create Tea? | yes | no",
+        "{prefix}poll list",
+        "{prefix}rooms enable poll",
+    ],
+    category="rooms",
+    context="any",
+)
 async def poll_command(bot, sender_jid, nick, args, msg, is_room):
     """
     Poll control and voting.

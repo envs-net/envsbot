@@ -606,7 +606,15 @@ async def on_muc_presence(bot, pres):
 # COMMANDS
 # ============================================================================
 
-@command("birthday_notify", role=Role.USER)
+@command(
+    "birthday_notify",
+    role=Role.USER,
+    short="Enable, disable or show birthday notifications for a room.",
+    usage="{prefix}birthday_notify <on|off|status>",
+    examples=["{prefix}birthday_notify status"],
+    category="rooms",
+    context="room or MUC PM",
+)
 async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
     """Enable, disable, or show birthday notifications for this room."""
     subcmd = args[0].lower() if args else None

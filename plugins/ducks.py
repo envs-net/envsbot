@@ -635,7 +635,22 @@ async def _subcommand(bot, msg, sub, args, room_jid):
     _duck_reply(bot, msg, "❌ Unknown duck subcommand.")
 
 
-@command("duck", role=Role.USER)
+@command(
+    "duck",
+    role=Role.USER,
+    short="Start or interact with the duck game.",
+    usage="{prefix}duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickname]>",
+    examples=[
+        "{prefix}duck status",
+        "{prefix}duck on",
+        "{prefix}duck befriend",
+        "{prefix}duck stats",
+        "{prefix}rooms enable ducks",
+        "{prefix}rooms enable room@conference.example.org ducks",
+    ],
+    category="fun",
+    context="room / MUC PM; use rooms enable with <room_jid> from private chat",
+)
 async def duck_command(bot, sender_jid, nick, args, msg, is_room):
     handled = await handle_room_toggle_command(
         bot,
@@ -697,7 +712,15 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
     await _subcommand(bot, msg, sub, args, room_jid)
 
 
-@command("bef", role=Role.USER)
+@command(
+    "bef",
+    role=Role.USER,
+    short="Befriend the current duck.",
+    usage="{prefix}bef",
+    examples=["{prefix}bef"],
+    category="fun",
+    context="any",
+)
 async def bef_command(bot, sender_jid, nick, args, msg, is_room):
     if not _is_public_muc(msg, is_room):
         return
@@ -707,7 +730,15 @@ async def bef_command(bot, sender_jid, nick, args, msg, is_room):
     await _handle_duck_action(bot, msg, "befriended")
 
 
-@command("trap", role=Role.USER)
+@command(
+    "trap",
+    role=Role.USER,
+    short="Set a trap in the duck game.",
+    usage="{prefix}trap",
+    examples=["{prefix}trap"],
+    category="fun",
+    context="any",
+)
 async def trap_command(bot, sender_jid, nick, args, msg, is_room):
     if not _is_public_muc(msg, is_room):
         return
@@ -717,7 +748,15 @@ async def trap_command(bot, sender_jid, nick, args, msg, is_room):
     await _handle_duck_action(bot, msg, "trapped")
 
 
-@command("duckstats", role=Role.USER)
+@command(
+    "duckstats",
+    role=Role.USER,
+    short="Show duck game stats.",
+    usage="{prefix}duckstats [nick]",
+    examples=["{prefix}duckstats"],
+    category="fun",
+    context="any",
+)
 async def duckstats_command(bot, sender_jid, nick, args, msg, is_room):
     if not _is_public_muc(msg, is_room):
         return

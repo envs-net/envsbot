@@ -11,7 +11,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.generate_commands_md import generate as generate_commands_md  # noqa: E402
-from utils.command_help import COMMAND_HELP  # noqa: E402
 from utils.command_registry import decorated_command_records  # noqa: E402
 
 DOCS_COMMANDS = ROOT / "docs" / "commands.md"
@@ -49,25 +48,15 @@ def validate_command_docs(docs_path: Path = DOCS_COMMANDS) -> tuple[list[str], i
         if not name:
             errors.append(f"{plugin}: command with empty name")
             continue
-        if not getattr(cmd, "short", ""):
-            errors.append(f"{plugin}:{name}: missing short")
-        if not getattr(cmd, "usage", ""):
-            errors.append(f"{plugin}:{name}: missing usage")
+        for field in ("short", "usage", "category", "context"):
+            value = str(getattr(cmd, field, "") or "").strip()
+            if not value:
+                errors.append(f"{plugin}:{name}: missing {field}")
         examples = list(getattr(cmd, "examples", []) or [])
         if not examples:
             errors.append(f"{plugin}:{name}: missing examples")
         if docs_text and f"`,{name}`" not in docs_text:
             errors.append(f"docs/commands.md: missing primary command {name!r}")
-
-    # COMMAND_HELP is still accepted as a legacy metadata fallback for older
-    # decorators. Validate it while the registry becomes the source of truth.
-    for key, metadata in sorted(COMMAND_HELP.items()):
-        if not metadata.get("short"):
-            errors.append(f"COMMAND_HELP[{key!r}]: missing short")
-        if not metadata.get("usage"):
-            errors.append(f"COMMAND_HELP[{key!r}]: missing usage")
-        if not metadata.get("examples"):
-            errors.append(f"COMMAND_HELP[{key!r}]: missing examples")
 
     return errors, len(commands)
 

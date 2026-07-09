@@ -548,7 +548,20 @@ async def xkcd_check_loop(bot):
         raise
 
 
-@command("xkcd", role=Role.USER)
+@command(
+    "xkcd",
+    role=Role.USER,
+    short="Show an XKCD comic or control room access to XKCD.",
+    usage="{prefix}xkcd [on|off|status|random|number|search <term> [page]]",
+    examples=[
+        "{prefix}xkcd",
+        "{prefix}xkcd random",
+        "{prefix}xkcd search python 2",
+        "{prefix}rooms enable xkcd",
+    ],
+    category="fun",
+    context="any",
+)
 async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
     """Manage and view XKCD comics."""
     from_jid = str(msg["from"].bare)

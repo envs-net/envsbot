@@ -78,7 +78,20 @@ def _parse_prune_args(args: list[str]) -> tuple[bool, int | None, int | None, st
     return dry_run, keep, days, None
 
 
-@command("backup create", role=Role.ADMIN, aliases=["backup"])
+@command(
+    "backup create",
+    role=Role.ADMIN,
+    aliases=["backup"],
+    short="Create a managed ZIP backup archive.",
+    usage="{prefix}backup create [reason]",
+    examples=[
+        "{prefix}backup create",
+        "{prefix}backup create before config change",
+        "{prefix}backup",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def backup_create(bot, sender, nick, args, msg, is_room):
     """Create a managed ZIP backup."""
     reason = " ".join(args).strip() or "manual"
@@ -99,7 +112,19 @@ async def backup_create(bot, sender, nick, args, msg, is_room):
     bot.reply_ok(msg, f"Backup created: {archive.name}")
 
 
-@command("backup list", role=Role.ADMIN, aliases=["backups", "backup ls"])
+@command(
+    "backup list",
+    role=Role.ADMIN,
+    aliases=["backups", "backup ls"],
+    short="List managed backup archives.",
+    usage="{prefix}backup list [all|page|last]",
+    examples=[
+        "{prefix}backup list",
+        "{prefix}backup list all",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def backup_list(bot, sender, nick, args, msg, is_room):
     """List managed ZIP backups."""
     page_request = parse_page_args(args)
@@ -119,7 +144,15 @@ async def backup_list(bot, sender, nick, args, msg, is_room):
     )
 
 
-@command("backup show", role=Role.ADMIN)
+@command(
+    "backup show",
+    role=Role.ADMIN,
+    short="Show manifest details for one managed backup archive.",
+    usage="{prefix}backup show <archive|last>",
+    examples=["{prefix}backup show last"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def backup_show(bot, sender, nick, args, msg, is_room):
     """Show details for one managed backup archive."""
     if len(args) != 1:
@@ -156,7 +189,18 @@ async def backup_show(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, lines)
 
 
-@command("backup prune", role=Role.ADMIN)
+@command(
+    "backup prune",
+    role=Role.ADMIN,
+    short="Prune managed backup archives, with optional dry-run.",
+    usage="{prefix}backup prune [dry-run] [keep <n>] [days <n>]",
+    examples=[
+        "{prefix}backup prune dry-run",
+        "{prefix}backup prune keep 20 days 30",
+    ],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def backup_prune(bot, sender, nick, args, msg, is_room):
     """Prune managed backup archives according to retention settings."""
     dry_run, keep, days, error = _parse_prune_args(args)
@@ -282,7 +326,16 @@ def _format_restore_plan_lines(plan: dict) -> list[str]:
     return lines
 
 
-@command("restore", role=Role.OWNER, aliases=["backup restore"])
+@command(
+    "restore",
+    role=Role.OWNER,
+    aliases=["backup restore"],
+    short="Restore a managed backup after explicit confirmation.",
+    usage="{prefix}restore <archive|last> confirm",
+    examples=["{prefix}restore last confirm"],
+    category="admin",
+    context="private chat / MUC PM",
+)
 async def backup_restore(bot, sender, nick, args, msg, is_room):
     """Restore a managed ZIP backup after explicit confirmation."""
     if len(args) == 2 and args[1].lower() in {"dry-run", "dryrun", "check", "plan"}:

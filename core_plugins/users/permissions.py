@@ -299,7 +299,16 @@ async def user_has_room_plugin_grant(
     return await user_is_room_owner_or_admin(bot, bare_jid, room_jid)
 
 
-@command("users roles", role=Role.ADMIN, aliases=["user roles"])
+@command(
+    "users roles",
+    role=Role.ADMIN,
+    aliases=["user roles"],
+    short="Show available roles and their ordering.",
+    usage="{prefix}users roles",
+    examples=["{prefix}users roles"],
+    category="users",
+    context="private chat / MUC PM",
+)
 async def users_roles(bot, sender, nick, args, msg, is_room):
     """Show available roles and their ordering."""
     lines = [
@@ -395,6 +404,15 @@ def _can_manage_plugin_from_diagnostics(
     "users permissions",
     role=Role.ADMIN,
     aliases=["user permissions", "users perms", "user perms"],
+    short="Diagnose global, room and room-scoped plugin permissions.",
+    usage="{prefix}users permissions <jid|nick> [room_jid]",
+    examples=[
+        "{prefix}users permissions alice@example.org",
+        "{prefix}users permissions alice@example.org room@conference.example.org",
+        "{prefix}users perms alice room@conference.example.org",
+    ],
+    category="users",
+    context="private chat / MUC PM",
 )
 async def users_permissions(bot, sender, nick, args, msg, is_room):
     """Show a user's effective bot and room-scoped plugin permissions."""
@@ -464,6 +482,11 @@ async def users_permissions(bot, sender, nick, args, msg, is_room):
     "users grant",
     role=Role.ADMIN,
     aliases=["user grant", "users plugin grant", "user plugin grant"],
+    short="Grant room-scoped plugin permissions to a user.",
+    usage="{prefix}users grant <jid> <plugin> [plugin ...]",
+    examples=["{prefix}users grant alice@example.org rss pin poll"],
+    category="users",
+    context="private chat / MUC PM",
 )
 async def users_grant(bot, sender, nick, args, msg, is_room):
     """Grant one or more room-scoped plugin permissions to a user."""
@@ -516,6 +539,11 @@ async def users_grant(bot, sender, nick, args, msg, is_room):
     "users grants",
     role=Role.ADMIN,
     aliases=["user grants", "users plugin grants", "user plugin grants"],
+    short="Show a user's room-scoped plugin permissions.",
+    usage="{prefix}users grants <jid>",
+    examples=["{prefix}users grants alice@example.org"],
+    category="users",
+    context="private chat / MUC PM",
 )
 async def users_grants(bot, sender, nick, args, msg, is_room):
     """Show room-scoped plugin permissions assigned to a user."""
@@ -538,7 +566,16 @@ async def users_grants(bot, sender, nick, args, msg, is_room):
     bot.reply(msg, f"🔐 Plugin grants for {jid}: {value}")
 
 
-@command("users admins", role=Role.ADMIN, aliases=["user admins", "users admin", "user admin"])
+@command(
+    "users admins",
+    role=Role.ADMIN,
+    aliases=["user admins", "users admin", "user admin"],
+    short="List users with admin-level roles.",
+    usage="{prefix}users admins [all|page|last]",
+    examples=["{prefix}users admins"],
+    category="users",
+    context="private chat / MUC PM",
+)
 async def users_admins(bot, sender, nick, args, msg, is_room):
     """List users with admin-level roles."""
     users = await bot.db.users.list()
