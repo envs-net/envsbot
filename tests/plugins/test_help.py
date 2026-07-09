@@ -818,3 +818,23 @@ def test_weather_command_metadata_matches_city_zip_support():
     assert "room nick" in cmd.short
     assert "city/ZIP code" in cmd.short
 
+
+
+def test_section_lines_extracts_docstring_sections_and_stops_at_next_header():
+    doc = """
+    Summary.
+
+    Usage
+    -----
+      ,demo one
+      ,demo two
+
+    Examples
+    --------
+      ,demo example
+    """
+
+    assert help_plugin._section_lines(doc, "Usage") == ["      ,demo one", "      ,demo two"]
+    assert help_plugin._section_lines(doc, "Examples") == ["      ,demo example"]
+    assert help_plugin._section_lines(doc, "Missing") == []
+    assert help_plugin._section_lines("", "Usage") == []

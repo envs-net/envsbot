@@ -39,3 +39,11 @@ def test_paginate_and_format_pages():
     assert paged[0] == "Title (page 1/3)"
     assert paged[-1] == "Use ,cmd <page|last|all> for more."
     assert formatting.bool_label(False) == "disabled"
+
+
+def test_status_helpers_return_standard_labels():
+    assert formatting.status_icon("ok") == "✅"
+    assert formatting.status_icon("disabled") == "ℹ️"
+    assert formatting.status_icon("unknown") == "ℹ️"
+    assert formatting.status_label("failed", "Task failed") == "🔴 Task failed"
+    assert formatting.status_label(None) == "ℹ️ info"

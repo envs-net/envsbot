@@ -1,4 +1,5 @@
 import sys
+import types
 
 import pytest
 import aiosqlite
@@ -177,3 +178,37 @@ async def test_database_manager_integrity_check_stringifies_unusual_rows():
     assert await db.integrity_check() == ["ok", "bad-row"]
     await db.optimize()
     assert db.conn.queries == ["PRAGMA integrity_check;", "PRAGMA optimize;", "commit"]
+
+
+
+@pytest.mark.asyncio
+async def test_database_migration_status_and_read_write_check(tmp_path, monkeypatch):
+    migrations = [
+        types.SimpleNamespace(version="0001"),
+        types.SimpleNamespace(version="0002"),
+    ]
+    monkeypatch.setattr("database.manager.available_migrations", lambda: migrations)
+
+    db = DatabaseManager(str(tmp_path / "bot.db"), flush_interval=999)
+    db.applied_migration_versions = AsyncMock(return_value={"0001"})
+    assert await db.pending_migration_versions() == ["0002"]
+    assert await db.migration_status() == {
+        "known": ["0001", "0002"],
+        "applied": ["0001"],
+        "pending": ["0002"],
+    }
+
+    from database.migrations import available_migrations as real_available_migrations
+
+    monkeypatch.setattr("database.manager.available_migrations", real_available_migrations)
+    live_db = DatabaseManager(str(tmp_path / "live.db"), flush_interval=999)
+    await live_db.connect()
+    try:
+        await live_db.verify_read_write()
+        assert await live_db.fetch_one(
+            "SELECT name FROM sqlite_temp_master WHERE name = ?",
+            ("envsbot_preflight_check",),
+        ) is None
+        assert dict(await live_db.fetch_one("SELECT 1 AS ok")) == {"ok": 1}
+    finally:
+        await live_db.close()

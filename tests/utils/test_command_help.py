@@ -30,3 +30,9 @@ def test_command_help_compat_view_is_lazy_mapping():
 def test_command_help_unknown_attribute_raises():
     with pytest.raises(AttributeError):
         command_help.__getattr__("UNKNOWN")
+
+
+def test_command_help_view_iteration_uses_registry_keys():
+    view = command_help.__getattr__("COMMAND_HELP")
+
+    assert "help" in list(iter(view))

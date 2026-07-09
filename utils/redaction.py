@@ -80,4 +80,6 @@ def redact_text(text: object, *, max_length: int = _MAX_STRING) -> str:
     """Return a compact redacted text value for log/audit strings."""
     value = redact_url(str(text))
     value = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", value)
+    if value.strip().lower() in SECRET_KEY_PARTS:
+        value = REDACTED
     return _truncate(value, max_length=max_length)

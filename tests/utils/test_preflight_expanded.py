@@ -226,3 +226,60 @@ async def test_collect_preflight_checks_and_run_preflight(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert status == 0
     assert "Overall: ✅ ok" in out
+
+@pytest.mark.asyncio
+async def test_check_database_redacts_bare_secret_runtime_errors(monkeypatch, tmp_path):
+    class BareSecretDB:
+        async def connect(self):
+            raise RuntimeError("secret")
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(preflight, "DatabaseManager", lambda _path: BareSecretDB())
+    ok, message = await preflight._check_database({"db": tmp_path / "bot.db"})
+
+    assert ok is False
+    assert "RuntimeError" in message
+    assert "secret" not in message
+
+
+@pytest.mark.asyncio
+async def test_collect_preflight_checks_has_stable_order_and_failure_path(monkeypatch, capsys):
+    monkeypatch.setattr(preflight, "validate_startup_config", lambda _config: None)
+    monkeypatch.setattr(preflight, "_check_config_path", lambda: (True, "config path: ok"))
+    monkeypatch.setattr(preflight, "_check_config_sample", lambda _config: (True, "sample ok"))
+    monkeypatch.setattr(preflight, "_check_imports", lambda: (True, "imports ok"))
+    monkeypatch.setattr(preflight, "_check_plugin_imports_and_metadata", lambda: (True, "plugins ok"))
+    monkeypatch.setattr(preflight, "_check_command_registry", lambda: (True, "registry ok"))
+    monkeypatch.setattr(preflight, "_check_command_docs", lambda: (True, "docs ok"))
+    monkeypatch.setattr(preflight, "_check_migration_catalog", lambda: (True, "migrations ok"))
+    monkeypatch.setattr(preflight, "_check_backup_dir", lambda _config: (True, "backup ok"))
+    monkeypatch.setattr(preflight, "_check_runtime_files", lambda _config: (True, "files ok"))
+
+    async def fake_db(_config):
+        return True, "db ok"
+
+    monkeypatch.setattr(preflight, "_check_database", fake_db)
+
+    checks = await preflight.collect_preflight_checks({"jid": "bot@example.org"})
+    assert checks == [
+        (True, "config: ok"),
+        (True, "config path: ok"),
+        (True, "sample ok"),
+        (True, "imports ok"),
+        (True, "plugins ok"),
+        (True, "registry ok"),
+        (True, "docs ok"),
+        (True, "migrations ok"),
+        (True, "backup ok"),
+        (True, "files ok"),
+        (True, "db ok"),
+    ]
+
+    monkeypatch.setattr(preflight, "_check_imports", lambda: (False, "imports failed"))
+    status = await preflight.run_preflight({"jid": "bot@example.org"})
+    out = capsys.readouterr().out
+    assert status == 1
+    assert "Overall: ❌ failed" in out
+    assert "imports failed" in out

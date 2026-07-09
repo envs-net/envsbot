@@ -415,3 +415,25 @@ async def test_config_unset_resets_to_sample_default(tmp_path, monkeypatch):
     assert "LOG_LEVEL = 'INFO'" in text
     assert config_cmd.config["loglevel"] == "INFO"
     assert "LOG_LEVEL reset to default" in bot.reply_ok.call_args.args[1]
+
+
+def test_update_config_file_assignment_success_and_errors(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.py"
+    cfg.write_text("PREFIX = ','\nNICK = 'old'\n", encoding="utf-8")
+    monkeypatch.setattr(config_cmd, "get_runtime_config_path", lambda: cfg)
+
+    config_cmd._update_config_file_assignment("NICK", "new")
+    updated = cfg.read_text(encoding="utf-8")
+    assert "NICK = 'new'" in updated
+    assert "PREFIX = ','" in updated
+
+    missing = tmp_path / "missing.py"
+    monkeypatch.setattr(config_cmd, "get_runtime_config_path", lambda: missing)
+    with pytest.raises(config_cmd.ConfigError, match="Missing config file"):
+        config_cmd._update_config_file_assignment("NICK", "new")
+
+    legacy = tmp_path / "config.json"
+    legacy.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config_cmd, "get_runtime_config_path", lambda: legacy)
+    with pytest.raises(config_cmd.ConfigError, match="legacy config.json"):
+        config_cmd._update_config_file_assignment("NICK", "new")
