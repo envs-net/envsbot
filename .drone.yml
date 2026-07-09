@@ -1,12 +1,13 @@
 ---
 kind: pipeline
 type: docker
-name: pytest
+name: pytest-3.12
 
 steps:
-- name: build pytest
+- name: test
   image: python:3.12
-  commands:
+  commands: &test_commands
+    - python -m pip install --upgrade pip
     - pip install -r requirements.txt
     - pip install -r requirements-dev.txt
     - python -m pip check
@@ -14,8 +15,21 @@ steps:
     - python scripts/check_command_docs.py
     - python -m build
     - pytest
-  trigger:
-    branch:
-      - main
-    event:
-      - tag
+
+trigger: &test_trigger
+  event:
+    - push
+    - pull_request
+    - tag
+
+---
+kind: pipeline
+type: docker
+name: pytest-3.13
+
+steps:
+- name: test
+  image: python:3.13
+  commands: *test_commands
+
+trigger: *test_trigger

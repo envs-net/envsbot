@@ -4,6 +4,17 @@ from utils.config import config
 from utils.command import command, Role, role_from_int
 from utils.formatting import format_page, parse_page_args
 
+from .formatting import _write_user_audit, _yes_no
+from .lookup import _maybe_await, _parse_user_jid, _plugin_name, _valid_plugin_names, find_users_by_nick_safe
+from .roles import (
+    ASSIGNABLE_ROLES,
+    GRANTABLE_PLUGINS,
+    GRANTS_FIELD,
+    ROLE_NAMES,
+    _command_prefix,
+    log,
+)
+
 
 def _owner_jid() -> str | None:
     """Return the configured owner JID as bare JID if it is valid."""

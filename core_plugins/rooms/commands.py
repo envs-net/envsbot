@@ -4,6 +4,24 @@ from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
 
+from .defaults import _cleanup_room_plugin_state
+from .presence import (
+    _looks_like_room_jid,
+    _resolve_room_settings_target,
+    _room_is_known,
+    is_valid_room_jid,
+)
+from .settings import _handle_room_feature_toggle, set_room_control_defaults
+from .state import (
+    JOINED_ROOMS,
+    _LEAVING_ROOMS,
+    _leave_runtime_room,
+    _plugin_cleanup_changed,
+    _room_diagnose_lines,
+    _room_in_runtime_state,
+    log,
+)
+
 
 async def autojoin_rooms(bot):
     """

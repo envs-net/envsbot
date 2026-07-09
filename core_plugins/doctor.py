@@ -8,8 +8,15 @@ from typing import Any
 
 from utils.backups import backup_dir, backup_keep, backup_retention_days, list_backups
 from utils.command import COMMANDS, Role, command
-from utils.config import config, get_runtime_config_path
+from utils.config import (
+    collect_config_warnings,
+    config,
+    get_runtime_config_path,
+    load_default_config_for_diff,
+)
 from utils.formatting import format_page, parse_page_args
+from utils.updatecheck import check_for_updates_once
+from utils.version import display_version
 
 PLUGIN_META = {
     "name": "doctor",
@@ -48,6 +55,9 @@ _SECTION_ALIASES = {
     "backup": "backups",
     "network": "network",
     "http": "network",
+    "release": "release",
+    "releases": "release",
+    "preflight": "release",
     "plugin-health": "plugin-health",
     "pluginhealth": "plugin-health",
     "health": "plugin-health",
@@ -297,6 +307,137 @@ def _network_lines() -> list[str]:
     ]
 
 
+def _local_version_line(bot: Any) -> str:
+    """Return a release-check line for the local version."""
+    raw_version = getattr(bot, "version", None)
+    if not isinstance(raw_version, str) or not raw_version.strip():
+        raw_version = None
+    return _line(True, "Local version", display_version(raw_version))
+
+
+async def _latest_release_line(bot: Any) -> str:
+    """Return a release-check line for the latest published release."""
+    try:
+        update_available, remote_version, error = await check_for_updates_once(
+            bot,
+            announce=False,
+            require_enabled=False,
+        )
+    except Exception as exc:
+        return _line(None, "Latest release", f"check failed: {exc}")
+    if error:
+        return _line(None, "Latest release", f"check failed: {error}")
+    if not remote_version:
+        return _line(None, "Latest release", "unknown")
+    status = "update available" if update_available else "current"
+    return _line(not update_available, "Latest release", f"{display_version(remote_version)} ({status})")
+
+
+def _command_docs_line() -> str:
+    """Return a release-check line for generated command docs."""
+    try:
+        from scripts.check_command_docs import validate_command_docs
+
+        errors, command_count = validate_command_docs()
+    except Exception as exc:
+        return _line(False, "Command docs", f"check failed: {exc}")
+    if errors:
+        return _line(False, "Command docs", f"{len(errors)} issue(s); regenerate docs/commands.md")
+    return _line(True, "Command docs", f"ok ({command_count} commands)")
+
+
+def _config_sample_line() -> str:
+    """Return a release-check line for config/default consistency."""
+    try:
+        defaults = load_default_config_for_diff()
+        warnings = collect_config_warnings(config)
+    except Exception as exc:
+        return _line(False, "Config sample", f"check failed: {exc}")
+
+    missing = sorted(str(key) for key in defaults if key not in config)
+    if missing:
+        shown = ", ".join(missing[:8])
+        suffix = "…" if len(missing) > 8 else ""
+        return _line(False, "Config sample", f"missing runtime key(s): {shown}{suffix}")
+    if warnings:
+        shown = "; ".join(str(item) for item in warnings[:3])
+        suffix = "…" if len(warnings) > 3 else ""
+        return _line(None, "Config warnings", f"{shown}{suffix}")
+    return _line(True, "Config sample", "ok")
+
+
+async def _release_migration_line(bot: Any) -> str:
+    """Return a release-check line for pending database migrations."""
+    db = getattr(bot, "db", None)
+    if db is None:
+        return _line(None, "Migrations", "database unavailable")
+
+    migration_status = getattr(db, "migration_status", None)
+    if callable(migration_status):
+        try:
+            status = await migration_status()
+            pending = list(status.get("pending", []))
+            applied = list(status.get("applied", []))
+        except Exception as exc:
+            return _line(False, "Migrations", str(exc))
+        if pending:
+            return _line(False, "Migrations", f"pending: {', '.join(pending)}")
+        return _line(True, "Migrations", f"ok ({len(applied)} applied)")
+
+    list_migrations = getattr(db, "list_migrations", None)
+    if callable(list_migrations):
+        try:
+            applied = [_migration_version(item) for item in list(await list_migrations())]
+        except Exception as exc:
+            return _line(False, "Migrations", str(exc))
+        return _line(True, "Migrations", f"ok ({len(applied)} applied)")
+    return _line(None, "Migrations", "status unavailable")
+
+
+def _release_backup_line() -> str:
+    """Return a release-check line for the latest managed backup."""
+    try:
+        backups = list_backups(directory=backup_dir())
+    except Exception as exc:
+        return _line(False, "Latest backup", str(exc))
+    if not backups:
+        return _line(None, "Latest backup", "no managed backup found")
+    return _line(True, "Latest backup", f"{backups[0].name} · {backups[0].created_at}")
+
+
+async def _release_plugin_metadata_line(bot: Any) -> str:
+    """Return a release-check line for plugin metadata diagnostics."""
+    manager = getattr(bot, "bot_plugins", None)
+    if manager is None:
+        return _line(None, "Plugin metadata", "plugin manager unavailable")
+    issue_getter = getattr(manager, "all_metadata_issues", None)
+    if not callable(issue_getter):
+        return _line(None, "Plugin metadata", "metadata diagnostics unavailable")
+    try:
+        issues = list(await issue_getter())
+    except Exception as exc:
+        return _line(False, "Plugin metadata", str(exc))
+    errors = [issue for issue in issues if getattr(issue, "severity", "") == "error"]
+    if errors:
+        return _line(False, "Plugin metadata", f"{len(errors)} error(s), {len(issues) - len(errors)} warning(s)")
+    if issues:
+        return _line(None, "Plugin metadata", f"{len(issues)} warning(s)")
+    return _line(True, "Plugin metadata", "ok")
+
+
+async def _release_lines(bot: Any) -> list[str]:
+    """Return release-readiness checks for operators."""
+    return [
+        _local_version_line(bot),
+        await _latest_release_line(bot),
+        _command_docs_line(),
+        _config_sample_line(),
+        await _release_migration_line(bot),
+        _release_backup_line(),
+        await _release_plugin_metadata_line(bot),
+    ]
+
+
 async def _plugin_doctor_lines(bot: Any, plugin_names: tuple[str, ...] | list[str]) -> list[str]:
     manager = getattr(bot, "bot_plugins", None)
     if manager is None:
@@ -352,6 +493,8 @@ async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
         return _backup_lines()
     if section == "network":
         return _network_lines()
+    if section == "release":
+        return await _release_lines(bot)
     if section == "plugin-health":
         return await _plugin_doctor_lines(bot, list(_PLUGIN_HEALTH_PLUGINS))
     if section.startswith("plugin:"):
@@ -368,6 +511,8 @@ async def build_doctor_lines(bot: Any, *, full: bool = False, sections: tuple[st
             label = "Database"
         elif section == "plugin-health":
             label = "Plugin health"
+        elif section == "release":
+            label = "Release readiness"
         elif section.startswith("plugin:"):
             label = f"Plugin: {section.split(':', 1)[1]}"
         else:
@@ -422,13 +567,14 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
     "doctor",
     role=Role.ADMIN,
     aliases=["bot doctor", "healthcheck", "bot health"],
-    short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS.",
-    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|all] [full] [page|last|all]",
+    short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness.",
+    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all] [full] [page|last|all]",
     examples=[
         "{prefix}doctor",
         "{prefix}doctor all full",
         "{prefix}doctor rss",
         "{prefix}doctor tasks full",
+        "{prefix}doctor release",
     ],
     category="admin",
     context="private chat / MUC PM",
@@ -462,6 +608,21 @@ async def doctor_command(bot, sender, nick, args, msg, is_room):
             command_hint=f"{bot.prefix}doctor",
         ),
     )
+
+
+@command(
+    "doctor release",
+    role=Role.ADMIN,
+    aliases=["bot doctor release", "doctor preflight", "bot doctor preflight"],
+    short="Run release-readiness checks for version, docs, config, DB, backups and plugin metadata.",
+    usage="{prefix}doctor release [page|last|all]",
+    examples=["{prefix}doctor release", "{prefix}doctor release all"],
+    category="admin",
+    context="private chat / MUC PM",
+)
+async def doctor_release(bot, sender, nick, args, msg, is_room):
+    """Run release-readiness checks."""
+    await doctor_command(bot, sender, nick, ["release", *(args or [])], msg, is_room)
 
 
 @command(

@@ -5,6 +5,8 @@ from functools import partial
 from datetime import datetime, timezone
 from slixmpp import JID
 
+from .roles import MAX_ROOM_NICKS, log
+
 
 async def on_muc_presence(bot, pres):
     if pres["type"] not in ("available", "unavailable"):

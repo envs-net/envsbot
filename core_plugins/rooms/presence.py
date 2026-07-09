@@ -2,20 +2,9 @@
 
 import asyncio
 import inspect
-from slixmpp import JID
 
-
-def _jid_bare(value) -> str:
-    """Return a best-effort lower-case bare JID string."""
-    if value is None:
-        return ""
-    bare = getattr(value, "bare", None)
-    if bare:
-        return str(bare).lower()
-    try:
-        return str(JID(str(value)).bare).lower()
-    except Exception:
-        return str(value).split("/", 1)[0].lower()
+from .state import JOINED_ROOMS, _LEAVING_ROOMS, _jid_bare, log
+from .permissions import _sender_can_manage_room_settings
 
 
 def _looks_like_room_jid(value: object) -> bool:

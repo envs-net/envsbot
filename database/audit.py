@@ -109,6 +109,110 @@ class AuditLog:
         )
         return await cursor.fetchall()
 
+
+    async def summary_since(self, *, hours: int = 24, limit: int = 8) -> dict[str, Any]:
+        """Return aggregate audit statistics for recent events."""
+        hours = max(1, int(hours))
+        limit = max(1, min(int(limit), 25))
+        since_modifier = f"-{hours} hours"
+        since_params = (since_modifier,)
+
+        async def scalar(sql: str, params: tuple[object, ...] = since_params) -> int:
+            cursor = await self.conn.execute(sql, params)
+            row = await cursor.fetchone()
+            if row is None:
+                return 0
+            return int(row[0])
+
+        async def grouped(sql: str) -> list[dict[str, Any]]:
+            cursor = await self.conn.execute(sql, (since_modifier, limit))
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                try:
+                    name = row["name"]
+                    count = row["count"]
+                except Exception:
+                    name, count = row[0], row[1]
+                result.append({"name": str(name), "count": int(count)})
+            return result
+
+        total = await scalar(
+            "SELECT COUNT(*) FROM audit_log "
+            "WHERE created_at >= datetime('now', ?)"
+        )
+        errors = await scalar(
+            """
+            SELECT COUNT(*)
+            FROM audit_log
+            WHERE created_at >= datetime('now', ?)
+              AND (
+                lower(event) LIKE '%error%'
+                OR lower(event) LIKE '%failed%'
+                OR lower(event) LIKE '%failure%'
+                OR lower(details) LIKE '%"error"%'
+                OR lower(details) LIKE '%"exception"%'
+                OR lower(details) LIKE '%"traceback"%'
+                OR lower(details) LIKE '%"status": "error"%'
+                OR lower(details) LIKE '%"status":"error"%'
+                OR lower(details) LIKE '%"status": "failed"%'
+                OR lower(details) LIKE '%"status":"failed"%'
+                OR lower(details) LIKE '%"result": "error"%'
+                OR lower(details) LIKE '%"result":"error"%'
+                OR lower(details) LIKE '%"result": "failed"%'
+                OR lower(details) LIKE '%"result":"failed"%'
+              )
+            """
+        )
+        unique_actors = await scalar(
+            "SELECT COUNT(DISTINCT actor) FROM audit_log "
+            "WHERE created_at >= datetime('now', ?) "
+            "AND actor IS NOT NULL AND actor != ''"
+        )
+        unique_targets = await scalar(
+            "SELECT COUNT(DISTINCT target) FROM audit_log "
+            "WHERE created_at >= datetime('now', ?) "
+            "AND target IS NOT NULL AND target != ''"
+        )
+
+        return {
+            "hours": hours,
+            "total": total,
+            "errors": errors,
+            "unique_actors": unique_actors,
+            "unique_targets": unique_targets,
+            "events": await grouped(
+                """
+                SELECT COALESCE(NULLIF(event, ''), '—') AS name, COUNT(*) AS count
+                FROM audit_log
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY name
+                ORDER BY count DESC, name ASC
+                LIMIT ?
+                """
+            ),
+            "actors": await grouped(
+                """
+                SELECT COALESCE(NULLIF(actor, ''), '—') AS name, COUNT(*) AS count
+                FROM audit_log
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY name
+                ORDER BY count DESC, name ASC
+                LIMIT ?
+                """
+            ),
+            "targets": await grouped(
+                """
+                SELECT COALESCE(NULLIF(target, ''), '—') AS name, COUNT(*) AS count
+                FROM audit_log
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY name
+                ORDER BY count DESC, name ASC
+                LIMIT ?
+                """
+            ),
+        }
+
     async def export_jsonl(
         self,
         *,

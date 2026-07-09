@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -168,3 +168,49 @@ def test_problem_lines_empty_messages():
     assert doctor._problem_lines(["🩺 EnvsBot doctor", "Overall: ✅ healthy"], mode="failed") == [
         "✅ No failed doctor checks found."
     ]
+
+
+@pytest.mark.asyncio
+async def test_doctor_release_section_reports_release_readiness(bot, monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(False, "1.5.0", None)),
+    )
+    monkeypatch.setattr(doctor, "_command_docs_line", lambda: "✅ Command docs: ok (126 commands)")
+    monkeypatch.setattr(doctor, "_config_sample_line", lambda: "✅ Config sample: ok")
+    monkeypatch.setattr(doctor, "_release_backup_line", lambda: "✅ Latest backup: backup.zip · now")
+
+    async def metadata_issues():
+        return []
+
+    bot.bot_plugins.all_metadata_issues = metadata_issues
+
+    lines = await doctor.build_doctor_lines(bot, sections=("release",))
+
+    assert any("[Release readiness]" in line for line in lines)
+    assert any("Local version" in line for line in lines)
+    assert any("Latest release: v1.5.0 (current)" in line for line in lines)
+    assert any("Command docs: ok" in line for line in lines)
+    assert any("Migrations: ok" in line for line in lines)
+    assert any("Plugin metadata: ok" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_doctor_release_command_selects_release_section(bot, monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "build_doctor_lines",
+        AsyncMock(return_value=["🩺 EnvsBot doctor", "Overall: ✅ healthy", "", "[Release readiness]"]),
+    )
+    message = MagicMock()
+
+    await doctor.doctor_release(bot, "admin@example.org", "admin", [], message, False)
+
+    doctor.build_doctor_lines.assert_awaited_once_with(bot, full=False, sections=("release",))
+    assert "Release readiness" in "\n".join(bot.reply.call_args.args[1])
+
+
+def test_parse_doctor_sections_supports_release_aliases():
+    assert doctor._parse_doctor_sections(["release"])[1] == ("release",)
+    assert doctor._parse_doctor_sections(["preflight"])[1] == ("release",)

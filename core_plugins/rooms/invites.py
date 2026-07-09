@@ -11,6 +11,18 @@ from utils.xmpp_notify import (
     notification_message_type,
 )
 
+from .settings import set_room_control_defaults
+from .state import (
+    JOINED_ROOMS,
+    _DIRECT_INVITE_NS,
+    _LEAVING_ROOMS,
+    _MUC_USER_NS,
+    _jid_bare,
+    _safe_get_plugin,
+    _safe_plugin_value,
+    log,
+)
+
 
 def room_invites_enabled() -> bool:
     """Return whether incoming MUC invite handling is enabled."""

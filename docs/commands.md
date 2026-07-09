@@ -112,6 +112,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,audit export` | `admin` | `private recommended` | Export recent audit events as JSON Lines. |
 | `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
 | `,audit prune` | `owner` | `private recommended` | Prune old audit events after confirmation. |
+| `,audit summary` | `admin` | `private recommended` | Summarize audit activity for the last 24h or 7d. |
 | `,audit target` | `admin` | `private recommended` | Show recent audit events for one target value. |
 | `,audit user` | `admin` | `private recommended` | Show recent audit events for one actor JID. |
 | `,backup create` | `admin` | `private chat / MUC PM` | Create a managed ZIP backup archive. |
@@ -131,8 +132,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config show` | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config unset` | `admin` | `private chat / MUC PM` | Reset one runtime-writable config value to the config_sample.py default. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
-| `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS. |
+| `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness. |
 | `,doctor failed` | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
+| `,doctor release` | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, DB, backups and plugin metadata. |
 | `,doctor warnings` | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |
 | `,plugin diagnose` | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
 | `,plugin state` | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
@@ -448,6 +450,22 @@ Examples:
 - `,audit prune 90 dry-run`
 - `,audit prune 90 confirm`
 
+#### `,audit summary`
+
+Summarize audit activity for the last 24h or 7d.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,audit summary [24h|7d]`
+
+Aliases: `,audit stats`, `,audits stats`, `,audits summary`
+
+Examples:
+
+- `,audit summary`
+- `,audit summary 7d`
+
 #### `,audit target`
 
 Show recent audit events for one target value.
@@ -702,12 +720,12 @@ Operator health checks and runtime diagnostics.
 
 #### `,doctor`
 
-Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS.
+Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|rss|all] [full] [page|last|all]`
+Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all] [full] [page|last|all]`
 
 Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
 
@@ -717,6 +735,7 @@ Examples:
 - `,doctor all full`
 - `,doctor rss`
 - `,doctor tasks full`
+- `,doctor release`
 
 #### `,doctor failed`
 
@@ -732,6 +751,22 @@ Aliases: `,bot doctor failed`, `,doctor error`, `,doctor errors`
 Examples:
 
 - `,doctor failed`
+
+#### `,doctor release`
+
+Run release-readiness checks for version, docs, config, DB, backups and plugin metadata.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,doctor release [page|last|all]`
+
+Aliases: `,bot doctor preflight`, `,bot doctor release`, `,doctor preflight`
+
+Examples:
+
+- `,doctor release`
+- `,doctor release all`
 
 #### `,doctor warnings`
 

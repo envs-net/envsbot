@@ -252,6 +252,76 @@ def _parse_export_args(args: list[str]) -> tuple[int, dict[str, str], str | None
     return limit, filters, None
 
 
+
+def _parse_summary_window(args: list[str] | tuple[str, ...] | None) -> tuple[int, str, str | None]:
+    """Return ``(hours, label, error)`` for audit summary windows."""
+    values = [str(arg).strip().lower() for arg in (args or []) if str(arg).strip()]
+    if not values:
+        return 24, "24h", None
+    if len(values) > 1:
+        return 24, "24h", "usage: audit summary [24h|7d]"
+
+    value = values[0]
+    aliases = {
+        "24h": (24, "24h"),
+        "day": (24, "24h"),
+        "1d": (24, "24h"),
+        "7d": (24 * 7, "7d"),
+        "week": (24 * 7, "7d"),
+        "1w": (24 * 7, "7d"),
+    }
+    if value in aliases:
+        hours, label = aliases[value]
+        return hours, label, None
+
+    unit = value[-1:]
+    number = value[:-1]
+    if unit in {"h", "d"} and number.isdigit():
+        amount = int(number)
+        if amount < 1:
+            return 24, "24h", "summary window must be at least 1 hour"
+        if unit == "h" and amount <= 24 * 14:
+            return amount, f"{amount}h", None
+        if unit == "d" and amount <= 14:
+            return amount * 24, f"{amount}d", None
+    return 24, "24h", "summary window must be 24h, 7d, or a small <n>h/<n>d value"
+
+
+def _format_summary_items(items, *, empty: str = "—") -> list[str]:
+    """Format summary item dictionaries returned by the audit store."""
+    result: list[str] = []
+    for item in list(items or [])[:8]:
+        if isinstance(item, dict):
+            name = str(item.get("name") or "—")
+            count = int(item.get("count") or 0)
+        else:
+            name, count = item
+            name = str(name or "—")
+            count = int(count)
+        result.append(f"• {name}: {count}")
+    return result or [empty]
+
+
+def _format_audit_summary(summary: dict, label: str) -> list[str]:
+    """Format an audit summary payload for bot output."""
+    lines = [
+        f"🧾 Audit summary — last {label}",
+        f"Events: {int(summary.get('total') or 0)}",
+        f"Error-like events: {int(summary.get('errors') or 0)}",
+        f"Unique actors: {int(summary.get('unique_actors') or 0)}",
+        f"Unique targets: {int(summary.get('unique_targets') or 0)}",
+        "",
+        "Top actions:",
+        *_format_summary_items(summary.get("events")),
+        "",
+        "Top actors:",
+        *_format_summary_items(summary.get("actors")),
+        "",
+        "Top targets:",
+        *_format_summary_items(summary.get("targets")),
+    ]
+    return lines
+
 @command(
     "audit last",
     role=Role.ADMIN,
@@ -387,6 +457,34 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
         command_hint=f"{config.get('prefix', ',')}audit action {event}",
         event=event,
     )
+
+
+
+@command(
+    "audit summary",
+    role=Role.ADMIN,
+    aliases=["audit stats", "audits summary", "audits stats"],
+    short="Summarize audit activity for the last 24h or 7d.",
+    usage="{prefix}audit summary [24h|7d]",
+    examples=["{prefix}audit summary", "{prefix}audit summary 7d"],
+    category="admin",
+    context="private recommended",
+)
+async def audit_summary(bot, sender, nick, args, msg, is_room):
+    """Show aggregate audit activity for a recent time window."""
+    hours, label, error = _parse_summary_window(args or [])
+    if error:
+        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit summary [24h|7d]")
+        return
+
+    audit_log = _audit_log(bot)
+    summarizer = getattr(audit_log, "summary_since", None)
+    if not callable(summarizer):
+        bot.reply_error(msg, "Audit summary is not available.")
+        return
+
+    summary = await summarizer(hours=hours, limit=8)
+    bot.reply(msg, _format_audit_summary(summary, label))
 
 
 @command(

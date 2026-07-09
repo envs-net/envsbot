@@ -3,6 +3,15 @@
 from utils.audit import audit_event
 from utils.room_features import format_room_feature_line, get_room_feature, set_room_feature
 
+from .defaults import (
+    PLUGIN_STORE_CONFIG,
+    ROOM_TOGGLE_STORES,
+    _normalize_room_plugin_default_name,
+    get_room_plugin_defaults,
+)
+from .presence import _resolve_room_settings_target
+from .state import _get_plugin_store, _room_matches, _store_get_global, _store_set_global, log
+
 
 async def _cleanup_room_toggle_state(bot, room_jid: str) -> int:
     """Remove room-scoped on/off entries from all known plugin stores."""

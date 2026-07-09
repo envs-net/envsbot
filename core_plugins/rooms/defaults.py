@@ -5,6 +5,14 @@ from utils.config import config
 from utils.formatting import format_page, parse_page_args
 from utils.room_features import format_room_feature_line, list_room_features
 
+from .state import (
+    _WARNED_ROOM_PLUGIN_DEFAULT_KEYS,
+    _maybe_await_result,
+    _merge_plugin_cleanup_summary,
+    log,
+)
+from .presence import _resolve_room_settings_target
+
 
 PLUGIN_META = {
     "name": "rooms",
@@ -154,6 +162,8 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
         "plugin_hooks": {},
     }
     try:
+        from .settings import _cleanup_room_toggle_state
+
         summary["toggles"] = await _cleanup_room_toggle_state(bot, room_jid)
 
         manager = getattr(bot, "bot_plugins", None)

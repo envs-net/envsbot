@@ -3,6 +3,11 @@
 from functools import partial
 from utils.config import config
 
+from .commands import autojoin_rooms
+from .invites import cleanup_expired_room_invites, load_pending_room_invites, on_room_invite, on_room_invite_message
+from .presence import on_muc_presence
+from .state import JOINED_ROOMS, log
+
 
 async def on_ready(bot):
     """Load pending room invites after the database is ready."""

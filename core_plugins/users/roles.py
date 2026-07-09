@@ -11,6 +11,16 @@ log = logging.getLogger(__name__)
 prefix = str(config.get("prefix", ",") or ",")
 
 
+def _command_prefix(bot=None) -> str:
+    """Return the currently configured command prefix for user replies."""
+    return str(
+        getattr(bot, "prefix", None)
+        or config.get("prefix", None)
+        or prefix
+        or ","
+    )
+
+
 MAX_ROOM_NICKS = config.get("users", {}).get("max_room_nicks", 5)
 
 
@@ -44,6 +54,7 @@ PLUGIN_META = {
 __all__ = [
     'log',
     'prefix',
+    '_command_prefix',
     'MAX_ROOM_NICKS',
     'ASSIGNABLE_ROLES',
     'ROLE_NAMES',

@@ -243,3 +243,37 @@ def test_is_error_event_handles_mapping_and_tuple_rows():
     }) is True
     assert audit_mod._is_error_event((1, "now", "event", "actor", "target", '{"result": "failed"}')) is True
     assert audit_mod._is_error_event((1, "now", "event", "actor", "target", '{"status": "ok"}')) is False
+
+
+@pytest.mark.asyncio
+async def test_audit_summary_uses_store_summary(bot, msg):
+    summary = {
+        "total": 4,
+        "errors": 1,
+        "unique_actors": 2,
+        "unique_targets": 3,
+        "events": [{"name": "room_added", "count": 2}],
+        "actors": [{"name": "admin@example.org", "count": 3}],
+        "targets": [{"name": "room@example.org", "count": 2}],
+    }
+    summarizer = AsyncMock(return_value=summary)
+    bot.db = SimpleNamespace(audit=SimpleNamespace(summary_since=summarizer))
+
+    await audit_mod.audit_summary(bot, "admin@example.org", "admin", ["7d"], msg, False)
+
+    summarizer.assert_awaited_once_with(hours=24 * 7, limit=8)
+    reply = "\n".join(bot.reply.call_args.args[1])
+    assert "Audit summary — last 7d" in reply
+    assert "Events: 4" in reply
+    assert "Error-like events: 1" in reply
+    assert "• room_added: 2" in reply
+    assert "• admin@example.org: 3" in reply
+
+
+def test_parse_summary_window_accepts_expected_windows():
+    assert audit_mod._parse_summary_window([]) == (24, "24h", None)
+    assert audit_mod._parse_summary_window(["24h"]) == (24, "24h", None)
+    assert audit_mod._parse_summary_window(["7d"]) == (24 * 7, "7d", None)
+    assert audit_mod._parse_summary_window(["12h"]) == (12, "12h", None)
+    assert audit_mod._parse_summary_window(["2d"]) == (48, "2d", None)
+    assert audit_mod._parse_summary_window(["0h"])[2] is not None

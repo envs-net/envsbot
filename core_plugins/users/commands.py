@@ -1,18 +1,24 @@
 """Split module for core_plugins/users.py: commands."""
 
 from slixmpp import JID
-from utils.config import config
 from utils.command import command, Role
+from utils.formatting import parse_page_args
 
-
-def _command_prefix(bot=None) -> str:
-    """Return the currently configured command prefix for user replies."""
-    return str(
-        getattr(bot, "prefix", None)
-        or config.get("prefix", None)
-        or prefix
-        or ","
-    )
+from .formatting import _audit_reason, _send_user_info, _write_user_audit
+from .lookup import _parse_user_jid, _valid_plugin_names, find_users_by_nick_safe
+from .permissions import (
+    _available_role_names,
+    _can_change_role,
+    _can_delete_user,
+    _grantable_plugin_names,
+    _owner_jid,
+    _role_from_user,
+    _role_label,
+    _validate_grant_change,
+    get_user_plugin_grants,
+    set_user_plugin_grants,
+)
+from .roles import ROLE_NAMES, _command_prefix, log
 
 
 @command(

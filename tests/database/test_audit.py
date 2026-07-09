@@ -87,3 +87,39 @@ async def test_audit_export_jsonl_and_prune(tmp_path):
         assert await audit.prune_older_than(90) == 1
         rows = await audit.list(limit=10)
         assert [row["event"] for row in rows] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_audit_summary_since_counts_recent_activity(tmp_path):
+    db_path = tmp_path / "audit-summary.sqlite"
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        audit = AuditLog(conn)
+        await audit.init()
+
+        await audit.append("old_event", actor="old@example.org", target="old")
+        await conn.execute(
+            "UPDATE audit_log SET created_at = datetime('now', '-3 days') "
+            "WHERE event = 'old_event'"
+        )
+        await conn.commit()
+        await audit.append("room_added", actor="admin@example.org", target="room@example.org")
+        await audit.append("room_added", actor="admin@example.org", target="room@example.org")
+        await audit.append(
+            "plugin_failed",
+            actor="bot@example.org",
+            target="rss",
+            details={"status": "failed"},
+        )
+
+        summary = await audit.summary_since(hours=24, limit=5)
+
+        assert summary["hours"] == 24
+        assert summary["total"] == 3
+        assert summary["errors"] == 1
+        assert summary["unique_actors"] == 2
+        assert summary["unique_targets"] == 2
+        assert summary["events"][0] == {"name": "room_added", "count": 2}
+        assert {item["name"] for item in summary["events"]} == {"room_added", "plugin_failed"}
+        assert summary["actors"][0] == {"name": "admin@example.org", "count": 2}
+        assert summary["targets"][0] == {"name": "room@example.org", "count": 2}

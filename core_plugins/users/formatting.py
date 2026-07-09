@@ -2,6 +2,8 @@
 
 from utils.audit import audit_event
 
+from .roles import log
+
 
 async def _send_user_info(bot, msg, user: dict):
     """
@@ -15,6 +17,8 @@ async def _send_user_info(bot, msg, user: dict):
     - last seen
     """
     try:
+        from .permissions import _role_from_user
+
         role = _role_from_user(user)
 
         created = user.get("created_at") or user.get("created")

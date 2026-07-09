@@ -2,6 +2,7 @@
 
 import inspect
 import logging
+from slixmpp import JID
 from utils.room_features import list_room_features
 
 
@@ -21,6 +22,19 @@ _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 
 
 _WARNED_ROOM_PLUGIN_DEFAULT_KEYS: set[str] = set()
+
+
+def _jid_bare(value) -> str:
+    """Return a best-effort lower-case bare JID string."""
+    if value is None:
+        return ""
+    bare = getattr(value, "bare", None)
+    if bare:
+        return str(bare).lower()
+    try:
+        return str(JID(str(value)).bare).lower()
+    except Exception:
+        return str(value).split("/", 1)[0].lower()
 
 
 def _safe_get_plugin(stanza, plugin_name: str):

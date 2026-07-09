@@ -3,6 +3,8 @@
 import inspect
 from slixmpp import JID
 
+from .roles import GRANTABLE_PLUGINS
+
 
 async def find_users_by_nick_safe(bot, nick: str):
     """

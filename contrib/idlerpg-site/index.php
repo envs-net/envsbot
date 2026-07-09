@@ -119,6 +119,38 @@ function idlerpg_point_coord($point, $axis) {
     return 0.0;
 }
 
+
+function idlerpg_map_label_position($x, $y, $name, $map_width, $map_height, &$occupied) {
+    $bucket_x = (int) floor(((float) $x) / 42);
+    $bucket_y = (int) floor(((float) $y) / 24);
+    $bucket = $bucket_x . ':' . $bucket_y;
+    $slot = (int) ($occupied[$bucket] ?? 0);
+    $occupied[$bucket] = $slot + 1;
+
+    $offsets = [
+        [8, -8, 'start'],
+        [8, 16, 'start'],
+        [-8, -8, 'end'],
+        [-8, 16, 'end'],
+        [0, -20, 'middle'],
+        [0, 28, 'middle'],
+    ];
+    $choice = $offsets[$slot % count($offsets)];
+    $extra = intdiv($slot, count($offsets)) * 14;
+    $dy = $choice[1] < 0 ? $choice[1] - $extra : $choice[1] + $extra;
+
+    $label_x = max(8, min((float) $map_width - 8, (float) $x + $choice[0]));
+    $label_y = max(14, min((float) $map_height - 8, (float) $y + $dy));
+
+    return [
+        'x' => $label_x,
+        'y' => $label_y,
+        'anchor' => $choice[2],
+        'crowded' => $slot > 0,
+        'title' => $name . ' [' . (int) $x . ',' . (int) $y . ']',
+    ];
+}
+
 function idlerpg_export_files_exist($dir) {
     if (!is_dir($dir)) {
         return false;
@@ -382,7 +414,10 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 .world-map { display: block; width: min(100%, 720px); height: auto; border: 1px solid var(--line); background: #f3edbd; }
 .map-label { font-style: italic; font-size: 16px; fill: #4b2d10; opacity: .88; }
 .map-small-label { font-size: 11px; fill: #4b2d10; opacity: .8; }
-.marker text { font-size: 12px; fill: #111; paint-order: stroke; stroke: #f3edbd; stroke-width: 4px; stroke-linejoin: round; }
+.marker { cursor: pointer; }
+.marker text { font-size: 12px; fill: #111; paint-order: stroke; stroke: #f3edbd; stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.marker.crowded text { font-size: 10px; }
+.marker:hover text, .marker:focus text { font-weight: 700; }
 .marker.online circle { fill: #2f80ff; }
 .marker.offline circle { fill: #b33; }
 .marker circle { stroke: #111; stroke-width: 1.5; }
@@ -521,7 +556,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 
             <?php if ($render_map || $view === 'map'): ?>
                 <h2><?php echo $view === 'map' ? 'World Map' : 'Quest Map'; ?></h2>
-                <p class="muted">Blue = online, red = offline, orange = grid quest point. Time-based quests have no map route.</p>
+                <p class="muted">Blue = online, red = offline, orange = grid quest point. Labels are staggered when players stand close together; hover a marker for exact details.</p>
                 <?php if (count($map_players) > 0): ?>
                     <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
                         <defs><pattern id="noise" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/></pattern></defs>
@@ -540,8 +575,9 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                                 <rect class="quest-point" x="<?php echo h($qx - 5); ?>" y="<?php echo h($qy - 5); ?>" width="10" height="10"/>
                             <?php endforeach; ?>
                         <?php endif; ?>
-                        <?php foreach (array_slice($map_players, 0, 120) as $player): $name = idlerpg_player_name($player); $x = max(0, min($map_width, idlerpg_player_coord($player, 'x'))); $y = max(0, min($map_height, idlerpg_player_coord($player, 'y'))); $class = idlerpg_player_online($player) ? 'marker online' : 'marker offline'; ?>
-                            <a href="<?php echo h(idlerpg_player_url($name)); ?>"><g class="<?php echo h($class); ?>"><circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/><text x="<?php echo h($x + 7); ?>" y="<?php echo h($y - 7); ?>"><?php echo h($name); ?></text></g></a>
+                        <?php $occupied_labels = []; ?>
+                        <?php foreach (array_slice($map_players, 0, 120) as $player): $name = idlerpg_player_name($player); $x = max(0, min($map_width, idlerpg_player_coord($player, 'x'))); $y = max(0, min($map_height, idlerpg_player_coord($player, 'y'))); $label = idlerpg_map_label_position($x, $y, $name, $map_width, $map_height, $occupied_labels); $class = idlerpg_player_online($player) ? 'marker online' : 'marker offline'; if ($label['crowded']) { $class .= ' crowded'; } ?>
+                            <a href="<?php echo h(idlerpg_player_url($name)); ?>"><g class="<?php echo h($class); ?>"><title><?php echo h($label['title'] . ' · lv.' . idlerpg_player_level($player)); ?></title><circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/><text text-anchor="<?php echo h($label['anchor']); ?>" x="<?php echo h($label['x']); ?>" y="<?php echo h($label['y']); ?>"><?php echo h($name); ?></text></g></a>
                         <?php endforeach; ?>
                     </svg>
                     <h3>Map positions</h3>

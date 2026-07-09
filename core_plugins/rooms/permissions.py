@@ -3,6 +3,8 @@
 import inspect
 from utils.command import Role
 
+from .state import JOINED_ROOMS, _jid_bare, log
+
 
 async def _maybe_get_user_role(bot, sender_jid: str, room_jid: str) -> Role:
     """Return the sender role for a room without assuming async mocks."""
