@@ -27,6 +27,8 @@ prefix = config.get("prefix", ",")
 
 def _plugin_health_status_from_lines(lines: list[str]) -> str:
     """Return a compact health status derived from plugin doctor lines."""
+    if not lines:
+        return "ok"
     if any(str(line).startswith("🔴") for line in lines):
         return "failed"
     if any(str(line).startswith(("⚠️", "🟡", "🟡️")) for line in lines):
@@ -37,7 +39,7 @@ def _plugin_health_status_from_lines(lines: list[str]) -> str:
         return "failed"
     if any("warning" in str(line).lower() or "stale" in str(line).lower() for line in lines):
         return "warning"
-    return "info"
+    return "ok"
 
 
 async def _plugin_health_summary(bot, loaded_names: set[str]) -> dict[str, str]:
@@ -45,7 +47,7 @@ async def _plugin_health_summary(bot, loaded_names: set[str]) -> dict[str, str]:
     manager = getattr(bot, "bot_plugins", None)
     doctor = getattr(manager, "plugin_doctor", None)
     if not callable(doctor):
-        return {name: "info" for name in loaded_names}
+        return {name: "ok" for name in loaded_names}
 
     summary: dict[str, str] = {}
     for name in sorted(loaded_names):

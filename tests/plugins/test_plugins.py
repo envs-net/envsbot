@@ -84,8 +84,9 @@ def test_plugin_health_status_from_lines_precedence_and_keywords():
     assert plugins_module._plugin_health_status_from_lines(["✅ good"]) == "ok"
     assert plugins_module._plugin_health_status_from_lines(["background task failed"]) == "failed"
     assert plugins_module._plugin_health_status_from_lines(["stale heartbeat"]) == "warning"
-    assert plugins_module._plugin_health_status_from_lines(["diagnostics unavailable"]) == "info"
-    assert plugins_module._plugin_health_status_from_lines([]) == "info"
+    assert plugins_module._plugin_health_status_from_lines(["diagnostics unavailable"]) == "ok"
+    assert plugins_module._plugin_health_status_from_lines(["ℹ️ info only"]) == "ok"
+    assert plugins_module._plugin_health_status_from_lines([]) == "ok"
 
 
 def test_plugin_health_summary_line_counts_known_and_unknown_statuses():
@@ -100,12 +101,12 @@ def test_plugin_health_summary_line_counts_known_and_unknown_statuses():
 
 
 @pytest.mark.asyncio
-async def test_plugin_health_summary_without_doctor_uses_info():
+async def test_plugin_health_summary_without_doctor_treats_loaded_plugins_as_ok():
     fake_bot = SimpleNamespace(bot_plugins=SimpleNamespace(plugin_doctor=None))
 
     assert await plugins_module._plugin_health_summary(fake_bot, {"ducks", "rss"}) == {
-        "ducks": "info",
-        "rss": "info",
+        "ducks": "ok",
+        "rss": "ok",
     }
 
 
@@ -127,10 +128,26 @@ async def test_plugin_health_summary_uses_doctor_lines_and_handles_errors():
         fake_bot, {"ok", "warn", "info", "bad"}
     ) == {
         "bad": "failed",
-        "info": "info",
+        "info": "ok",
         "ok": "ok",
         "warn": "warning",
     }
+
+
+@pytest.mark.asyncio
+async def test_plugin_list_treats_loaded_plugins_without_diagnostics_as_ok(bot, msg):
+    bot.bot_plugins.plugin_doctor = AsyncMock(
+        side_effect=lambda name: [f"ℹ️ {name}: loaded=True"]
+    )
+
+    await plugins_module.plugin_list(bot, "adminjid", "AdminNick", ["all"], msg, False)
+    out = bot.reply.call_args[0][1]
+    joined = out if isinstance(out, str) else "\n".join(out)
+
+    assert "Health: ✅ 3 ok, ⚠️ 0 warning, 🔴 0 failed, ℹ️ 0 unknown" in joined
+    assert "[loaded] plugins — ✅ ok" in joined
+    assert "[loaded] rooms — ✅ ok" in joined
+    assert "[loaded] ducks — ✅ ok" in joined
 
 
 def test_format_state_lines_handles_empty_and_collection_values():
