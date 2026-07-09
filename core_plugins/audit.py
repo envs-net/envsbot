@@ -9,7 +9,7 @@ from slixmpp import JID
 from utils.audit import audit_event
 from utils.command import Role, command
 from utils.config import config
-from utils.formatting import format_page, parse_page_args
+from utils.formatting import parse_page_args
 
 log = logging.getLogger(__name__)
 
@@ -47,47 +47,120 @@ def _format_row(row) -> str:
     return f"#{event_id} {created_at} | {event} | actor={actor} | target={target}{suffix}"
 
 
+def _audit_log(bot):
+    """Return the configured audit log object, if available."""
+    return getattr(getattr(bot, "db", None), "audit", None)
+
+
 async def _list_events(
     bot,
     *,
     limit: int = 20,
+    offset: int = 0,
     actor: str | None = None,
     target: str | None = None,
     event: str | None = None,
 ):
-    audit_log = getattr(getattr(bot, "db", None), "audit", None)
+    audit_log = _audit_log(bot)
     if audit_log is None:
         return []
     return await audit_log.list(
         limit=limit,
+        offset=offset,
         actor=actor,
         target=target,
         event=event,
     )
 
 
-def _reply_audit_rows(
+async def _count_events(
     bot,
-    msg,
+    *,
+    actor: str | None = None,
+    target: str | None = None,
+    event: str | None = None,
+) -> int:
+    audit_log = _audit_log(bot)
+    counter = getattr(audit_log, "count", None)
+    if callable(counter):
+        return await counter(actor=actor, target=target, event=event)
+    return len(await _list_events(bot, limit=1000, actor=actor, target=target, event=event))
+
+
+def _format_audit_page(
     title: str,
     rows,
     *,
     empty: str,
+    page_request,
+    total: int,
+    page_size: int,
+    command_hint: str,
+) -> list[str]:
+    """Format already paged audit rows without re-slicing them."""
+    lines = [_format_row(row) for row in rows]
+    if page_request.all:
+        return [title, *(lines or [empty])]
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = total_pages if page_request.page == -1 else min(max(page_request.page, 1), total_pages)
+    suffix = f" (page {page}/{total_pages})" if total_pages > 1 else ""
+    result = [title + suffix]
+    result.extend(lines or [empty])
+    if total_pages > 1:
+        result.append(f"Use {command_hint} <page|last|all> for more.")
+    return result
+
+
+async def _reply_audit_query(
+    bot,
+    msg,
+    title: str,
+    *,
+    empty: str,
     page_args: list[str] | None = None,
     command_hint: str | None = None,
+    actor: str | None = None,
+    target: str | None = None,
+    event: str | None = None,
 ) -> None:
-    """Reply with formatted, paginated audit rows."""
-    lines = [_format_row(row) for row in rows]
-    if not lines:
-        lines = [empty]
+    """Reply with a database-backed, paginated audit query."""
+    page_request = parse_page_args(page_args or [])
+    page_size = 10
+    command_hint = command_hint or f"{config.get('prefix', ',')}audit last"
+    total = await _count_events(bot, actor=actor, target=target, event=event)
+
+    if page_request.all:
+        rows = await _list_events(
+            bot,
+            limit=max(total, 1),
+            actor=actor,
+            target=target,
+            event=event,
+        )
+    else:
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = total_pages if page_request.page == -1 else min(max(page_request.page, 1), total_pages)
+        rows = await _list_events(
+            bot,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            actor=actor,
+            target=target,
+            event=event,
+        )
+        page_request = type(page_request)(page=page, all=False)
+
     bot.reply(
         msg,
-        format_page(
+        _format_audit_page(
             title,
-            lines,
-            page_request=parse_page_args(page_args or []),
-            page_size=10,
-            command_hint=command_hint or f"{config.get('prefix', ',')}audit last",
+            rows,
+            empty=empty,
+            page_request=page_request,
+            total=total,
+            page_size=page_size,
+            command_hint=command_hint,
         ),
     )
 
@@ -130,33 +203,39 @@ def _parse_export_args(args: list[str]) -> tuple[int, dict[str, str], str | None
     role=Role.ADMIN,
     aliases=["audit", "audits last"],
     short="Show recent admin audit events.",
-    usage="{prefix}audit last [all|page|last|limit]",
-    examples=["{prefix}audit last", "{prefix}audit last 2"],
+    usage="{prefix}audit last [all|page|last|limit <n>]",
+    examples=["{prefix}audit last", "{prefix}audit last 2", "{prefix}audit last limit 50"],
     category="admin",
     context="private recommended",
 )
 async def audit_last(bot, sender, nick, args, msg, is_room):
     """Show recent audit events."""
-    page_request = parse_page_args(args)
-    limit = 50 if page_request.all else 30
-    if args and str(args[0]).isdigit():
-        limit = max(1, min(int(args[0]), 100))
-        page_request = parse_page_args([])
+    if args and str(args[0]).lower() == "limit":
+        if len(args) != 2 or not str(args[1]).isdigit():
+            bot.reply_usage(msg, f"{bot.prefix}audit last [all|page|last|limit <n>]")
+            return
+        rows = await _list_events(bot, limit=max(1, min(int(args[1]), 100)))
+        bot.reply(
+            msg,
+            _format_audit_page(
+                "🧾 Audit log",
+                rows,
+                empty="No audit events found.",
+                page_request=parse_page_args(["all"]),
+                total=len(rows),
+                page_size=10,
+                command_hint=f"{bot.prefix}audit last",
+            ),
+        )
+        return
 
-    rows = await _list_events(bot, limit=limit)
-    lines = [_format_row(row) for row in rows]
-    if not lines:
-        lines = ["No audit events found."]
-
-    bot.reply(
+    await _reply_audit_query(
+        bot,
         msg,
-        format_page(
-            "🧾 Audit log",
-            lines,
-            page_request=page_request,
-            page_size=10,
-            command_hint=f"{bot.prefix}audit last",
-        ),
+        "🧾 Audit log",
+        empty="No audit events found.",
+        page_args=list(args or []),
+        command_hint=f"{bot.prefix}audit last",
     )
 
 
@@ -172,8 +251,8 @@ async def audit_last(bot, sender, nick, args, msg, is_room):
 )
 async def audit_user(bot, sender, nick, args, msg, is_room):
     """Show audit events for one actor."""
-    if len(args) != 1:
-        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit user <jid>")
+    if not args:
+        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit user <jid> [all|page|last]")
         return
     try:
         actor = str(JID(args[0]).bare)
@@ -181,15 +260,14 @@ async def audit_user(bot, sender, nick, args, msg, is_room):
         bot.reply_error(msg, "Invalid JID.")
         return
 
-    rows = await _list_events(bot, limit=50, actor=actor)
-    _reply_audit_rows(
+    await _reply_audit_query(
         bot,
         msg,
         f"🧾 Audit log — actor={actor}",
-        rows,
         empty=f"No audit events found for {actor}.",
         page_args=list(args[1:]),
         command_hint=f"{config.get('prefix', ',')}audit user {actor}",
+        actor=actor,
     )
 
 
@@ -212,15 +290,14 @@ async def audit_target(bot, sender, nick, args, msg, is_room):
     if error or target is None:
         bot.reply_usage(msg, error or f"{config.get('prefix', ',')}audit target <target>")
         return
-    rows = await _list_events(bot, limit=50, target=target)
-    _reply_audit_rows(
+    await _reply_audit_query(
         bot,
         msg,
         f"🧾 Audit log — target={target}",
-        rows,
         empty=f"No audit events found for target {target}.",
         page_args=page_args,
         command_hint=f"{config.get('prefix', ',')}audit target {target}",
+        target=target,
     )
 
 
@@ -243,15 +320,14 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
     if error or event is None:
         bot.reply_usage(msg, error or f"{config.get('prefix', ',')}audit action <event_type>")
         return
-    rows = await _list_events(bot, limit=50, event=event)
-    _reply_audit_rows(
+    await _reply_audit_query(
         bot,
         msg,
         f"🧾 Audit log — action={event}",
-        rows,
         empty=f"No audit events found for action {event}.",
         page_args=page_args,
         command_hint=f"{config.get('prefix', ',')}audit action {event}",
+        event=event,
     )
 
 @command(

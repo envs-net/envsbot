@@ -6,7 +6,13 @@ from utils.plugin_metadata import validate_plugin_metadata
 def test_validate_plugin_metadata_accepts_minimal_valid_meta():
     issues = validate_plugin_metadata(
         "rss",
-        {"name": "rss", "description": "feeds", "category": "info", "requires": ["rooms"]},
+        {
+            "name": "rss",
+            "description": "feeds",
+            "category": "info",
+            "requires": ["rooms"],
+            "hidden": False,
+        },
     )
     assert issues == []
 

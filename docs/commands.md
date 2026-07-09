@@ -271,7 +271,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 ## Plugin command details
 
-### admin
+### _admin
 
 Source: `core`
 Category: `core`
@@ -403,7 +403,7 @@ Show recent admin audit events.
 Role: `admin`<br>
 Context: `private recommended`<br>
 Category: `admin`<br>
-Usage: `,audit last [all|page|last|limit]`
+Usage: `,audit last [all|page|last|limit <n>]`
 
 Aliases: `,audit`, `,audits last`
 
@@ -411,6 +411,7 @@ Examples:
 
 - `,audit last`
 - `,audit last 2`
+- `,audit last limit 50`
 
 #### `,audit prune`
 

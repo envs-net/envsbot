@@ -12,6 +12,7 @@ KNOWN_PLUGIN_META_KEYS = frozenset({
     "description",
     "category",
     "requires",
+    "hidden",
 })
 
 

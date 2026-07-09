@@ -36,7 +36,7 @@ from utils.version import __version__, display_version
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
-    "name": "admin",
+    "name": "_admin",
     "version": "0.2.0",
     "description": "Bot administration commands",
     "category": "core",

@@ -28,9 +28,14 @@ async def test_audit_log_init_append_and_list_filters(tmp_path):
         assert [row["event"] for row in all_rows] == ["backup_created", "config_reloaded"]
         assert all_rows[0]["details"] == "{}"
         assert json.loads(all_rows[1]["details"]) == {"a": 1, "b": 2}
+        assert await audit.count() == 2
+
+        second_page = await audit.list(limit=1, offset=1)
+        assert [row["event"] for row in second_page] == ["config_reloaded"]
 
         filtered = await audit.list(limit=0, actor="admin@example.org")
         assert len(filtered) == 1
+        assert await audit.count(actor="admin@example.org") == 1
         assert filtered[0]["event"] == "config_reloaded"
         assert filtered[0]["actor"] == "admin@example.org"
         assert filtered[0]["target"] == "config"

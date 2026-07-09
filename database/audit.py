@@ -46,16 +46,14 @@ class AuditLog:
         )
         await self.conn.commit()
 
-    async def list(
+    def _filter_sql(
         self,
         *,
-        limit: int = 20,
         actor: str | None = None,
         target: str | None = None,
         event: str | None = None,
-    ):
-        """Return latest audit events, optionally filtered."""
-        limit = max(1, min(int(limit), 100))
+    ) -> tuple[str, list[str]]:
+        """Build a WHERE clause and params for audit filters."""
         where = []
         params = []
         if actor:
@@ -67,16 +65,45 @@ class AuditLog:
         if event:
             where.append("event = ?")
             params.append(event)
+        return (f"WHERE {' AND '.join(where)}" if where else "", params)
 
-        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-        params.append(limit)
+    async def count(
+        self,
+        *,
+        actor: str | None = None,
+        target: str | None = None,
+        event: str | None = None,
+    ) -> int:
+        """Return the number of audit events matching optional filters."""
+        where_sql, params = self._filter_sql(actor=actor, target=target, event=event)
+        cursor = await self.conn.execute(
+            f"SELECT COUNT(*) AS count FROM audit_log {where_sql}",
+            tuple(params),
+        )
+        row = await cursor.fetchone()
+        return int(row["count"] if hasattr(row, "keys") else row[0])
+
+    async def list(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        actor: str | None = None,
+        target: str | None = None,
+        event: str | None = None,
+    ):
+        """Return latest audit events, optionally filtered."""
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
+        where_sql, params = self._filter_sql(actor=actor, target=target, event=event)
+        params.extend([limit, offset])
         cursor = await self.conn.execute(
             f"""
             SELECT id, created_at, event, actor, target, details
             FROM audit_log
             {where_sql}
             ORDER BY id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
             tuple(params),
         )

@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,6 +11,7 @@ def bot():
     bot = MagicMock()
     bot.prefix = ","
     bot.reply = MagicMock()
+    bot.db = SimpleNamespace(audit=None)
     return bot
 
 
@@ -19,37 +21,57 @@ def msg():
 
 
 @pytest.mark.asyncio
-async def test_audit_last_default_uses_safe_limit(bot, msg, monkeypatch):
-    list_events = AsyncMock(return_value=[])
-    monkeypatch.setattr(audit_mod, "_list_events", list_events)
+async def test_audit_last_uses_database_backed_pagination(bot, msg):
+    rows = [
+        (idx, f"now-{idx}", "event", "actor", "target", "{}")
+        for idx in range(25, 0, -1)
+    ]
 
-    await audit_mod.audit_last(bot, "admin@example.org", "admin", [], msg, False)
+    async def list_events(*, limit=20, offset=0, actor=None, target=None, event=None):
+        assert actor is None
+        assert target is None
+        assert event is None
+        return rows[offset:offset + limit]
 
-    list_events.assert_awaited_once_with(bot, limit=30)
+    audit_log = SimpleNamespace(
+        count=AsyncMock(return_value=len(rows)),
+        list=AsyncMock(side_effect=list_events),
+    )
+    bot.db = SimpleNamespace(audit=audit_log)
+
+    await audit_mod.audit_last(bot, "admin@example.org", "admin", ["2"], msg, False)
+
+    audit_log.count.assert_awaited_once_with(actor=None, target=None, event=None)
+    audit_log.list.assert_awaited_once_with(limit=10, offset=10, actor=None, target=None, event=None)
     reply_lines = bot.reply.call_args.args[1]
-    assert reply_lines[0] == "🧾 Audit log"
-    assert "No audit events found." in reply_lines
+    assert reply_lines[0] == "🧾 Audit log (page 2/3)"
+    assert "#15 now-15" in "\n".join(reply_lines)
+    assert "#25 now-25" not in "\n".join(reply_lines)
 
 
 @pytest.mark.asyncio
-async def test_audit_last_all_uses_larger_limit(bot, msg, monkeypatch):
-    list_events = AsyncMock(return_value=[])
-    monkeypatch.setattr(audit_mod, "_list_events", list_events)
+async def test_audit_last_all_fetches_all_matching_rows(bot, msg):
+    rows = [(1, "now", "event", "actor", "target", "{}")]
+    audit_log = SimpleNamespace(
+        count=AsyncMock(return_value=len(rows)),
+        list=AsyncMock(return_value=rows),
+    )
+    bot.db = SimpleNamespace(audit=audit_log)
 
     await audit_mod.audit_last(bot, "admin@example.org", "admin", ["all"], msg, False)
 
-    list_events.assert_awaited_once_with(bot, limit=50)
+    audit_log.list.assert_awaited_once_with(limit=1, offset=0, actor=None, target=None, event=None)
     reply_lines = bot.reply.call_args.args[1]
     assert reply_lines[0] == "🧾 Audit log"
-    assert "No audit events found." in reply_lines
+    assert "#1 now" in "\n".join(reply_lines)
 
 
 @pytest.mark.asyncio
-async def test_audit_last_numeric_argument_is_limit(bot, msg, monkeypatch):
+async def test_audit_last_limit_argument_uses_legacy_limit(bot, msg, monkeypatch):
     list_events = AsyncMock(return_value=[])
     monkeypatch.setattr(audit_mod, "_list_events", list_events)
 
-    await audit_mod.audit_last(bot, "admin@example.org", "admin", ["7"], msg, False)
+    await audit_mod.audit_last(bot, "admin@example.org", "admin", ["limit", "7"], msg, False)
 
     list_events.assert_awaited_once_with(bot, limit=7)
     reply_lines = bot.reply.call_args.args[1]
@@ -100,14 +122,21 @@ async def test_audit_user_usage_invalid_jid_empty_and_rows(bot, msg, monkeypatch
     await audit_mod.audit_user(bot, "admin@example.org", "admin", ["not a jid"], msg, False)
     bot.reply_error.assert_called_once_with(msg, "Invalid JID.")
 
-    list_events = AsyncMock(return_value=[])
-    monkeypatch.setattr(audit_mod, "_list_events", list_events)
+    audit_log = SimpleNamespace(
+        count=AsyncMock(return_value=0),
+        list=AsyncMock(return_value=[]),
+    )
+    bot.db = SimpleNamespace(audit=audit_log)
     await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org/resource"], msg, False)
-    list_events.assert_awaited_once_with(bot, limit=50, actor="admin@example.org")
+    audit_log.count.assert_awaited_with(actor="admin@example.org", target=None, event=None)
+    audit_log.list.assert_awaited_with(limit=10, offset=0, actor="admin@example.org", target=None, event=None)
     assert "No audit events found for admin@example.org." in bot.reply.call_args.args[1]
 
-    list_events = AsyncMock(return_value=[(1, "now", "event", "Admin@example.org", "target", '{}')])
-    monkeypatch.setattr(audit_mod, "_list_events", list_events)
+    audit_log = SimpleNamespace(
+        count=AsyncMock(return_value=1),
+        list=AsyncMock(return_value=[(1, "now", "event", "Admin@example.org", "target", '{}')]),
+    )
+    bot.db = SimpleNamespace(audit=audit_log)
     await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org"], msg, False)
     assert "#1 now | event" in "\n".join(bot.reply.call_args.args[1])
 
@@ -124,9 +153,11 @@ async def test_audit_target_and_action_filters(msg):
         "target": "room@example.org",
         "details": "{}",
     }
-    audit_log = MagicMock()
-    audit_log.list = AsyncMock(return_value=[row])
-    bot.db = MagicMock(audit=audit_log)
+    audit_log = SimpleNamespace(
+        count=AsyncMock(return_value=1),
+        list=AsyncMock(return_value=[row]),
+    )
+    bot.db = SimpleNamespace(audit=audit_log)
 
     await audit_mod.audit_target(
         bot,
@@ -137,7 +168,8 @@ async def test_audit_target_and_action_filters(msg):
         False,
     )
     audit_log.list.assert_awaited_with(
-        limit=50,
+        limit=10,
+        offset=0,
         actor=None,
         target="room@example.org",
         event=None,
@@ -153,7 +185,8 @@ async def test_audit_target_and_action_filters(msg):
         False,
     )
     audit_log.list.assert_awaited_with(
-        limit=50,
+        limit=10,
+        offset=0,
         actor=None,
         target=None,
         event="room_added",
