@@ -401,68 +401,63 @@ async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
     monkeypatch.setattr(vcard, "JOINED_ROOMS", joined)
     monkeypatch.setattr(xmpp, "JOINED_ROOMS", joined)
 
-    assert await dice.get_runtime_state(bot, "room@conf/nick") == {
-        "enabled_rooms": 1,
-        "max_dice": 10,
-        "max_sides": 100,
-    }
-    assert await dice.doctor(bot, "room@conf") == [
+    dice_state = await dice.get_runtime_state(bot, room_jid="room@conf/nick")
+    assert dice_state["enabled_rooms"] == 1
+    assert dice_state["max_dice"] == 10
+    assert dice_state["max_sides"] == 100
+    assert await dice.doctor(bot, room_jid="room@conf") == [
         "✅ Dice for room@conf: enabled_rooms=1, limits=10d100"
     ]
 
-    assert await info.get_runtime_state(bot, "room@conf") == {
-        "enabled_rooms": 1,
-        "acronyms": 2,
-        "definitions": 3,
-        "pending_additions": 1,
-        "pending_removals": 1,
-        "timeout": info.INFO_HTTP_TIMEOUT,
-    }
-    assert await info.doctor(bot, "room@conf") == [
+    info_state = await info.get_runtime_state(bot, room_jid="room@conf")
+    assert info_state["enabled_rooms"] == 1
+    assert info_state["acronyms"] == 2
+    assert info_state["definitions"] == 3
+    assert info_state["pending_additions"] == 1
+    assert info_state["pending_removals"] == 1
+    assert info_state["timeout"] == info.INFO_HTTP_TIMEOUT
+    assert await info.doctor(bot, room_jid="room@conf") == [
         f"✅ Info for room@conf: enabled_rooms=1, acronyms=2, definitions=3, "
         f"pending_additions=1, pending_removals=1, timeout={info.INFO_HTTP_TIMEOUT:g}s"
     ]
 
-    assert await sed.get_runtime_state(bot, "room@conf") == {
-        "enabled_rooms": 1,
-        "cached_rooms": 1,
-        "cached_messages": 1,
-        "cache_size": sed.SED_CACHE_SIZE,
-        "regex_timeout": sed.REGEX_TIMEOUT,
-    }
-    assert await sed.doctor(bot, "room@conf") == [
+    sed_state = await sed.get_runtime_state(bot, room_jid="room@conf")
+    assert sed_state["enabled_rooms"] == 1
+    assert sed_state["cached_rooms"] == 1
+    assert sed_state["cached_messages"] == 1
+    assert sed_state["cache_size"] == sed.SED_CACHE_SIZE
+    assert sed_state["regex_timeout"] == sed.REGEX_TIMEOUT
+    assert await sed.doctor(bot, room_jid="room@conf") == [
         f"✅ Sed for room@conf: enabled_rooms=1, cached_rooms=1, "
         f"cached_messages=1, cache_size={sed.SED_CACHE_SIZE}, regex_timeout={sed.REGEX_TIMEOUT:g}s"
     ]
 
-    tools_state = await tools.get_runtime_state(bot, "room@conf")
+    tools_state = await tools.get_runtime_state(bot, room_jid="room@conf")
     assert tools_state["enabled_rooms"] == 1
     assert tools_state["joined_rooms"] == 1
     assert tools_state["tracked_nicks"] == 1
     assert tools_state["timezones_known"] > 0
-    assert (await tools.doctor(bot, "room@conf"))[0].startswith(
+    assert (await tools.doctor(bot, room_jid="room@conf"))[0].startswith(
         "✅ Tools for room@conf: enabled_rooms=1, joined_rooms=1, tracked_nicks=1"
     )
 
-    assert await vcard.get_runtime_state(bot, "room@conf") == {
-        "enabled_rooms": 1,
-        "joined_rooms": 1,
-        "tracked_nicks": 1,
-        "xep_0054_available": 1,
-        "fetch_timeout": 10.0,
-    }
-    assert await vcard.doctor(bot, "room@conf") == [
+    vcard_state = await vcard.get_runtime_state(bot, room_jid="room@conf")
+    assert vcard_state["enabled_rooms"] == 1
+    assert vcard_state["joined_rooms"] == 1
+    assert vcard_state["tracked_nicks"] == 1
+    assert vcard_state["xep_0054_available"] == 1
+    assert vcard_state["fetch_timeout"] == 10.0
+    assert await vcard.doctor(bot, room_jid="room@conf") == [
         "✅ vCard for room@conf: enabled_rooms=1, joined_rooms=1, "
         "tracked_nicks=1, xep_0054_available=1, fetch_timeout=10s"
     ]
 
-    assert await xmpp.get_runtime_state(bot, "room@conf") == {
-        "enabled_rooms": 1,
-        "joined_rooms": 1,
-        "query_timeout": xmpp.XMPP_QUERY_TIMEOUT_SECONDS,
-        "http_timeout": xmpp.XMPP_HTTP_TIMEOUT_SECONDS,
-    }
-    assert await xmpp.doctor(bot, "room@conf") == [
+    xmpp_state = await xmpp.get_runtime_state(bot, room_jid="room@conf")
+    assert xmpp_state["enabled_rooms"] == 1
+    assert xmpp_state["joined_rooms"] == 1
+    assert xmpp_state["query_timeout"] == xmpp.XMPP_QUERY_TIMEOUT_SECONDS
+    assert xmpp_state["http_timeout"] == xmpp.XMPP_HTTP_TIMEOUT_SECONDS
+    assert await xmpp.doctor(bot, room_jid="room@conf") == [
         f"✅ XMPP for room@conf: enabled_rooms=1, joined_rooms=1, "
         f"query_timeout={xmpp.XMPP_QUERY_TIMEOUT_SECONDS:g}s, "
         f"http_timeout={xmpp.XMPP_HTTP_TIMEOUT_SECONDS:g}s"
