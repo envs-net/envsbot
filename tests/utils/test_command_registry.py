@@ -11,6 +11,11 @@ class FakeCommands(dict):
         super().__init__()
         self.by_plugin = {}
 
+    def __eq__(self, other):
+        if not isinstance(other, FakeCommands):
+            return dict.__eq__(self, other)
+        return dict.__eq__(self, other) and self.by_plugin == other.by_plugin
+
 
 def test_command_records_normalize_live_registry_metadata(monkeypatch):
     commands = FakeCommands()

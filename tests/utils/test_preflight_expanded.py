@@ -228,7 +228,7 @@ async def test_collect_preflight_checks_and_run_preflight(monkeypatch, capsys):
     assert "Overall: ✅ ok" in out
 
 @pytest.mark.asyncio
-async def test_check_database_redacts_bare_secret_runtime_errors(monkeypatch, tmp_path):
+async def test_check_database_keeps_bare_key_names_in_error_text(monkeypatch, tmp_path):
     class BareSecretDB:
         async def connect(self):
             raise RuntimeError("secret")
@@ -240,8 +240,7 @@ async def test_check_database_redacts_bare_secret_runtime_errors(monkeypatch, tm
     ok, message = await preflight._check_database({"db": tmp_path / "bot.db"})
 
     assert ok is False
-    assert "RuntimeError" in message
-    assert "secret" not in message
+    assert "RuntimeError: secret" in message
 
 
 @pytest.mark.asyncio

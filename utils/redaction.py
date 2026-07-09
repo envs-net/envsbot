@@ -65,7 +65,7 @@ def redact_value(value: Any, *, key: object | None = None, max_string: int = _MA
     if isinstance(value, list):
         return [redact_value(v, max_string=max_string) for v in value]
     if isinstance(value, set):
-        return sorted(redact_value(v, max_string=max_string) for v in value)
+        return {redact_value(v, max_string=max_string) for v in value}
     if isinstance(value, str):
         return _truncate(redact_url(value), max_length=max_string)
     return value
@@ -80,6 +80,4 @@ def redact_text(text: object, *, max_length: int = _MAX_STRING) -> str:
     """Return a compact redacted text value for log/audit strings."""
     value = redact_url(str(text))
     value = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", value)
-    if value.strip().lower() in SECRET_KEY_PARTS:
-        value = REDACTED
     return _truncate(value, max_length=max_length)
