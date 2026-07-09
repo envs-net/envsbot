@@ -134,3 +134,37 @@ async def test_doctor_plugin_section_uses_plugin_doctor(bot):
     assert lines[1] == "Overall: ✅ healthy"
     assert any("[Plugin: rss]" in line for line in lines)
     assert any("rss: healthy" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_doctor_warning_and_failed_filters(bot):
+    async def plugin_doctor(name, room_jid=None):
+        if name == "rss":
+            return ["⚠️ rss: retry backoff active"]
+        if name == "weather":
+            return ["🔴 weather: API failed"]
+        return [f"✅ {name}: ok"]
+
+    bot.bot_plugins.plugin_doctor = plugin_doctor
+    message = MagicMock()
+
+    await doctor.doctor_command(bot, "admin@example.org", "admin", ["warnings"], message, False)
+    warning_reply = "\n".join(bot.reply.call_args.args[1])
+    assert "doctor — warnings" in bot.reply.call_args.args[1][0]
+    assert "rss: retry backoff active" in warning_reply
+    assert "weather: API failed" not in warning_reply
+
+    await doctor.doctor_failed(bot, "admin@example.org", "admin", [], message, False)
+    failed_reply = "\n".join(bot.reply.call_args.args[1])
+    assert "doctor — failed" in bot.reply.call_args.args[1][0]
+    assert "weather: API failed" in failed_reply
+    assert "rss: retry backoff active" not in failed_reply
+
+
+def test_problem_lines_empty_messages():
+    assert doctor._problem_lines(["🩺 EnvsBot doctor", "Overall: ✅ healthy"], mode="warnings") == [
+        "✅ No doctor warnings found."
+    ]
+    assert doctor._problem_lines(["🩺 EnvsBot doctor", "Overall: ✅ healthy"], mode="failed") == [
+        "✅ No failed doctor checks found."
+    ]

@@ -82,7 +82,10 @@ async def test_rooms_invite_accept_joins_and_removes_pending(fake_bot, fake_msg,
 
     join_invited.assert_awaited_once_with(fake_bot, "room3@conference.test", "EnvsBot")
     assert fake_bot.pending_room_invites == {}
-    fake_bot.reply_ok.assert_called()
+    reply_lines = fake_bot.reply.call_args.args[1]
+    assert reply_lines[0].startswith("✅ Accepted room invite #7")
+    assert any(f"{fake_bot.prefix}rooms diagnose room3@conference.test" in line for line in reply_lines)
+    assert any(f"{fake_bot.prefix}rooms plugins room3@conference.test all" in line for line in reply_lines)
 
 
 @pytest.mark.asyncio
@@ -469,7 +472,8 @@ async def test_rooms_invite_command_accept_and_decline_edges(fake_bot, fake_msg,
     join.assert_awaited_once_with(fake_bot, "room5@conf", "ResourceNick")
     delete.assert_awaited_once_with(fake_bot, 5)
     assert audit.await_args.kwargs["target"] == "room5@conf"
-    assert "Accepted room invite #5" in fake_bot.reply_ok.call_args.args[1]
+    assert "Accepted room invite #5" in fake_bot.reply.call_args.args[1][0]
+    assert any("!rooms diagnose room5@conf" in line for line in fake_bot.reply.call_args.args[1])
 
     fake_bot.pending_room_invites = {
         6: {"id": 6, "room_jid": "room6@conf", "inviter": "user@example.org", "reason": ""}
@@ -482,3 +486,13 @@ async def test_rooms_invite_command_accept_and_decline_edges(fake_bot, fake_msg,
     monkeypatch.setattr(rooms, "_delete_pending_room_invite", AsyncMock(return_value=fake_bot.pending_room_invites[6]))
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["rm", "6"], fake_msg, False)
     assert "Declined room invite #6" in fake_bot.reply_ok.call_args.args[1]
+
+
+def test_room_invite_onboarding_lines_use_runtime_prefix(fake_bot):
+    fake_bot.prefix = ";"
+    lines = rooms._room_invite_onboarding_lines(fake_bot, "new@conference.test")
+
+    assert lines[0].startswith("✅ Accepted room invite")
+    assert any(";rooms diagnose new@conference.test" in line for line in lines)
+    assert any(";rooms plugins new@conference.test all" in line for line in lines)
+    assert any(";doctor rooms" in line for line in lines)

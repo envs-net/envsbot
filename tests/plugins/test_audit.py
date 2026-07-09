@@ -214,3 +214,32 @@ async def test_audit_export_accepts_filters(bot, msg):
     )
     assert "action" not in bot.reply.call_args.args[1]
     assert "event=backup_created" in bot.reply.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_audit_errors_filters_error_like_rows(bot, msg):
+    rows = [
+        (4, "now-4", "command_executed", "actor", "target", '{"status": "ok"}'),
+        (3, "now-3", "plugin_failed", "actor", "rss", "{}"),
+        (2, "now-2", "command_executed", "actor", "target", '{"status": "error"}'),
+        (1, "now-1", "backup_created", "actor", "backup", "{}"),
+    ]
+    audit_log = SimpleNamespace(list=AsyncMock(return_value=rows))
+    bot.db = SimpleNamespace(audit=audit_log)
+
+    await audit_mod.audit_errors(bot, "admin@example.org", "admin", [], msg, False)
+
+    reply = "\n".join(bot.reply.call_args.args[1])
+    assert "Audit errors" in reply
+    assert "plugin_failed" in reply
+    assert "status=error" in reply
+    assert "status=ok" not in reply
+
+
+def test_is_error_event_handles_mapping_and_tuple_rows():
+    assert audit_mod._is_error_event({
+        "event": "command_executed",
+        "details": '{"error": "boom"}',
+    }) is True
+    assert audit_mod._is_error_event((1, "now", "event", "actor", "target", '{"result": "failed"}')) is True
+    assert audit_mod._is_error_event((1, "now", "event", "actor", "target", '{"status": "ok"}')) is False

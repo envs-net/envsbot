@@ -25,6 +25,8 @@ Examples:
 ```text
 ,doctor
 ,doctor all
+,doctor warnings
+,doctor failed
 ,doctor tasks
 ,doctor rss
 ,doctor idlerpg
@@ -42,14 +44,26 @@ plugin-provided room state where available.
 ,rooms diagnose lounge@conference.example.org
 ```
 
+## Room invite onboarding
+
+When the bot receives a direct or mediated MUC invite, it stores the invite as a pending item and notifies the configured admin target. After accepting an invite, the reply includes a small onboarding checklist:
+
+```text
+,rooms diagnose room@conference.example.org
+,rooms plugins room@conference.example.org all
+,doctor rooms
+```
+
+This keeps the invite flow safe: the room is joined and stored with autojoin enabled, room plugin defaults are applied, and the operator gets the next checks for affiliation, room plugin toggles and general room health.
+
 ## Plugin diagnostics and state
 
-Use `,plugin diagnose <plugin>` for metadata, command, hook and task information.
-Use `,plugin state <plugin> [room_jid]` for plugin-provided runtime counters.
+Use `,plugins` for the loaded/available plugin list. Loaded plugins include a compact health marker and the first line shows an aggregate health summary. Use `,plugin diagnose <plugin>` for metadata, command, hook and task information. Use `,plugin state <plugin> [room_jid]` for plugin-provided runtime counters.
 
 Examples:
 
 ```text
+,plugins
 ,plugin diagnose rss
 ,plugin state rss
 ,plugin state poll lounge@conference.example.org
@@ -114,6 +128,7 @@ The audit log can be filtered by actor, target or event type:
 
 ```text
 ,audit last
+,audit errors
 ,audit user admin@example.org
 ,audit target lounge@conference.example.org
 ,audit action room_feature_changed

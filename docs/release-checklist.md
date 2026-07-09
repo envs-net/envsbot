@@ -41,9 +41,10 @@ not recommend running a production bot from `main`.
 
 ## Test suite
 
-Run the full offline test suite:
+Run the local preflight and the full offline test suite:
 
 ```bash
+PYTHONPATH="$PWD" envsbot --check
 PYTHONPATH="$PWD" pytest --no-cov -q
 PYTHONPATH="$PWD" pytest --cov=envsbot --cov-report=term-missing
 ```
@@ -79,6 +80,14 @@ and MUC private message where possible:
 ,backup
 ,backup list
 ,rooms list
+,rooms invite list
+,doctor warnings
+,doctor failed
+,tasks failed
+,tasks stale
+,audit errors
+,plugins
+,plugin diagnose rss
 ,users admins
 ,users roles
 ```

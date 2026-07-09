@@ -51,6 +51,13 @@ _SECTION_ALIASES = {
     "plugin-health": "plugin-health",
     "pluginhealth": "plugin-health",
     "health": "plugin-health",
+    "warnings": "warnings",
+    "warning": "warnings",
+    "warn": "warnings",
+    "failed": "failed",
+    "fail": "failed",
+    "errors": "failed",
+    "error": "failed",
     "rss": "plugin:rss",
     "idlerpg": "plugin:idlerpg",
     "irpg": "plugin:idlerpg",
@@ -316,6 +323,20 @@ def _overall_status(lines: list[str]) -> str:
     return "Overall: ✅ healthy"
 
 
+
+def _problem_lines(lines: list[str], *, mode: str) -> list[str]:
+    """Return warning/error lines from a full doctor result."""
+    body = [line for line in lines if line and not str(line).startswith("Overall:") and line != "🩺 EnvsBot doctor"]
+    if mode == "failed":
+        matched = [line for line in body if str(line).startswith("🔴") or "failed" in str(line).lower()]
+        return matched or ["✅ No failed doctor checks found."]
+    matched = [
+        line for line in body
+        if str(line).startswith(("⚠️", "🟡", "🟡️")) or "warning" in str(line).lower()
+    ]
+    return matched or ["✅ No doctor warnings found."]
+
+
 async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
     if section == "config":
         return _config_lines()
@@ -415,14 +436,59 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
 async def doctor_command(bot, sender, nick, args, msg, is_room):
     """Run operator health checks."""
     full, sections, page_args = _parse_doctor_sections(args or [])
+    filter_mode = None
+    if sections == ("warnings",):
+        filter_mode = "warnings"
+        sections = _ALL_SECTIONS
+        full = True
+    elif sections == ("failed",):
+        filter_mode = "failed"
+        sections = _ALL_SECTIONS
+        full = True
+
     lines = await build_doctor_lines(bot, full=full, sections=sections)
+    output_lines = lines[1:] if len(lines) > 1 else lines
+    title = "🩺 EnvsBot doctor"
+    if filter_mode:
+        output_lines = _problem_lines(lines, mode=filter_mode)
+        title = f"🩺 EnvsBot doctor — {filter_mode}"
     bot.reply(
         msg,
         format_page(
-            "🩺 EnvsBot doctor",
-            lines[1:] if len(lines) > 1 else lines,
+            title,
+            output_lines,
             page_request=parse_page_args(page_args),
             page_size=18,
             command_hint=f"{bot.prefix}doctor",
         ),
     )
+
+
+@command(
+    "doctor warnings",
+    role=Role.ADMIN,
+    aliases=["bot doctor warnings", "doctor warn", "doctor warning"],
+    short="Show only doctor warning lines.",
+    usage="{prefix}doctor warnings [page|last|all]",
+    examples=["{prefix}doctor warnings"],
+    category="admin",
+    context="private chat / MUC PM",
+)
+async def doctor_warnings(bot, sender, nick, args, msg, is_room):
+    """Show only doctor warning lines."""
+    await doctor_command(bot, sender, nick, ["warnings", *(args or [])], msg, is_room)
+
+
+@command(
+    "doctor failed",
+    role=Role.ADMIN,
+    aliases=["bot doctor failed", "doctor errors", "doctor error"],
+    short="Show only failed doctor checks.",
+    usage="{prefix}doctor failed [page|last|all]",
+    examples=["{prefix}doctor failed"],
+    category="admin",
+    context="private chat / MUC PM",
+)
+async def doctor_failed(bot, sender, nick, args, msg, is_room):
+    """Show only failed doctor checks."""
+    await doctor_command(bot, sender, nick, ["failed", *(args or [])], msg, is_room)

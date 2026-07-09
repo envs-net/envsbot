@@ -53,6 +53,13 @@ def bot():
     m.bot_plugins.unload = AsyncMock(return_value=(True, "Plugin unloaded."))
     m.bot_plugins.reload = AsyncMock(return_value=(True, "Plugin reloaded."))
     m.bot_plugins.list = MagicMock(return_value=["plugins", "rooms", "info"])
+    m.bot_plugins.plugin_doctor = AsyncMock(
+        side_effect=lambda name: {
+            "plugins": ["✅ plugins: ok"],
+            "rooms": ["⚠️ rooms: one warning"],
+            "ducks": ["🔴 ducks: failed"],
+        }.get(name, [f"ℹ️ {name}: no diagnostics"])
+    )
     return m
 
 
@@ -75,9 +82,11 @@ async def test_plugin_list(bot, msg):
     # Should mention all loaded and available plugins grouped by category
     assert "[Core plugins]" in out
     assert "[Optional plugins]" in out
-    assert "[loaded] plugins" in out
+    joined = "\n".join(out)
+    assert "Health: ✅ 1 ok, ⚠️ 1 warning, 🔴 1 failed" in joined
+    assert "[loaded] plugins — ✅ ok" in joined
     assert "[not loaded] info" in out
-    assert "[loaded] ducks" in out
+    assert "[loaded] ducks — 🔴 failed" in joined
 
 
 @pytest.mark.asyncio

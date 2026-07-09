@@ -52,6 +52,60 @@ def _audit_log(bot):
     return getattr(getattr(bot, "db", None), "audit", None)
 
 
+
+def _row_event(row) -> str:
+    """Return the event field from a row-like object."""
+    try:
+        return str(row["event"] or "")
+    except Exception:
+        try:
+            return str(row[2] or "")
+        except Exception:
+            return ""
+
+
+def _row_details(row) -> dict:
+    """Return parsed details from a row-like object."""
+    try:
+        raw = row["details"]
+    except Exception:
+        try:
+            raw = row[5]
+        except Exception:
+            raw = "{}"
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _is_error_event(row) -> bool:
+    """Return True when an audit row describes an error/failure."""
+    event = _row_event(row).lower()
+    if any(token in event for token in ("error", "failed", "failure")):
+        return True
+    details = _row_details(row)
+    for key, value in details.items():
+        key_lc = str(key).lower()
+        value_lc = str(value).lower()
+        if key_lc in {"error", "last_error", "exception", "traceback"} and value_lc not in {"", "none", "null"}:
+            return True
+        if key_lc in {"status", "result"} and value_lc in {"error", "failed", "failure"}:
+            return True
+    return False
+
+
+async def _list_error_events(bot, *, limit: int = 20, offset: int = 0):
+    """Return paginated audit events that look like errors or failures."""
+    audit_log = _audit_log(bot)
+    if audit_log is None:
+        return [], 0
+    rows = await audit_log.list(limit=1000, offset=0)
+    matches = [row for row in rows if _is_error_event(row)]
+    return matches[offset: offset + limit], len(matches)
+
+
 async def _list_events(
     bot,
     *,
@@ -332,6 +386,42 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
         page_args=page_args,
         command_hint=f"{config.get('prefix', ',')}audit action {event}",
         event=event,
+    )
+
+
+@command(
+    "audit errors",
+    role=Role.ADMIN,
+    aliases=["audit failed", "audits errors", "audits failed"],
+    short="Show audit events that look like errors or failures.",
+    usage="{prefix}audit errors [all|page|last]",
+    examples=["{prefix}audit errors", "{prefix}audit errors all"],
+    category="admin",
+    context="private recommended",
+)
+async def audit_errors(bot, sender, nick, args, msg, is_room):
+    """Show audit events that look like errors or failures."""
+    page_request = parse_page_args(args or [])
+    page_size = 10
+    if page_request.all:
+        rows, total = await _list_error_events(bot, limit=1000, offset=0)
+    else:
+        _, total = await _list_error_events(bot, limit=1, offset=0)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = total_pages if page_request.page == -1 else min(max(page_request.page, 1), total_pages)
+        rows, _ = await _list_error_events(bot, limit=page_size, offset=(page - 1) * page_size)
+        page_request = type(page_request)(page=page, all=False)
+    bot.reply(
+        msg,
+        _format_audit_page(
+            "🧾 Audit errors",
+            rows,
+            empty="No audit error events found.",
+            page_request=page_request,
+            total=total,
+            page_size=page_size,
+            command_hint=f"{config.get('prefix', ',')}audit errors",
+        ),
     )
 
 @command(

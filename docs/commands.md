@@ -108,6 +108,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,audit action` | `admin` | `private recommended` | Show recent audit events for one action/event type. |
+| `,audit errors` | `admin` | `private recommended` | Show audit events that look like errors or failures. |
 | `,audit export` | `admin` | `private recommended` | Export recent audit events as JSON Lines. |
 | `,audit last` | `admin` | `private recommended` | Show recent admin audit events. |
 | `,audit prune` | `owner` | `private recommended` | Prune old audit events after confirmation. |
@@ -131,6 +132,8 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config unset` | `admin` | `private chat / MUC PM` | Reset one runtime-writable config value to the config_sample.py default. |
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
 | `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and RSS. |
+| `,doctor failed` | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
+| `,doctor warnings` | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |
 | `,plugin diagnose` | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
 | `,plugin state` | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
 | `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
@@ -379,6 +382,22 @@ Aliases: `,audit event`, `,audits action`, `,audits event`
 Examples:
 
 - `,audit action room_feature_changed`
+
+#### `,audit errors`
+
+Show audit events that look like errors or failures.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,audit errors [all|page|last]`
+
+Aliases: `,audit failed`, `,audits errors`, `,audits failed`
+
+Examples:
+
+- `,audit errors`
+- `,audit errors all`
 
 #### `,audit export`
 
@@ -698,6 +717,36 @@ Examples:
 - `,doctor all full`
 - `,doctor rss`
 - `,doctor tasks full`
+
+#### `,doctor failed`
+
+Show only failed doctor checks.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,doctor failed [page|last|all]`
+
+Aliases: `,bot doctor failed`, `,doctor error`, `,doctor errors`
+
+Examples:
+
+- `,doctor failed`
+
+#### `,doctor warnings`
+
+Show only doctor warning lines.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,doctor warnings [page|last|all]`
+
+Aliases: `,bot doctor warnings`, `,doctor warn`, `,doctor warning`
+
+Examples:
+
+- `,doctor warnings`
 
 ### help
 

@@ -10,7 +10,7 @@ All commands rely on the async PluginManager API.
 import logging
 from utils.command import command, Role
 from utils.config import config
-from utils.formatting import format_page, parse_page_args
+from utils.formatting import format_page, parse_page_args, status_icon
 from utils.audit import audit_event
 
 log = logging.getLogger(__name__)
@@ -23,6 +23,53 @@ PLUGIN_META = {
     "category": "core",
 }
 prefix = config.get("prefix", ",")
+
+
+def _plugin_health_status_from_lines(lines: list[str]) -> str:
+    """Return a compact health status derived from plugin doctor lines."""
+    if any(str(line).startswith("🔴") for line in lines):
+        return "failed"
+    if any(str(line).startswith(("⚠️", "🟡", "🟡️")) for line in lines):
+        return "warning"
+    if any(str(line).startswith("✅") for line in lines):
+        return "ok"
+    if any("error" in str(line).lower() or "failed" in str(line).lower() for line in lines):
+        return "failed"
+    if any("warning" in str(line).lower() or "stale" in str(line).lower() for line in lines):
+        return "warning"
+    return "info"
+
+
+async def _plugin_health_summary(bot, loaded_names: set[str]) -> dict[str, str]:
+    """Return a best-effort health status per loaded plugin."""
+    manager = getattr(bot, "bot_plugins", None)
+    doctor = getattr(manager, "plugin_doctor", None)
+    if not callable(doctor):
+        return {name: "info" for name in loaded_names}
+
+    summary: dict[str, str] = {}
+    for name in sorted(loaded_names):
+        try:
+            lines = [str(line) for line in await doctor(name)]
+            summary[name] = _plugin_health_status_from_lines(lines)
+        except Exception:
+            log.debug("[PLUGIN] health summary failed for %s", name, exc_info=True)
+            summary[name] = "failed"
+    return summary
+
+
+def _plugin_health_summary_line(health: dict[str, str]) -> str:
+    """Return an aggregate plugin health summary line."""
+    counts = {"ok": 0, "warning": 0, "failed": 0, "info": 0}
+    for status in health.values():
+        counts[status if status in counts else "info"] += 1
+    return (
+        "Health: "
+        f"{status_icon('ok')} {counts['ok']} ok, "
+        f"{status_icon('warning')} {counts['warning']} warning, "
+        f"{status_icon('failed')} {counts['failed']} failed, "
+        f"{status_icon('info')} {counts['info']} unknown"
+    )
 
 
 def _format_state_lines(state: dict) -> list[str]:
@@ -65,21 +112,30 @@ def _plugin_command_names(name: str) -> list[str]:
     context="private chat / MUC PM",
 )
 async def plugin_list(bot, sender, nick, args, msg, is_room):
-    """List all plugins grouped by category."""
+    """List all plugins grouped by category and health."""
     categories = await bot.bot_plugins.list_detailed()
     page = parse_page_args(args)
 
     labels = {"core": "Core plugins", "plugins": "Optional plugins"}
     order = ["core", "plugins"] + sorted(k for k in categories if k not in {"core", "plugins"})
+    loaded_names = {
+        str(name)
+        for block in categories.values()
+        for name in block.get("loaded", [])
+    }
+    health = await _plugin_health_summary(bot, loaded_names)
 
     entries = []
+    if loaded_names:
+        entries.extend([_plugin_health_summary_line(health), ""])
     for category in order:
         if category not in categories:
             continue
         block = categories[category]
         entries.append(f"[{labels.get(category, category.title())}]")
         for name in sorted(block["loaded"]):
-            entries.append(f"[loaded] {name}")
+            status = health.get(str(name), "info")
+            entries.append(f"[loaded] {name} — {status_icon(status)} {status}")
         for name in sorted(block["available"]):
             entries.append(f"[not loaded] {name}")
         entries.append("")

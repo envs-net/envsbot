@@ -450,6 +450,22 @@ async def on_room_invite(bot, msg) -> None:
         log.warning("Room invite event received without an extractable room JID")
 
 
+
+def _room_invite_onboarding_lines(bot, room_jid: str) -> list[str]:
+    """Return concise next steps after accepting a room invite."""
+    prefix = getattr(bot, "prefix", None) or str(config.get("prefix", ",") or ",")
+    return [
+        f"✅ Accepted room invite. Joined and stored {room_jid} with autojoin enabled.",
+        "",
+        "Next checks:",
+        f"• {prefix}rooms diagnose {room_jid}",
+        f"• {prefix}rooms plugins {room_jid} all",
+        f"• {prefix}doctor rooms",
+        "",
+        "Tip: make sure the bot has the room affiliation it needs before enabling moderation-like features.",
+    ]
+
+
 async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
     """Join a room and store it with autojoin enabled."""
     _LEAVING_ROOMS.discard(room_jid)
@@ -624,10 +640,9 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             target=room_jid,
             details={"invite_id": invite_id, "inviter": inviter, "nick": room_nick},
         )
-        bot.reply_ok(
-            msg,
-            f"Accepted room invite #{invite_id}. Joined and stored {room_jid} with autojoin enabled.",
-        )
+        lines = _room_invite_onboarding_lines(bot, room_jid)
+        lines[0] = f"✅ Accepted room invite #{invite_id}. Joined and stored {room_jid} with autojoin enabled."
+        bot.reply(msg, lines)
         return
 
     removed = await _delete_pending_room_invite(bot, invite_id)

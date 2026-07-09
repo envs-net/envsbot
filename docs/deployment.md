@@ -76,6 +76,10 @@ sudo journalctl -u envsbot.service -f
 sudo systemctl restart envsbot.service
 ```
 
+Optional hardening: after verifying `envsbot --check` works reliably on the
+host, add it as an `ExecStartPre=` command in the systemd unit so invalid
+configuration or a broken local checkout prevents a restart.
+
 ## Updates
 
 For a normal update:
@@ -85,8 +89,15 @@ cd /srv/envsbot
 git pull
 . .venv/bin/activate
 pip install -e .
+envsbot --check
 sudo systemctl restart envsbot.service
+sudo journalctl -u envsbot.service -n 100 --no-pager
 ```
+
+`envsbot --check` is a local preflight check. It does not connect to XMPP,
+but it validates configuration loading, plugin imports, command metadata,
+generated command docs, migrations, backup paths, runtime files and SQLite
+read/write access. Treat a non-zero exit code as a deployment blocker.
 
 Run the test suite before deploying when changing code locally:
 
