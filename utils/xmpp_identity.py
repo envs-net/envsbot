@@ -46,13 +46,11 @@ def _normalize_bare_jid(value) -> str | None:
 
 
 async def get_jids_from_nick_index(bot, nick):
-    """Look up the real JID of a nick from the UserManager's _nick_index."""
+    """Look up and return a single real JID for a nick from _nick_index."""
     idx = getattr(bot.db.users, "_nick_index", {})
     value = idx.get(nick)
-    if isinstance(value, set):
+    if isinstance(value, (set, list, tuple)):
         return next(iter(value), None)
-    if isinstance(value, list):
-        return value
     return value or None
 
 
@@ -233,7 +231,7 @@ async def muc_pm_sender_can_manage_room(bot, msg, is_room: bool) -> tuple[bool, 
         return False, "", "ℹ️ This command can only be used in a MUC DM."
     room_jid, nick = _room_and_nick_from_muc_pm(msg)
     if room_jid not in JOINED_ROOMS:
-        return False, room_jid, "ℹ️ This command can only be used in a MUC DM."
+        return False, room_jid, "⛔ Bot is not currently in that room."
     occupant = _get_muc_occupant(room_jid, nick)
     if not occupant:
         return False, room_jid, "⛔ Could not verify your room permissions."

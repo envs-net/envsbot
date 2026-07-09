@@ -24,7 +24,7 @@ def _format_enabled(label: str) -> str:
 
 
 def _format_disabled(label: str) -> str:
-    return f"✅ {label} disabled in this room."
+    return f"ℹ️ {label} disabled in this room."
 
 
 def _format_already_enabled(label: str) -> str:
@@ -48,8 +48,11 @@ async def handle_room_toggle_command(
     list_field: str = "rooms",
     log_prefix: str = "[PLUGIN]",
 ) -> bool:
-    """Shared handler for `{plugin} on|off|status` commands."""
-    del list_field
+    """Shared handler for `{plugin} on|off|status` commands.
+
+    ``list_field`` is reserved for backward compatibility with the old
+    signature. This dict-backed implementation intentionally ignores it.
+    """
     if not args:
         return False
     subcmd = str(args[0]).lower()
