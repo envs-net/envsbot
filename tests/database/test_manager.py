@@ -135,3 +135,45 @@ async def test_applied_versions_and_run_migrations_skip_existing(monkeypatch):
         ("run", "0003"),
         ("mark", "0003"),
     ]
+
+@pytest.mark.asyncio
+async def test_database_manager_integrity_check_and_optimize(tmp_db_path):
+    db = DatabaseManager(tmp_db_path)
+    await db.connect()
+
+    assert await db.integrity_check() == ["ok"]
+    await db.optimize()
+
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_manager_integrity_check_stringifies_unusual_rows():
+    class BadRow:
+        def __getitem__(self, _index):
+            raise TypeError("bad row")
+
+        def __str__(self):
+            return "bad-row"
+
+    class Cursor:
+        async def fetchall(self):
+            return [("ok",), BadRow()]
+
+    class Conn:
+        def __init__(self):
+            self.queries = []
+
+        async def execute(self, sql):
+            self.queries.append(sql)
+            return Cursor()
+
+        async def commit(self):
+            self.queries.append("commit")
+
+    db = DatabaseManager(":memory:")
+    db.conn = Conn()
+
+    assert await db.integrity_check() == ["ok", "bad-row"]
+    await db.optimize()
+    assert db.conn.queries == ["PRAGMA integrity_check;", "PRAGMA optimize;", "commit"]

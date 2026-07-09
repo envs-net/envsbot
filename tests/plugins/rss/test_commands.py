@@ -834,3 +834,31 @@ async def test_rss_feed_template_command_private_room_and_default_paths(make_bot
         False,
     )
     assert "RSS feed template reset" in bot.replies[-1][1]
+
+@pytest.mark.asyncio
+async def test_limited_response_reader_and_save_last_id(monkeypatch):
+    class Content:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+
+        async def iter_chunked(self, size):
+            assert size == 8192
+            for chunk in self.chunks:
+                yield chunk
+
+    class Response:
+        def __init__(self, chunks):
+            self.content = Content(chunks)
+
+    assert await rss._read_limited_response(Response([b"ab", b"cd"])) == b"abcd"
+
+    monkeypatch.setattr(rss, "RSS_MAX_READ_BYTES", 3)
+    with pytest.raises(rss.FetchURLTooLarge, match="exceeds 3 bytes"):
+        await rss._read_limited_response(Response([b"ab", b"cd"]))
+
+    set_field = AsyncMock(return_value=True)
+    monkeypatch.setattr(rss, "_set_feed_field", set_field)
+    bot = object()
+    store = object()
+    assert await rss._save_last_id(bot, store, "https://feed.example/rss", "entry-1") is True
+    set_field.assert_awaited_once_with(bot, store, "https://feed.example/rss", "last_id", "entry-1")

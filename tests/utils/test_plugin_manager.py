@@ -489,3 +489,75 @@ async def test_restart_tasks_without_hook_does_not_cancel_existing_tasks():
     assert "no task restart hook" in message
     assert cancelled == 0
     manager.bot.tasks.cancel_plugin.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_plugin_metadata_and_doctor_helpers(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot=bot, package="fakepkg")
+    good = make_fake_plugin(meta={
+        "name": "good",
+        "version": "1.0",
+        "description": "Good plugin",
+        "category": "utility",
+    })
+    missing = make_fake_plugin(meta={})
+    pm.plugins = {"good": good, "missing": missing}
+    pm.meta = {"good": good.PLUGIN_META, "missing": missing.PLUGIN_META}
+    monkeypatch.setattr(pm, "discover", lambda: ["good", "missing"])
+
+    assert await pm.metadata_issues("good") == []
+    issues = await pm.metadata_issues("missing")
+    assert {issue.message for issue in issues} >= {"missing non-empty 'name'", "missing non-empty 'description'", "missing non-empty 'category'"}
+    all_issues = await pm.all_metadata_issues()
+    assert len(all_issues) == len(issues)
+
+    async def async_doctor(bot_arg, room_jid=None):
+        assert bot_arg is bot
+        assert room_jid == "room@conf"
+        return ["✅ good: async ok"]
+
+    good.doctor = async_doctor
+    assert await pm.plugin_doctor("good", room_jid="room@conf") == ["✅ good: async ok"]
+
+    good.doctor = lambda bot_arg, room_jid=None: "✅ good: string ok"
+    assert await pm.plugin_doctor("good") == ["✅ good: string ok"]
+
+    good.doctor = lambda bot_arg, room_jid=None: None
+    assert await pm.plugin_doctor("good") == ["✅ good: ok"]
+
+    good.doctor = "not-callable"
+    assert await pm.plugin_doctor("good") == ["🔴 good: doctor hook is not callable"]
+
+    def broken_doctor(_bot, room_jid=None):
+        raise RuntimeError("boom")
+
+    good.doctor = broken_doctor
+    assert await pm.plugin_doctor("good") == ["🔴 good: doctor failed: boom"]
+
+    assert await pm.plugin_doctor("not-loaded") == ["🔴 not-loaded: not loaded"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_doctor_uses_runtime_state_when_no_hook(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot=bot, package="fakepkg")
+    mod = make_fake_plugin(meta={"name": "stateful"})
+    if hasattr(mod, "doctor"):
+        delattr(mod, "doctor")
+    pm.plugins = {"stateful": mod}
+
+    async def plugin_state(name, room_jid=None):
+        assert name == "stateful"
+        assert room_jid == "room@conf"
+        return {"beta": 2, "alpha": 1}
+
+    monkeypatch.setattr(pm, "plugin_state", plugin_state)
+    assert await pm.plugin_doctor("stateful", room_jid="room@conf") == [
+        "ℹ️ stateful: alpha=1, beta=2"
+    ]
+
+    async def empty_plugin_state(name, room_jid=None):
+        return {}
+
+    monkeypatch.setattr(pm, "plugin_state", empty_plugin_state)
+    assert await pm.plugin_doctor("stateful") == ["ℹ️ stateful: no diagnostic hook"]

@@ -317,3 +317,56 @@ async def test_prune_task_unless_failed_ignores_unknown_tasks():
 
     supervisor._prune_task_unless_failed(unknown_task)
     assert supervisor.snapshot() == []
+
+@pytest.mark.asyncio
+async def test_heartbeat_touch_and_stale_task_edges(monkeypatch):
+    supervisor = TaskSupervisor()
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    task = supervisor.create("alpha", sleeper(), name="main")
+    assert supervisor.heartbeat("alpha", name="main") is True
+    assert supervisor.heartbeat("alpha", name="missing") is False
+    assert supervisor.heartbeat("missing") is False
+
+    first_snapshot = supervisor.snapshot(include_done=False)[0]
+    assert first_snapshot.plugin == "alpha"
+    assert first_snapshot.name == "main"
+    assert first_snapshot.heartbeat_at is not None
+
+    # Force a stale heartbeat and verify it is reported for aware datetimes.
+    supervisor._tasks[task]["heartbeat_at"] = "2000-01-01T00:00:00+00:00"
+    stale = supervisor.stale_tasks(max_age_seconds=1)
+    assert [item.name for item in stale] == ["main"]
+
+    assert supervisor.touch(task) is True
+    assert supervisor.stale_tasks(max_age_seconds=3600) == []
+
+    # Malformed heartbeat timestamps are treated as stale rather than crashing.
+    supervisor._tasks[task]["heartbeat_at"] = "not-a-date"
+    assert [item.name for item in supervisor.stale_tasks(max_age_seconds=3600)] == ["main"]
+
+    assert await supervisor.cancel_task(task, timeout=1.0) is True
+    assert supervisor.touch(task) is False
+
+
+@pytest.mark.asyncio
+async def test_stale_tasks_ignores_done_tasks_and_missing_heartbeats():
+    supervisor = TaskSupervisor()
+
+    async def quick():
+        return "ok"
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    done_task = supervisor.create("alpha", quick(), name="done")
+    await done_task
+    running_without_heartbeat = supervisor.create("alpha", sleeper(), name="no-heartbeat")
+    supervisor._tasks[running_without_heartbeat]["heartbeat_at"] = None
+
+    assert supervisor.stale_tasks(max_age_seconds=0) == []
+    await supervisor.cancel_task(running_without_heartbeat, timeout=1.0)
