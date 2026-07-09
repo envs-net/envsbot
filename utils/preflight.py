@@ -22,6 +22,13 @@ from utils.plugin_metadata import validate_plugin_metadata
 from utils.redaction import redact_text
 
 log = logging.getLogger(__name__)
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _runtime_path(value: Any) -> Path:
+    """Resolve runtime resource paths relative to the project root."""
+    path = Path(str(value))
+    return path if path.is_absolute() else _PROJECT_ROOT / path
 
 
 async def _check_database(config: Mapping[str, Any]) -> tuple[bool, str]:
@@ -143,11 +150,11 @@ def _check_runtime_files(config: Mapping[str, Any]) -> tuple[bool, str]:
     checks: list[str] = []
     avatar = config.get("avatar")
     if avatar:
-        avatar_path = Path(str(avatar))
+        avatar_path = _runtime_path(avatar)
         checks.append(f"avatar={'ok' if avatar_path.exists() else 'missing'}")
         if not avatar_path.exists():
             return False, f"runtime files: {', '.join(checks)}"
-    vcard_sample = Path("vcard_sample.py")
+    vcard_sample = _PROJECT_ROOT / "vcard_sample.py"
     if vcard_sample.exists():
         checks.append("vcard_sample=ok")
     return True, f"runtime files: {', '.join(checks) if checks else 'ok'}"

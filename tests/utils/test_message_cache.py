@@ -7,15 +7,14 @@ import pytest
 from utils import message_cache
 
 
-class ExplodingMsg(dict):
+class ExplodingMsg:
     def __init__(self, *, explode_on: str):
-        super().__init__()
         self.explode_on = explode_on
 
     def get(self, key, default=None):
         if key == self.explode_on:
             raise RuntimeError("boom")
-        return super().get(key, default)
+        return default
 
 
 @pytest.fixture(autouse=True)

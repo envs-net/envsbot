@@ -107,13 +107,17 @@ def test_check_backup_dir_success_and_failure(tmp_path):
 
 
 def test_check_runtime_files_avatar_and_vcard(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(preflight, "_PROJECT_ROOT", tmp_path)
     assert preflight._check_runtime_files({}) == (True, "runtime files: ok")
 
     avatar = tmp_path / "avatar.jpg"
     avatar.write_bytes(b"jpg")
-    Path("vcard_sample.py").write_text("VCARD = {}", encoding="utf-8")
+    (tmp_path / "vcard_sample.py").write_text("VCARD = {}", encoding="utf-8")
     assert preflight._check_runtime_files({"avatar": str(avatar)}) == (
+        True,
+        "runtime files: avatar=ok, vcard_sample=ok",
+    )
+    assert preflight._check_runtime_files({"avatar": "avatar.jpg"}) == (
         True,
         "runtime files: avatar=ok, vcard_sample=ok",
     )
