@@ -177,7 +177,8 @@ small `bot/` modules:
 - `bot.audit` for best-effort audit writes
 
 These modules are intended to keep the runtime core easier to test while the
-public `envsbot.Bot` API remains compatible.
+public `envsbot.Bot` API remains compatible. See [`architecture.md`](architecture.md)
+for the full module map and command flow.
 
 
 ## Structured core logs

@@ -19,16 +19,15 @@ PLUGIN_META = {
     "category": "utility",
 }
 
-HELP = {
-    "commands": {
-        "example": {
-            "usage": ",example",
-            "description": "Reply with a small example message.",
-        },
-    },
-}
-
-@command("example", role=Role.USER)
+@command(
+    "example",
+    role=Role.USER,
+    short="Reply with a small example message.",
+    usage="{prefix}example",
+    examples=["{prefix}example"],
+    category="utility",
+    context="any",
+)
 async def example_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, "example ok")
 ```

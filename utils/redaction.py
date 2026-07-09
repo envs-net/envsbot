@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -18,6 +19,9 @@ SECRET_KEY_PARTS = (
 )
 REDACTED = "<redacted>"
 _MAX_STRING = 240
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(password|passwd|token|secret|api[_-]?key|apikey|access[_-]?key|private[_-]?key)\s*=\s*([^\s,;]+)"
+)
 
 
 def is_secret_key(key: object) -> bool:
@@ -74,4 +78,6 @@ def redact_named(name: object, value: Any, *, max_string: int = _MAX_STRING) -> 
 
 def redact_text(text: object, *, max_length: int = _MAX_STRING) -> str:
     """Return a compact redacted text value for log/audit strings."""
-    return _truncate(redact_url(str(text)), max_length=max_length)
+    value = redact_url(str(text))
+    value = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", value)
+    return _truncate(value, max_length=max_length)

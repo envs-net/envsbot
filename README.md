@@ -14,7 +14,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 
 * Modular plugin architecture with dynamic load, unload and reload support
 * Decorator-based command registry with roles, aliases, usage metadata and generated help
-* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command reference in [`docs/commands.md`](docs/commands.md), runtime help guide in [`docs/help.md`](docs/help.md), and diagnostics guide in [`docs/diagnostics.md`](docs/diagnostics.md)
+* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command reference in [`docs/commands.md`](docs/commands.md), runtime help guide in [`docs/help.md`](docs/help.md), diagnostics guide in [`docs/diagnostics.md`](docs/diagnostics.md), and architecture overview in [`docs/architecture.md`](docs/architecture.md)
 * XMPP MUC and direct-message command handling
 * Room management with persistent autojoin rooms and per-room plugin toggles
 * User registration, hardened role management, last-seen tracking and nickname lookup
@@ -432,6 +432,7 @@ Drone CI is configured in `.drone.yml`.
 * [`docs/commands.md`](docs/commands.md) - generated command reference
 * [`docs/help.md`](docs/help.md) - runtime help guide
 * [`docs/diagnostics.md`](docs/diagnostics.md) - doctor checks, plugin state and operational diagnostics
+* [`docs/architecture.md`](docs/architecture.md) - runtime module layout and command flow
 * [`docs/plugin-development.md`](docs/plugin-development.md) - plugin structure, hooks, stores, grants and diagnostics
 * [`docs/maintenance.md`](docs/maintenance.md) - offline SQLite maintenance
 * [`docs/release-checklist.md`](docs/release-checklist.md) - release preparation checklist
