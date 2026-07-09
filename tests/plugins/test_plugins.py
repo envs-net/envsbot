@@ -1,5 +1,7 @@
-import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 import core_plugins.plugins as plugins_module
 
@@ -74,6 +76,95 @@ def test_plugin_list_has_bare_plugins_alias():
     assert "plugins list" in plugins_module.plugin_list._command_names
 
 
+def test_plugin_health_status_from_lines_precedence_and_keywords():
+    assert plugins_module._plugin_health_status_from_lines(["🔴 broken"]) == "failed"
+    assert plugins_module._plugin_health_status_from_lines(["⚠️ warning"]) == "warning"
+    assert plugins_module._plugin_health_status_from_lines(["🟡 degraded"]) == "warning"
+    assert plugins_module._plugin_health_status_from_lines(["🟡️ degraded"]) == "warning"
+    assert plugins_module._plugin_health_status_from_lines(["✅ good"]) == "ok"
+    assert plugins_module._plugin_health_status_from_lines(["background task failed"]) == "failed"
+    assert plugins_module._plugin_health_status_from_lines(["stale heartbeat"]) == "warning"
+    assert plugins_module._plugin_health_status_from_lines(["diagnostics unavailable"]) == "info"
+    assert plugins_module._plugin_health_status_from_lines([]) == "info"
+
+
+def test_plugin_health_summary_line_counts_known_and_unknown_statuses():
+    line = plugins_module._plugin_health_summary_line({
+        "ok_plugin": "ok",
+        "warn_plugin": "warning",
+        "bad_plugin": "failed",
+        "mystery_plugin": "custom",
+    })
+
+    assert line == "Health: ✅ 1 ok, ⚠️ 1 warning, 🔴 1 failed, ℹ️ 1 unknown"
+
+
+@pytest.mark.asyncio
+async def test_plugin_health_summary_without_doctor_uses_info():
+    fake_bot = SimpleNamespace(bot_plugins=SimpleNamespace(plugin_doctor=None))
+
+    assert await plugins_module._plugin_health_summary(fake_bot, {"ducks", "rss"}) == {
+        "ducks": "info",
+        "rss": "info",
+    }
+
+
+@pytest.mark.asyncio
+async def test_plugin_health_summary_uses_doctor_lines_and_handles_errors():
+    async def doctor(name):
+        if name == "bad":
+            raise RuntimeError("boom")
+        return {
+            "ok": ["✅ all good"],
+            "warn": ["runtime warning"],
+        }.get(name, ["nothing interesting"])
+
+    fake_bot = SimpleNamespace(
+        bot_plugins=SimpleNamespace(plugin_doctor=doctor),
+    )
+
+    assert await plugins_module._plugin_health_summary(
+        fake_bot, {"ok", "warn", "info", "bad"}
+    ) == {
+        "bad": "failed",
+        "info": "info",
+        "ok": "ok",
+        "warn": "warning",
+    }
+
+
+def test_format_state_lines_handles_empty_and_collection_values():
+    assert plugins_module._format_state_lines({}) == ["State: no runtime state reported"]
+    assert plugins_module._format_state_lines({
+        "rooms": ["a", "b"],
+        "empty": [],
+        "count": 3,
+    }) == [
+        "count: 3",
+        "empty: none",
+        "rooms: a, b",
+    ]
+
+
+def test_plugin_command_names_returns_registered_commands_and_handles_errors(monkeypatch):
+    fake_commands = SimpleNamespace(by_plugin={"rss": {("rss",), ("rss", "add")}})
+    monkeypatch.setattr(plugins_module, "log", MagicMock())
+
+    import utils.command as command_module
+
+    monkeypatch.setattr(command_module, "COMMANDS", fake_commands)
+    assert plugins_module._plugin_command_names("rss") == ["rss", "rss add"]
+
+    class BrokenCommands:
+        @property
+        def by_plugin(self):
+            raise RuntimeError("registry failed")
+
+    monkeypatch.setattr(command_module, "COMMANDS", BrokenCommands())
+    assert plugins_module._plugin_command_names("rss") == []
+    assert plugins_module.log.debug.called
+
+
 @pytest.mark.asyncio
 async def test_plugin_list(bot, msg):
     await plugins_module.plugin_list(bot, "adminjid", "AdminNick", [],
@@ -85,7 +176,7 @@ async def test_plugin_list(bot, msg):
     joined = "\n".join(out)
     assert "Health: ✅ 1 ok, ⚠️ 1 warning, 🔴 1 failed" in joined
     assert "[loaded] plugins — ✅ ok" in joined
-    assert "[not loaded] info" in out
+    assert "[not loaded] info" in joined
     assert "[loaded] ducks — 🔴 failed" in joined
 
 
@@ -210,8 +301,7 @@ async def test_plugin_reload_all_success(bot, msg):
     bot.bot_plugins.reload = AsyncMock(return_value=(True, "Reloaded"))
     await plugins_module.plugin_reload(bot, "adminjid", "AdminNick",
                                        ["all"], msg, False)
-    assert "plugins" in bot.bot_plugins.reload.call_args[
-        0] or bot.bot_plugins.reload.call_args_list[0]
+    bot.bot_plugins.reload.assert_any_await("plugins", auto=False)
     assert "reloaded successfully" in bot.reply.call_args[0][1]
 
 
