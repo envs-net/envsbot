@@ -61,27 +61,31 @@ and permission checks. Run the docs generator after changing command metadata:
 python scripts/generate_commands_md.py
 ```
 
-## Help metadata
+## Help and generated command metadata
 
-Plugins should expose a `HELP` dictionary. This powers `,help <plugin>`, the
-generated command reference and focused command help. Keep usage strings short
-and include room-context hints when commands behave differently in MUCs, MUC PMs
-or normal private chats.
+The generated command reference and focused runtime help are driven by command
+decorator metadata plus the fallback entries in `utils/command_help.py`. Keep
+usage strings short and include room-context hints when commands behave
+differently in MUCs, MUC PMs or normal private chats.
 
-Useful fields are:
+Preferred command metadata lives directly on the decorator:
 
 ```python
-HELP = {
-    "summary": "Short plugin summary.",
-    "commands": {
-        "example": {
-            "usage": ",example [arg]",
-            "description": "What the command does.",
-            "examples": [",example test"],
-        },
-    },
-}
+@command(
+    "example",
+    role=Role.USER,
+    short="Reply with a small example message.",
+    usage="{prefix}example [text]",
+    examples=["{prefix}example hello"],
+    category="utility",
+    context="any",
+)
+async def example_command(bot, sender_jid, nick, args, msg, is_room):
+    ...
 ```
+
+When a command cannot carry all metadata in the decorator, add or update the
+matching fallback entry in `utils/command_help.py`.
 
 ## Room feature toggles
 

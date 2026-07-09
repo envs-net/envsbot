@@ -17,12 +17,30 @@ from __future__ import annotations
 import asyncio
 import importlib
 import pkgutil
-import sys
 import inspect
 import logging
-from collections import deque
 
 from utils.command import COMMANDS, Role
+from utils.plugin_manager_dependencies import (
+    dependency_conflict,
+    get_dependents,
+    topological_sort,
+    validate_dependencies,
+)
+from utils.plugin_manager_diagnostics import (
+    call_doctor_hook,
+    call_runtime_state_hook,
+)
+from utils.plugin_manager_discovery import (
+    discover_sources,
+    source_info,
+    stable_discovery_order,
+)
+from utils.plugin_manager_lifecycle import (
+    detach_module,
+    import_module_async,
+    run_hook,
+)
 from utils.plugin_metadata import validate_plugin_metadata
 
 log = logging.getLogger(__name__)
@@ -111,79 +129,16 @@ class PluginManager:
     # --------------------------------------------------
 
     def _get_dependents(self, name):
-        """
-        Find ALL plugins that depend on the given plugin (recursively).
-        """
-        dependents = set()
-        to_process = deque([name])
-
-        while to_process:
-            current = to_process.popleft()
-
-            for plugin_name, meta in self.meta.items():
-                if plugin_name in dependents:
-                    continue
-
-                if current in meta.get("requires", []):
-                    dependents.add(plugin_name)
-                    to_process.append(plugin_name)
-
-        return dependents
+        """Find ALL plugins that depend on the given plugin recursively."""
+        return get_dependents(self.meta, name)
 
     def _topological_sort(self, plugin_names):
-        """
-        Sort plugins by their dependencies (topological sort).
-
-        Ensures that if plugin A depends on plugin B, B is loaded BEFORE A.
-
-        Args:
-            plugin_names: Iterable of plugin names to sort
-
-        Returns:
-            list: Sorted plugin names (dependencies first)
-        """
-        plugin_set = set(plugin_names)
-        sorted_plugins = []
-        visited = set()
-        temp_marked = set()
-
-        def visit(node):
-            if node in visited:
-                return
-            if node in temp_marked:
-                log.warning("[PLUGIN] circular dependency: %s", node)
-                return
-
-            temp_marked.add(node)
-
-            # Visit all dependencies of this node FIRST
-            meta = self.meta.get(node, {})
-            for dep in meta.get("requires", []):
-                if dep in plugin_set and dep not in visited:
-                    visit(dep)
-
-            temp_marked.remove(node)
-            visited.add(node)
-            sorted_plugins.append(node)
-
-        # Sort input for deterministic order
-        for plugin_name in sorted(plugin_names):
-            visit(plugin_name)
-
-        return sorted_plugins
+        """Sort plugins by dependency order, dependencies first."""
+        return topological_sort(self.meta, plugin_names)
 
     def _check_dependency_conflict(self, name: str) -> tuple[bool, str]:
-        """
-        Check if unloading a plugin would break other plugins.
-
-        Returns:
-            (bool, str): (has_conflict, error_message)
-        """
-        dependents = self._get_dependents(name)
-        if dependents:
-            dependents_list = ", ".join(sorted(dependents))
-            return True, f"Plugins depend on {name}: {dependents_list}"
-        return False, ""
+        """Check if unloading a plugin would break other plugins."""
+        return dependency_conflict(self.meta, name)
 
     def _validate_dependencies(
         self,
@@ -191,50 +146,16 @@ class PluginManager:
         _visited=None,
         _discovered=None,
     ) -> tuple[bool, str]:
-        """
-        Validate that all dependencies of a plugin are available.
-
-        Returns:
-            (bool, str): (valid, error_message)
-        """
-        if _visited is None:
-            _visited = set()
-        if _discovered is None:
-            _discovered = self.discover()
-
-        if name in _visited:
-            return False, f"Circular dependency detected involving {name}"
-
-        _visited.add(name)
-
-        # Try to load metadata if not already loaded
-        if name not in self.meta:
-            try:
-                module = importlib.import_module(self._module_path(name))
-                meta = getattr(module, "PLUGIN_META", {})
-            except Exception as e:
-                return False, f"Cannot load {name}: {e}"
-        else:
-            meta = self.meta[name]
-
-        # Check required dependencies
-        for dep in meta.get("requires", []):
-            if dep not in _discovered:
-                return (
-                    False,
-                    f"Plugin {name} requires {dep}, which is not available",
-                )
-
-            # Recursively validate transitive dependencies
-            valid, msg = self._validate_dependencies(
-                dep,
-                _visited.copy(),
-                _discovered,
-            )
-            if not valid:
-                return False, msg
-
-        return True, ""
+        """Validate that all dependencies of a plugin are available."""
+        discovered = set(_discovered if _discovered is not None else self.discover())
+        return validate_dependencies(
+            name,
+            meta_by_plugin=self.meta,
+            discovered=discovered,
+            module_path=self._module_path,
+            import_module=importlib.import_module,
+            visited=_visited,
+        )
 
     # --------------------------------------------------
     # SOURCE HELPERS
@@ -242,44 +163,23 @@ class PluginManager:
 
     def _discover_sources(self):
         """Return plugin source metadata keyed by stable plugin name."""
-        result = {}
-        for package_name, is_core in self.sources:
-            try:
-                package = importlib.import_module(package_name)
-            except Exception:
-                log.debug("[PLUGIN] source package unavailable: %s", package_name)
-                continue
-
-            package_path = getattr(package, "__path__", None)
-            if package_path is None:
-                log.debug("[PLUGIN] source is not a package: %s", package_name)
-                continue
-
-            for module_info in pkgutil.iter_modules(package_path):
-                name = module_info.name
-                # Core plugins win over optional plugins if a duplicate exists.
-                if name in result and not is_core:
-                    continue
-                result[name] = {"package": package_name, "core": is_core}
-
-        return result
+        return discover_sources(
+            self.sources,
+            import_module=importlib.import_module,
+            iter_modules=pkgutil.iter_modules,
+        )
 
     def _source_info(self, name: str) -> dict:
         """Return source info for a plugin name."""
-        if name in self.plugin_sources:
-            return self.plugin_sources[name]
-
-        discovered = self._discover_sources()
-        if name in discovered:
-            self.plugin_sources[name] = discovered[name]
-            return discovered[name]
-
-        # Fallback keeps tests with monkeypatched imports working.
-        is_core = self._multi_source and name in self.core_plugins
-        package = self.core_package if is_core else self.package
-        info = {"package": package, "core": is_core}
-        self.plugin_sources[name] = info
-        return info
+        return source_info(
+            name,
+            plugin_sources=self.plugin_sources,
+            discover=self._discover_sources,
+            multi_source=self._multi_source,
+            core_plugins=self.core_plugins,
+            core_package=self.core_package,
+            package=self.package,
+        )
 
     def _module_path(self, name: str) -> str:
         """Return full Python module path for a stable plugin name."""
@@ -334,19 +234,10 @@ class PluginManager:
     # --------------------------------------------------
 
     def discover(self):
-        """
-        Discover available plugins from all configured sources.
-
-        Returns:
-            list[str]: Sorted list of stable plugin names. Core plugins are
-            ordered before optional plugins for deterministic startup.
-        """
+        """Discover available plugins from all configured sources."""
         discovered = self._discover_sources()
         self.plugin_sources.update(discovered)
-        return sorted(
-            discovered,
-            key=lambda name: (not discovered[name]["core"], name),
-        )
+        return stable_discovery_order(discovered)
 
     def list(self):
         """
@@ -408,36 +299,8 @@ class PluginManager:
         return loaded, failed, made_progress
 
     def _detach_module(self, module, name: str):
-        """
-        Deterministically detach a plugin module from the import system.
-
-        This ensures the import system and parent package will not retain
-        references to the old module object, preventing stale code from
-        remaining reachable after unload / failed load.
-
-        This does NOT rely on garbage collection.
-        """
-        modname = getattr(module, "__name__", None) or f"{self.package}.{name}"
-
-        # Remove the module itself from sys.modules
-        sys.modules.pop(modname, None)
-
-        # Remove attribute from parent package (e.g. plugins.help)
-        pkg_name, _, child = modname.rpartition(".")
-        if pkg_name and child:
-            pkg = sys.modules.get(pkg_name)
-            if pkg is not None and getattr(pkg, child, None) is module:
-                try:
-                    delattr(pkg, child)
-                except Exception:
-                    # Best-effort cleanup; should not mask unload errors
-                    log.debug("[PLUGIN] failed to delattr(%s, %s)",
-                              pkg_name, child, exc_info=True)
-
-        # Remove any submodules under this plugin namespace (plugins.<name>.*)
-        prefix = modname + "."
-        for k in [k for k in sys.modules.keys() if k.startswith(prefix)]:
-            sys.modules.pop(k, None)
+        """Deterministically detach a plugin module from the import system."""
+        detach_module(module, name, fallback_package=self.package)
 
     async def _cleanup_failed_load(self, name: str) -> None:
         """Best-effort cleanup after a plugin load failed mid-flight.
@@ -469,34 +332,15 @@ class PluginManager:
             )
 
     async def _run_hook(self, hook):
-        """
-        Execute a plugin hook safely.
-
-        Supports both sync and async functions.
-
-        Args:
-            hook (callable): Hook function.
-        """
-        if hook is None:
-            return
-        if inspect.iscoroutinefunction(hook):
-            await hook(self.bot)
-        else:
-            await asyncio.to_thread(hook, self.bot)
+        """Execute a plugin hook safely."""
+        await run_hook(self.bot, hook)
 
     async def _import(self, module_path):
-        """
-        Import a module asynchronously.
-
-        Args:
-            module_path (str): Full module path.
-
-        Returns:
-            module: Imported module.
-        """
-        # Helps when tests create or modify modules dynamically.
-        importlib.invalidate_caches()
-        return await asyncio.to_thread(importlib.import_module, module_path)
+        """Import a module asynchronously."""
+        return await import_module_async(
+            module_path,
+            import_module=importlib.import_module,
+        )
 
     # --------------------------------------------------
     # CORE (ASYNC)
@@ -835,35 +679,16 @@ class PluginManager:
         return summaries
 
     async def plugin_state(self, name: str, room_jid: str | None = None) -> dict:
-        """Return plugin-provided runtime state for diagnostics.
-
-        Plugins can expose ``get_runtime_state(bot, room_jid=None)``.  The hook
-        may be sync or async and should return a small dict with counts/status
-        values, not raw user data.  Missing hooks return an empty state rather
-        than failing diagnostics.
-        """
+        """Return plugin-provided runtime state for diagnostics."""
         module = self.plugins.get(name)
         if module is None:
             return {"loaded": False}
-
-        hook = getattr(module, "get_runtime_state", None)
-        if hook is None:
-            return {"loaded": True}
-        if not callable(hook):
-            return {"loaded": True, "error": "get_runtime_state is not callable"}
-
-        try:
-            result = hook(self.bot, room_jid=room_jid)
-            if inspect.isawaitable(result):
-                result = await result
-            if result is None:
-                result = {}
-            if not isinstance(result, dict):
-                result = {"result": result}
-            return {"loaded": True, **result}
-        except Exception as exc:
-            log.exception("[PLUGIN] get_runtime_state failed for %s", name)
-            return {"loaded": True, "error": str(exc)}
+        return await call_runtime_state_hook(
+            self.bot,
+            name,
+            getattr(module, "get_runtime_state", None),
+            room_jid=room_jid,
+        )
 
     async def restart_tasks(self, name: str) -> tuple[bool, str, int]:
         """Restart supervised background tasks for one loaded plugin.
@@ -964,26 +789,17 @@ class PluginManager:
         module = self.plugins.get(name)
         if module is None:
             return [f"🔴 {name}: not loaded"]
-        hook = getattr(module, "doctor", None)
-        if hook is None:
-            state = await self.plugin_state(name, room_jid=room_jid)
-            if not state:
-                return [f"ℹ️ {name}: no diagnostic hook"]
-            return [f"ℹ️ {name}: " + ", ".join(f"{k}={v}" for k, v in sorted(state.items()))]
-        if not callable(hook):
-            return [f"🔴 {name}: doctor hook is not callable"]
-        try:
-            result = hook(self.bot, room_jid=room_jid)
-            if inspect.isawaitable(result):
-                result = await result
-            if result is None:
-                return [f"✅ {name}: ok"]
-            if isinstance(result, str):
-                return [result]
-            return [str(line) for line in result]
-        except Exception as exc:
-            log.exception("[PLUGIN] doctor hook failed for %s", name)
-            return [f"🔴 {name}: doctor failed: {exc}"]
+
+        async def _state_getter(plugin_name: str, state_room: str | None):
+            return await self.plugin_state(plugin_name, room_jid=state_room)
+
+        return await call_doctor_hook(
+            self.bot,
+            name,
+            getattr(module, "doctor", None),
+            room_jid=room_jid,
+            state_getter=_state_getter,
+        )
 
     async def get_plugin_info(self, name):
         """

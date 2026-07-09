@@ -66,9 +66,13 @@ async def test_tasks_default_lists_summary_and_compact_lines(bot, msg):
 
     reply = bot.reply.call_args.args[1]
     assert reply[0] == "🧵 Background tasks"
-    assert "Summary: 1 running, 1 failed, 0 cancelled, 1 done" in reply
-    assert any("rss/feed-loop — running" in line for line in reply)
-    assert any("birthday_notify/birthday-loop — failed" in line for line in reply)
+    text = "\n".join(reply)
+    assert "1 running" in text
+    assert "1 failed" in text
+    assert "0 cancelled" in text
+    assert "1 done" in text
+    assert any("rss/feed-loop" in line and "running" in line for line in reply)
+    assert any("birthday_notify/birthday-loop" in line and "failed" in line for line in reply)
 
 
 @pytest.mark.asyncio

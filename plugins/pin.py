@@ -15,6 +15,8 @@ Manage pins:
     {prefix}pin search <query> [page]
     {prefix}pin find <query> [page]
     {prefix}pin show <id>
+    {prefix}pin edit <id> <text>
+    {prefix}pin tags <id> [tag ...]
     {prefix}pin delete <id>
 
 Room control (MUC PM):
@@ -54,7 +56,7 @@ log = logging.getLogger(__name__)
 PLUGIN_META = {
     "name": "pin",
     "version": "1.3.0",
-    "description": "Pin room messages with paging, search and non-reply fallback.",
+    "description": "Pin room messages with paging, search, tags and non-reply fallback.",
     "category": "utility",
     "requires": ["rooms", "_core"],
 }
@@ -253,9 +255,44 @@ def _format_pin_line(entry: dict[str, Any]) -> str:
     target_nick = entry.get("target_nick") or "unknown"
     preview = _trim_preview(entry.get("preview") or entry.get("target_text")
                             or "—", max_lines=1, max_chars=240)
+    tags = _format_pin_tags(entry.get("tags"))
+    tag_suffix = f" | tags: {tags}" if tags else ""
     return (f"• #{pin_id} by {actor_nick} at {created_at} "
-            f"| target: {target_nick} | {preview}")
+            f"| target: {target_nick} | {preview}{tag_suffix}")
 
+
+
+
+def _normalize_pin_tags(raw: Any) -> list[str]:
+    """Return normalized unique pin tags without leading ``#``."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        pieces = raw.replace(",", " ").split()
+    else:
+        try:
+            pieces = []
+            for item in raw:
+                pieces.extend(str(item).replace(",", " ").split())
+        except TypeError:
+            pieces = str(raw).replace(",", " ").split()
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    for piece in pieces:
+        tag = piece.strip().strip("#").casefold()
+        tag = "".join(ch for ch in tag if ch.isalnum() or ch in {"-", "_"})
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+    return tags
+
+
+def _format_pin_tags(raw: Any) -> str:
+    """Return display text for normalized pin tags."""
+    tags = _normalize_pin_tags(raw)
+    return " ".join(f"#{tag}" for tag in tags)
 
 def _parse_pin_search_args(args: list[Any]) -> tuple[str, int] | None:
     """Return ``(query, page)`` for ``pin search/find`` arguments.
@@ -298,6 +335,7 @@ def _pin_search_haystack(entry: dict[str, Any]) -> str:
         entry.get("preview"),
         entry.get("target_text"),
         entry.get("source"),
+        _format_pin_tags(entry.get("tags")),
         _format_timestamp(entry.get("created_at")),
     ]
     return "\n".join(str(value) for value in values if value).casefold()
@@ -591,6 +629,8 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
                 "list [page] | "
                 f"{_prefix()}pin search <query> [page] | "
                 f"{_prefix()}pin show <id> | "
+                f"{_prefix()}pin edit <id> <text> | "
+                f"{_prefix()}pin tags <id> [tag ...] | "
                 f"{_prefix()}pin delete <id> | {_prefix()}pin on|off|status"
             ),
             mention=False,
@@ -633,6 +673,14 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
         await _pin_command_show(bot, msg, room, args)
         return
 
+    if subcmd == "edit":
+        await _pin_command_edit(bot, msg, room, args)
+        return
+
+    if subcmd in {"tag", "tags"}:
+        await _pin_command_tags(bot, msg, room, args)
+        return
+
     if subcmd == "delete":
         await _pin_command_delete(bot, msg, room, args)
         return
@@ -642,7 +690,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
             msg,
             (
                 f"Unknown subcommand '{subcmd}'. "
-                f"Use {_prefix()}pin add|list|search|show|delete|on|off|status"
+                f"Use {_prefix()}pin add|list|search|show|edit|tags|delete|on|off|status"
             ),
             mention=False,
         )
@@ -769,6 +817,10 @@ async def _pin_command_show(bot, msg, room, args):
         f"Source: {entry.get('source') or 'unknown'}",
     ]
 
+    tags = _format_pin_tags(entry.get("tags"))
+    if tags:
+        lines.append(f"Tags: {tags}")
+
     preview = entry.get("preview")
     if preview:
         lines.extend(["", "Preview:", preview])
@@ -778,6 +830,109 @@ async def _pin_command_show(bot, msg, room, args):
         lines.extend(["", "Pinned text:", full_text])
 
     bot.reply(msg, lines, mention=False)
+
+
+async def _pin_command_edit(bot, msg, room, args):
+    if not await _is_enabled_for_room(bot, PIN_ENABLED_KEY, "pin", room):
+        bot.reply(msg, "ℹ️ Pin plugin is disabled in this room.")
+        return
+
+    if not await _sender_can_manage_pins_in_room(bot, msg, room):
+        bot.reply(
+            msg,
+            "⛔ Only room moderators/admins/owners can edit pins.",
+            mention=False,
+        )
+        return
+
+    if len(args) < 3:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin edit <id> <text>")
+        return
+
+    try:
+        pin_id = int(args[1])
+    except ValueError:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin edit <id> <text>")
+        return
+
+    text = " ".join(str(part) for part in args[2:]).strip()
+    if not text:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin edit <id> <text>")
+        return
+
+    state = await _load_pin_data(bot)
+    bucket = _room_bucket(state, room)
+    entry = _find_pin(bucket, pin_id)
+    if not entry:
+        bot.reply(msg, f"❌ Pin #{pin_id} not found in this room.")
+        return
+
+    entry["target_text"] = text
+    entry["preview"] = _trim_preview(text)
+    entry["updated_at"] = int(time.time())
+    entry["source"] = entry.get("source") or "manual-edit"
+    await _save_pin_data(bot, state)
+    await audit_event(
+        bot,
+        "pin_edited",
+        actor=getattr(msg.get("from"), "bare", None),
+        target=room,
+        details={"pin_id": pin_id},
+    )
+    bot.reply(msg, f"✅ Updated pin #{pin_id}.", mention=False)
+
+
+async def _pin_command_tags(bot, msg, room, args):
+    if not await _is_enabled_for_room(bot, PIN_ENABLED_KEY, "pin", room):
+        bot.reply(msg, "ℹ️ Pin plugin is disabled in this room.")
+        return
+
+    if len(args) < 2:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin tags <id> [tag ...]")
+        return
+
+    try:
+        pin_id = int(args[1])
+    except ValueError:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin tags <id> [tag ...]")
+        return
+
+    state = await _load_pin_data(bot)
+    bucket = _room_bucket(state, room)
+    entry = _find_pin(bucket, pin_id)
+    if not entry:
+        bot.reply(msg, f"❌ Pin #{pin_id} not found in this room.")
+        return
+
+    if len(args) == 2:
+        tags = _format_pin_tags(entry.get("tags"))
+        bot.reply(msg, f"📌 Pin #{pin_id} tags: {tags or 'none'}", mention=False)
+        return
+
+    if not await _sender_can_manage_pins_in_room(bot, msg, room):
+        bot.reply(
+            msg,
+            "⛔ Only room moderators/admins/owners can change pin tags.",
+            mention=False,
+        )
+        return
+
+    tags = _normalize_pin_tags(args[2:])
+    entry["tags"] = tags
+    entry["updated_at"] = int(time.time())
+    await _save_pin_data(bot, state)
+    await audit_event(
+        bot,
+        "pin_tags_changed",
+        actor=getattr(msg.get("from"), "bare", None),
+        target=room,
+        details={"pin_id": pin_id, "tags": tags},
+    )
+    bot.reply(
+        msg,
+        f"✅ Updated tags for pin #{pin_id}: {_format_pin_tags(tags) or 'none'}.",
+        mention=False,
+    )
 
 
 async def _pin_command_delete(bot, msg, room, args):

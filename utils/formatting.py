@@ -96,3 +96,34 @@ def format_page(
 def bool_label(value: bool) -> str:
     """Return a compact enabled/disabled label."""
     return "enabled" if bool(value) else "disabled"
+
+
+_STATUS_ICONS = {
+    "ok": "✅",
+    "success": "✅",
+    "healthy": "✅",
+    "running": "✅",
+    "enabled": "✅",
+    "info": "ℹ️",
+    "done": "ℹ️",
+    "disabled": "ℹ️",
+    "warning": "⚠️",
+    "warn": "⚠️",
+    "stale": "⚠️",
+    "cancelled": "⚠️",
+    "canceled": "⚠️",
+    "error": "🔴",
+    "failed": "🔴",
+    "fail": "🔴",
+}
+
+
+def status_icon(status: str | None) -> str:
+    """Return the standard operator icon for a status string."""
+    return _STATUS_ICONS.get(str(status or "").strip().lower(), "ℹ️")
+
+
+def status_label(status: str | None, label: str | None = None) -> str:
+    """Return ``'<icon> <label>'`` for consistent admin output."""
+    label_text = str(label if label is not None else status or "info")
+    return f"{status_icon(status)} {label_text}"

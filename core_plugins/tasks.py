@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 from utils.command import Role, command
 from utils.config import config
-from utils.formatting import PageRequest, format_page, parse_page_args
+from utils.formatting import PageRequest, format_page, parse_page_args, status_icon
 from utils.task_supervisor import TaskInfo
 
 PLUGIN_META = {
@@ -57,10 +57,11 @@ def _summary_line(tasks: list[TaskInfo]) -> str:
     """Return a readable task state summary."""
     counts = _status_counts(tasks)
     return (
-        f"Summary: {counts.get('running', 0)} running, "
-        f"{counts.get('failed', 0)} failed, "
-        f"{counts.get('cancelled', 0)} cancelled, "
-        f"{counts.get('done', 0)} done"
+        "Summary: "
+        f"{status_icon('running')} {counts.get('running', 0)} running, "
+        f"{status_icon('failed')} {counts.get('failed', 0)} failed, "
+        f"{status_icon('cancelled')} {counts.get('cancelled', 0)} cancelled, "
+        f"{status_icon('done')} {counts.get('done', 0)} done"
     )
 
 
@@ -68,7 +69,7 @@ def _compact_task_line(task: TaskInfo) -> str:
     """Return one compact task line."""
     heartbeat = f" | heartbeat={task.heartbeat_at}" if task.heartbeat_at and task.status == "running" else ""
     extra = f" | error={task.last_error}" if task.last_error else ""
-    return f"• {task.plugin}/{task.name} — {task.status}{heartbeat}{extra}"
+    return f"• {task.plugin}/{task.name} — {status_icon(task.status)} {task.status}{heartbeat}{extra}"
 
 
 def _full_task_lines(task: TaskInfo) -> list[str]:

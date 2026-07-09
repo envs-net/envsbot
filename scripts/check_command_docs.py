@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from utils.command_help import COMMAND_HELP  # noqa: E402
+from scripts.generate_commands_md import generate as generate_commands_md  # noqa: E402
 
 DOCS_COMMANDS = ROOT / "docs" / "commands.md"
 
@@ -65,6 +66,13 @@ def main() -> int:
         docs_text = DOCS_COMMANDS.read_text()
         if "This file is generated from command metadata" not in docs_text:
             errors.append("docs/commands.md is missing generated-file marker")
+        else:
+            generated = generate_commands_md()
+            if docs_text != generated:
+                errors.append(
+                    "docs/commands.md is out of date; run "
+                    "python scripts/generate_commands_md.py"
+                )
     else:
         errors.append("docs/commands.md is missing")
 

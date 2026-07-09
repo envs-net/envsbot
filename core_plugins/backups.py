@@ -18,7 +18,7 @@ from utils.backups import (
     verify_backup,
 )
 from utils.command import Role, command
-from utils.formatting import format_page, parse_page_args
+from utils.formatting import format_page, parse_page_args, status_icon
 
 log = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ async def backup_verify(bot, sender, nick, args, msg, is_room):
     lines = [
         "📦 Backup verification",
         f"Archive: {result['name']}",
-        f"Status: {'ok' if result['ok'] else 'failed'}",
+        f"Status: {status_icon('ok' if result['ok'] else 'failed')} {'ok' if result['ok'] else 'failed'}",
         f"Files: {', '.join(result['files']) if result['files'] else 'none'}",
     ]
     if result["errors"]:

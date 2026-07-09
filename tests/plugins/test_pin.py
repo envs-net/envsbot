@@ -624,3 +624,81 @@ async def test_pin_command_search_usage_no_matches_and_disabled(bot, make_msg, m
     enabled.return_value = False
     await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "mail"], msg, True)
     assert "disabled in this room" in _reply_text(bot.reply)
+
+
+def test_pin_tags_normalize_format_and_search():
+    assert pin._normalize_pin_tags(["#Mail", "mail", "support,ssh", "bad!"]) == [
+        "mail",
+        "support",
+        "ssh",
+        "bad",
+    ]
+    assert pin._format_pin_tags(["Mail", "support"]) == "#mail #support"
+    entry = {"id": 4, "preview": "Room setup", "tags": ["mail", "support"]}
+    assert pin._pin_matches_query(entry, "#mail")
+    assert pin._pin_matches_query(entry, "support")
+
+
+@pytest.mark.asyncio
+async def test_pin_command_edit_and_tags(bot, make_msg, monkeypatch, room_jid):
+    msg = make_msg(is_room=True)
+    state = {
+        room_jid: {
+            pin.PINS_FIELD: [
+                {"id": 7, "preview": "old", "target_text": "old", "tags": []}
+            ]
+        }
+    }
+    saved = AsyncMock()
+    audit = AsyncMock()
+    monkeypatch.setattr(pin, "_is_enabled_for_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "_sender_can_manage_pins_in_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+    monkeypatch.setattr(pin, "_save_pin_data", saved)
+    monkeypatch.setattr(pin, "audit_event", audit)
+    monkeypatch.setattr(pin.time, "time", lambda: 123)
+
+    await pin.pin_command(
+        bot,
+        "alice@example.com",
+        "Alice",
+        ["edit", "7", "new", "knowledge", "base"],
+        msg,
+        True,
+    )
+
+    entry = state[room_jid][pin.PINS_FIELD][0]
+    assert entry["target_text"] == "new knowledge base"
+    assert entry["preview"] == "new knowledge base"
+    assert entry["updated_at"] == 123
+    saved.assert_awaited_with(bot, state)
+    audit.assert_awaited()
+    assert "Updated pin #7" in _reply_text(bot.reply)
+
+    bot.reply.reset_mock()
+    saved.reset_mock()
+    audit.reset_mock()
+    await pin.pin_command(
+        bot,
+        "alice@example.com",
+        "Alice",
+        ["tags", "7", "#mail", "Support", "mail"],
+        msg,
+        True,
+    )
+
+    assert entry["tags"] == ["mail", "support"]
+    saved.assert_awaited_with(bot, state)
+    audit.assert_awaited_once()
+    assert "#mail #support" in _reply_text(bot.reply)
+
+    bot.reply.reset_mock()
+    await pin.pin_command(
+        bot,
+        "alice@example.com",
+        "Alice",
+        ["tags", "7"],
+        msg,
+        True,
+    )
+    assert "Pin #7 tags: #mail #support" in _reply_text(bot.reply)

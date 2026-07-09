@@ -591,13 +591,15 @@ COMMAND_HELP: dict[str, CommandMetadata] = {
         "category": "fun",
     },
     "pin": {
-        "short": "Pin, list, search or delete room pins.",
-        "usage": "{prefix}pin <add|list|search|find|show|delete|on|off|status> ...",
+        "short": "Pin, list, search, edit, tag or delete room pins.",
+        "usage": "{prefix}pin <add|list|search|find|show|edit|tags|delete|on|off|status> ...",
         "examples": [
             "{prefix}pin status",
             "{prefix}pin list",
             "{prefix}pin search mail",
             "{prefix}pin search ssh key",
+            "{prefix}pin edit 3 Updated room info",
+            "{prefix}pin tags 3 mail support",
             "{prefix}rooms enable pin",
         ],
         "category": "rooms",
