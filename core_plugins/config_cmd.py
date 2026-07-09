@@ -40,8 +40,6 @@ PLUGIN_META = {
     "category": "core",
 }
 
-_SECRET_KEYS = {"password", "token", "secret", "api_key", "apikey", "key"}
-
 _CONFIG_EDIT_BACKUP_REASON = "before-config-edit"
 _CONFIG_EDIT_SECTION = "# Runtime config edits"
 _PROTECTED_CONFIG_KEYS = {

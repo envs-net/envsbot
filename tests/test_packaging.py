@@ -8,6 +8,7 @@ def test_setuptools_package_discovery_covers_split_packages():
     find_config = pyproject["tool"]["setuptools"]["packages"]["find"]
 
     assert set(find_config["include"]) >= {
+        "bot*",
         "core_plugins*",
         "plugins*",
         "database*",

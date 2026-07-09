@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -100,22 +99,18 @@ def _check_command_registry() -> tuple[bool, str]:
 
 
 def _check_command_docs() -> tuple[bool, str]:
-    script = Path("scripts/check_command_docs.py")
-    if not script.exists():
-        return False, "command docs: script missing"
     try:
-        result = subprocess.run(
-            ["python", str(script)],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        if result.returncode == 0:
-            return True, "command docs: ok"
-        return False, "command docs: failed"
+        from scripts.check_command_docs import validate_command_docs
+
+        errors, command_count = validate_command_docs()
     except Exception as exc:
         return False, f"command docs: {type(exc).__name__}: {redact_text(exc)}"
+    if errors:
+        preview = "; ".join(errors[:3])
+        if len(errors) > 3:
+            preview += f"; ... ({len(errors)} errors)"
+        return False, f"command docs: {preview}"
+    return True, f"command docs: ok ({command_count} commands)"
 
 
 def _check_config_sample(config: Mapping[str, Any]) -> tuple[bool, str]:

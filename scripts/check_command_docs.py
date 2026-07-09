@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.generate_commands_md import generate as generate_commands_md  # noqa: E402
 from utils.command_help import COMMAND_HELP  # noqa: E402
@@ -16,15 +17,21 @@ from utils.command_registry import decorated_command_records  # noqa: E402
 DOCS_COMMANDS = ROOT / "docs" / "commands.md"
 
 
-def main() -> int:
+def validate_command_docs(docs_path: Path = DOCS_COMMANDS) -> tuple[list[str], int]:
+    """Return command-doc validation errors and decorated command count.
+
+    This function is intentionally importable so ``envsbot --check`` can reuse
+    the same source-of-truth validation as CI without spawning another Python
+    process or accidentally using a different interpreter.
+    """
     errors: list[str] = []
     commands = decorated_command_records()
     if not commands:
         errors.append("no commands found")
 
     docs_text = ""
-    if DOCS_COMMANDS.exists():
-        docs_text = DOCS_COMMANDS.read_text()
+    if docs_path.exists():
+        docs_text = docs_path.read_text(encoding="utf-8")
         if "This file is generated from command metadata" not in docs_text:
             errors.append("docs/commands.md is missing generated-file marker")
         else:
@@ -46,7 +53,8 @@ def main() -> int:
             errors.append(f"{plugin}:{name}: missing short")
         if not getattr(cmd, "usage", ""):
             errors.append(f"{plugin}:{name}: missing usage")
-        if not getattr(cmd, "examples", []) or not list(getattr(cmd, "examples", []) or []):
+        examples = list(getattr(cmd, "examples", []) or [])
+        if not examples:
             errors.append(f"{plugin}:{name}: missing examples")
         if docs_text and f"`,{name}`" not in docs_text:
             errors.append(f"docs/commands.md: missing primary command {name!r}")
@@ -61,12 +69,17 @@ def main() -> int:
         if not metadata.get("examples"):
             errors.append(f"COMMAND_HELP[{key!r}]: missing examples")
 
+    return errors, len(commands)
+
+
+def main() -> int:
+    errors, command_count = validate_command_docs()
     if errors:
         print("Command docs check failed:")
         for error in errors:
             print(f"- {error}")
         return 1
-    print(f"Command docs check passed ({len(commands)} decorated commands).")
+    print(f"Command docs check passed ({command_count} decorated commands).")
     return 0
 
 
