@@ -132,3 +132,19 @@ async def test_fetch_bytes_raises_after_redirect_limit():
             session_factory=_factory_for(response, []),
             max_redirects=0,
         )
+
+
+@pytest.mark.asyncio
+async def test_fetch_bytes_redirect_without_location_raises():
+    response = FakeResponse(status=302, headers={})
+
+    with pytest.raises(
+        UnsafeFetchURL,
+        match="redirect response without Location header",
+    ):
+        await fetch_bytes(
+            "https://example.test/start",
+            validator=passthrough_validator,
+            session_factory=_factory_for(response, []),
+        )
+
