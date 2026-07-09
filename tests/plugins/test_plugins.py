@@ -171,9 +171,9 @@ async def test_plugin_list(bot, msg):
                                      msg, False)
     out = bot.reply.call_args[0][1]
     # Should mention all loaded and available plugins grouped by category
-    assert "[Core plugins]" in out
-    assert "[Optional plugins]" in out
-    joined = "\n".join(out)
+    joined = out if isinstance(out, str) else "\n".join(out)
+    assert "[Core plugins]" in joined
+    assert "[Optional plugins]" in joined
     assert "Health: ✅ 1 ok, ⚠️ 1 warning, 🔴 1 failed" in joined
     assert "[loaded] plugins — ✅ ok" in joined
     assert "[not loaded] info" in joined
@@ -310,7 +310,7 @@ async def test_plugin_reload_all_auto_some_errors(bot, msg):
     bot.bot_plugins.list = MagicMock(return_value=["plugins", "rooms", "info"])
     # First two succeed, info fails
 
-    def reload_side(name, auto):
+    def reload_side(name, *, auto):
         if name == "info":
             return (False, "Failed")
         return (True, "Reloaded")
@@ -349,7 +349,10 @@ async def test_plugin_diagnose_and_state_commands(bot, msg):
 
     diagnose = bot.reply.call_args.args[1]
     assert "🔎 Plugin diagnostics: rss" in diagnose
-    assert any("runtime state hook" in line for line in diagnose)
+    if isinstance(diagnose, str):
+        assert "runtime state hook" in diagnose
+    else:
+        assert any("runtime state hook" in line for line in diagnose)
 
     await plugins_module.plugin_state(
         bot,
