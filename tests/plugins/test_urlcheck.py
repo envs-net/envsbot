@@ -209,10 +209,12 @@ async def test_on_groupchat_message_regular_url(fake_bot, monkeypatch):
     store = fake_bot._test_urlcheck_store
     store.data["room3@conf"] = True
     urlcheck.JOINED_ROOMS["room3@conf"] = {"nick": "someone"}
-    monkeypatch.setattr(urlcheck, "fetch_url_title",
-                        lambda url, max_redirects=5:
-                        ("http://real", 200, "text/html",
-                         "HTML Title", 123, "mydesc"))
+    monkeypatch.setattr(
+        urlcheck,
+        "fetch_url_title",
+        AsyncMock(return_value=("http://real", 200, "text/html",
+                                "HTML Title", 123, "mydesc")),
+    )
     monkeypatch.setattr(urlcheck, "is_youtube_url", lambda url: False)
     monkeypatch.setattr(
         urlcheck, "has_xep_0392_link_metadata", lambda msg: False)
@@ -243,10 +245,12 @@ async def test_on_groupchat_message_youtube_url(fake_bot, monkeypatch):
     store = fake_bot._test_urlcheck_store
     store.data["room4@conf"] = True
     urlcheck.JOINED_ROOMS["room4@conf"] = {"nick": "someone"}
-    monkeypatch.setattr(urlcheck, "fetch_url_title",
-                        lambda url, max_redirects=5:
-                        ("http://yt.vid", 200, "text/html",
-                         "Title", 321, "desc"))
+    monkeypatch.setattr(
+        urlcheck,
+        "fetch_url_title",
+        AsyncMock(return_value=("http://yt.vid", 200, "text/html",
+                                "Title", 321, "desc")),
+    )
     monkeypatch.setattr(urlcheck, "is_youtube_url", lambda url: True)
     monkeypatch.setattr(urlcheck, "fetch_youtube_info", AsyncMock(
         return_value=("YOUTUBE DESC", "thetitle", "uploader", "4m3s", 123)))
@@ -311,7 +315,7 @@ def test_extract_urls_handles_multiple_code_blocks():
         "> https://example.org/quoted",
     ])
 
-    assert urlcheck._extract_urls_from_message_text(text) == [
+    assert urlcheck.extract_urls_from_message_text(text) == [
         "https://example.org/one",
         "https://example.org/two",
     ]
@@ -320,7 +324,7 @@ def test_extract_urls_handles_multiple_code_blocks():
 def test_extract_urls_strips_trailing_prose_punctuation():
     text = "See https://example.org/path, and https://example.net/end)."
 
-    assert urlcheck._extract_urls_from_message_text(text) == [
+    assert urlcheck.extract_urls_from_message_text(text) == [
         "https://example.org/path",
         "https://example.net/end",
     ]
@@ -335,7 +339,7 @@ def test_extract_urls_handles_inline_code_fences():
         "``` https://example.org/reopened",
     ])
 
-    assert urlcheck._extract_urls_from_message_text(text) == [
+    assert urlcheck.extract_urls_from_message_text(text) == [
         "https://example.org/before",
         "https://example.org/after",
         "https://example.org/visible",
