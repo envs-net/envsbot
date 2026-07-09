@@ -771,6 +771,17 @@ async def on_load(bot):
     log.info("[DUCKS] Plugin loaded")
 
 
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return duck-game runtime diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    active = int(state.get("active_ducks", 0) or 0)
+    spawn_tasks = int(state.get("spawn_tasks", state.get("pending_spawn", 0)) or 0)
+    expire_tasks = int(state.get("expire_tasks", 0) or 0)
+    return [
+        f"✅ Ducks{scope}: active_ducks={active}, spawn_tasks={spawn_tasks}, expire_tasks={expire_tasks}"
+    ]
+
 async def on_unload(bot):
     for room_jid in list(NEXT_DUCK_THRESHOLDS):
         try:

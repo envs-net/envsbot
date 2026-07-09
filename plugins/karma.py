@@ -402,6 +402,44 @@ async def _handle_score_event(bot, msg, events, actor_nick, room_jid):
             " Try again later.")
 
 
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return karma counters for diagnostics."""
+    store = await get_karma_store(bot)
+    scores = await store.get_global(KARMA_SCORES_KEY, default={})
+    if not isinstance(scores, dict):
+        scores = {}
+    enabled = await store.get_global(KARMA_ENABLED_KEY, default={})
+    if not isinstance(enabled, dict):
+        enabled = {}
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        matching = next(
+            (room for room in scores if str(room).split("/", 1)[0].strip().lower() == target),
+            None,
+        )
+        room_scores = scores.get(matching, {}) if matching else {}
+        return {
+            "enabled_rooms": int(any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled)),
+            "tracked_targets": len(room_scores) if isinstance(room_scores, dict) else 0,
+            "throttled_users": len(LAST_KARMA_ACTIONS),
+        }
+    return {
+        "enabled_rooms": len(enabled),
+        "rooms_with_scores": len(scores),
+        "tracked_targets": sum(len(room_scores) for room_scores in scores.values() if isinstance(room_scores, dict)),
+        "throttled_users": len(LAST_KARMA_ACTIONS),
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return karma diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Karma{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, tracked_targets={state.get('tracked_targets', 0)}"
+    ]
+
+
 async def on_load(bot):
     log.info("[KARMA] Plugin loading...")
     bot.bot_plugins.register_event(

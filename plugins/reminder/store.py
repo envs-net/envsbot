@@ -633,6 +633,17 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "enabled": int(REMINDER_ENABLED),
     }
 
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return reminder health diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    enabled = state.get("enabled", 1)
+    pending = int(state.get("pending_reminders", 0) or 0)
+    active = int(state.get("active_tasks", 0) or 0)
+    icon = "✅" if int(enabled or 0) else "ℹ️"
+    status = "enabled" if int(enabled or 0) else "disabled"
+    return [f"{icon} Reminder{scope}: {status}, pending={pending}, active_tasks={active}"]
+
 __all__ = [
     'log',
     'PLUGIN_META',
@@ -652,4 +663,5 @@ __all__ = [
     'delete_reminder',
     'on_ready',
     'get_runtime_state',
+    'doctor',
 ]

@@ -109,7 +109,7 @@ async def test_audit_user_usage_invalid_jid_empty_and_rows(bot, msg, monkeypatch
     list_events = AsyncMock(return_value=[(1, "now", "event", "Admin@example.org", "target", '{}')])
     monkeypatch.setattr(audit_mod, "_list_events", list_events)
     await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org"], msg, False)
-    assert "#1 now | event" in bot.reply.call_args.args[1]
+    assert "#1 now | event" in "\n".join(bot.reply.call_args.args[1])
 
 
 @pytest.mark.asyncio
@@ -142,7 +142,7 @@ async def test_audit_target_and_action_filters(msg):
         target="room@example.org",
         event=None,
     )
-    assert "room_added" in bot.reply.call_args.args[1]
+    assert "room_added" in "\n".join(bot.reply.call_args.args[1])
 
     await audit_mod.audit_action(
         bot,
@@ -158,3 +158,26 @@ async def test_audit_target_and_action_filters(msg):
         target=None,
         event="room_added",
     )
+
+@pytest.mark.asyncio
+async def test_audit_export_accepts_filters(bot, msg):
+    exporter = AsyncMock(return_value='{"event":"backup_created"}')
+    bot.db = MagicMock()
+    bot.db.audit.export_jsonl = exporter
+
+    await audit_mod.audit_export(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["25", "action", "backup_created", "target", "managed_backups"],
+        msg,
+        False,
+    )
+
+    exporter.assert_awaited_once_with(
+        limit=25,
+        event="backup_created",
+        target="managed_backups",
+    )
+    assert "action" not in bot.reply.call_args.args[1]
+    assert "event=backup_created" in bot.reply.call_args.args[1]

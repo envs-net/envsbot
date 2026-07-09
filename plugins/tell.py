@@ -141,6 +141,7 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
 
     now = datetime.datetime.now(datetime.timezone.utc).timestamp()
     payload = {
+        "room_jid": str(msg["from"].bare),
         "recv_jid": rec_jid,
         "send_jid": send_jid,
         "send_nick": sender_nick,
@@ -191,6 +192,51 @@ async def deliver_tell_messages(bot, msg):
         )
         log.info(f"[TELL] Delivered tell message to {
                  nick} ({rec_jid}): {entry['message']}")
+
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return tell counters for diagnostics."""
+    store = await get_tell_store(bot)
+    enabled = await store.get_global(TELL_KEY, default={})
+    if not isinstance(enabled, dict):
+        enabled = {}
+
+    pending = 0
+    users = getattr(getattr(bot, "db", None), "users", None)
+    list_users = getattr(users, "list", None)
+    if callable(list_users):
+        for user in await list_users():
+            jid = user.get("jid") if isinstance(user, dict) else None
+            if not jid or jid == "__GLOBAL__":
+                continue
+            messages = await store.get(str(jid), "tell_messages") or []
+            if isinstance(messages, list):
+                if room_jid:
+                    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+                    pending += sum(
+                        1 for item in messages
+                        if isinstance(item, dict)
+                        and str(item.get("room_jid") or "").split("/", 1)[0].strip().lower() == target
+                    )
+                else:
+                    pending += len(messages)
+
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        return {
+            "enabled_rooms": int(any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled)),
+            "pending_messages": pending,
+        }
+    return {"enabled_rooms": len(enabled), "pending_messages": pending}
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return tell diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ Tell{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, pending_messages={state.get('pending_messages', 0)}"
+    ]
 
 
 def on_load(bot):

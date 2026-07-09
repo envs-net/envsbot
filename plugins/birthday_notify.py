@@ -643,6 +643,36 @@ async def _get_birthday_store(bot):
     return bot.db.users.plugin("birthday_notify")
 
 
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return birthday notification counters for diagnostics."""
+    store = await _get_birthday_store(bot)
+    enabled = await store.get_global("birthday_notify", default={})
+    if not isinstance(enabled, dict):
+        enabled = {}
+    task_running = int(_BIRTHDAY_CHECK_TASK is not None and not _BIRTHDAY_CHECK_TASK.done())
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        return {
+            "enabled_rooms": int(any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled)),
+            "announced_today": sum(1 for room, _jid in ANNOUNCED_TODAY if str(room).split("/", 1)[0].strip().lower() == target),
+            "task_running": task_running,
+        }
+    return {
+        "enabled_rooms": len(enabled),
+        "announced_today": len(ANNOUNCED_TODAY),
+        "task_running": task_running,
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return birthday notification diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    icon = "✅" if int(state.get("task_running", 0) or 0) else "⚠️"
+    return [
+        f"{icon} Birthday{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, announced_today={state.get('announced_today', 0)}, task_running={state.get('task_running', 0)}"
+    ]
+
 # ============================================================================
 # PLUGIN LIFECYCLE
 # ============================================================================

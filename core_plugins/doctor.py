@@ -18,6 +18,19 @@ PLUGIN_META = {
     "category": "core",
 }
 
+_PLUGIN_HEALTH_PLUGINS = (
+    "rss",
+    "idlerpg",
+    "reminder",
+    "pin",
+    "weather",
+    "urlcheck",
+    "birthday_notify",
+    "ducks",
+    "tell",
+    "karma",
+)
+
 _SECTION_ALIASES = {
     "all": "all",
     "full": "all",
@@ -35,10 +48,32 @@ _SECTION_ALIASES = {
     "backup": "backups",
     "network": "network",
     "http": "network",
-    "rss": "rss",
+    "plugin-health": "plugin-health",
+    "pluginhealth": "plugin-health",
+    "health": "plugin-health",
+    "rss": "plugin:rss",
+    "idlerpg": "plugin:idlerpg",
+    "irpg": "plugin:idlerpg",
+    "reminder": "plugin:reminder",
+    "pin": "plugin:pin",
+    "weather": "plugin:weather",
+    "urlcheck": "plugin:urlcheck",
+    "birthday": "plugin:birthday_notify",
+    "birthday_notify": "plugin:birthday_notify",
+    "ducks": "plugin:ducks",
+    "tell": "plugin:tell",
+    "karma": "plugin:karma",
 }
-_DEFAULT_SECTIONS = ("config", "database", "rooms", "plugins", "tasks", "backups")
-_ALL_SECTIONS = _DEFAULT_SECTIONS + ("network", "rss")
+_DEFAULT_SECTIONS = (
+    "config",
+    "database",
+    "rooms",
+    "plugins",
+    "tasks",
+    "backups",
+    "plugin-health",
+)
+_ALL_SECTIONS = _DEFAULT_SECTIONS + ("network",)
 
 
 def _line(ok: bool | None, label: str, text: str) -> str:
@@ -241,14 +276,30 @@ def _network_lines() -> list[str]:
     ]
 
 
-async def _rss_lines(bot: Any) -> list[str]:
+async def _plugin_doctor_lines(bot: Any, plugin_names: tuple[str, ...] | list[str]) -> list[str]:
     manager = getattr(bot, "bot_plugins", None)
     if manager is None:
-        return [_line(False, "RSS", "plugin manager missing")]
+        return [_line(False, "Plugin health", "plugin manager missing")]
     doctor = getattr(manager, "plugin_doctor", None)
     if not callable(doctor):
-        return [_line(False, "RSS", "plugin diagnostics unavailable")]
-    return list(await doctor("rss"))
+        return [_line(False, "Plugin health", "plugin diagnostics unavailable")]
+
+    lines: list[str] = []
+    for plugin_name in plugin_names:
+        lines.extend(str(line) for line in await doctor(plugin_name))
+    return lines or [_line(None, "Plugin health", "no plugins selected")]
+
+
+def _overall_status(lines: list[str]) -> str:
+    """Return a compact status line for doctor output."""
+    body = lines[2:] if lines[:2] == ["🩺 EnvsBot doctor", ""] else lines
+    failures = sum(1 for line in body if str(line).startswith("🔴"))
+    warnings = sum(1 for line in body if str(line).startswith(("⚠️", "🟡", "🟡️")))
+    if failures:
+        return f"Overall: 🔴 {failures} problem(s), {warnings} warning(s)"
+    if warnings:
+        return f"Overall: ⚠️ {warnings} warning(s)"
+    return "Overall: ✅ healthy"
 
 
 async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
@@ -266,23 +317,32 @@ async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
         return _backup_lines()
     if section == "network":
         return _network_lines()
-    if section == "rss":
-        return await _rss_lines(bot)
+    if section == "plugin-health":
+        return await _plugin_doctor_lines(bot, list(_PLUGIN_HEALTH_PLUGINS))
+    if section.startswith("plugin:"):
+        return await _plugin_doctor_lines(bot, [section.split(":", 1)[1]])
     return [_line(False, section, "unknown doctor section")]
 
 
 async def build_doctor_lines(bot: Any, *, full: bool = False, sections: tuple[str, ...] | None = None) -> list[str]:
     """Build the doctor output as testable lines."""
     selected = sections or _DEFAULT_SECTIONS
-    lines = ["🩺 EnvsBot doctor", ""]
+    body: list[str] = []
     for section in selected:
-        label = "Database" if section == "database" else section.capitalize()
-        lines.append(f"[{label}]")
-        lines.extend(await _section_lines(bot, section, full=full))
-        lines.append("")
-    if lines and lines[-1] == "":
-        lines.pop()
-    return lines
+        if section == "database":
+            label = "Database"
+        elif section == "plugin-health":
+            label = "Plugin health"
+        elif section.startswith("plugin:"):
+            label = f"Plugin: {section.split(':', 1)[1]}"
+        else:
+            label = section.capitalize()
+        body.append(f"[{label}]")
+        body.extend(await _section_lines(bot, section, full=full))
+        body.append("")
+    if body and body[-1] == "":
+        body.pop()
+    return ["🩺 EnvsBot doctor", _overall_status(body), "", *body]
 
 
 def _parse_doctor_args(args: list[str]) -> tuple[bool, list[str]]:
@@ -332,7 +392,7 @@ async def doctor_command(bot, sender, nick, args, msg, is_room):
         msg,
         format_page(
             "🩺 EnvsBot doctor",
-            lines[2:] if len(lines) > 2 else lines,
+            lines[1:] if len(lines) > 1 else lines,
             page_request=parse_page_args(page_args),
             page_size=18,
             command_hint=f"{bot.prefix}doctor",

@@ -72,6 +72,26 @@ async def get_weather_store(bot):
     return bot.db.users.plugin("weather")
 
 
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return weather room-toggle counters for diagnostics."""
+    store = await get_weather_store(bot)
+    enabled = await store.get_global(WEATHER_KEY, default={})
+    if not isinstance(enabled, dict):
+        enabled = {}
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        return {
+            "enabled_rooms": int(any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled))
+        }
+    return {"enabled_rooms": len(enabled)}
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return weather diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [f"✅ Weather{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, timeout={WEATHER_HTTP_TIMEOUT:g}s"]
+
 @command("weather", role=Role.USER, aliases=["w"])
 async def weather_command(bot, sender_jid, nick, args, msg, is_room):
     """

@@ -292,6 +292,21 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     }
 
 
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return IdleRPG room/task diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    tasks = int(state.get("tasks", 0) or 0)
+    players = int(state.get("players", 0) or 0)
+    online = int(state.get("online_players", 0) or 0)
+    rooms = int(state.get("rooms", 0) or 0)
+    quests = int(state.get("active_quests", 0) or 0)
+    ok = tasks > 0 or rooms == 0
+    icon = "✅" if ok else "⚠️"
+    return [
+        f"{icon} IdleRPG{scope}: rooms={rooms}, players={players}, online={online}, active_quests={quests}, tasks={tasks}"
+    ]
+
 async def cleanup_room_state(bot, room_jid: str):
     await _cancel_room_task(room_jid)
     data = await _get_data(bot)

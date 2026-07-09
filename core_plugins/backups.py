@@ -263,6 +263,11 @@ async def backup_restore_plan(bot, sender, nick, args, msg, is_room):
     except BackupError as exc:
         bot.reply_error(msg, str(exc))
         return
+    bot.reply(msg, _format_restore_plan_lines(plan))
+
+
+def _format_restore_plan_lines(plan: dict) -> list[str]:
+    """Return formatted restore plan lines."""
     lines = [
         "📦 Backup restore dry-run",
         f"Archive: {plan['archive']}",
@@ -274,16 +279,25 @@ async def backup_restore_plan(bot, sender, nick, args, msg, is_room):
             lines.append(f"• {entry} -> {plan['targets'][entry]}")
     else:
         lines.append("• nothing")
-    bot.reply(msg, lines)
+    return lines
 
 
 @command("restore", role=Role.OWNER, aliases=["backup restore"])
 async def backup_restore(bot, sender, nick, args, msg, is_room):
     """Restore a managed ZIP backup after explicit confirmation."""
+    if len(args) == 2 and args[1].lower() in {"dry-run", "dryrun", "check", "plan"}:
+        try:
+            plan = restore_plan(resolve_backup(args[0]))
+        except BackupError as exc:
+            bot.reply_error(msg, str(exc))
+            return
+        bot.reply(msg, _format_restore_plan_lines(plan))
+        return
+
     if len(args) != 2 or args[1].lower() != "confirm":
         bot.reply_warn(
             msg,
-            f"Usage: {bot.prefix}restore <archive|last> confirm\n"
+            f"Usage: {bot.prefix}restore <archive|last> <dry-run|confirm>\n"
             "Restore overwrites bot.db, config.py, vcard.py and chat_slang.csv "
             "when those files are present in the archive. A safety backup is "
             "created first.",

@@ -37,6 +37,7 @@ from functools import partial
 from utils.command import command, Role
 from utils.config import config
 from utils.http_fetch import fetch_bytes, fetch_json, passthrough_validator
+from utils.urlcheck_extraction import extract_urls_from_message_text
 from utils.url_safety import UnsafeFetchURL
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins._core import handle_room_toggle_command
@@ -52,7 +53,6 @@ PLUGIN_META = {
 }
 
 URLCHECK_KEY = "URLCHECK"
-URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
 # Robust YouTube video ID extraction: supports many URL forms
 #  youtu.be/VIDEO_ID
 # /watch?...v=VIDEOID, /embed/VIDEOID, /v/VIDEOID, /shorts/VIDEOID
@@ -96,6 +96,33 @@ _wait_secs_url = URLCHECK_WAIT_SECONDS
 async def get_urlcheck_store(bot):
     return bot.db.users.plugin("urlcheck")
 
+
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+    """Return URLCheck counters for diagnostics."""
+    store = await get_urlcheck_store(bot)
+    enabled = await store.get_global(URLCHECK_KEY, default={})
+    if not isinstance(enabled, dict):
+        enabled = {}
+    if room_jid:
+        target = str(room_jid or "").split("/", 1)[0].strip().lower()
+        room_enabled = any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled)
+        return {
+            "enabled_rooms": int(room_enabled),
+            "cached_urls": len(_url_timestamps.get(room_jid, {})),
+        }
+    return {
+        "enabled_rooms": len(enabled),
+        "cached_urls": sum(len(urls) for urls in _url_timestamps.values()),
+    }
+
+
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return URLCheck diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    return [
+        f"✅ URLCheck{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, cached_urls={state.get('cached_urls', 0)}, max_redirects={URLCHECK_MAX_REDIRECTS}"
+    ]
 
 @command("urlcheck", role=Role.USER)
 async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
@@ -174,29 +201,8 @@ async def on_groupchat_message(bot, msg):
 
 
 def _extract_urls_from_message_text(text):
-    lines = []
-    in_code_block = False
-
-    for line in text.splitlines():
-        if "```" in line:
-            in_code_block = not in_code_block
-            continue
-        if in_code_block:
-            continue
-        if not line.lstrip().startswith(">"):
-            lines.append(line)
-
-    urls = []
-    for line in lines:
-        for url in URL_RE.findall(line):
-            parsed = urlparse(url) if url else None
-            if parsed is not None and parsed.scheme in ("http", "https"):
-                hostname = (parsed.hostname or "").lower().rstrip(".")
-                if hostname == "reddit.com" or hostname.endswith(".reddit.com"):
-                    continue
-            urls.append(url)
-
-    return urls
+    """Backward-compatible wrapper around split extraction helpers."""
+    return extract_urls_from_message_text(text)
 
 
 async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):

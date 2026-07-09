@@ -192,7 +192,7 @@ except asyncio.CancelledError:
 
 ## Runtime diagnostics
 
-A plugin can expose small state counters for `,plugin state` and room diagnostics:
+A plugin can expose small state counters for `,plugin state`, room diagnostics and `,doctor plugin-health`:
 
 ```python
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
@@ -201,8 +201,17 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     return {"items": 12, "tasks": 4}
 ```
 
-Return compact numeric or string values. Do not return large raw state objects,
-secrets, full feed contents or user-private data.
+Return compact numeric or string values. Do not return large raw state objects, secrets, full feed contents or user-private data.
+
+For richer operator output, expose a doctor hook:
+
+```python
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    return [f"✅ example: items={state.get('items', 0)}"]
+```
+
+Doctor hooks should be fast, side-effect free and safe to run in normal operations.
 
 ## Audit logging
 
@@ -228,3 +237,36 @@ Avoid storing secrets or full message bodies.
 - Keep cleanup hooks idempotent so repeated room deletion or plugin reloads are
   safe.
 - Keep help metadata and generated docs in sync with command decorators.
+
+
+## Shared HTTP fetch utility
+
+Plugins that fetch external HTTP resources should use `utils.http_fetch` instead
+of creating their own sessions and redirect logic. The shared helpers provide
+consistent timeouts, user-agent handling, byte limits and SSRF-safe redirect
+handling for user-supplied URLs. Fixed, bot-controlled API endpoints can use
+`passthrough_validator`; user-supplied URLs should keep URL safety validation
+enabled.
+
+```python
+from utils.http_fetch import fetch_json, fetch_text, passthrough_validator
+
+result = await fetch_json(
+    "https://api.example.org/status",
+    validator=passthrough_validator,
+    max_bytes=262144,
+)
+```
+
+## Command/docs CI checks
+
+After changing commands or command metadata, run:
+
+```bash
+python scripts/generate_commands_md.py
+python scripts/check_command_docs.py
+python -m compileall -q .
+pytest
+```
+
+The CI pipeline runs these checks so generated docs and runtime help do not drift.

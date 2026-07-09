@@ -891,6 +891,16 @@ async def _pin_command_add_last(bot, sender_jid, nick, msg, room, args):
     )
 
 
+async def doctor(bot, room_jid: str | None = None) -> list[str]:
+    """Return pin health diagnostics."""
+    state = await get_runtime_state(bot, room_jid=room_jid)
+    scope = f" for {room_jid}" if room_jid else ""
+    pins = int(state.get("pins", 0) or 0)
+    rooms = int(state.get("rooms", 0) or 0)
+    if room_jid and rooms == 0:
+        return [f"ℹ️ Pin{scope}: no stored pins"]
+    return [f"✅ Pin{scope}: rooms={rooms}, pins={pins}"]
+
 async def on_load(bot):
     bot.bot_plugins.register_event(
         "pin",

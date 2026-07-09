@@ -9,6 +9,8 @@ steps:
   commands:
     - pip install -r requirements.txt
     - pip install -r requirements-dev.txt
+    - python -m compileall -q .
+    - python scripts/check_command_docs.py
     - pytest
   trigger:
     branch:

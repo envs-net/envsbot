@@ -5,7 +5,7 @@ state inspection and safe maintenance.
 
 ## Health checks
 
-Use `,doctor` for a compact health check and `,doctor full` for more detail.
+Use `,doctor` for a compact health check, `,doctor all` for the full operator view and `,doctor <section>` for focused diagnostics.
 
 The doctor command checks:
 
@@ -16,12 +16,18 @@ The doctor command checks:
 - loaded/available plugins and registered commands
 - supervised background task summary
 - backup directory and retention settings
+- plugin-provided health checks for RSS, IdleRPG, reminders, pins, weather, URLCheck, birthdays, ducks, tell and karma
+
+Useful sections include `config`, `database`, `rooms`, `plugins`, `tasks`, `backups`, `network`, `plugin-health` and selected plugin names such as `rss`, `idlerpg`, `weather` or `urlcheck`.
 
 Examples:
 
 ```text
 ,doctor
-,doctor full
+,doctor all
+,doctor tasks
+,doctor rss
+,doctor idlerpg
 ```
 
 ## Room diagnostics
@@ -66,10 +72,15 @@ its tasks through `restart_tasks(bot)` or `on_ready(bot)`.
 
 ```text
 ,tasks
+,tasks list
 ,tasks failed
+,tasks stale
 ,tasks plugin rss
+,tasks plugin rss running
 ,tasks restart rss
 ```
+
+`tasks stale` is read-only and reports supervised tasks whose heartbeat is older than `TASK_STALE_AFTER_SECONDS` (default: one hour). Restart support is intentionally opt-in per plugin.
 
 Plugins with long-running loops should use `utils.task_supervisor.create_plugin_task()`
 instead of `asyncio.create_task()` so tasks appear in `,tasks`, are cancelled on
@@ -80,6 +91,15 @@ plugin unload and can be restarted consistently.
 Backups are kept by count with `BACKUP_KEEP` and optionally by age with
 `BACKUP_RETENTION_DAYS`. Set `BACKUP_RETENTION_DAYS = 0` to disable age-based
 retention.
+
+Manual inspection and restore planning should be used before destructive restores:
+
+```text
+,backup show last
+,backup verify last
+,backup restore last dry-run
+,backup restore last confirm
+```
 
 Manual pruning supports a dry-run mode:
 
@@ -97,6 +117,9 @@ The audit log can be filtered by actor, target or event type:
 ,audit user admin@example.org
 ,audit target lounge@conference.example.org
 ,audit action room_feature_changed
+,audit target lounge@conference.example.org all
+,audit export 100 action backup_created
+,audit prune 90 dry-run
 ```
 
 Room changes, plugin changes, config reloads, backups and selected plugin state

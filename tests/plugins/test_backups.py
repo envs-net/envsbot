@@ -246,3 +246,19 @@ async def test_backup_prune_dry_run_and_delete(bot, msg, monkeypatch):
     prune.assert_called_once_with(keep=None, days=30)
     audit.assert_awaited_once()
     bot.reply_ok.assert_called()
+
+@pytest.mark.asyncio
+async def test_backup_restore_supports_dry_run(bot, msg, monkeypatch):
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=Path("backup.zip")))
+    monkeypatch.setattr(backups_plugin, "restore_plan", MagicMock(return_value={
+        "archive": "backup.zip",
+        "manifest": {"created_at": "2026-06-24T12:00:00Z"},
+        "entries": ["bot.db"],
+        "targets": {"bot.db": "/srv/envsbot/bot.db"},
+    }))
+
+    await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last", "dry-run"], msg, False)
+
+    lines = bot.reply.call_args.args[1]
+    assert lines[0] == "📦 Backup restore dry-run"
+    assert "• bot.db -> /srv/envsbot/bot.db" in lines

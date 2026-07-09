@@ -66,12 +66,63 @@ async def _list_events(
     )
 
 
-def _reply_audit_rows(bot, msg, title: str, rows, *, empty: str) -> None:
-    """Reply with formatted audit rows."""
+def _reply_audit_rows(
+    bot,
+    msg,
+    title: str,
+    rows,
+    *,
+    empty: str,
+    page_args: list[str] | None = None,
+    command_hint: str | None = None,
+) -> None:
+    """Reply with formatted, paginated audit rows."""
     lines = [_format_row(row) for row in rows]
     if not lines:
         lines = [empty]
-    bot.reply(msg, "\n".join([title, *lines]))
+    bot.reply(
+        msg,
+        format_page(
+            title,
+            lines,
+            page_request=parse_page_args(page_args or []),
+            page_size=10,
+            command_hint=command_hint or f"{config.get('prefix', ',')}audit last",
+        ),
+    )
+
+
+def _parse_filter_command_args(args: list[str], usage: str) -> tuple[str | None, list[str], str | None]:
+    """Return ``(value, page_args, error)`` for simple audit filters."""
+    if not args:
+        return None, [], usage
+    value = str(args[0]).strip()
+    if not value:
+        return None, [], usage
+    return value, list(args[1:]), None
+
+
+def _parse_export_args(args: list[str]) -> tuple[int, dict[str, str], str | None]:
+    """Parse audit export arguments."""
+    limit = 100
+    filters: dict[str, str] = {}
+    remaining = list(args or [])
+    if remaining and str(remaining[0]).isdigit():
+        limit = max(1, min(int(remaining.pop(0)), 500))
+    while remaining:
+        key = remaining.pop(0).lower()
+        if key in {"user", "actor"}:
+            field = "actor"
+        elif key in {"target", "room"}:
+            field = "target"
+        elif key in {"action", "event"}:
+            field = "event"
+        else:
+            return limit, filters, f"invalid filter: {key}"
+        if not remaining:
+            return limit, filters, f"missing value for {key}"
+        filters[field] = str(remaining.pop(0))
+    return limit, filters, None
 
 
 @command(
@@ -134,9 +185,11 @@ async def audit_user(bot, sender, nick, args, msg, is_room):
     _reply_audit_rows(
         bot,
         msg,
-        "🧾 Audit log",
+        f"🧾 Audit log — actor={actor}",
         rows,
         empty=f"No audit events found for {actor}.",
+        page_args=list(args[1:]),
+        command_hint=f"{config.get('prefix', ',')}audit user {actor}",
     )
 
 
@@ -152,17 +205,22 @@ async def audit_user(bot, sender, nick, args, msg, is_room):
 )
 async def audit_target(bot, sender, nick, args, msg, is_room):
     """Show audit events for one target."""
-    if len(args) != 1:
-        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit target <target>")
+    target, page_args, error = _parse_filter_command_args(
+        args,
+        f"{config.get('prefix', ',')}audit target <target> [all|page|last]",
+    )
+    if error or target is None:
+        bot.reply_usage(msg, error or f"{config.get('prefix', ',')}audit target <target>")
         return
-    target = str(args[0])
     rows = await _list_events(bot, limit=50, target=target)
     _reply_audit_rows(
         bot,
         msg,
-        "🧾 Audit log",
+        f"🧾 Audit log — target={target}",
         rows,
         empty=f"No audit events found for target {target}.",
+        page_args=page_args,
+        command_hint=f"{config.get('prefix', ',')}audit target {target}",
     )
 
 
@@ -178,17 +236,22 @@ async def audit_target(bot, sender, nick, args, msg, is_room):
 )
 async def audit_action(bot, sender, nick, args, msg, is_room):
     """Show audit events for one event type."""
-    if len(args) != 1:
-        bot.reply_usage(msg, f"{config.get('prefix', ',')}audit action <event_type>")
+    event, page_args, error = _parse_filter_command_args(
+        args,
+        f"{config.get('prefix', ',')}audit action <event_type> [all|page|last]",
+    )
+    if error or event is None:
+        bot.reply_usage(msg, error or f"{config.get('prefix', ',')}audit action <event_type>")
         return
-    event = str(args[0])
     rows = await _list_events(bot, limit=50, event=event)
     _reply_audit_rows(
         bot,
         msg,
-        "🧾 Audit log",
+        f"🧾 Audit log — action={event}",
         rows,
         empty=f"No audit events found for action {event}.",
+        page_args=page_args,
+        command_hint=f"{config.get('prefix', ',')}audit action {event}",
     )
 
 @command(
@@ -203,23 +266,24 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
 )
 async def audit_export(bot, sender, nick, args, msg, is_room):
     """Export recent audit events as JSON Lines."""
-    limit = 100
-    if args:
-        try:
-            limit = max(1, min(int(args[0]), 500))
-        except ValueError:
-            bot.reply_usage(msg, f"{config.get('prefix', ',')}audit export [limit]")
-            return
+    limit, filters, error = _parse_export_args(args or [])
+    if error:
+        bot.reply_usage(
+            msg,
+            f"{config.get('prefix', ',')}audit export [limit] [user <jid>|target <target>|action <event>]",
+        )
+        return
     audit_log = getattr(getattr(bot, "db", None), "audit", None)
     exporter = getattr(audit_log, "export_jsonl", None)
     if not callable(exporter):
         bot.reply_error(msg, "Audit export is not available.")
         return
-    payload = await exporter(limit=limit)
+    payload = await exporter(limit=limit, **filters)
     if not payload:
         bot.reply(msg, "🧾 Audit export\nNo audit events found.")
         return
-    bot.reply(msg, f"🧾 Audit export (JSONL, newest {limit})\n{payload}", no_store=True)
+    suffix = "" if not filters else " · " + ", ".join(f"{k}={v}" for k, v in sorted(filters.items()))
+    bot.reply(msg, f"🧾 Audit export (JSONL, newest {limit}{suffix})\n{payload}", no_store=True)
 
 
 @command(

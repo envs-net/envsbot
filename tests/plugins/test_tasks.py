@@ -134,3 +134,29 @@ async def test_tasks_restart_delegates_to_plugin_manager(msg):
 
     bot.bot_plugins.restart_tasks.assert_awaited_once_with("rss")
     assert "Cancelled before restart: 2" in bot.reply.call_args.args[1]
+
+@pytest.mark.asyncio
+async def test_tasks_stale_command_lists_stale_tasks(msg):
+    stale = [
+        TaskInfo(
+            plugin="rss",
+            name="feed-loop",
+            status="running",
+            created_at="2026-06-22T10:00:00+00:00",
+            done_at=None,
+            cancelled=False,
+            last_error=None,
+            heartbeat_at="2026-06-22T09:00:00+00:00",
+        )
+    ]
+    bot = MagicMock()
+    bot.reply = MagicMock()
+    bot.reply_warn = MagicMock()
+    bot.tasks.stale_tasks = MagicMock(return_value=stale)
+
+    await tasks_plugin.tasks_stale_command(bot, "admin@example.org", "admin", [], msg, False)
+
+    bot.tasks.stale_tasks.assert_called_once()
+    reply = bot.reply.call_args.args[1]
+    assert reply[0].startswith("🧵 Stale background tasks")
+    assert any("rss/feed-loop" in line for line in reply)

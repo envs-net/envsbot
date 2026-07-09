@@ -184,3 +184,70 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
         command_hint=f"{_prefix()}tasks",
     )
     bot.reply(msg, reply)
+
+
+@command(
+    "tasks list",
+    role=Role.ADMIN,
+    aliases=["task list"],
+    short="Show supervised background tasks.",
+    usage="{prefix}tasks list [all|page|last]",
+    examples=["{prefix}tasks list", "{prefix}tasks list all"],
+    category="admin",
+    context="private recommended",
+)
+async def tasks_list_command(bot, sender, nick, args, msg, is_room):
+    """Show supervised background tasks."""
+    await tasks_command(bot, sender, nick, args, msg, is_room)
+
+
+@command(
+    "tasks failed",
+    role=Role.ADMIN,
+    aliases=["task failed", "tasks errors"],
+    short="Show failed supervised background tasks.",
+    usage="{prefix}tasks failed [all|page|last]",
+    examples=["{prefix}tasks failed"],
+    category="admin",
+    context="private recommended",
+)
+async def tasks_failed_command(bot, sender, nick, args, msg, is_room):
+    """Show failed supervised background tasks."""
+    await tasks_command(bot, sender, nick, ["failed", *(args or [])], msg, is_room)
+
+
+@command(
+    "tasks stale",
+    role=Role.ADMIN,
+    aliases=["task stale"],
+    short="Show supervised tasks with stale heartbeats.",
+    usage="{prefix}tasks stale [all|page|last]",
+    examples=["{prefix}tasks stale"],
+    category="admin",
+    context="private recommended",
+)
+async def tasks_stale_command(bot, sender, nick, args, msg, is_room):
+    """Show supervised tasks with stale heartbeats."""
+    supervisor = getattr(bot, "tasks", None)
+    if supervisor is None:
+        bot.reply_warn(msg, "Task supervisor is not available.")
+        return
+    stale_getter = getattr(supervisor, "stale_tasks", None)
+    if not callable(stale_getter):
+        bot.reply_warn(msg, "Task stale detection is not available.")
+        return
+    try:
+        max_age = float(config.get("task_stale_after_seconds", 3600) or 3600)
+    except Exception:
+        max_age = 3600.0
+    stale = stale_getter(max_age_seconds=max_age)
+    page_request = parse_page_args(args or [])
+    lines = _render_tasks(list(stale), full=False)
+    reply = format_page(
+        f"🧵 Stale background tasks (> {int(max_age)}s)",
+        lines,
+        page_request=page_request,
+        page_size=12,
+        command_hint=f"{_prefix()}tasks stale",
+    )
+    bot.reply(msg, reply)

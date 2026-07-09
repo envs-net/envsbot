@@ -1,4 +1,5 @@
-# envsbot command reference
+wrote docs/commands.md
+ence
 
 This file is generated from command metadata. Do not edit it by hand.
 
@@ -135,6 +136,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,plugin state` | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
 | `,restore` | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
 | `,tasks` | `admin` | `private chat / MUC PM` | Show supervised background task status. |
+| `,tasks failed` | `admin` | `private recommended` | Show failed supervised background tasks. |
+| `,tasks list` | `admin` | `private recommended` | Show supervised background tasks. |
+| `,tasks stale` | `admin` | `private recommended` | Show supervised tasks with stale heartbeats. |
 
 ### Core
 
@@ -1134,6 +1138,52 @@ Examples:
 - `,tasks plugin rss`
 - `,tasks failed`
 - `,tasks restart rss`
+
+#### `,tasks failed`
+
+Show failed supervised background tasks.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,tasks failed [all|page|last]`
+
+Aliases: `,task failed`, `,tasks errors`
+
+Examples:
+
+- `,tasks failed`
+
+#### `,tasks list`
+
+Show supervised background tasks.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,tasks list [all|page|last]`
+
+Aliases: `,task list`
+
+Examples:
+
+- `,tasks list`
+- `,tasks list all`
+
+#### `,tasks stale`
+
+Show supervised tasks with stale heartbeats.
+
+Role: `admin`<br>
+Context: `private recommended`<br>
+Category: `admin`<br>
+Usage: `,tasks stale [all|page|last]`
+
+Aliases: `,task stale`
+
+Examples:
+
+- `,tasks stale`
 
 ### users
 

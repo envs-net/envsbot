@@ -120,3 +120,17 @@ async def test_doctor_all_disables_paging_and_keeps_full_details(bot):
     assert not any("Use ,doctor" in line for line in reply)
     assert any("Room room@example.org" in line for line in reply)
 
+
+@pytest.mark.asyncio
+async def test_doctor_plugin_section_uses_plugin_doctor(bot):
+    async def plugin_doctor(name, room_jid=None):
+        return [f"✅ {name}: healthy"]
+
+    bot.bot_plugins.plugin_doctor = plugin_doctor
+
+    lines = await doctor.build_doctor_lines(bot, sections=("plugin:rss",))
+
+    assert lines[0] == "🩺 EnvsBot doctor"
+    assert lines[1] == "Overall: ✅ healthy"
+    assert any("[Plugin: rss]" in line for line in lines)
+    assert any("rss: healthy" in line for line in lines)
