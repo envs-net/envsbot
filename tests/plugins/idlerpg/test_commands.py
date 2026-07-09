@@ -98,6 +98,34 @@ async def test_message_penalty_and_logout_login(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_login_while_already_online_is_noop(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    monkeypatch.setattr(idlerpg, "ANNOUNCE_LOGIN", True)
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    player["last_login"] = 123
+    player["last_seen"] = 123
+    room["events"] = []
+
+    bot.replies.clear()
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["login"], msg, True)
+
+    assert "already online" in bot.replies[-1][0]
+    assert "is now online from nickname" not in "\n".join(text for text, _kwargs in bot.replies)
+    assert player["last_login"] == 123
+    assert player["last_seen"] == 123
+    assert room["events"] == []
+
+
+@pytest.mark.asyncio
 async def test_admin_push_setlevel_reset_delete():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")

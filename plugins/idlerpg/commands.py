@@ -87,6 +87,14 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
         return
     player = _normalize_player(sender_jid, player)
     pending = player.get("pending_logout_penalty") if isinstance(player.get("pending_logout_penalty"), dict) else {}
+    if not pending and _is_player_online(room_jid, str(_jid or sender_jid), player):
+        _reply(
+            bot,
+            msg,
+            f"ℹ️ {_display_player(player)} is already online for IdleRPG. "
+            + _next_level_line(player),
+        )
+        return
     reply_suffix = ""
     if pending:
         due_at = int(pending.get("due_at", 0) or 0)
