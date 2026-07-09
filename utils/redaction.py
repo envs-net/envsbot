@@ -24,6 +24,11 @@ _SECRET_ASSIGNMENT_RE = re.compile(
 )
 
 
+def _redact_secret_assignments(value: str) -> str:
+    """Redact secret-looking key=value assignments in free-form text."""
+    return _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", value)
+
+
 def is_secret_key(key: object) -> bool:
     """Return True when a mapping key likely contains a secret."""
     key_lc = str(key or "").lower()
@@ -65,9 +70,17 @@ def redact_value(value: Any, *, key: object | None = None, max_string: int = _MA
     if isinstance(value, list):
         return [redact_value(v, max_string=max_string) for v in value]
     if isinstance(value, set):
-        return {redact_value(v, max_string=max_string) for v in value}
+        redacted_set: set[Any] = set()
+        for item in value:
+            redacted_item = redact_value(item, max_string=max_string)
+            try:
+                redacted_set.add(redacted_item)
+            except TypeError:
+                redacted_set.add(_truncate(str(redacted_item), max_length=max_string))
+        return redacted_set
     if isinstance(value, str):
-        return _truncate(redact_url(value), max_length=max_string)
+        value = _redact_secret_assignments(redact_url(value))
+        return _truncate(value, max_length=max_string)
     return value
 
 
@@ -78,6 +91,5 @@ def redact_named(name: object, value: Any, *, max_string: int = _MAX_STRING) -> 
 
 def redact_text(text: object, *, max_length: int = _MAX_STRING) -> str:
     """Return a compact redacted text value for log/audit strings."""
-    value = redact_url(str(text))
-    value = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}={REDACTED}", value)
+    value = _redact_secret_assignments(redact_url(str(text)))
     return _truncate(value, max_length=max_length)
