@@ -12,6 +12,7 @@ from typing import Any
 from utils.command import Role
 from utils.config import config
 from utils.logging_helpers import kv
+from utils.redaction import redact_text, redact_value
 
 log = logging.getLogger(__name__)
 
@@ -43,10 +44,7 @@ def _should_audit_command(role: Role) -> bool:
 
 def _safe_detail(value: Any) -> str:
     """Return a compact value for audit details without leaking huge messages."""
-    text = str(value)
-    if len(text) > 160:
-        return text[:157] + "..."
-    return text
+    return redact_text(value, max_length=160)
 
 
 class CommandExecutor:
@@ -93,7 +91,7 @@ class CommandExecutor:
                 "command_executed",
                 actor=context.sender_jid,
                 target=context.command_name,
-                details=details,
+                details=redact_value(details),
             )
         except Exception:
             log.debug("[COMMAND] Failed to write command audit event", exc_info=True)

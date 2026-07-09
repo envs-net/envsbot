@@ -11,6 +11,7 @@ from bot.context import CommandContext
 from bot.permissions import role_bypasses_rate_limit
 from utils.command import Role
 from utils.command_execution import CommandExecutionContext
+from utils.permissions import can_execute_command
 
 log = logging.getLogger(__name__)
 
@@ -166,6 +167,9 @@ class CommandDispatchMixin:
             return
         if not body.startswith(self.prefix):
             return
+        if not getattr(self, "accepting_commands", True):
+            self.reply(msg, "🔴 Bot is shutting down; please retry shortly.")
+            return
 
         text = body[len(self.prefix):].strip()
         if not text:
@@ -190,12 +194,21 @@ class CommandDispatchMixin:
                     )
                 return
 
-        if not app.check_permission(context.role, cmd_obj):
-            self.reply(msg, "🔴 You are not allowed to use this command.")
-            return
+        try:
+            from core_plugins.rooms import room_invite_admin_rooms
 
-        if not self._can_execute_command_in_room(cmd_obj, is_room, context.room):
-            self.reply(msg, "🔴 Use this command in MUC Direct Message only.")
+            invite_admin_rooms = room_invite_admin_rooms()
+        except Exception:
+            invite_admin_rooms = set()
+
+        decision = can_execute_command(
+            context,
+            cmd_obj,
+            room_invite_admin_rooms=invite_admin_rooms,
+            permission_checker=app.check_permission,
+        )
+        if not decision.allowed:
+            self.reply(msg, decision.reason)
             return
 
         execution_context = CommandExecutionContext(

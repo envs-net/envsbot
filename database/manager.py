@@ -3,6 +3,7 @@ import logging
 import aiosqlite
 
 from utils.config import config
+from utils.logging_helpers import kv
 
 from .users import UserManager
 from .rooms import Rooms
@@ -113,6 +114,29 @@ class DatabaseManager:
         rows = await self.list_migrations()
         return {row["version"] for row in rows}
 
+    async def pending_migration_versions(self) -> list[str]:
+        """Return known migration versions that are not yet applied."""
+        applied = await self.applied_migration_versions()
+        return [migration.version for migration in available_migrations() if migration.version not in applied]
+
+    async def migration_status(self) -> dict[str, list[str]]:
+        """Return applied, pending and known migration versions."""
+        applied = sorted(await self.applied_migration_versions())
+        known = [migration.version for migration in available_migrations()]
+        pending = [version for version in known if version not in set(applied)]
+        return {"known": known, "applied": applied, "pending": pending}
+
+    async def verify_read_write(self) -> None:
+        """Verify the SQLite connection can read and perform a rolled-back write."""
+        await self.fetch_one("SELECT 1")
+        await self.conn.execute("SAVEPOINT envsbot_preflight_rw")
+        try:
+            await self.conn.execute("CREATE TEMP TABLE IF NOT EXISTS envsbot_preflight_check (value INTEGER)")
+            await self.conn.execute("INSERT INTO envsbot_preflight_check (value) VALUES (1)")
+        finally:
+            await self.conn.execute("ROLLBACK TO envsbot_preflight_rw")
+            await self.conn.execute("RELEASE envsbot_preflight_rw")
+
     async def run_migrations(self):
         """Run all pending database migrations in order."""
         applied = await self.applied_migration_versions()
@@ -120,13 +144,13 @@ class DatabaseManager:
             if migration.version in applied:
                 continue
             log.info(
-                "[DatabaseManager] Applying migration %s: %s",
-                migration.version,
-                migration.description,
+                "[DB] event=migration status=applying %s",
+                kv(version=migration.version, description=migration.description),
             )
             await migration.run(self)
             await self.mark_migration_applied(migration.version)
             applied.add(migration.version)
+            log.info("[DB] event=migration status=ok %s", kv(version=migration.version))
 
     async def _flush_loop(self):
         """Background loop that flushes data periodically with retry logic."""

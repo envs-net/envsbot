@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.redaction import redact_value
+
 
 def _format_value(value: Any) -> str:
-    text = str(value)
+    text = str(redact_value(value))
     if not text:
         return "-"
     if any(ch.isspace() for ch in text):

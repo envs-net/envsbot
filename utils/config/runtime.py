@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from utils.rate_limiter import TokenBucketRateLimiter
+from utils.redaction import redact_named
 
 log = logging.getLogger(__name__)
 
@@ -33,12 +34,6 @@ _RATE_LIMIT_KEYS = {
     "command_rate_limit_notify_cooldown_seconds",
 }
 
-_SECRET_NAME_PARTS = ("password", "token", "secret", "api_key", "apikey", "key")
-
-
-def _is_secret_key(key: str) -> bool:
-    key_lc = key.lower()
-    return any(part in key_lc for part in _SECRET_NAME_PARTS)
 
 
 def _display_key(key: str) -> str:
@@ -48,9 +43,7 @@ def _display_key(key: str) -> str:
 
 
 def _display_value(key: str, value: object) -> str:
-    if _is_secret_key(key):
-        return "<redacted>"
-    return repr(value)
+    return repr(redact_named(key, value))
 
 
 def config_change_lines(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:

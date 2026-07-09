@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from utils.redaction import redact_named, redact_value
+
 log = logging.getLogger(__name__)
 
 
@@ -19,9 +21,9 @@ class AuditMixin:
                 return
             await audit_log.append(
                 event,
-                actor=str(actor) if actor is not None else None,
-                target=str(target) if target is not None else None,
-                details=details or {},
+                actor=redact_named("actor", str(actor)) if actor is not None else None,
+                target=redact_named("target", str(target)) if target is not None else None,
+                details=redact_value(details or {}),
             )
         except Exception:
             log.debug("[AUDIT] Failed to write audit event", exc_info=True)

@@ -128,22 +128,36 @@ async def _db_lines(bot: Any) -> list[str]:
         except Exception as exc:
             lines.append(_line(False, "Integrity check", str(exc)))
 
-    list_migrations = getattr(db, "list_migrations", None)
-    if callable(list_migrations):
+    migration_status = getattr(db, "migration_status", None)
+    if callable(migration_status):
         try:
-            applied = [
-                _migration_version(item)
-                for item in list(await list_migrations())
-            ]
-            lines.append(
-                _line(
-                    True,
-                    "Migrations",
-                    ", ".join(applied) if applied else "none applied",
-                )
-            )
+            status = await migration_status()
+            applied = list(status.get("applied", []))
+            pending = list(status.get("pending", []))
+            if pending:
+                message = f"pending: {', '.join(pending)}; applied: {', '.join(applied) if applied else 'none'}"
+            else:
+                message = ", ".join(applied) if applied else "none applied"
+            lines.append(_line(not pending, "Migrations", message))
         except Exception as exc:
             lines.append(_line(False, "Migrations", str(exc)))
+    else:
+        list_migrations = getattr(db, "list_migrations", None)
+        if callable(list_migrations):
+            try:
+                applied = [
+                    _migration_version(item)
+                    for item in list(await list_migrations())
+                ]
+                lines.append(
+                    _line(
+                        True,
+                        "Migrations",
+                        ", ".join(applied) if applied else "none applied",
+                    )
+                )
+            except Exception as exc:
+                lines.append(_line(False, "Migrations", str(exc)))
     return lines
 
 

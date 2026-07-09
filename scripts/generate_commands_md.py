@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import importlib
 import inspect
-import pkgutil
 import sys
 from pathlib import Path
 
@@ -15,6 +13,7 @@ if str(ROOT) not in sys.path:
 
 from utils.command import Role  # noqa: E402
 from utils.config import config  # noqa: E402
+from utils.command_registry import discover_command_modules, plugin_metadata  # noqa: E402
 
 PREFIX = config.get("prefix", ",")
 
@@ -47,36 +46,15 @@ def _metadata(cmd):
     }
 
 
-def _plugin_meta(module, name):
-    meta = getattr(module, "PLUGIN_META", {}) or {}
-    return {
-        "name": meta.get("name", name),
-        "category": meta.get("category", "other"),
-        "description": meta.get("description") or _first_line(module.__doc__),
-        "hidden": bool(meta.get("hidden")),
-        "version": meta.get("version", ""),
-    }
+def _plugin_meta(module, name, source="plugins"):
+    """Return plugin metadata through the shared registry helper."""
+    return plugin_metadata(module, name, source)
 
 
 def _discover_plugins():
-    sources = [("core_plugins", "core"), ("plugins", "plugins")]
-    seen = set()
-    for package_name, source in sources:
-        try:
-            package = importlib.import_module(package_name)
-        except Exception as exc:
-            print(f"warning: could not import {package_name}: {exc}", file=sys.stderr)
-            continue
-
-        for module_info in sorted(pkgutil.iter_modules(package.__path__), key=lambda item: item.name):
-            name = module_info.name
-            if name in seen:
-                continue
-            seen.add(name)
-            try:
-                yield name, importlib.import_module(f"{package_name}.{name}"), source
-            except Exception as exc:
-                print(f"warning: could not import {package_name}.{name}: {exc}", file=sys.stderr)
+    """Discover plugin modules through the shared command registry helpers."""
+    for name, module, source in discover_command_modules():
+        yield name, module, source
 
 
 def _commands_from_module(module):
@@ -144,8 +122,7 @@ def _collect():
     plugins = []
     commands = []
     for name, module, source in _discover_plugins():
-        meta = _plugin_meta(module, name)
-        meta["source"] = source
+        meta = _plugin_meta(module, name, source)
         if meta["hidden"]:
             continue
         plugin_commands = _commands_from_module(module)

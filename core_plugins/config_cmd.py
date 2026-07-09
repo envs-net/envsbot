@@ -31,6 +31,7 @@ from utils.formatting import format_page, paginate_lines, parse_page_args
 from utils.audit import audit_event
 from utils.backups import create_backup
 from utils.room_features import clear_room_feature_caches
+from utils.redaction import is_secret_key as _central_is_secret_key, redact_named as _central_redact_named, redact_value as _central_redact
 
 PLUGIN_META = {
     "name": "config_cmd",
@@ -195,6 +196,32 @@ def _update_config_file_assignment(display_key: str, value: object) -> None:
     _write_config_text_atomic(path, updated)
 
 
+def _write_config_text_with_rollback(path, new_text: str, *, rollback_text: str | None = None) -> None:
+    """Atomically write config text and restore the previous text on failure."""
+    if rollback_text is None and path.exists():
+        rollback_text = path.read_text(encoding="utf-8")
+    try:
+        _write_config_text_atomic(path, new_text)
+    except Exception:
+        if rollback_text is not None:
+            with suppress(Exception):
+                _write_config_text_atomic(path, rollback_text)
+        raise
+
+
+def _candidate_config_text(display_key: str, value: object) -> tuple[object, str, str]:
+    """Return path, original text and validated candidate config text."""
+    path = get_runtime_config_path()
+    if path.suffix.lower() == ".json":
+        raise ConfigError("config set/unset only supports config.py, not legacy config.json")
+    if not path.exists():
+        raise ConfigError(f"Missing config file: {path}")
+    source = path.read_text(encoding="utf-8")
+    updated = _replace_config_assignment(source, display_key, value)
+    ast.parse(updated, filename=str(path))
+    return path, source, updated
+
+
 async def _maybe_create_config_backup(bot) -> str | None:
     """Create a safety backup before mutating config.py when possible."""
     try:
@@ -205,7 +232,7 @@ async def _maybe_create_config_backup(bot) -> str | None:
 
 
 async def _apply_config_reload(bot, sender: str, before: dict, new_config: dict) -> str:
-    """Apply a freshly loaded config and return reply text."""
+    """Apply a freshly loaded config atomically and return reply text."""
     startup_changes = startup_change_lines(before, new_config)
     effective_config = dict(new_config)
     for key in STARTUP_ONLY_KEYS:
@@ -215,13 +242,22 @@ async def _apply_config_reload(bot, sender: str, before: dict, new_config: dict)
             else:
                 effective_config.pop(key, None)
 
-    config.clear()
-    config.update(effective_config)
-    clear_room_feature_caches()
+    old_config = dict(config)
+    try:
+        config.clear()
+        config.update(effective_config)
+        clear_room_feature_caches()
 
-    runtime_notes = apply_runtime_config(bot, before, config)
-    restarted = await restart_reloadable_plugin_tasks(bot, before, config)
-    changed_lines = config_change_lines(before, config)
+        runtime_notes = apply_runtime_config(bot, before, config)
+        restarted = await restart_reloadable_plugin_tasks(bot, before, config)
+        changed_lines = config_change_lines(before, config)
+    except Exception:
+        config.clear()
+        config.update(old_config)
+        clear_room_feature_caches()
+        with suppress(Exception):
+            apply_runtime_config(bot, effective_config, config)
+        raise
 
     notes = ["config.py reloaded."]
     if changed_lines:
@@ -247,25 +283,15 @@ async def _apply_config_reload(bot, sender: str, before: dict, new_config: dict)
 
 
 def _is_secret_key(key: str) -> bool:
-    key_lc = key.lower()
-    return any(part in key_lc for part in _SECRET_KEYS)
+    return _central_is_secret_key(key)
 
 
 def _redact(value):
-    if isinstance(value, dict):
-        return {
-            k: ("<redacted>" if _is_secret_key(k) else _redact(v))
-            for k, v in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact(v) for v in value]
-    return value
+    return _central_redact(value)
 
 
 def _redact_named(name: str, value):
-    if _is_secret_key(name):
-        return "<redacted>"
-    return _redact(value)
+    return _central_redact_named(name, value)
 
 
 def _render_value(value) -> str:
@@ -464,9 +490,14 @@ async def config_set(bot, sender, nick, args, msg, is_room):
     old_value = before.get(normalized_key)
     backup_name = await _maybe_create_config_backup(bot)
     try:
-        _update_config_file_assignment(display_key, new_value)
-        reloaded = load_config(require_required_keys=True)
-        reply = await _apply_config_reload(bot, sender, before, reloaded)
+        path, original_source, updated_source = _candidate_config_text(display_key, new_value)
+        _write_config_text_with_rollback(path, updated_source, rollback_text=original_source)
+        try:
+            reloaded = load_config(require_required_keys=True)
+            reply = await _apply_config_reload(bot, sender, before, reloaded)
+        except Exception:
+            _write_config_text_with_rollback(path, original_source, rollback_text=updated_source)
+            raise
     except Exception as exc:
         bot.reply_error(msg, f"Failed to write/apply config: {exc}")
         return
@@ -519,9 +550,14 @@ async def config_unset(bot, sender, nick, args, msg, is_room):
     old_value = before.get(normalized_key)
     backup_name = await _maybe_create_config_backup(bot)
     try:
-        _update_config_file_assignment(display_key, default_value)
-        reloaded = load_config(require_required_keys=True)
-        reply = await _apply_config_reload(bot, sender, before, reloaded)
+        path, original_source, updated_source = _candidate_config_text(display_key, default_value)
+        _write_config_text_with_rollback(path, updated_source, rollback_text=original_source)
+        try:
+            reloaded = load_config(require_required_keys=True)
+            reply = await _apply_config_reload(bot, sender, before, reloaded)
+        except Exception:
+            _write_config_text_with_rollback(path, original_source, rollback_text=updated_source)
+            raise
     except Exception as exc:
         bot.reply_error(msg, f"Failed to write/apply config: {exc}")
         return

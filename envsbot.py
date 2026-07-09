@@ -171,6 +171,7 @@ class Bot(
         self.tasks = TaskSupervisor()
         self.command_executor = CommandExecutor(self)
         self._startup_backup_done = False
+        self.accepting_commands = True
 
         self.rate_limiter = TokenBucketRateLimiter(
             capacity=int(config.get("command_rate_limit_capacity", 4)),

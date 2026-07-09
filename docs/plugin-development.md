@@ -307,3 +307,45 @@ async def cmd_example(bot, sender, nick, args, msg, is_room):
 
 `docs/commands.md` is generated from command metadata, and
 `scripts/check_command_docs.py` verifies that the committed file is current.
+
+
+## Permission checks and command context
+
+New core or plugin code should prefer `utils.command_context.CommandContext` and
+`utils.permissions` for cross-cutting permission decisions. The dispatcher builds
+a single resolved context containing sender JID, nick, room, role, command name,
+arguments and MUC-PM state. This avoids reimplementing subtly different checks
+for public MUC messages, MUC private messages and normal private chat.
+
+Use the central helpers where possible:
+
+```python
+from utils.permissions import can_execute_command, can_manage_room_role
+```
+
+Plugins may still have plugin-specific authorization rules, but bot-role checks
+and public-room restrictions should remain centralized.
+
+## Runtime config reload safety
+
+Runtime config changes are validated before the file is replaced. If applying a
+new config fails after writing `config.py`, the previous file contents and the
+in-memory config are restored best-effort. Commands that mutate config should
+keep using the helpers in `core_plugins.config_cmd` instead of writing config
+files directly.
+
+## Redaction
+
+Use `utils.redaction` for any value that may reach logs, audit events or admin
+output. It masks secret-looking keys, trims very long strings and removes URL
+credentials while preserving useful shape for diagnostics.
+
+```python
+from utils.redaction import redact_value, redact_named, redact_text
+```
+
+## Preflight hooks
+
+`envsbot --check` imports plugin modules and validates plugin metadata and
+command metadata without connecting to XMPP. Keep module imports side-effect
+light: long-running tasks should start in `on_ready`, not at import time.

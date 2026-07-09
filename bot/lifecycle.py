@@ -9,6 +9,8 @@ import os
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
+from utils.logging_helpers import kv
+
 log = logging.getLogger(__name__)
 
 
@@ -128,28 +130,45 @@ class LifecycleMixin:
 
     async def shutdown_runtime(self) -> None:
         """Best-effort ordered shutdown of tasks, plugins and database."""
-        log.info("[BOT] event=shutdown status=start")
+        log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
+        self.accepting_commands = False
+
+        plugin_status = "skipped"
         try:
             unload = getattr(self.bot_plugins, "unload_all", None)
             if callable(unload):
                 result = unload()
                 if asyncio.iscoroutine(result):
                     await asyncio.wait_for(result, timeout=10.0)
+                plugin_status = "ok"
         except Exception:
-            log.exception("[BOT] event=shutdown_plugins status=failed")
+            plugin_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=plugins status=failed")
+        else:
+            log.info("[LIFECYCLE] event=shutdown phase=plugins %s", kv(status=plugin_status))
 
+        task_status = "skipped"
+        cancelled = 0
         try:
             tasks = getattr(self, "tasks", None)
             cancel_all = getattr(tasks, "cancel_all", None)
             if callable(cancel_all):
-                result = cancel_all()
+                result = cancel_all(timeout=10.0)
                 if asyncio.iscoroutine(result):
-                    await asyncio.wait_for(result, timeout=10.0)
+                    cancelled = int(await asyncio.wait_for(result, timeout=12.0) or 0)
+                task_status = "ok"
         except Exception:
-            log.exception("[BOT] event=shutdown_tasks status=failed")
+            task_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=tasks status=failed")
+        else:
+            log.info("[LIFECYCLE] event=shutdown phase=tasks %s", kv(status=task_status, cancelled=cancelled))
 
+        db_status = "ok"
         try:
             await asyncio.wait_for(self.db.close(), timeout=5.0)
         except Exception as exc:
-            log.exception("[XMPP] Error closing database: %s", exc)
-        log.info("[BOT] event=shutdown status=ok")
+            db_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=db status=failed error=%s", exc)
+        else:
+            log.info("[LIFECYCLE] event=shutdown phase=db status=closed")
+        log.info("[LIFECYCLE] event=shutdown phase=done %s", kv(status="ok" if db_status == "ok" else "partial", plugins=plugin_status, tasks=task_status, db=db_status))

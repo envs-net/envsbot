@@ -152,9 +152,16 @@ python -m envsbot --check
 envsbot --check
 ```
 
-The preflight checks that the config can be loaded, core packages import, the
-backup directory is writable, command documentation is generated from current
-metadata, and the SQLite database can be opened and checked.
+The preflight checks that the config can be loaded, `config_sample.py` stays
+compatible, plugin modules import, plugin metadata is valid, command metadata is
+complete, command documentation is generated from current metadata, known
+migrations are ordered, the backup directory is writable, runtime files are
+available, and the SQLite database can be opened, checked and written inside a
+rolled-back transaction.
+
+A non-zero exit code means the deployment should not be restarted yet. The
+preflight intentionally does not connect to XMPP and is safe to run from CI or
+from a systemd `ExecStartPre=` style check.
 
 ## Core runtime modules
 
@@ -171,3 +178,18 @@ small `bot/` modules:
 
 These modules are intended to keep the runtime core easier to test while the
 public `envsbot.Bot` API remains compatible.
+
+
+## Structured core logs
+
+Core paths now prefer stable key/value log messages so `journalctl` output is
+easier to filter. Common examples are:
+
+```text
+[COMMAND] event=slow command=doctor actor=user@example.org room=room@conference.example.org duration_ms=45 status=ok
+[LIFECYCLE] event=shutdown phase=tasks status=ok cancelled=21
+[DB] event=migration status=ok version=0003_room_invites
+```
+
+Sensitive values and URLs with embedded credentials are passed through the
+central redaction helper before they are written to logs or audit details.

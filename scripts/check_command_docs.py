@@ -1,63 +1,24 @@
 #!/usr/bin/env python3
-"""Check that command decorators and command help metadata stay in sync."""
+"""Check that generated command docs match the command registry metadata."""
 
 from __future__ import annotations
 
-import ast
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-
-# Ensure repo imports win when the script is run from any directory.
 sys.path.insert(0, str(ROOT))
 
-from utils.command_help import COMMAND_HELP  # noqa: E402
 from scripts.generate_commands_md import generate as generate_commands_md  # noqa: E402
+from utils.command_help import COMMAND_HELP  # noqa: E402
+from utils.command_registry import decorated_command_records  # noqa: E402
 
 DOCS_COMMANDS = ROOT / "docs" / "commands.md"
 
 
-def _is_command_decorator(decorator: ast.AST) -> bool:
-    if not isinstance(decorator, ast.Call):
-        return False
-    func = decorator.func
-    return (
-        isinstance(func, ast.Name) and func.id == "command"
-    ) or (
-        isinstance(func, ast.Attribute) and func.attr == "command"
-    )
-
-
-def _constant_string(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
-def _iter_commands():
-    for rel in ("plugins", "core_plugins"):
-        for path in sorted((ROOT / rel).rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            tree = ast.parse(path.read_text(), filename=str(path))
-            for node in ast.walk(tree):
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                for decorator in node.decorator_list:
-                    if not _is_command_decorator(decorator):
-                        continue
-                    if not decorator.args:
-                        continue
-                    name = _constant_string(decorator.args[0])
-                    if name:
-                        keywords = {kw.arg for kw in decorator.keywords if kw.arg}
-                        yield path.relative_to(ROOT), node.name, name.lower(), keywords
-
-
 def main() -> int:
     errors: list[str] = []
-    commands = list(_iter_commands())
+    commands = decorated_command_records()
     if not commands:
         errors.append("no commands found")
 
@@ -76,19 +37,22 @@ def main() -> int:
     else:
         errors.append("docs/commands.md is missing")
 
-    for rel, func, name, keywords in commands:
-        metadata = COMMAND_HELP.get(name, {})
-        if not metadata and not {"short", "usage"} & keywords:
-            errors.append(f"{rel}:{func}: {name}: missing COMMAND_HELP entry")
+    for plugin, _meta, cmd in commands:
+        name = str(getattr(cmd, "name", "")).lower()
+        if not name:
+            errors.append(f"{plugin}: command with empty name")
             continue
-        for field in ("short", "usage"):
-            if field not in keywords and not metadata.get(field):
-                errors.append(f"{rel}:{func}: {name}: missing {field}")
-        if "examples" not in keywords and not metadata.get("examples"):
-            errors.append(f"{rel}:{func}: {name}: missing examples")
+        if not getattr(cmd, "short", ""):
+            errors.append(f"{plugin}:{name}: missing short")
+        if not getattr(cmd, "usage", ""):
+            errors.append(f"{plugin}:{name}: missing usage")
+        if not getattr(cmd, "examples", []) or not list(getattr(cmd, "examples", []) or []):
+            errors.append(f"{plugin}:{name}: missing examples")
         if docs_text and f"`,{name}`" not in docs_text:
             errors.append(f"docs/commands.md: missing primary command {name!r}")
 
+    # COMMAND_HELP is still accepted as a legacy metadata fallback for older
+    # decorators. Validate it while the registry becomes the source of truth.
     for key, metadata in sorted(COMMAND_HELP.items()):
         if not metadata.get("short"):
             errors.append(f"COMMAND_HELP[{key!r}]: missing short")
