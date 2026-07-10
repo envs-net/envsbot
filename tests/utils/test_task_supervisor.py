@@ -327,6 +327,10 @@ async def test_heartbeat_touch_and_stale_task_edges(monkeypatch):
             await asyncio.sleep(60)
 
     task = supervisor.create("alpha", sleeper(), name="main")
+    initial_snapshot = supervisor.snapshot(include_done=False)[0]
+    assert initial_snapshot.heartbeat_at is None
+    assert supervisor.stale_tasks(max_age_seconds=0) == []
+
     assert supervisor.heartbeat("alpha", name="main") is True
     assert supervisor.heartbeat("alpha", name="missing") is False
     assert supervisor.heartbeat("missing") is False

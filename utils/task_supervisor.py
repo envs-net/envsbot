@@ -174,7 +174,10 @@ class TaskSupervisor:
             "created_at": _now(),
             "done_at": None,
             "last_error": None,
-            "heartbeat_at": _now(),
+            # A heartbeat is only meaningful after the task explicitly reports one.
+            # Initializing it with the creation time makes intentionally sleeping
+            # workers look stale even though they are healthy and still running.
+            "heartbeat_at": None,
             "restart_count": 0,
         }
         self._tasks[task] = meta
