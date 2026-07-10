@@ -1,3 +1,5 @@
+import json
+
 from .helpers import (
     DummyBot,
     DummyTask,
@@ -33,3 +35,50 @@ def test_public_rules_include_new_options():
     assert rules["boss_min_level"] == idlerpg.BOSS_MIN_LEVEL
     assert rules["boss_reward_percent"] == idlerpg.BOSS_REWARD_PERCENT
     assert rules["boss_loss_percent"] == idlerpg.BOSS_LOSS_PERCENT
+
+
+def test_public_player_record_does_not_expose_user_jid():
+    player = idlerpg._normalize_player(
+        "alice@example.org",
+        {
+            "jid": "alice@example.org",
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 3,
+            "next": 42,
+        },
+    )
+
+    record = idlerpg._player_public_record("room@conf", "alice@example.org", player, rank=1)
+    payload = json.dumps(record, sort_keys=True)
+
+    assert "alice@example.org" not in payload
+    assert record["name"] == "Alice"
+    assert record["character"] == "Alice"
+
+
+def test_public_events_redact_private_jids_from_text_players_and_data():
+    room = {"events": []}
+
+    idlerpg._record_event(
+        room,
+        "debug",
+        "alice@example.org defeated bob@example.org",
+        players=["Alice", "alice@example.org"],
+        data={
+            "actor_jid": "alice@example.org",
+            "target_jid": "bob@example.org",
+            "note": "seen by bob@example.org",
+            "values": ["Alice", "alice@example.org", 7],
+        },
+    )
+
+    event = idlerpg._room_events(room)[0]
+    payload = json.dumps(event, sort_keys=True)
+
+    assert "alice@example.org" not in payload
+    assert "bob@example.org" not in payload
+    assert event["players"] == ["Alice"]
+    assert "actor_jid" not in event.get("data", {})
+    assert "target_jid" not in event.get("data", {})
+    assert "[redacted-jid]" in payload

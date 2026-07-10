@@ -161,6 +161,10 @@ async def test_message_penalty_generic_message_event_and_dedupe_by_stanza_id():
     msg = DummyMsg(body="x", resource="skx", stanza_id="msg-1")
     await idlerpg.on_message(bot, msg)
     await idlerpg.on_message(bot, msg)
+    assert player["next"] == before + 1
+    assert player["penalties"]["message"] == 1
+    assert player["stats"]["messages"] == 1
+
     msg2 = DummyMsg(body="x", resource="skx", stanza_id="msg-2")
     await idlerpg.on_message(bot, msg2)
 
@@ -436,6 +440,7 @@ async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
     assert "Playing for: 1 days, 01:01:01" in bot.replies[-1][0]
     assert "Idled online:" in bot.replies[-1][0]
     assert "Profile JSON: https://envs.net/idlerpg/room_at_conf/profiles/Alice.json" in bot.replies[-1][0]
+    assert "alice@envs.net" not in bot.replies[-1][0]
 
 
 @pytest.mark.asyncio
@@ -468,6 +473,7 @@ async def test_export_command_writes_public_files(tmp_path, monkeypatch):
     assert (tmp_path / "leaderboard.json").exists()
     profile_payload = (tmp_path / "room_at_conf" / "profiles" / "Alice.json").read_text()
     assert '"played_for"' in profile_payload
+    assert "alice@envs.net" not in profile_payload
 
 
 @pytest.mark.asyncio
@@ -993,9 +999,11 @@ async def test_remove_me_command_room_scope_missing_and_success():
 @pytest.mark.asyncio
 async def test_on_load_registers_message_and_presence_handlers():
     registered = []
+    runtime_registered = []
     bot = DummyBot()
     bot.bot_plugins = types.SimpleNamespace(
-        register_event=lambda *args: registered.append(args)
+        register_event=lambda *args: registered.append(args),
+        register_runtime_event=lambda *args: runtime_registered.append(args),
     )
 
     await idlerpg.on_load(bot)
@@ -1005,7 +1013,11 @@ async def test_on_load_registers_message_and_presence_handlers():
         (idlerpg.PLUGIN_NAME, "message"),
         (idlerpg.PLUGIN_NAME, "groupchat_presence"),
     ]
+    assert [entry[:2] for entry in runtime_registered] == [
+        (idlerpg.PLUGIN_NAME, "public_groupchat_message"),
+    ]
     assert all(callable(entry[2]) for entry in registered)
+    assert all(callable(entry[2]) for entry in runtime_registered)
 
 
 @pytest.mark.asyncio

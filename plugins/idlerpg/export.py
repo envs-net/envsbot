@@ -69,16 +69,41 @@ def _safe_event_kind(kind: str) -> str:
     return cleaned[:40] or "event"
 
 
+_PRIVATE_JID_RE = re.compile(
+    r"(?<![\w.+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)(?![\w.-])"
+)
+
+
+def _sanitize_public_text(text: Any) -> str:
+    """Remove private bare JIDs from public IdleRPG event text."""
+    return _PRIVATE_JID_RE.sub("[redacted-jid]", str(text or ""))
+
+
+def _public_player_name(value: Any) -> str:
+    name = str(value or "").strip()[:80]
+    if not name or _PRIVATE_JID_RE.search(name):
+        return ""
+    return name
+
+
 def _clean_event_data(data: dict[str, Any]) -> dict[str, Any]:
     clean: dict[str, Any] = {}
-    for key, value in data.items():
-        key = _safe_event_kind(str(key))
-        if key in {"jid", "sender", "actor_jid", "target_jid"}:
+    for raw_key, value in data.items():
+        key = _safe_event_kind(str(raw_key))
+        if "jid" in key or key in {"sender", "actor", "target"}:
             continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
+        if isinstance(value, str):
+            clean[key] = _sanitize_public_text(value)
+        elif isinstance(value, (int, float, bool)) or value is None:
             clean[key] = value
         elif isinstance(value, list):
-            clean[key] = [item for item in value if isinstance(item, (str, int, float, bool))][:12]
+            cleaned_items = []
+            for item in value:
+                if isinstance(item, str):
+                    cleaned_items.append(_sanitize_public_text(item))
+                elif isinstance(item, (int, float, bool)) or item is None:
+                    cleaned_items.append(item)
+            clean[key] = cleaned_items[:12]
     return clean
 
 
@@ -112,8 +137,9 @@ def _record_event(
         room["events"] = events
     _prune_events(room)
     events = room["events"]
-    entry: dict[str, Any] = {"ts": _now(), "kind": _safe_event_kind(kind), "text": str(text or "")[:500]}
-    player_names = [str(player)[:80] for player in (players or []) if str(player).strip()]
+    entry: dict[str, Any] = {"ts": _now(), "kind": _safe_event_kind(kind), "text": _sanitize_public_text(text)[:500]}
+    player_names = [_public_player_name(player) for player in (players or [])]
+    player_names = [player for player in player_names if player]
     if player_names:
         entry["players"] = player_names[:8]
     clean_data = _clean_event_data(data or {})
@@ -129,11 +155,11 @@ def _event_public_record(event: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "ts": int(event.get("ts", 0) or 0),
         "kind": _safe_event_kind(str(event.get("kind") or "event")),
-        "text": str(event.get("text") or "")[:500],
+        "text": _sanitize_public_text(event.get("text"))[:500],
     }
     players = event.get("players")
     if isinstance(players, list):
-        payload["players"] = [str(player)[:80] for player in players if str(player).strip()][:8]
+        payload["players"] = [player for player in (_public_player_name(value) for value in players) if player][:8]
     data = event.get("data")
     if isinstance(data, dict):
         payload["data"] = _clean_event_data(data)
