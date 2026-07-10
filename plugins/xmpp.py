@@ -17,6 +17,7 @@ Commands:
                                       server (XEP-0030).
     {prefix}x info <domain|jid>     - Shows identities & features (XEP-0030).
     {prefix}x ping <domain|jid>     - Pings an XMPP entity (XEP-0199).
+    {prefix}x check <domain|jid>    - Run ping/disco/version/SRV diagnostics.
     {prefix}x uptime <domain>       - Shows the uptime of an XMPP server
                                       (XEP-0012).
     {prefix}x srv <domain>          - DNS SRV lookup.
@@ -57,6 +58,7 @@ XMPP Utility Commands:
   {prefix}x contact <domain>      - Show server contact information (XEP-0030)
   {prefix}x info <domain|jid>     - Show identities & features (XEP-0030)
   {prefix}x ping <domain|jid>     - Ping entity (XEP-0199)
+  {prefix}x check <domain|jid>    - Run ping/disco/version/SRV diagnostics
   {prefix}x uptime <domain>       - Show server uptime (XEP-0012)
   {prefix}x srv <domain>          - DNS SRV lookup
   {prefix}x compliance <domain>   - Compliance score
@@ -905,6 +907,154 @@ async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
 
     except Exception as e:
         bot.reply(msg, f"🔴 DNS lookup failed: {e}")
+
+
+def _xmpp_feature_summary(features) -> list[str]:
+    feature_set = set(str(feature) for feature in (features or []))
+    checks = [
+        ("ping", "urn:xmpp:ping"),
+        ("muc", "http://jabber.org/protocol/muc"),
+        ("pubsub", "http://jabber.org/protocol/pubsub"),
+        ("http-upload", "urn:xmpp:http:upload:0"),
+        ("message-archive", "urn:xmpp:mam:2"),
+        ("stream-mgmt", "urn:xmpp:sm:3"),
+    ]
+    return [name for name, feature in checks if feature in feature_set]
+
+
+async def _xmpp_check_ping(bot, target: str) -> tuple[str, str]:
+    try:
+        start = time.monotonic()
+        await bot.plugin["xep_0199"].ping(
+            jid=target,
+            timeout=XMPP_QUERY_TIMEOUT_SECONDS,
+        )
+        rtt = (time.monotonic() - start) * 1000
+        return "✅", f"ping ok ({rtt:.1f} ms)"
+    except slixmpp.exceptions.IqTimeout:
+        return "🔴", "ping timed out"
+    except slixmpp.exceptions.IqError as exc:
+        return "⚠️", f"ping error: {_get_iq_error_condition(exc)}"
+    except Exception as exc:
+        return "🔴", f"ping failed: {exc}"
+
+
+async def _xmpp_check_version(bot, target: str) -> tuple[str, str]:
+    try:
+        result = await bot.plugin["xep_0092"].get_version(
+            jid=target,
+            timeout=XMPP_QUERY_TIMEOUT_SECONDS,
+        )
+        name, version, os_info = _extract_xmpp_version_info(result)
+        if name and version:
+            return "✅", f"version: {_format_xmpp_version_info(name, version, os_info)}"
+        return "ℹ️", "version: not advertised"
+    except slixmpp.exceptions.IqTimeout:
+        return "⚠️", "version: timed out"
+    except slixmpp.exceptions.IqError as exc:
+        condition = _get_iq_error_condition(exc)
+        if condition == "service-unavailable":
+            return "ℹ️", "version: unsupported"
+        return "⚠️", f"version: {condition}"
+    except Exception as exc:
+        return "⚠️", f"version: {exc}"
+
+
+async def _xmpp_check_disco(bot, target: str) -> tuple[str, str]:
+    try:
+        info = await bot.plugin["xep_0030"].get_info(
+            jid=target,
+            timeout=XMPP_QUERY_TIMEOUT_SECONDS,
+        )
+        disco_info = info.get("disco_info", {})
+        identities = disco_info.get("identities", []) or []
+        features = disco_info.get("features", []) or []
+        known = _xmpp_feature_summary(features)
+        summary = (
+            f"disco ok: {len(identities)} identities, {len(features)} features"
+        )
+        if known:
+            summary += f" ({', '.join(known)})"
+        return "✅", summary
+    except slixmpp.exceptions.IqTimeout:
+        return "🔴", "disco timed out"
+    except slixmpp.exceptions.IqError as exc:
+        return "⚠️", f"disco error: {_get_iq_error_condition(exc)}"
+    except Exception as exc:
+        return "🔴", f"disco failed: {exc}"
+
+
+def _xmpp_check_srv(domain: str) -> tuple[str, str]:
+    try:
+        import dns.resolver
+        import dns.exception
+    except ImportError:
+        return "ℹ️", "SRV skipped: python-dnspython not installed"
+
+    services = [
+        '_xmpp-client._tcp',
+        '_xmpp-server._tcp',
+        '_xmpps-client._tcp',
+        '_xmpps-server._tcp',
+    ]
+    try:
+        resolver = _make_srv_resolver(dns.resolver, XMPP_QUERY_TIMEOUT_SECONDS)
+        records = _collect_all_srv_records(domain, services, resolver, dns.exception)
+    except Exception as exc:
+        return "⚠️", f"SRV lookup failed: {exc}"
+
+    found = [service for service, text in records.items() if "Not found" not in text and "Error" not in text]
+    if found:
+        return "✅", "SRV records: " + ", ".join(found)
+    return "⚠️", "SRV records: none found"
+
+
+@command(
+    "xmpp check",
+    role=Role.USER,
+    aliases=["x check"],
+    short="Run combined XMPP service diagnostics.",
+    usage="{prefix}xmpp check <domain|jid>",
+    examples=["{prefix}x check envs.net", "{prefix}x check conference.envs.net"],
+    category="xmpp",
+    context="any",
+)
+async def cmd_xmpp_check(bot, sender_jid, nick, args, msg, is_room):
+    """Run a compact XMPP health check for a domain or service JID."""
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
+    if not args:
+        bot.reply(msg, f"❌ Missing target\nUsage: {config.get('prefix', ',')}x check <domain|jid>")
+        return
+
+    target, error = _resolve_target(bot, args, msg, is_room, nick)
+    if error:
+        bot.reply(msg, f"❌ {error}")
+        return
+
+    target = str(target).strip()
+    domain = get_domain_from_jid(target).split('/', 1)[0]
+    is_valid, error_msg = _validate_domain(domain)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid target: {error_msg}")
+        return
+
+    ping_status, ping_line = await _xmpp_check_ping(bot, target)
+    disco_status, disco_line = await _xmpp_check_disco(bot, target)
+    version_status, version_line = await _xmpp_check_version(bot, target)
+    srv_status, srv_line = await asyncio.to_thread(_xmpp_check_srv, domain)
+
+    lines = [
+        f"🩺 XMPP check for {target}",
+        f"{ping_status} {ping_line}",
+        f"{disco_status} {disco_line}",
+        f"{version_status} {version_line}",
+        f"{srv_status} {srv_line}",
+    ]
+    bot.reply(msg, lines)
 
 
 @command(

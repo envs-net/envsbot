@@ -229,6 +229,8 @@ RSS_MAX_ENTRIES_PER_POLL = 10
 RSS_RETRY_INITIAL_DELAY = 300
 RSS_RETRY_BACKOFF_MULTIPLIER = 2.0
 RSS_MAX_BACKOFF_TIME = 3600
+# A feed is considered broken in ,rss broken after this many consecutive errors.
+RSS_BROKEN_ERROR_THRESHOLD = 3
 
 # Duplicate title/description detection threshold, 0 < value <= 1.
 RSS_SIMILARITY_THRESHOLD = 0.8
@@ -277,6 +279,7 @@ POLL_MAX_OPTIONS = 10
 POLL_MAX_QUESTION_LEN = 200
 POLL_MAX_OPTION_LEN = 100
 POLL_MAX_HISTORY_PER_ROOM = 50
+POLL_DEFAULT_MULTI_MAX_CHOICES = 3
 
 
 # ================= PINS =================
@@ -374,6 +377,7 @@ IDLERPG = {
     "item_chance": 0.20,
     "battle_event_weight": 0.55,
     "team_battle_event_weight": 0.08,
+    "boss_event_weight": 0.06,
     "item_event_weight": 0.15,
     "item_damage_event_weight": 0.08,
     "item_steal_event_weight": 0.04,
@@ -402,6 +406,15 @@ IDLERPG = {
     "alignment_bonus_percent": 7,
     "quest_reward_percent": 25,
     "team_battle_percent": 20,
+    # Boss events are group fights against a room boss. Winners reduce their
+    # TTL; failed attempts add a small setback.
+    "boss_min_players": 3,
+    "boss_max_players": 5,
+    "boss_min_level": 10,
+    "boss_reward_percent": 12,
+    "boss_loss_percent": 4,
+    "boss_power_min_factor": 0.75,
+    "boss_power_max_factor": 1.25,
 
     # Manual duels let nearby online players challenge each other. Distance is
     # measured on the IdleRPG map; cooldown applies to both duelists to avoid

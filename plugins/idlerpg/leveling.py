@@ -166,6 +166,8 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
         _award(player, "battle_scarred")
     if stats.get("team_battles_won", 0) >= 5:
         _award(player, "team_veteran")
+    if stats.get("bosses_defeated", 0) >= 5:
+        _award(player, "boss_veteran")
     if stats.get("quests_completed", 0) >= 3 and _season_gate_passed(room, 7):
         _award(player, "quest_walker")
     if stats.get("godsends", 0) >= 10:

@@ -5,10 +5,12 @@ from utils.command import command, Role
 from utils.config import config
 from utils.url_safety import FetchURLTooLarge
 from core_plugins.rooms import JOINED_ROOMS
+from core_plugins._core import paginate_items
 from core_plugins.users import user_has_room_plugin_grant
 from utils.audit import audit_event
 from .config import (
     DEFAULT_POLL_INTERVAL,
+    RSS_BROKEN_ERROR_THRESHOLD,
     RSS_MAX_ENTRIES_PER_POLL,
     RSS_MAX_READ_BYTES,
 )
@@ -44,6 +46,12 @@ from .formatting import (
 )
 from .store import (
     _apply_retry_state,
+    _feed_active_rooms,
+    _feed_is_globally_paused,
+    _feed_paused_rooms,
+    _feed_status_label,
+    _format_rss_timestamp,
+    _normalize_subscription_room,
     _reset_feed_retry,
     get_effective_template,
     get_feed_template,
@@ -506,17 +514,126 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
     bot.reply(msg, _rss_template_usage(bot))
 
 
+def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None = None) -> list[str]:
+    """Return concise RSS health lines for all feeds."""
+    now = _now() if now is None else int(now)
+    rows = []
+    for url, feed in sorted(feeds.items()):
+        if not isinstance(feed, dict):
+            continue
+        error_count = int(feed.get("error_count", 0) or 0)
+        status = _feed_status_label(feed, now=now)
+        broken = error_count >= RSS_BROKEN_ERROR_THRESHOLD or status in {"backoff", "paused", "paused for all rooms"}
+        if broken_only and not broken:
+            continue
+        active_rooms = _feed_active_rooms(feed)
+        total_rooms = len(feed.get("rooms", []) if isinstance(feed.get("rooms"), list) else [])
+        paused_rooms = sorted(_feed_paused_rooms(feed))
+        last_error = str(feed.get("last_error") or "none")
+        if len(last_error) > 120:
+            last_error = last_error[:117] + "..."
+        rows.append(
+            " • "
+            f"{status}: {feed.get('title') or url} — {url}\n"
+            f"   rooms: {len(active_rooms)}/{total_rooms} active"
+            f"{f' · paused: {len(paused_rooms)}' if paused_rooms else ''}; "
+            f"errors: {error_count}; last success: {_format_rss_timestamp(feed.get('last_success'))}; "
+            f"last error: {last_error}"
+        )
+    return rows
+
+
+def _rss_health_summary(feeds: dict) -> str:
+    total = sum(1 for feed in feeds.values() if isinstance(feed, dict))
+    paused = sum(1 for feed in feeds.values() if isinstance(feed, dict) and _feed_is_globally_paused(feed))
+    backoff = sum(
+        1 for feed in feeds.values()
+        if isinstance(feed, dict) and int(feed.get("next_retry") or 0) > _now()
+    )
+    degraded = sum(
+        1 for feed in feeds.values()
+        if isinstance(feed, dict) and int(feed.get("error_count", 0) or 0) > 0
+    )
+    return f"RSS health: {total} feeds · {paused} paused · {backoff} in backoff · {degraded} with errors"
+
+
+def _rss_normalize_room_list(feed: dict) -> list[str]:
+    rooms = feed.setdefault("rooms", [])
+    if not isinstance(rooms, list):
+        rooms = []
+        feed["rooms"] = rooms
+    deduped = []
+    seen = set()
+    for room in rooms:
+        key = _normalize_subscription_room(room)
+        if not key or key in seen:
+            continue
+        deduped.append(str(room))
+        seen.add(key)
+    if deduped != rooms:
+        feed["rooms"] = deduped
+    return deduped
+
+
+async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool) -> None:
+    url = _normalize_url(url)
+    feeds = await get_feeds(store)
+    feed = feeds.get(url)
+    if not isinstance(feed, dict):
+        bot.reply(msg, "Feed not found.")
+        return
+
+    scope = str(target or "").strip()
+    changed = False
+    if scope.lower() == "all":
+        feed["paused"] = paused
+        changed = True
+        label = "globally"
+    else:
+        target_room = _normalize_room_jid(scope) if scope else room
+        if not target_room:
+            bot.reply(msg, "🔴 RSS pause/resume needs a room context, room JID, or 'all'.")
+            return
+        rooms = _rss_normalize_room_list(feed)
+        room_key = _normalize_subscription_room(target_room)
+        if not any(_normalize_subscription_room(item) == room_key for item in rooms):
+            bot.reply(msg, f"ℹ️ Room {target_room} is not subscribed to this feed.")
+            return
+        paused_rooms = sorted(_feed_paused_rooms(feed))
+        if paused and room_key not in paused_rooms:
+            paused_rooms.append(room_key)
+            changed = True
+        if not paused and room_key in paused_rooms:
+            paused_rooms.remove(room_key)
+            changed = True
+        feed["paused_rooms"] = paused_rooms
+        label = f"for {target_room}"
+
+    if changed:
+        await save_feeds(store, feeds)
+        await _cancel_feed_task(bot, url)
+        if not paused or not feed.get("paused"):
+            await ensure_task(bot, store, url, feed.get("period", DEFAULT_POLL_INTERVAL))
+
+    action = "Paused" if paused else "Resumed"
+    bot.reply(msg, f"✅ {action} RSS feed {label}: {url}" if changed else f"ℹ️ RSS feed already {'paused' if paused else 'active'} {label}: {url}")
+
+
 @command(
     "rss",
     role=Role.USER,
     short="Manage RSS feed subscriptions for rooms.",
-    usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|list|template> ...",
+    usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
     examples=[
         "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss list room@conference.example.org",
         "{prefix}rss list 2",
         "{prefix}rss list all",
         "{prefix}rss retry all",
+        "{prefix}rss health",
+        "{prefix}rss broken",
+        "{prefix}rss pause https://example.org/feed.rss",
+        "{prefix}rss resume https://example.org/feed.rss",
         "{prefix}rss reset all",
         "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss template",
@@ -540,6 +657,8 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss add <feedurl> [room_jid]
     {prefix}rss delete|remove|del|rm <feedurl> [room_jid|all]
     {prefix}rss retry|reset <feedurl>|all [room_jid]
+    {prefix}rss pause|resume <feedurl> [room_jid|all]
+    {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [room_jid] [page|all|last]
     {prefix}rss template [show|set|unset|test] [room_jid] [feedurl] [template]
     """
@@ -549,7 +668,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(
             msg,
             f"Usage: {_command_prefix(bot)}rss "
-            "<add|delete|remove|del|rm|retry|reset|list|template> ...",
+            "<add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
         )
         return
 
@@ -705,6 +824,97 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         )
         return
 
+    elif sub in {"pause", "resume"}:
+        if len(args) not in (2, 3):
+            bot.reply(
+                msg,
+                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl> [room_jid|all]",
+            )
+            return
+        target = args[2] if len(args) == 3 else None
+        if target and str(target).strip().lower() == "all":
+            if not await _sender_can_manage_rss_globally(bot, sender_jid):
+                bot.reply(msg, "🔴 Only global moderators can pause/resume RSS feeds globally.")
+                return
+        else:
+            target_room = _room_for_feed_command(msg, is_room, explicit_room=target)
+            if not target_room:
+                bot.reply(msg, "🔴 RSS pause/resume needs a room context or explicit room JID.")
+                return
+            if not await _sender_can_manage_rss_room(bot, sender_jid, target_room):
+                bot.reply(
+                    msg,
+                    "🔴 You need a global moderator role, or an RSS plugin "
+                    f"grant and owner/admin affiliation in {target_room}.",
+                )
+                return
+        await _rss_set_pause_state(
+            bot,
+            msg,
+            store,
+            args[1],
+            room,
+            target,
+            paused=(sub == "pause"),
+        )
+        await audit_event(
+            bot,
+            f"rss_feed_{sub}",
+            actor=sender_jid,
+            target=target or room or "rss",
+            details={"url": _normalize_url(args[1])},
+        )
+        return
+
+    elif sub in {"health", "broken"}:
+        feeds = await get_feeds(store)
+        if not feeds:
+            bot.reply(msg, "No feeds configured.")
+            return
+        list_args = args
+        target_room = room
+        explicit_room = False
+        if len(args) >= 2 and _looks_like_room_arg(args[1]):
+            target_room = _normalize_room_jid(args[1])
+            list_args = [args[0], *args[2:]]
+            explicit_room = True
+        is_global_manager = await _sender_can_manage_rss_globally(bot, sender_jid)
+        if explicit_room or not is_global_manager:
+            if not target_room:
+                bot.reply(msg, "🔴 RSS health from private chat needs an explicit room JID unless you are a global moderator.")
+                return
+            if not await _sender_can_manage_rss_room(bot, sender_jid, target_room):
+                bot.reply(
+                    msg,
+                    "🔴 You need a global moderator role, or an RSS plugin "
+                    f"grant and owner/admin affiliation in {target_room}.",
+                )
+                return
+            feeds = _filter_feeds_for_room(feeds, target_room)
+        lines = [_rss_health_summary(feeds)]
+        detail_lines = _rss_health_lines(feeds, broken_only=(sub == "broken"))
+        if not detail_lines:
+            lines.append("✅ No broken RSS feeds." if sub == "broken" else "No matching RSS feeds.")
+        else:
+            page_size = config.get("rss_list_page_size", 10) or 10
+            parsed = _rss_list_page(list_args, len(detail_lines), int(page_size))
+            if parsed is None:
+                bot.reply(msg, f"Usage: {_command_prefix(bot)}rss {sub} [room_jid] [page|all|last]")
+                return
+            page, show_all = parsed
+            if show_all:
+                page_items = detail_lines
+                lines[0] += " - all"
+            else:
+                page_items, page, total_pages, total = paginate_items(detail_lines, page, int(page_size))
+                lines[0] += f" - Page {page}/{total_pages}"
+            lines.extend(page_items)
+            if not show_all and page < total_pages:
+                lines.append("")
+                lines.append(f"Use {_command_prefix(bot)}rss {sub} {page + 1} for the next page.")
+        bot.reply(msg, lines)
+        return
+
     # List rooms or one explicitly targeted room.
     elif sub == "list":
         feeds = await get_feeds(store)
@@ -756,7 +966,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(
             msg,
             "Unknown subcommand. Use add, delete, remove, retry, "
-            "reset, list, or template.",
+            "reset, pause, resume, health, broken, list, or template.",
         )
 
 
@@ -787,6 +997,14 @@ async def _add_feed(bot, msg, url, store, room):
                 "last_id": last_id,
                 "error_count": 0,
                 "next_retry": 0,
+                "paused": False,
+                "paused_rooms": [],
+                "last_checked": _now(),
+                "last_success": _now(),
+                "last_error": "",
+                "last_error_at": 0,
+                "last_posted": _now() if last_id else 0,
+                "posted_count": 0,
             }
 
             await save_feeds(store, feeds)
@@ -807,8 +1025,10 @@ async def _add_feed(bot, msg, url, store, room):
             )
             return
     else:
-        if room not in feeds[url]["rooms"]:
-            feeds[url]["rooms"].append(room)
+        rooms = _rss_normalize_room_list(feeds[url])
+        if not any(_normalize_subscription_room(item) == _normalize_subscription_room(room) for item in rooms):
+            rooms.append(room)
+            feeds[url]["rooms"] = rooms
             await save_feeds(store, feeds)
             # await _flush_user_store(bot)
 

@@ -6,17 +6,19 @@ Features:
 - Multiple simultaneous polls per room
 - Poll history
 - Optional time limits with auto-close
+- Optional multi-choice polls
 - Voting by real JID (one vote per user per poll, revoting allowed)
 
 Commands:
     {prefix}poll on|off|status
     {prefix}poll create <question> | <option1> | <option2> | option3 ...]
     {prefix}poll create <duration> | <question> | <option1> | <option2> ...]
+    {prefix}poll create multi[:max] | <question> | <option1> | <option2> ...]
     {prefix}poll list
     {prefix}poll show <id>
     {prefix}poll result <id>
     {prefix}poll history [limit]
-    {prefix}poll vote <id> <option-number>
+    {prefix}poll vote <id> <option-number>[,<option-number>...]
     {prefix}poll close <id>
     {prefix}poll cancel <id>
     {prefix}poll delete <id>
@@ -24,7 +26,8 @@ Commands:
 Examples:
     {prefix}poll create Was essen wir? | Pizza | Döner | Falafel
     {prefix}poll create 1h30m | Was essen wir? | Pizza | Döner | Falafel
-    {prefix}poll vote 3 2
+    {prefix}poll create multi:2 | Was essen wir? | Pizza | Döner | Falafel
+    {prefix}poll vote 3 1,2
     {prefix}poll result 3
 """
 
@@ -56,6 +59,7 @@ MAX_OPTIONS = int(config.get("poll_max_options", 10) or 10)
 MAX_QUESTION_LEN = int(config.get("poll_max_question_len", 200) or 200)
 MAX_OPTION_LEN = int(config.get("poll_max_option_len", 100) or 100)
 MAX_HISTORY_PER_ROOM = int(config.get("poll_max_history_per_room", 50) or 50)
+DEFAULT_MULTI_MAX_CHOICES = max(2, int(config.get("poll_default_multi_max_choices", 3) or 3))
 
 AUTO_CLOSE_TASKS = {}  # (room_jid, poll_id) -> asyncio.Task
 
@@ -150,38 +154,75 @@ def _format_remaining(ends_at: int | None) -> str:
     return " ".join(parts)
 
 
-def _parse_create_args(
+def _parse_multi_token(value: str) -> tuple[bool, int | None]:
+    """Parse optional multi-choice token (multi or multi:<max>)."""
+    token = str(value or "").strip().lower()
+    if token not in {"multi", "multiple"} and not token.startswith(("multi:", "multiple:")):
+        return False, None
+    if ":" not in token:
+        return True, DEFAULT_MULTI_MAX_CHOICES
+    _prefix, raw_limit = token.split(":", 1)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return True, None
+    return True, max(2, limit)
+
+
+def _parse_create_args_full(
     raw: str, prefix: str = ","
-) -> tuple[int | None, str | None, list[str] | None, str | None]:
+) -> tuple[int | None, str | None, list[str] | None, bool, int | None, str | None]:
     """
     Parse:
       question | option1 | option2
       30m | question | option1 | option2
       1h30m | question | option1 | option2
+      multi[:max] | question | option1 | option2
+      30m | multi[:max] | question | option1 | option2
 
     Returns:
-      (duration_seconds, question, options, error)
+      (duration_seconds, question, options, multi_choice, max_choices, error)
     """
     parts = [p.strip() for p in raw.split("|")]
     parts = [p for p in parts if p]
 
+    usage = (
+        f"Usage: {prefix}poll create [duration] | [multi[:max]] | question | "
+        "option1 | option2 [| option3 ...]"
+    )
     if len(parts) < 3:
-        out = f"Usage: {prefix}poll create [duration] | question | option1 |"
-        out += " option2 [| option3 ...]"
-        return None, None, None, out
+        return None, None, None, False, None, usage
 
     duration = _core.parse_duration(parts[0])
+    multi_choice = False
+    max_choices: int | None = None
+
     if duration is not None:
-        if len(parts) < 4:
-            out = "A timed poll needs a question and at least two options."
-            return None, None, None, out
-        question = parts[1]
-        options = parts[2:]
-        return duration, question, options, None
+        parts = parts[1:]
+        if len(parts) < 3:
+            return None, None, None, False, None, "A timed poll needs a question and at least two options."
+
+    is_multi, parsed_max = _parse_multi_token(parts[0])
+    if is_multi:
+        if parsed_max is None:
+            return None, None, None, False, None, "Invalid multi-choice limit. Use multi or multi:2."
+        multi_choice = True
+        max_choices = parsed_max
+        parts = parts[1:]
+        if len(parts) < 3:
+            return None, None, None, True, max_choices, "A multi-choice poll needs a question and at least two options."
 
     question = parts[0]
     options = parts[1:]
-    return None, question, options, None
+    return duration, question, options, multi_choice, max_choices, None
+
+
+def _parse_create_args(
+    raw: str, prefix: str = ","
+) -> tuple[int | None, str | None, list[str] | None, str | None]:
+    """Backward-compatible parser returning duration/question/options/error."""
+    duration, question, options, _multi_choice, _max_choices, error = _parse_create_args_full(raw, prefix)
+    return duration, question, options, error
 
 
 def _normalize_poll(room_jid: str, poll_id: str, poll: dict) -> dict:
@@ -190,6 +231,15 @@ def _normalize_poll(room_jid: str, poll_id: str, poll: dict) -> dict:
     poll["question"] = str(poll.get("question", "")).strip()
     poll["options"] = [str(o) for o in poll.get("options", [])]
     poll["votes"] = dict(poll.get("votes", {}))
+    poll["multi_choice"] = bool(poll.get("multi_choice", False))
+    try:
+        poll["max_choices"] = max(1, int(poll.get("max_choices") or 1))
+    except (TypeError, ValueError):
+        poll["max_choices"] = 1
+    if poll["multi_choice"]:
+        poll["max_choices"] = max(2, min(poll["max_choices"], len(poll.get("options", [])) or 2))
+    else:
+        poll["max_choices"] = 1
     poll["created_by"] = str(poll.get("created_by", ""))
     poll["created_by_nick"] = str(poll.get("created_by_nick", ""))
     poll["created_at"] = int(poll.get("created_at", _now()))
@@ -210,15 +260,60 @@ def _poll_is_open(poll: dict) -> bool:
 
 def _poll_vote_totals(poll: dict) -> list[int]:
     totals = [0] * len(poll.get("options", []))
-    for _, opt_idx in poll.get("votes", {}).items():
-        try:
-            idx = int(opt_idx)
-        except Exception:
-            continue
-        if 0 <= idx < len(totals):
-            totals[idx] += 1
+    for vote in poll.get("votes", {}).values():
+        choices = vote if isinstance(vote, list) else [vote]
+        seen: set[int] = set()
+        for opt_idx in choices:
+            try:
+                idx = int(opt_idx)
+            except Exception:
+                continue
+            if idx in seen:
+                continue
+            seen.add(idx)
+            if 0 <= idx < len(totals):
+                totals[idx] += 1
     return totals
 
+
+def _poll_voter_count(poll: dict) -> int:
+    return len(poll.get("votes", {}))
+
+
+def _format_vote_value(poll: dict, vote) -> str:
+    choices = vote if isinstance(vote, list) else [vote]
+    names = []
+    for raw in choices:
+        try:
+            idx = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(poll.get("options", [])):
+            names.append(str(poll["options"][idx]))
+    return ", ".join(names) if names else "no valid option"
+
+
+def _parse_vote_choices(args: list[str], poll: dict) -> tuple[list[int] | None, str | None]:
+    raw = " ".join(str(part) for part in args[2:]).replace(",", " ")
+    tokens = [token for token in raw.split() if token]
+    if not tokens:
+        return None, "missing option number"
+    choices: list[int] = []
+    for token in tokens:
+        if not token.isdigit():
+            return None, "choices must be option numbers"
+        option_num = int(token)
+        if option_num < 1 or option_num > len(poll.get("options", [])):
+            return None, f"Option must be between 1 and {len(poll.get('options', []))}"
+        idx = option_num - 1
+        if idx not in choices:
+            choices.append(idx)
+    if not poll.get("multi_choice") and len(choices) != 1:
+        return None, "this poll accepts exactly one option"
+    max_choices = max(1, int(poll.get("max_choices", 1) or 1))
+    if len(choices) > max_choices:
+        return None, f"this poll accepts at most {max_choices} choices"
+    return choices, None
 
 def _winner_summary(poll: dict) -> str:
     totals = _poll_vote_totals(poll)
@@ -244,11 +339,15 @@ def _format_poll_header(poll: dict) -> str:
     status = poll.get("status", "unknown")
     limit = _format_ts(poll.get("ends_at")) if poll.get(
         "ends_at") else "no limit"
-    v = f"{poll.get('created_by_nick') or poll.get('created_by') or 'unknown'}"
+    creator = poll.get('created_by_nick') or poll.get('created_by') or 'unknown'
+    poll_type = "multi-choice" if poll.get("multi_choice") else "single-choice"
+    if poll.get("multi_choice"):
+        poll_type += f" (max {poll.get('max_choices', 1)} choices)"
     return (
         f"📊 Poll #{poll['id']}: {poll['question']}\n"
         f"Status: {status}\n"
-        f"Created by: {v}\n"
+        f"Type: {poll_type}\n"
+        f"Created by: {creator}\n"
         f"Created at: {_format_ts(poll.get('created_at'))}\n"
         f"Ends at: {limit}"
     )
@@ -272,7 +371,8 @@ def _format_poll_results(poll: dict) -> str:
         lines.append(f"{i}. {option} — {count} {label}")
 
     lines.append("")
-    lines.append(f"Total votes: {total_votes}")
+    lines.append(f"Total selections: {total_votes}")
+    lines.append(f"Voters: {_poll_voter_count(poll)}")
     lines.append(_winner_summary(poll))
     return "\n".join(lines)
 
@@ -453,7 +553,7 @@ async def _restore_auto_close_tasks(bot):
 async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
                               data, room, args):
     raw = " ".join(args[1:]).strip()
-    duration, question, options, error = _parse_create_args(
+    duration, question, options, multi_choice, max_choices, error = _parse_create_args_full(
         raw, _command_prefix(bot)
     )
     if error:
@@ -485,6 +585,9 @@ async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
         )
         return
 
+    if multi_choice:
+        max_choices = max(2, min(int(max_choices or DEFAULT_MULTI_MAX_CHOICES), len(options)))
+
     if any(len(opt) > MAX_OPTION_LEN for opt in options):
         _poll_reply(
             bot,
@@ -508,6 +611,8 @@ async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
         "question": question,
         "options": options,
         "votes": {},
+        "multi_choice": multi_choice,
+        "max_choices": max_choices if multi_choice else 1,
         "created_by": creator_jid,
         "created_by_nick": creator_nick,
         "created_at": _now(),
@@ -527,8 +632,14 @@ async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
         "",
         _format_poll_options(poll),
         "",
-        f"Vote with: {_command_prefix(bot)}poll vote {poll_id} <number>",
+        (
+            f"Vote with: {_command_prefix(bot)}poll vote {poll_id} "
+            + ("<number>[,<number>...]" if multi_choice else "<number>")
+        ),
     ]
+    if multi_choice:
+        lines.append(f"Multi-choice: up to {max_choices} choices per voter.")
+
     if poll.get("ends_at"):
         v = f"{_format_ts(poll['ends_at'])}"
         v += f" ({_format_remaining(poll['ends_at'])})"
@@ -564,7 +675,8 @@ async def _poll_handle_list(bot, msg, room_jid, room):
             suffix = ""
         lines.append(
             f"#{poll['id']} {poll['question']}"
-            f" ({len(poll['options'])} options{suffix})"
+            f" ({len(poll['options'])} options"
+            f"{', multi-choice' if poll.get('multi_choice') else ''}{suffix})"
         )
 
     _poll_reply(bot, msg, "\n".join(lines))
@@ -618,7 +730,8 @@ async def _poll_handle_show_result(bot, msg, room_jid, room, args, sub):
             lines += [
                 "",
                 f"Vote with: {_command_prefix(bot)}poll"
-                f" vote {poll['id']} <number>",
+                f" vote {poll['id']} "
+                + ("<number>[,<number>...]" if poll.get("multi_choice") else "<number>"),
             ]
         _poll_reply(bot, msg, "\n".join(lines))
         return
@@ -627,17 +740,15 @@ async def _poll_handle_show_result(bot, msg, room_jid, room, args, sub):
 
 
 async def _poll_handle_vote(bot, msg, room_jid, room, data, args):
-    if (len(args) != 3 or not str(args[1]).isdigit()
-            or not str(args[2]).isdigit()):
+    if len(args) < 3 or not str(args[1]).isdigit():
         _poll_reply(
             bot,
             msg,
-            f"Usage: {_command_prefix(bot)}poll vote <id> <option-number>",
+            f"Usage: {_command_prefix(bot)}poll vote <id> <option-number>[,<option-number>...]",
         )
         return
 
     poll_id = args[1]
-    option_num = int(args[2])
 
     poll = _get_poll(room, poll_id)
     if not poll:
@@ -650,12 +761,12 @@ async def _poll_handle_vote(bot, msg, room_jid, room, data, args):
         _poll_reply(bot, msg, f"❌ Poll #{poll_id} is not open.")
         return
 
-    if option_num < 1 or option_num > len(poll["options"]):
+    choices, error = _parse_vote_choices(args, poll)
+    if error or not choices:
         _poll_reply(
             bot,
             msg,
-            "❌ Option must be between 1 and"
-            f" {len(poll['options'])}.",
+            f"❌ Invalid vote: {error}. Usage: {_command_prefix(bot)}poll vote <id> <option-number>[,<option-number>...]",
         )
         return
 
@@ -664,20 +775,18 @@ async def _poll_handle_vote(bot, msg, room_jid, room, data, args):
         _poll_reply(
             bot,
             msg,
-            "❌ Could not determine your real JID"
-            " in this room.",
+            "❌ Could not determine your real JID in this room.",
         )
         return
 
-    poll["votes"][voter_jid] = option_num - 1
+    poll["votes"][voter_jid] = choices if poll.get("multi_choice") else choices[0]
     room["polls"][str(poll_id)] = poll
     await _set_data(bot, data)
 
     _poll_reply(
         bot,
         msg,
-        f"✅ Your vote for poll #{poll_id}"
-        f" is now '{poll['options'][option_num - 1]}'.",
+        f"✅ Your vote for poll #{poll_id} is now '{_format_vote_value(poll, poll['votes'][voter_jid])}'.",
     )
 
 
@@ -751,6 +860,7 @@ async def _poll_handle_manage(
     examples=[
         "{prefix}poll status",
         "{prefix}poll create Tea? | yes | no",
+        "{prefix}poll create multi:2 | Lunch? | Pizza | Döner | Falafel",
         "{prefix}poll list",
         "{prefix}rooms enable poll",
     ],
@@ -765,12 +875,12 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}poll on
         {prefix}poll off
         {prefix}poll status
-        {prefix}poll create [duration] | question | option1 | option2 | ...]
+        {prefix}poll create [duration] | [multi[:max]] | question | option1 | option2 | ...]
         {prefix}poll list
         {prefix}poll show <id>
         {prefix}poll result <id>
         {prefix}poll history [limit]
-        {prefix}poll vote <id> <option-number>
+        {prefix}poll vote <id> <option-number>[,<option-number>...]
         {prefix}poll close <id>
         {prefix}poll cancel <id>
         {prefix}poll delete <id>

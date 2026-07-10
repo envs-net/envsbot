@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import compileall
 import os
+import py_compile
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -366,6 +369,68 @@ def _config_sample_line() -> str:
     return _line(True, "Config sample", "ok")
 
 
+def _release_python_compile_line() -> str:
+    """Return a release-check line for basic Python syntax/import safety."""
+    root = Path(__file__).resolve().parents[1]
+    targets = [
+        root / "bot",
+        root / "core_plugins",
+        root / "database",
+        root / "plugins",
+        root / "utils",
+        root / "envsbot.py",
+        root / "config_sample.py",
+    ]
+    try:
+        for target in targets:
+            if target.is_dir():
+                if not compileall.compile_dir(target, quiet=2, maxlevels=20):
+                    return _line(False, "Python compile", f"failed in {target.name}")
+            elif target.exists():
+                py_compile.compile(str(target), doraise=True)
+        return _line(True, "Python compile", "ok")
+    except Exception as exc:
+        return _line(False, "Python compile", str(exc))
+
+
+def _release_git_status_line() -> str:
+    """Return a release-check line for uncommitted tracked changes."""
+    root = Path(__file__).resolve().parents[1]
+    if not (root / ".git").exists():
+        return _line(None, "Git status", "not a git checkout")
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--short", "--untracked-files=no"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _line(None, "Git status", f"check failed: {exc}")
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "git status failed").strip()
+        return _line(None, "Git status", detail[:160])
+    changed = [line for line in proc.stdout.splitlines() if line.strip()]
+    if changed:
+        return _line(False, "Git status", f"{len(changed)} tracked file(s) modified")
+    return _line(True, "Git status", "clean")
+
+
+def _release_task_line(bot: Any) -> str:
+    """Return a release-check line for failed supervised tasks."""
+    supervisor = getattr(bot, "tasks", None)
+    if supervisor is None:
+        return _line(None, "Background tasks", "supervisor unavailable")
+    try:
+        running, failed, finished = supervisor.summary()
+    except Exception as exc:
+        return _line(False, "Background tasks", str(exc))
+    return _line(failed == 0, "Background tasks", f"{running} running, {failed} failed, {finished} finished")
+
+
 async def _release_migration_line(bot: Any) -> str:
     """Return a release-check line for pending database migrations."""
     db = getattr(bot, "db", None)
@@ -432,8 +497,11 @@ async def _release_lines(bot: Any) -> list[str]:
         await _latest_release_line(bot),
         _command_docs_line(),
         _config_sample_line(),
+        _release_python_compile_line(),
+        _release_git_status_line(),
         await _release_migration_line(bot),
         _release_backup_line(),
+        _release_task_line(bot),
         await _release_plugin_metadata_line(bot),
     ]
 
@@ -614,7 +682,7 @@ async def doctor_command(bot, sender, nick, args, msg, is_room):
     "doctor release",
     role=Role.ADMIN,
     aliases=["bot doctor release", "doctor preflight", "bot doctor preflight"],
-    short="Run release-readiness checks for version, docs, config, DB, backups and plugin metadata.",
+    short="Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata.",
     usage="{prefix}doctor release [page|last|all]",
     examples=["{prefix}doctor release", "{prefix}doctor release all"],
     category="admin",

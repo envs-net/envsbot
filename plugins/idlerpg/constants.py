@@ -39,6 +39,8 @@ ACHIEVEMENTS = {
     "critical_striker": ("Critical Striker", "landed a critical strike"),
     "team_battle_winner": ("Team Fighter", "won a team battle"),
     "team_veteran": ("Team Veteran", "won 5 team battles"),
+    "boss_slayer": ("Boss Slayer", "helped defeat a room boss"),
+    "boss_veteran": ("Raid Veteran", "helped defeat 5 room bosses"),
     "unique_item": ("Relic Finder", "found a unique item"),
     "artifact_finder": ("Artifact Finder", "found 3 unique items"),
     "item_blessed": ("Blessed Gear", "had an item blessed"),

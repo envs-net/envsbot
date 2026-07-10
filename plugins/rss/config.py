@@ -91,6 +91,11 @@ RSS_MAX_ENTRIES_PER_POLL = max(
     int(config.get("rss_max_entries_per_poll", 10) or 10),
 )
 
+RSS_BROKEN_ERROR_THRESHOLD = max(
+    1,
+    int(config.get("rss_broken_error_threshold", 3) or 3),
+)
+
 __all__ = [
     'PLUGIN_META',
     'RSS_KEY',
@@ -110,4 +115,5 @@ __all__ = [
     'ALLOW_PRIVATE_FETCH_URLS',
     'RSS_LIST_PAGE_SIZE',
     'RSS_MAX_ENTRIES_PER_POLL',
+    'RSS_BROKEN_ERROR_THRESHOLD',
 ]

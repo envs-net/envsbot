@@ -88,7 +88,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `idlerpg` | `plugins` | `fun` | IdleRPG game for MUCs, inspired by the classic IRC game |
 | `info` | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. |
 | `karma` | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- |
-| `pin` | `plugins` | `utility` | Pin room messages with paging, search, tags and non-reply fallback. |
+| `pin` | `plugins` | `utility` | Pin room messages with paging, search, tags, important pins and non-reply fallback. |
 | `poll` | `plugins` | `utility` | Room polls with voting, history and auto-close |
 | `reminder` | `plugins` | `utility` | Schedule and manage reminders |
 | `rss` | `plugins` | `info` | RSS/Atom feed watcher and poster |
@@ -134,7 +134,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config validate` | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
 | `,doctor` | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness. |
 | `,doctor failed` | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
-| `,doctor release` | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, DB, backups and plugin metadata. |
+| `,doctor release` | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata. |
 | `,doctor warnings` | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |
 | `,plugin diagnose` | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
 | `,plugin state` | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
@@ -207,7 +207,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,birthday_notify` | `user` | `room or MUC PM` | Enable, disable or show birthday notifications for a room. |
-| `,pin` | `user` | `any` | Pin, list, search, edit, tag or delete room pins. |
+| `,pin` | `user` | `any` | Pin, list, search, mark important, edit, tag or delete room pins. |
 | `,poll` | `user` | `any` | Create and manage polls. |
 | `,rooms add` | `admin` | `private chat / MUC PM` | Add or update a stored room configuration. |
 | `,rooms delete` | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
@@ -264,6 +264,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Role | Context | Description |
 | --- | --- | --- | --- |
 | `,xmpp` | `user` | `room or MUC PM` | Enable, disable or show room access to XMPP lookup commands. |
+| `,xmpp check` | `user` | `any` | Run combined XMPP service diagnostics. |
 | `,xmpp compliance` | `user` | `any` | Check XMPP compliance features via disco. |
 | `,xmpp contact` | `user` | `any` | Show contact addresses from service discovery. |
 | `,xmpp help` | `user` | `any` | Show help for XMPP lookup subcommands. |
@@ -754,7 +755,7 @@ Examples:
 
 #### `,doctor release`
 
-Run release-readiness checks for version, docs, config, DB, backups and plugin metadata.
+Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
@@ -1752,16 +1753,16 @@ Examples:
 Source: `plugins`
 Category: `utility`
 
-Pin room messages with paging, search, tags and non-reply fallback.
+Pin room messages with paging, search, tags, important pins and non-reply fallback.
 
 #### `,pin`
 
-Pin, list, search, edit, tag or delete room pins.
+Pin, list, search, mark important, edit, tag or delete room pins.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,pin <add|list|search|find|show|edit|tags|delete|on|off|status> ...`
+Usage: `,pin <add|list|important|search|find|show|edit|tags|delete|on|off|status> ...`
 
 Examples:
 
@@ -1771,6 +1772,8 @@ Examples:
 - `,pin search ssh key`
 - `,pin edit 3 Updated room info`
 - `,pin tags 3 mail support`
+- `,pin important 3 on`
+- `,pin important list`
 - `,rooms enable pin`
 
 ### poll
@@ -1793,6 +1796,7 @@ Examples:
 
 - `,poll status`
 - `,poll create Tea? | yes | no`
+- `,poll create multi:2 | Lunch? | Pizza | Döner | Falafel`
 - `,poll list`
 - `,rooms enable poll`
 
@@ -1864,7 +1868,7 @@ Manage RSS feed subscriptions for rooms.
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|delete|remove|del|rm|retry|reset|list|template> ...`
+Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...`
 
 Examples:
 
@@ -1873,6 +1877,10 @@ Examples:
 - `,rss list 2`
 - `,rss list all`
 - `,rss retry all`
+- `,rss health`
+- `,rss broken`
+- `,rss pause https://example.org/feed.rss`
+- `,rss resume https://example.org/feed.rss`
 - `,rss reset all`
 - `,rss retry https://example.org/feed.rss room@conference.example.org`
 - `,rss template`
@@ -2291,6 +2299,22 @@ Aliases: `,x`
 Examples:
 
 - `,xmpp status`
+
+#### `,xmpp check`
+
+Run combined XMPP service diagnostics.
+
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
+Usage: `,xmpp check <domain|jid>`
+
+Aliases: `,x check`
+
+Examples:
+
+- `,x check envs.net`
+- `,x check conference.envs.net`
 
 #### `,xmpp compliance`
 

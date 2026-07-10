@@ -210,6 +210,110 @@ def _apply_retry_state(feed, error_count, next_retry):
         changed = True
     return changed
 
+def _normalize_subscription_room(room: str) -> str:
+    return _normalize_template_room_jid(room)
+
+
+def _feed_paused_rooms(feed: dict) -> set[str]:
+    rooms = feed.get("paused_rooms")
+    if not isinstance(rooms, list):
+        return set()
+    return {
+        _normalize_subscription_room(room)
+        for room in rooms
+        if _normalize_subscription_room(room)
+    }
+
+
+def _feed_active_rooms(feed: dict) -> list[str]:
+    """Return subscribed rooms that are not paused for this feed."""
+    rooms = feed.get("rooms")
+    if not isinstance(rooms, list):
+        return []
+    paused = _feed_paused_rooms(feed)
+    active = []
+    seen = set()
+    for room in rooms:
+        key = _normalize_subscription_room(room)
+        if not key or key in seen or key in paused:
+            continue
+        active.append(str(room))
+        seen.add(key)
+    return active
+
+
+def _feed_is_globally_paused(feed: dict) -> bool:
+    return bool(feed.get("paused", False))
+
+
+def _format_rss_timestamp(ts) -> str:
+    try:
+        value = int(ts or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value <= 0:
+        return "never"
+    import time
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(value))
+
+
+def _feed_status_label(feed: dict, now: int | None = None) -> str:
+    if _feed_is_globally_paused(feed):
+        return "paused"
+    if not _feed_active_rooms(feed):
+        return "paused for all rooms"
+    try:
+        next_retry = int(feed.get("next_retry", 0) or 0)
+    except (TypeError, ValueError):
+        next_retry = 0
+    now = _now() if now is None else int(now)
+    if next_retry > now:
+        return "backoff"
+    if int(feed.get("error_count", 0) or 0) > 0:
+        return "degraded"
+    return "ok"
+
+
+def _record_feed_check(feed: dict, *, now: int, success: bool, error: str | None = None) -> bool:
+    changed = False
+    for key, value in {"last_checked": now}.items():
+        if feed.get(key) != value:
+            feed[key] = value
+            changed = True
+    if success:
+        updates = {
+            "last_success": now,
+            "last_error": "",
+            "last_error_at": 0,
+        }
+    else:
+        updates = {
+            "last_error": str(error or "unknown")[:240],
+            "last_error_at": now,
+        }
+    for key, value in updates.items():
+        if feed.get(key) != value:
+            feed[key] = value
+            changed = True
+    return changed
+
+
+def _record_feed_post(feed: dict, *, now: int, posted: int = 1) -> bool:
+    changed = False
+    try:
+        current = int(feed.get("posted_count", 0) or 0)
+    except (TypeError, ValueError):
+        current = 0
+    updates = {
+        "last_posted": now,
+        "posted_count": current + max(0, int(posted or 0)),
+    }
+    for key, value in updates.items():
+        if feed.get(key) != value:
+            feed[key] = value
+            changed = True
+    return changed
+
 
 async def _reset_retry_state(bot, store, url):
     return await _set_retry_state(bot, store, url, 0, 0)
@@ -386,6 +490,14 @@ __all__ = [
     '_sleep_for_retry',
     '_format_retry_status',
     '_reset_feed_retry',
+    '_normalize_subscription_room',
+    '_feed_paused_rooms',
+    '_feed_active_rooms',
+    '_feed_is_globally_paused',
+    '_format_rss_timestamp',
+    '_feed_status_label',
+    '_record_feed_check',
+    '_record_feed_post',
     'cleanup_room_state',
     'get_runtime_state',
     'doctor',

@@ -39,6 +39,8 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
         events.append((BATTLE_EVENT_WEIGHT, "battle"))
     if len(players) >= 6:
         events.append((TEAM_BATTLE_EVENT_WEIGHT, "team_battle"))
+    if len(players) >= BOSS_MIN_PLAYERS:
+        events.append((BOSS_EVENT_WEIGHT, "boss"))
     events.append((ITEM_EVENT_WEIGHT, "item"))
     events.append((ITEM_DAMAGE_EVENT_WEIGHT, "item_damage"))
     if len(players) >= 2:
@@ -48,6 +50,7 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
     configured_weight = (
         BATTLE_EVENT_WEIGHT
         + TEAM_BATTLE_EVENT_WEIGHT
+        + BOSS_EVENT_WEIGHT
         + ITEM_EVENT_WEIGHT
         + ITEM_DAMAGE_EVENT_WEIGHT
         + ITEM_STEAL_EVENT_WEIGHT
@@ -72,6 +75,8 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
         return
     if selected == "team_battle":
         _run_team_battle(players, messages, room)
+        return
+    if selected == "boss" and _run_boss_event(players, messages, room):
         return
     if selected == "item":
         _run_item_blessing(players, messages, room)

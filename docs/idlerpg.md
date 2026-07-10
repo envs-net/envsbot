@@ -137,6 +137,7 @@ The game loop can also trigger rare classic IdleRPG-style events:
 
 - PvP battles between online players
 - team battles between two groups of online players
+- boss events where 3-5 eligible online players fight a room boss together
 - critical strikes that add time to the defeated player's clock
 - level-up battles, with classic odds below/above level 25
 - rare item drops and swaps after battles
@@ -167,6 +168,7 @@ IDLERPG = {
     "item_chance": 0.20,
     "battle_event_weight": 0.55,
     "team_battle_event_weight": 0.08,
+    "boss_event_weight": 0.06,
     "item_event_weight": 0.15,
     "item_damage_event_weight": 0.08,
     "item_steal_event_weight": 0.04,
@@ -198,6 +200,11 @@ IDLERPG = {
     "alignment_bonus_percent": 7,
     "quest_reward_percent": 25,
     "team_battle_percent": 20,
+    "boss_min_players": 3,
+    "boss_max_players": 5,
+    "boss_min_level": 10,
+    "boss_reward_percent": 12,
+    "boss_loss_percent": 4,
     "manual_duel_max_distance": 10,
     "manual_duel_cooldown_seconds": 3600,
 }
@@ -208,6 +215,11 @@ IDLERPG = {
 `battle_win_min_percent` and `battle_loss_min_percent` are minimum values. The
 opponent's level can increase the final battle percentage. Critical strikes,
 godsends and calamities use a random percentage within their configured range.
+
+Boss events require at least `boss_min_players` online players at or above
+`boss_min_level`. If the party defeats the boss, each participant receives a
+TTL reduction and can unlock the `Boss Slayer` / `Raid Veteran` achievements.
+If the party fails, each participant receives a small configured setback.
 
 Unique items use predefined envs.net-themed names and are exported in each
 player profile under `unique_items`. They never expose JIDs or private account

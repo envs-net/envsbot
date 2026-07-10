@@ -1,5 +1,5 @@
 """
-Pin messages in a room and list/show/search/delete stored pins.
+Pin messages in a room and list/show/search/delete/mark important stored pins.
 
 Usage
 -----
@@ -17,6 +17,7 @@ Manage pins:
     {prefix}pin show <id>
     {prefix}pin edit <id> <text>
     {prefix}pin tags <id> [tag ...]
+    {prefix}pin important [list|<id> on|off]
     {prefix}pin delete <id>
 
 Room control (MUC PM):
@@ -56,7 +57,7 @@ log = logging.getLogger(__name__)
 PLUGIN_META = {
     "name": "pin",
     "version": "1.3.0",
-    "description": "Pin room messages with paging, search, tags and non-reply fallback.",
+    "description": "Pin room messages with paging, search, tags, important pins and non-reply fallback.",
     "category": "utility",
     "requires": ["rooms", "_core"],
 }
@@ -257,10 +258,9 @@ def _format_pin_line(entry: dict[str, Any]) -> str:
                             or "—", max_lines=1, max_chars=240)
     tags = _format_pin_tags(entry.get("tags"))
     tag_suffix = f" | tags: {tags}" if tags else ""
-    return (f"• #{pin_id} by {actor_nick} at {created_at} "
+    marker = "⭐ " if entry.get("important") else "• "
+    return (f"{marker}#{pin_id} by {actor_nick} at {created_at} "
             f"| target: {target_nick} | {preview}{tag_suffix}")
-
-
 
 
 def _normalize_pin_tags(raw: Any) -> list[str]:
@@ -622,8 +622,8 @@ async def _on_groupchat_message(bot, msg):
 @command(
     "pin",
     role=Role.USER,
-    short="Pin, list, search, edit, tag or delete room pins.",
-    usage="{prefix}pin <add|list|search|find|show|edit|tags|delete|on|off|status> ...",
+    short="Pin, list, search, mark important, edit, tag or delete room pins.",
+    usage="{prefix}pin <add|list|important|search|find|show|edit|tags|delete|on|off|status> ...",
     examples=[
         "{prefix}pin status",
         "{prefix}pin list",
@@ -631,6 +631,8 @@ async def _on_groupchat_message(bot, msg):
         "{prefix}pin search ssh key",
         "{prefix}pin edit 3 Updated room info",
         "{prefix}pin tags 3 mail support",
+        "{prefix}pin important 3 on",
+        "{prefix}pin important list",
         "{prefix}rooms enable pin",
     ],
     category="rooms",
@@ -647,6 +649,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
                 f"{_prefix()}pin show <id> | "
                 f"{_prefix()}pin edit <id> <text> | "
                 f"{_prefix()}pin tags <id> [tag ...] | "
+                f"{_prefix()}pin important [list|<id> on|off] | "
                 f"{_prefix()}pin delete <id> | {_prefix()}pin on|off|status"
             ),
             mention=False,
@@ -697,6 +700,10 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
         await _pin_command_tags(bot, msg, room, args)
         return
 
+    if subcmd in {"important", "star", "unstar"}:
+        await _pin_command_important(bot, msg, room, args)
+        return
+
     if subcmd == "delete":
         await _pin_command_delete(bot, msg, room, args)
         return
@@ -706,7 +713,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
             msg,
             (
                 f"Unknown subcommand '{subcmd}'. "
-                f"Use {_prefix()}pin add|list|search|show|edit|tags|delete|on|off|status"
+                f"Use {_prefix()}pin add|list|important|search|show|edit|tags|delete|on|off|status"
             ),
             mention=False,
         )
@@ -731,7 +738,7 @@ async def _pin_command_list(bot, msg, room, args):
     state = await _load_pin_data(bot)
     bucket = _room_bucket(state, room)
     pins = list(bucket.get(PINS_FIELD, []))
-    pins.sort(key=lambda x: int(x.get("id", 0)), reverse=True)
+    pins.sort(key=lambda x: (bool(x.get("important")), int(x.get("id", 0))), reverse=True)
 
     if not pins:
         bot.reply(msg, "📌 No pinned messages stored for this room.",
@@ -766,7 +773,7 @@ async def _pin_command_search(bot, msg, room, args):
     bucket = _room_bucket(state, room)
     pins = list(bucket.get(PINS_FIELD, []))
     matches = [entry for entry in pins if _pin_matches_query(entry, query)]
-    matches.sort(key=lambda x: int(x.get("id", 0)), reverse=True)
+    matches.sort(key=lambda x: (bool(x.get("important")), int(x.get("id", 0))), reverse=True)
 
     if not matches:
         bot.reply(
@@ -825,6 +832,7 @@ async def _pin_command_show(bot, msg, room, args):
         f"📌 Pin #{entry.get('id')}",
         f"Room: {entry.get('room') or room}",
         f"Created: {_format_timestamp(entry.get('created_at'))}",
+        f"Important: {'yes' if entry.get('important') else 'no'}",
         f"Pinned by: {entry.get('actor_nick') or 'unknown'}"
         f" ({entry.get('actor_jid') or 'unknown'})",
         f"Target nick: {entry.get('target_nick') or 'unknown'}",
@@ -947,6 +955,98 @@ async def _pin_command_tags(bot, msg, room, args):
     bot.reply(
         msg,
         f"✅ Updated tags for pin #{pin_id}: {_format_pin_tags(tags) or 'none'}.",
+        mention=False,
+    )
+
+
+async def _pin_command_important(bot, msg, room, args):
+    if not await _is_enabled_for_room(bot, PIN_ENABLED_KEY, "pin", room):
+        bot.reply(msg, "ℹ️ Pin plugin is disabled in this room.")
+        return
+
+    action = str(args[0]).lower() if args else "important"
+    if action == "unstar":
+        args = ["important", *(args[1:]), "off"]
+    elif action == "star":
+        args = ["important", *(args[1:]), "on"]
+
+    if len(args) == 1 or str(args[1]).lower() in {"list", "ls"}:
+        page = 1
+        if len(args) >= 3:
+            try:
+                page = max(1, int(args[2]))
+            except ValueError:
+                bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+                return
+
+        state = await _load_pin_data(bot)
+        bucket = _room_bucket(state, room)
+        pins = [
+            entry for entry in bucket.get(PINS_FIELD, [])
+            if isinstance(entry, dict) and entry.get("important")
+        ]
+        pins.sort(key=lambda x: int(x.get("id", 0)), reverse=True)
+        if not pins:
+            bot.reply(msg, "⭐ No important pins stored for this room.", mention=False)
+            return
+        page_items, page, total_pages, total = paginate_items(pins, page, PAGE_SIZE)
+        lines = [f"⭐ Important pins for {room} ({total}) - Page {page}/{total_pages}", ""]
+        lines.extend(_format_pin_line(entry) for entry in page_items)
+        if page < total_pages:
+            lines.append("")
+            lines.append(f"Use {_prefix()}pin important list {page + 1} for the next page.")
+        bot.reply(msg, lines, mention=False)
+        return
+
+    if len(args) not in (2, 3):
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+        return
+
+    if not await _sender_can_manage_pins_in_room(bot, msg, room):
+        bot.reply(
+            msg,
+            "⛔ Only room moderators/admins/owners can mark important pins.",
+            mention=False,
+        )
+        return
+
+    try:
+        pin_id = int(args[1])
+    except ValueError:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+        return
+
+    value = str(args[2]).lower() if len(args) == 3 else "on"
+    if value not in {"on", "off", "yes", "no", "true", "false", "1", "0"}:
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+        return
+    important = value in {"on", "yes", "true", "1"}
+
+    state = await _load_pin_data(bot)
+    bucket = _room_bucket(state, room)
+    entry = _find_pin(bucket, pin_id)
+    if not entry:
+        bot.reply(msg, f"❌ Pin #{pin_id} not found in this room.")
+        return
+
+    if bool(entry.get("important")) == important:
+        state_text = "important" if important else "normal"
+        bot.reply(msg, f"ℹ️ Pin #{pin_id} is already marked as {state_text}.", mention=False)
+        return
+
+    entry["important"] = important
+    entry["updated_at"] = int(time.time())
+    await _save_pin_data(bot, state)
+    await audit_event(
+        bot,
+        "pin_importance_changed",
+        actor=getattr(msg.get("from"), "bare", None),
+        target=room,
+        details={"pin_id": pin_id, "important": important},
+    )
+    bot.reply(
+        msg,
+        f"✅ Pin #{pin_id} marked as {'important' if important else 'normal'}.",
         mention=False,
     )
 

@@ -470,10 +470,10 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                     <div class="card"><span>Highest level</span><strong><?php echo count($leaderboard) > 0 ? 'lv.' . h(idlerpg_player_level($leaderboard[0])) : 'n/a'; ?></strong></div>
                     <div class="card"><span>Quest</span><strong><?php echo $quest ? 'active' : 'none'; ?></strong></div>
                 </div>
-                <h2>Top players</h2>
+                <h2>Top 5 players</h2>
                 <?php if (count($leaderboard) > 0): ?>
                     <table><thead><tr><th>#</th><th>Character</th><th>Class</th><th>Level</th><th>Next level</th></tr></thead><tbody>
-                    <?php foreach (array_slice($leaderboard, 0, 10) as $index => $player): $name = idlerpg_player_name($player); ?>
+                    <?php foreach (array_slice($leaderboard, 0, 5) as $index => $player): $name = idlerpg_player_name($player); ?>
                         <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td></tr>
                     <?php endforeach; ?>
                     </tbody></table>
@@ -498,6 +498,10 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                             <tr><th>Alignment</th><td><?php echo h($selected_profile['alignment'] ?? 'neutral'); ?></td></tr>
                             <tr><th>Map</th><td>[<?php echo h((int) idlerpg_player_coord($selected_profile, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($selected_profile, 'y')); ?>]</td></tr>
                             <tr><th>Item sum</th><td><?php echo h($selected_profile['item_sum'] ?? 0); ?></td></tr>
+                            <?php $profile_stats = is_array($selected_profile['stats'] ?? null) ? $selected_profile['stats'] : []; ?>
+                            <tr><th>Bosses defeated</th><td><?php echo h($profile_stats['bosses_defeated'] ?? 0); ?></td></tr>
+                            <tr><th>Random battles won</th><td><?php echo h($profile_stats['battles_won'] ?? 0); ?></td></tr>
+                            <tr><th>Quests completed</th><td><?php echo h($profile_stats['quests_completed'] ?? 0); ?></td></tr>
                             <tr><th>Status</th><td><?php echo idlerpg_player_online($selected_profile) ? 'online' : 'offline'; ?></td></tr>
                         </tbody></table>
                     </section>

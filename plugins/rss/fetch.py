@@ -16,6 +16,12 @@ from utils.url_safety import (
     validate_fetch_url_async,
 )
 from core_plugins.rooms import JOINED_ROOMS
+from .store import (
+    _apply_retry_state,
+    _feed_status_label,
+    _format_rss_timestamp,
+    _record_feed_check,
+)
 
 
 SIMILARITY_THRESHOLD = float(config.get("rss_similarity_threshold", 0.8) or 0.8)
@@ -513,7 +519,12 @@ async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
     retry_delay = _retry_delay(period, error_count)
     next_retry = now + retry_delay
 
-    await _set_retry_state(bot, store, url, error_count, next_retry)
+    def mutator(feed):
+        changed = _apply_retry_state(feed, error_count, next_retry)
+        changed = _record_feed_check(feed, now=now, success=False, error=str(exc)) or changed
+        return changed
+
+    await _update_feed(bot, store, url, mutator)
     log.debug(
         "Feed %s backoff set to %s errors, retry at %s",
         url,
@@ -534,10 +545,15 @@ async def _handle_empty_feed(url, period, parsed):
 def _format_feed_list_item(feed_url: str, data: dict, now=None) -> str:
     """Format one RSS feed entry for ``rss list`` output."""
     status = _format_retry_status(data, now=now)
+    paused_rooms = data.get("paused_rooms") if isinstance(data, dict) else []
+    paused_text = f"\n Paused rooms: {', '.join(paused_rooms)}" if paused_rooms else ""
     return (
         f"- {feed_url}\n Title: {data.get('title', feed_url)}\n"
+        f" Status: {_feed_status_label(data, now=now)}\n"
         f" Period: {data.get('period', '?')}s\n"
         f" Rooms: {', '.join(data.get('rooms', []))}\n"
+        f" Last success: {_format_rss_timestamp(data.get('last_success'))}\n"
+        f" Last error: {data.get('last_error') or 'none'}{paused_text}\n"
         f"{status}"
     )
 
@@ -595,9 +611,17 @@ def _format_feed_list(feeds: dict, args, bot=None, now=None) -> list[str] | None
 
 
 async def _handle_feed_recovery(bot, store, url, error_count):
+    now = _now()
+
+    def mutator(feed):
+        changed = _record_feed_check(feed, now=now, success=True)
+        if error_count > 0:
+            changed = _apply_retry_state(feed, 0, 0) or changed
+        return changed
+
     if error_count > 0:
         log.debug("Feed %s recovered, resetting error count", url)
-        await _reset_retry_state(bot, store, url)
+    await _update_feed(bot, store, url, mutator)
 
 
 async def _maybe_update_feed_link(bot, store, url, parsed, feed_link):

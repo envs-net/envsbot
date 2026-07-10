@@ -16,11 +16,13 @@ from .fetch import (
     _post_entry_to_rooms,
     _resolve_relative_url,
     _set_feed_field,
+    get_feeds,
+    save_feeds,
     _should_include_description,
     entry_get,
     html_to_text_with_links,
 )
-from .store import get_effective_template
+from .store import get_effective_template, _feed_active_rooms, _record_feed_post
 
 
 log = logging.getLogger(__name__)
@@ -188,7 +190,8 @@ async def _post_rss_entry_to_rooms(bot, store, rooms, url, context):
 
 
 async def _post_new_entries(bot, store, url, feed_title,
-                            feed_link, rooms, new_entries):
+                            feed_link, rooms, new_entries, feed: dict | None = None):
+    active_rooms = _feed_active_rooms(feed or {"rooms": rooms})
     for entry, entry_id in reversed(new_entries):
         entry_link = _normalize_url(
             _resolve_relative_url(feed_link, _extract_entry_link(entry))
@@ -210,9 +213,15 @@ async def _post_new_entries(bot, store, url, feed_title,
             entry_date=_entry_date(entry),
         )
 
-        posted = await _post_rss_entry_to_rooms(bot, store, rooms, url, context)
+        posted = await _post_rss_entry_to_rooms(bot, store, active_rooms, url, context)
 
-        if not await _save_last_id_for_template_post(bot, store, url, entry_id):
+        def mutator(feed_data):
+            changed = _set_last_id_in_feed(feed_data, entry_id)
+            if posted:
+                changed = _record_feed_post(feed_data, now=_feed_now(), posted=1) or changed
+            return changed
+
+        if not await _update_feed_for_post(bot, store, url, mutator):
             log.warning("Feed %s was deleted during posting!", url)
             break
 
@@ -227,3 +236,26 @@ async def _post_new_entries(bot, store, url, feed_title,
                 "[RSS] Saved last_id for %s without posting; no joined rooms",
                 url,
             )
+
+
+def _set_last_id_in_feed(feed_data: dict, entry_id: str) -> bool:
+    if feed_data.get("last_id") == entry_id:
+        return False
+    feed_data["last_id"] = entry_id
+    return True
+
+
+def _feed_now() -> int:
+    import time
+    return int(time.time())
+
+
+async def _update_feed_for_post(bot, store, url: str, mutator):
+    feeds = await get_feeds(store)
+    feed = feeds.get(url)
+    if feed is None:
+        return False
+    changed = mutator(feed)
+    if changed:
+        await save_feeds(store, feeds)
+    return True

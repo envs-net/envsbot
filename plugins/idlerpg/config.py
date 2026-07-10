@@ -153,6 +153,46 @@ TEAM_BATTLE_EVENT_WEIGHT = float(
 )
 
 
+BOSS_EVENT_WEIGHT = float(
+    _cfg.get("boss_event_weight", config.get("idlerpg_boss_event_weight", 0.06)) or 0.06
+)
+
+
+BOSS_MIN_PLAYERS = int(
+    _cfg.get("boss_min_players", config.get("idlerpg_boss_min_players", 3)) or 3
+)
+
+
+BOSS_MAX_PLAYERS = int(
+    _cfg.get("boss_max_players", config.get("idlerpg_boss_max_players", 5)) or 5
+)
+
+
+BOSS_MIN_LEVEL = int(
+    _cfg.get("boss_min_level", config.get("idlerpg_boss_min_level", 10)) or 10
+)
+
+
+BOSS_REWARD_PERCENT = int(
+    _cfg.get("boss_reward_percent", config.get("idlerpg_boss_reward_percent", 12)) or 12
+)
+
+
+BOSS_LOSS_PERCENT = int(
+    _cfg.get("boss_loss_percent", config.get("idlerpg_boss_loss_percent", 4)) or 4
+)
+
+
+BOSS_POWER_MIN_FACTOR = float(
+    _cfg.get("boss_power_min_factor", config.get("idlerpg_boss_power_min_factor", 0.75)) or 0.75
+)
+
+
+BOSS_POWER_MAX_FACTOR = float(
+    _cfg.get("boss_power_max_factor", config.get("idlerpg_boss_power_max_factor", 1.25)) or 1.25
+)
+
+
 BATTLE_WIN_MIN_PERCENT = int(
     _cfg.get("battle_win_min_percent", config.get("idlerpg_battle_win_min_percent", 7)) or 7
 )
@@ -407,6 +447,14 @@ __all__ = [
     'CRITICAL_STRIKE_CHANCE_EVIL',
     'ITEM_DROP_CHANCE',
     'TEAM_BATTLE_EVENT_WEIGHT',
+    'BOSS_EVENT_WEIGHT',
+    'BOSS_MIN_PLAYERS',
+    'BOSS_MAX_PLAYERS',
+    'BOSS_MIN_LEVEL',
+    'BOSS_REWARD_PERCENT',
+    'BOSS_LOSS_PERCENT',
+    'BOSS_POWER_MIN_FACTOR',
+    'BOSS_POWER_MAX_FACTOR',
     'BATTLE_WIN_MIN_PERCENT',
     'BATTLE_LOSS_MIN_PERCENT',
     'CRITICAL_MIN_PERCENT',

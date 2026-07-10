@@ -2,6 +2,7 @@
 
 import asyncio
 from utils.task_supervisor import create_plugin_task
+from .store import _feed_is_globally_paused
 
 
 CHECK_TASKS = {}
@@ -14,6 +15,10 @@ async def rss_check_loop(bot, store, url, period):
 
         if feed is None:
             break
+
+        if _feed_is_globally_paused(feed):
+            await asyncio.sleep(period)
+            continue
 
         feed_title = feed["title"]
         feed_link = feed.get("link", url)
@@ -50,7 +55,7 @@ async def rss_check_loop(bot, store, url, period):
 
         new_entries = _collect_new_entries(parsed, last_id)
         await _post_new_entries(
-            bot, store, url, feed_title, feed_link, rooms, new_entries
+            bot, store, url, feed_title, feed_link, rooms, new_entries, feed=feed
         )
 
         await asyncio.sleep(period)
