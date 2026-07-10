@@ -82,3 +82,36 @@ def test_public_events_redact_private_jids_from_text_players_and_data():
     assert "actor_jid" not in event.get("data", {})
     assert "target_jid" not in event.get("data", {})
     assert "[redacted-jid]" in payload
+
+
+def test_active_quest_export_omits_stale_private_jids(tmp_path):
+    room = idlerpg._blank_room()
+    room["players"] = {
+        "alice@example.org": idlerpg._normalize_player(
+            "alice@example.org",
+            {
+                "jid": "alice@example.org",
+                "name": "Alice",
+                "class": "sysadmin",
+                "level": 42,
+                "next": 123,
+            },
+        )
+    }
+    room["quest"] = {
+        "active": True,
+        "type": "time",
+        "text": "defeat the stale JID leak",
+        "started_at": 100,
+        "complete_at": 200,
+        "questers": ["alice@example.org", "stale@example.org"],
+        "route": [],
+        "route_index": 0,
+    }
+
+    _summary, payload = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
+    exported = json.dumps(payload, sort_keys=True)
+
+    assert payload["quest"]["questers"] == ["Alice"]
+    assert "alice@example.org" not in exported
+    assert "stale@example.org" not in exported

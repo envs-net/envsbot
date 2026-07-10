@@ -143,6 +143,36 @@ async def test_message_penalty_uses_character_name_when_jid_is_unavailable(monke
 
 
 @pytest.mark.asyncio
+async def test_message_penalty_uses_get_mucnick_when_resource_is_missing():
+    bot = DummyBot()
+    register_msg = DummyMsg(resource="skx")
+    JOINED_ROOMS["room@conf"]["nicks"]["skx"] = {"jid": None, "affiliation": "member"}
+    await idlerpg._handle_register(
+        bot,
+        "skx@example.org",
+        ["register", "skx", "test"],
+        register_msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["skx@example.org"]
+    before = player["next"]
+
+    class MucNickOnlyMsg(DummyMsg):
+        def __init__(self):
+            super().__init__(body="hello", resource=None, stanza_id="mucnick-only")
+            self.data["mucnick"] = None
+
+        def get_mucnick(self):
+            return "skx"
+
+    await idlerpg.on_message(bot, MucNickOnlyMsg())
+
+    assert player["next"] > before
+    assert player["penalties"]["message"] > 0
+
+
+@pytest.mark.asyncio
 async def test_message_penalty_generic_message_event_and_dedupe_by_stanza_id():
     bot = DummyBot()
     register_msg = DummyMsg(resource="skx")

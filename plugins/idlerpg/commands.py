@@ -1146,7 +1146,7 @@ async def on_message(bot, msg):
         if not await _core._is_enabled_for_room(bot, IDLERPG_ENABLED_KEY, PLUGIN_NAME, room_jid):
             return
         bot_nick = getattr(getattr(bot, "presence", None), "joined_rooms", {}).get(room_jid)
-        actor_nick = msg.get("mucnick") or getattr(msg["from"], "resource", None)
+        actor_nick = _message_actor_nick(msg)
         if bot_nick and actor_nick and str(bot_nick).lower() == str(actor_nick).lower():
             return
         if not COUNT_COMMAND_MESSAGES and body.startswith(_command_prefix(bot)):

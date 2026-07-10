@@ -296,8 +296,9 @@ def _export_room_state(
             "route_index": int(quest.get("route_index", 0) or 0),
             "current_target": list(current_target) if current_target is not None else None,
             "questers": [
-                _display_player(room.get("players", {}).get(jid, {"name": jid}))
+                _display_player(player)
                 for jid in quest.get("questers", [])
+                if isinstance((player := room.get("players", {}).get(jid)), dict)
             ],
         }
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
