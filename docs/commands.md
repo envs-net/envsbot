@@ -1822,6 +1822,11 @@ Examples:
 
 - `,remind status`
 - `,remind 10m check logs`
+- `,remind 2026-05-01 14:30 Take a break`
+- `,remind 2026-05-01 14:30 CEST Take a break`
+- `,remind 2026-05-01 14:30 Europe/Berlin Take a break`
+- `,remind 2026-05-01 14:30 +02:00 Take a break`
+- `,timezone set Europe/Berlin`
 - `,rooms enable reminder`
 
 #### `,remind delete`

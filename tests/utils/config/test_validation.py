@@ -304,6 +304,28 @@ def test_validate_config_accepts_valid_timezone():
     config_mod.validate_config(cfg, require_required_keys=True)
 
 
+def test_validate_config_checks_reminder_default_timezone():
+    base = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+    }
+
+    config_mod.validate_config(
+        {**base, "reminder_default_timezone": "Europe/Berlin"},
+        require_required_keys=True,
+    )
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(
+            {**base, "reminder_default_timezone": "CEST"},
+            require_required_keys=True,
+        )
+
+    assert "reminder_default_timezone: must be a valid IANA timezone" in str(exc.value)
+
+
 def test_validate_config_rejects_non_positive_rss_interval():
     cfg = {
         "jid": "bot@example.org",

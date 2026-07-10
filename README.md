@@ -289,7 +289,7 @@ Optional plugins:
 * `karma` - room-local karma tracking
 * `pin` - save and manage pinned messages
 * `poll` - room polls with voting and history
-* `reminder` - timed reminders
+* `reminder` - timed reminders with relative, absolute and timezone-aware scheduling
 * `rss` - RSS/Atom feed watcher with optional per-room and per-feed output templates
 * `sed` - sed-style message corrections
 * `tell` - offline messages delivered when users rejoin
@@ -299,6 +299,8 @@ Optional plugins:
 * `weather` - weather lookup from configured location data or city/ZIP input
 * `xkcd` - latest, random, specific and searched XKCD comics
 * `xmpp` - XMPP diagnostics, discovery, uptime, version and SRV checks
+
+Reminder timezone notes: absolute reminders accept optional timezone tokens such as `CEST`, `CET`, `UTC`, `Europe/Berlin` or `+02:00`. Without an explicit token, the bot uses the user profile timezone from `,timezone set <IANA timezone>`, then `REMINDER_DEFAULT_TIMEZONE` from `config.py`, then UTC.
 
 ---
 

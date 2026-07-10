@@ -151,18 +151,20 @@ def _validate_numeric_ranges(cfg, errors):
 
 
 def _validate_timezone(cfg, errors):
-    if "timezone" not in cfg:
-        return
+    timezone_keys = ("timezone", "reminder_default_timezone")
+    for key in timezone_keys:
+        if key not in cfg:
+            continue
 
-    timezone = cfg["timezone"]
-    if timezone is None:
-        return
-    if not isinstance(timezone, str):
-        return
+        timezone = cfg[key]
+        if timezone is None:
+            continue
+        if not isinstance(timezone, str):
+            continue
 
-    if timezone not in AVAILABLE_TIMEZONES:
-        errors.append(
-            "timezone: must be a valid IANA timezone, e.g. Europe/Berlin")
+        if timezone not in AVAILABLE_TIMEZONES:
+            errors.append(
+                f"{key}: must be a valid IANA timezone, e.g. Europe/Berlin")
 
 
 def _validate_avatar(cfg, errors, warnings):

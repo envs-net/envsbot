@@ -113,6 +113,7 @@ DEFAULT_CONFIG = {
     "xkcd_index_start_delay_seconds": 30,
     "xkcd_index_request_delay_seconds": 0.15,
     "xkcd_http_timeout": 10,
+    "reminder_default_timezone": "UTC",
 }
 
 
@@ -205,6 +206,7 @@ OPTIONAL_CONFIG_TYPES = {
     "youtube_api_key": str,
     "reminder_enabled": bool,
     "reminder_max_age_days": int,
+    "reminder_default_timezone": str,
     "version_check_enabled": bool,
     "version_check_interval": int,
     "version_check_url": str,
@@ -265,6 +267,7 @@ PYTHON_CONFIG_KEY_MAP = {
     "YOUTUBE_API_KEY": "youtube_api_key",
     "REMINDER_ENABLED": "reminder_enabled",
     "REMINDER_MAX_AGE_DAYS": "reminder_max_age_days",
+    "REMINDER_DEFAULT_TIMEZONE": "reminder_default_timezone",
     "RSS_GLOBAL_QUERY_INTERVAL": "rss_global_query_interval",
     "MAX_NEW_FEED_ENTRIES": "max_new_feed_entries",
     "RSS_MAX_ENTRIES_PER_POLL": "rss_max_entries_per_poll",

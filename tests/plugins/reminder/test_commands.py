@@ -25,9 +25,10 @@ async def test_remind_command_and_status_controls(dummy_bot, dummy_msg):
     text = "ℹ️ Usage: ,remind <duration|date time> <message>\n"
     text += "Example: ,remind 30m Take a break\n"
     text += "Example: ,remind 2026-05-01 14:30 Take a break\n"
+    text += "Example: ,remind 2026-05-01 14:30 CEST Take a break\n"
     text += "Example: ,remind 01.05.2026 14:30 Take a break\n"
     text += "Formats: 10s, 5m, 1h, 2d, 1h30m,"
-    text += " YYYY-MM-DD HH:MM, DD.MM.YYYY HH:MM (max 365 days)"
+    text += " YYYY-MM-DD HH:MM, DD.MM.YYYY HH:MM, optional TZ (max 365 days)"
     dummy_bot.reply.assert_any_call(
         dummy_msg, text)
 

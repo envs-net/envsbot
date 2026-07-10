@@ -3,7 +3,7 @@
 import datetime
 import pytz
 from utils.command import command, Role
-from core_plugins._core import get_user_tzinfo
+from .parsing import get_reminder_tzinfo
 
 
 def _utcnow() -> datetime.datetime:
@@ -75,7 +75,7 @@ async def list_reminders(bot, sender_jid, nick, args, msg, is_room):
     try:
         ctx = _reminder_context(bot, sender_jid, nick, msg, is_room)
         user_jid = ctx["user_jid"]
-        user_tz = await get_user_tzinfo(bot, ctx.get("timezone_jid"))
+        user_tz = await get_reminder_tzinfo(bot, ctx.get("timezone_jid"))
 
         reminders = await _get_pending_reminders(bot, user_jid)
 

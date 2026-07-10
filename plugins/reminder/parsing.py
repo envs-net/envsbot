@@ -1,8 +1,116 @@
 """Split module for plugins/reminder.py: parsing."""
 
 import datetime
+import logging
+import re
+
 import pytz
+from utils.config import config
 from core_plugins._core import JOINED_ROOMS, _is_muc_pm, _normalize_bare_jid, parse_duration
+
+
+log = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _utc_tz():
+    return pytz.UTC
+
+
+_FIXED_TIMEZONE_ALIASES: dict[str, datetime.tzinfo] = {
+    "Z": datetime.timezone.utc,
+    "UTC": datetime.timezone.utc,
+    "GMT": datetime.timezone.utc,
+    "CET": datetime.timezone(datetime.timedelta(hours=1), "CET"),
+    "MEZ": datetime.timezone(datetime.timedelta(hours=1), "CET"),
+    "CEST": datetime.timezone(datetime.timedelta(hours=2), "CEST"),
+    "MESZ": datetime.timezone(datetime.timedelta(hours=2), "CEST"),
+}
+
+_OFFSET_TIMEZONE_RE = re.compile(r"^([+-])(\d{2}):?(\d{2})$")
+
+
+
+def _timezone_from_token(token: str) -> datetime.tzinfo | None:
+    """Resolve one command-line timezone token.
+
+    Supports IANA names such as ``Europe/Berlin``, common explicit reminder
+    abbreviations (UTC/CET/CEST/MEZ/MESZ), and numeric offsets such as ``+0200``
+    or ``+02:00``.  The abbreviation handling is intentionally fixed-offset:
+    when a user writes CEST, they explicitly requested UTC+02:00.
+    """
+    cleaned = str(token or "").strip()
+    if not cleaned:
+        return None
+
+    upper = cleaned.upper()
+    if upper in _FIXED_TIMEZONE_ALIASES:
+        return _FIXED_TIMEZONE_ALIASES[upper]
+
+    match = _OFFSET_TIMEZONE_RE.match(cleaned)
+    if match:
+        sign, hour_s, minute_s = match.groups()
+        hours = int(hour_s)
+        minutes = int(minute_s)
+        if hours > 23 or minutes > 59:
+            return None
+        delta = datetime.timedelta(hours=hours, minutes=minutes)
+        if sign == "-":
+            delta = -delta
+        return datetime.timezone(delta, cleaned)
+
+    if cleaned in pytz.all_timezones:
+        return pytz.timezone(cleaned)
+
+    return None
+
+
+def _reminder_default_tzinfo() -> datetime.tzinfo:
+    """Return the reminder fallback timezone from config, defaulting to UTC."""
+    timezone_name = str(config.get("reminder_default_timezone", "UTC") or "UTC")
+    timezone = _timezone_from_token(timezone_name)
+    if timezone is not None:
+        return timezone
+
+    log.warning(
+        "[REMINDER] Invalid reminder_default_timezone %r; falling back to UTC",
+        timezone_name,
+    )
+    return pytz.timezone("UTC")
+
+
+async def get_reminder_tzinfo(bot, timezone_jid: str | None) -> datetime.tzinfo:
+    """Return a user's vCard timezone or the reminder config fallback.
+
+    The generic core helper falls back to UTC when no user TIMEZONE is stored.
+    For reminders we want a configurable bot-side default while still respecting
+    an explicitly configured user timezone, including an explicit UTC setting.
+    """
+    if timezone_jid:
+        try:
+            store = bot.db.users.plugin("vcard")
+            timezone_name = await store.get(str(timezone_jid), "TIMEZONE")
+        except Exception as exc:
+            log.warning(
+                "[REMINDER] Could not read TIMEZONE for %s: %s; using default",
+                timezone_jid,
+                exc,
+            )
+        else:
+            timezone = _timezone_from_token(str(timezone_name or ""))
+            if timezone is not None:
+                return timezone
+            if timezone_name:
+                log.warning(
+                    "[REMINDER] Invalid TIMEZONE for %s: %s; using default",
+                    timezone_jid,
+                    timezone_name,
+                )
+
+    return _reminder_default_tzinfo()
 
 
 def _timezone_lookup_jid(bot, sender_jid, msg, is_room: bool) -> str | None:
@@ -116,16 +224,13 @@ def _ensure_utc(
     return dt.astimezone(datetime.timezone.utc)
 
 
-def parse_absolute_datetime(
+def _parse_absolute_datetime_with_timezone(
     args: list[str],
     user_tz: datetime.tzinfo | None = None,
-) -> tuple[datetime.datetime | None, int]:
-    """Parse an absolute date/time from the beginning of command arguments.
-
-    Returns (datetime_utc, consumed_arg_count), or (None, 0) if parsing fails.
-    """
+) -> tuple[datetime.datetime | None, int, datetime.tzinfo | None]:
+    """Parse absolute date/time and optional timezone from command args."""
     if not args:
-        return None, 0
+        return None, 0, None
 
     candidates: list[tuple[str, int]] = [(args[0], 1)]
 
@@ -147,11 +252,36 @@ def parse_absolute_datetime(
         for fmt in formats:
             try:
                 dt = datetime.datetime.strptime(candidate, fmt)
-                return _ensure_utc(dt, user_tz), consumed
             except ValueError:
                 continue
 
-    return None, 0
+            explicit_tz = None
+            if len(args) > consumed:
+                explicit_tz = _timezone_from_token(args[consumed])
+                if explicit_tz is not None:
+                    consumed += 1
+
+            display_tz = explicit_tz or user_tz or _reminder_default_tzinfo()
+            return _ensure_utc(dt, display_tz), consumed, display_tz
+
+    return None, 0, None
+
+
+def parse_absolute_datetime(
+    args: list[str],
+    user_tz: datetime.tzinfo | None = None,
+) -> tuple[datetime.datetime | None, int]:
+    """Parse an absolute date/time from the beginning of command arguments.
+
+    Returns (datetime_utc, consumed_arg_count), or (None, 0) if parsing fails.
+    An optional timezone token after the time is consumed when present, e.g.
+    ``2026-07-10 13:23 CEST`` or ``2026-07-10 13:23 Europe/Berlin``.
+    """
+    remind_at, consumed, _display_tz = _parse_absolute_datetime_with_timezone(
+        args,
+        user_tz,
+    )
+    return remind_at, consumed
 
 
 def parse_reminder_when(
@@ -174,7 +304,10 @@ def parse_reminder_when(
 
         return seconds, message, f"in {format_seconds(seconds)}"
 
-    remind_at, consumed = parse_absolute_datetime(args, user_tz)
+    remind_at, consumed, display_tz = _parse_absolute_datetime_with_timezone(
+        args,
+        user_tz,
+    )
     if remind_at is None or len(args) <= consumed:
         return None, None, None
 
@@ -187,7 +320,7 @@ def parse_reminder_when(
         return None, None, None
 
     display_when = f"on {_format_local_datetime(
-        remind_at, user_tz or _utc_tz())}"
+        remind_at, display_tz or user_tz or _reminder_default_tzinfo())}"
     return seconds, message, display_when
 
 

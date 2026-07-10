@@ -262,6 +262,13 @@ BIRTHDAY_CHECK_INTERVAL_SECONDS = 3600
 REMINDER_ENABLED = True
 REMINDER_MAX_AGE_DAYS = 365
 
+# Fallback timezone for absolute reminder dates when the user has no TIMEZONE
+# set in their bot profile. Explicit command timezones such as CEST, CET, UTC,
+# Europe/Berlin or +02:00 override this per reminder. Use an IANA timezone
+# such as Europe/Berlin when you want automatic DST handling; CET/CEST are
+# treated as explicit fixed offsets.
+REMINDER_DEFAULT_TIMEZONE = "UTC"
+
 
 # ================= SED CORRECTIONS =================
 

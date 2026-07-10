@@ -6,7 +6,7 @@ This directory contains the operator and command documentation for EnvsBot.
 
 - [`commands.md`](commands.md) - generated command reference from the live command metadata
 - [`help.md`](help.md) - runtime help behavior and usage examples
-- [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, RSS and grants
+- [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, reminders, RSS and grants
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
 - [`deployment.md`](deployment.md) - install layout, console entrypoint and systemd unit
 - [`diagnostics.md`](diagnostics.md) - doctor checks, plugin state, task restart, audit filters and rate limits
@@ -23,7 +23,7 @@ Operational notes:
 - Runtime help should use `,help <plugin>` for plugin help and `,help ,<command>` for unambiguous command help.
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
-- Operator-tunable plugin limits and timeouts are documented directly in `config_sample.py`.
+- Operator-tunable plugin limits, timeouts and reminder timezone defaults are documented directly in `config_sample.py`.
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status full` includes supervised background-task state.
 - `,tasks` shows supervised background tasks without the rest of the status output.
@@ -69,3 +69,15 @@ Examples:
 ```
 
 The sender must be a room admin/owner in the target room or have a bot moderator/admin role. This allows clients without MUC-PM support to manage room settings safely. If you use a notification room as an operational/admin room, pass the target room JID explicitly in room-setting commands. `ROOM_PLUGIN_DEFAULTS` in `config.py` defines the defaults for newly added rooms and for `,rooms set_plugin_defaults`; existing per-room settings are not changed until that command is used.
+
+## Reminder timezones
+
+Absolute reminders can include an explicit timezone token after the time:
+
+```text
+,remind 2026-07-10 13:23 CEST deploy window
+,remind 2026-07-10 13:23 Europe/Berlin deploy window
+,remind 2026-07-10 13:23 +02:00 deploy window
+```
+
+When no timezone is given, reminders use the user's stored `TIMEZONE` from `,timezone set <IANA timezone>`, then `REMINDER_DEFAULT_TIMEZONE` from `config.py`, then UTC.

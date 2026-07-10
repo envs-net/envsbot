@@ -1,5 +1,6 @@
 from .helpers import (
     MY_TZ,
+    AsyncMock,
     MagicMock,
     datetime,
     pytest,
@@ -33,6 +34,21 @@ def test_parse_absolute_datetime():
     dt2, count2 = reminder.parse_absolute_datetime(
         ["01.05.2026", "14:30"], MY_TZ)
     assert dt2 is not None and count2 == 2
+
+    dt3, count3 = reminder.parse_absolute_datetime(
+        ["2026-07-10", "13:23", "CEST", "test"], pytz.UTC)
+    assert dt3 is not None and count3 == 3
+    assert dt3.hour == 11 and dt3.minute == 23
+
+    dt4, count4 = reminder.parse_absolute_datetime(
+        ["2026-01-10", "13:23", "CET", "test"], pytz.UTC)
+    assert dt4 is not None and count4 == 3
+    assert dt4.hour == 12 and dt4.minute == 23
+
+    dt5, count5 = reminder.parse_absolute_datetime(
+        ["2026-01-10", "13:23", "Europe/Berlin", "test"], pytz.UTC)
+    assert dt5 is not None and count5 == 3
+    assert dt5.hour == 12 and dt5.minute == 23
     # Invalid
     dt, count = reminder.parse_absolute_datetime(["bad"], MY_TZ)
     assert dt is None
@@ -55,6 +71,49 @@ async def test_parse_reminder_when_duration_and_datetime():
     # Invalid cases
     assert reminder.parse_reminder_when([], MY_TZ) == (None, None, None)
     assert reminder.parse_reminder_when(["5s"], MY_TZ) == (None, None, None)
+
+
+def test_parse_reminder_when_explicit_timezone(monkeypatch):
+    fixed_now = datetime.datetime(2026, 7, 10, 10, 0, tzinfo=datetime.timezone.utc)
+    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+
+    sec, msg, when = reminder.parse_reminder_when(
+        ["2026-07-10", "13:23", "CEST", "TEST1"],
+        pytz.UTC,
+    )
+
+    assert sec == 4980
+    assert msg == "TEST1"
+    assert when == "on 2026-07-10 13:23 CEST"
+
+
+def test_timezone_from_token_and_default_config(monkeypatch):
+    assert reminder._timezone_from_token("CEST").utcoffset(None).total_seconds() == 7200
+    assert reminder._timezone_from_token("CET").utcoffset(None).total_seconds() == 3600
+    assert str(reminder._timezone_from_token("Europe/Berlin")) == "Europe/Berlin"
+    assert reminder._timezone_from_token("+02:30").utcoffset(None).total_seconds() == 9000
+    assert reminder._timezone_from_token("Mars/Base") is None
+
+    monkeypatch.setitem(reminder.config, "reminder_default_timezone", "Europe/Berlin")
+    assert str(reminder._reminder_default_tzinfo()) == "Europe/Berlin"
+
+    monkeypatch.setitem(reminder.config, "reminder_default_timezone", "Invalid/Zone")
+    assert str(reminder._reminder_default_tzinfo()) == "UTC"
+
+
+@pytest.mark.asyncio
+async def test_get_reminder_tzinfo_uses_user_timezone_or_config_default(monkeypatch, dummy_bot):
+    store = MagicMock()
+    store.get = AsyncMock(return_value="UTC")
+    dummy_bot.db.users.plugin.return_value = store
+    assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "UTC"
+
+    store.get = AsyncMock(return_value=None)
+    monkeypatch.setitem(reminder.config, "reminder_default_timezone", "Europe/Berlin")
+    assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "Europe/Berlin"
+
+    store.get = AsyncMock(side_effect=RuntimeError("db"))
+    assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "Europe/Berlin"
 
 
 def test_format_seconds():

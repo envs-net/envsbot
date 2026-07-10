@@ -5,7 +5,8 @@ import datetime
 import logging
 from utils.command import command, Role
 from utils.config import config
-from core_plugins._core import handle_room_toggle_command, get_user_tzinfo
+from core_plugins._core import handle_room_toggle_command
+from .parsing import get_reminder_tzinfo
 
 
 log = logging.getLogger(__name__)
@@ -442,6 +443,11 @@ async def _restore_pending_reminders(bot) -> int:
     examples=[
         "{prefix}remind status",
         "{prefix}remind 10m check logs",
+        "{prefix}remind 2026-05-01 14:30 Take a break",
+        "{prefix}remind 2026-05-01 14:30 CEST Take a break",
+        "{prefix}remind 2026-05-01 14:30 Europe/Berlin Take a break",
+        "{prefix}remind 2026-05-01 14:30 +02:00 Take a break",
+        "{prefix}timezone set Europe/Berlin",
         "{prefix}rooms enable reminder",
     ],
     category="utility",
@@ -476,16 +482,17 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
             f"ℹ️ Usage: {prefix}remind <duration|date time> <message>\n"
             f"Example: {prefix}remind 30m Take a break\n"
             f"Example: {prefix}remind 2026-05-01 14:30 Take a break\n"
+            f"Example: {prefix}remind 2026-05-01 14:30 CEST Take a break\n"
             f"Example: {prefix}remind 01.05.2026 14:30 Take a break\n"
             "Formats: 10s, 5m, 1h, 2d, 1h30m, "
-            "YYYY-MM-DD HH:MM, DD.MM.YYYY HH:MM "
+            "YYYY-MM-DD HH:MM, DD.MM.YYYY HH:MM, optional TZ "
             f"(max {config.get('reminder_max_age_days', 365)} days)",
         )
         return
 
     try:
         ctx = _reminder_context(bot, sender_jid, nick, msg, is_room)
-        user_tz = await get_user_tzinfo(bot, ctx.get("timezone_jid"))
+        user_tz = await get_reminder_tzinfo(bot, ctx.get("timezone_jid"))
 
         seconds, message, display_when = parse_reminder_when(args, user_tz)
 
@@ -494,7 +501,8 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
                 msg,
                 "❌ Invalid reminder time.\n"
                 "Use relative format: 10s, 5m, 1h, 2d, 1h30m\n"
-                "Or absolute format: 2026-05-01 14:30, 01.05.2026 14:30",
+                "Or absolute format: 2026-05-01 14:30, "
+                "2026-05-01 14:30 CEST, 01.05.2026 14:30",
             )
             return
 
