@@ -218,6 +218,18 @@ def test_parse_doctor_sections_supports_release_aliases():
     assert doctor._parse_doctor_sections(["preflight"])[1] == ("release",)
 
 
+def test_repo_root_handles_mutmut_module_paths(tmp_path, monkeypatch):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    mutant_module = tmp_path / "mutants" / "core_plugins" / "doctor.py"
+    mutant_module.parent.mkdir(parents=True)
+    mutant_module.write_text("# mutant copy\n", encoding="utf-8")
+
+    monkeypatch.setattr(doctor, "__file__", str(mutant_module))
+
+    assert doctor._repo_root() == tmp_path
+
+
 def test_release_command_docs_line_handles_ok_errors_and_exceptions(monkeypatch):
     def fake_ok(*args, **kwargs):
         return SimpleNamespace(

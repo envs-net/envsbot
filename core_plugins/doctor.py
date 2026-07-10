@@ -102,6 +102,21 @@ def _line(ok: bool | None, label: str, text: str) -> str:
     return f"{icon} {label}: {text}"
 
 
+def _repo_root() -> Path:
+    """Return the repository checkout root, even when running under mutmut.
+
+    mutmut copies mutated modules below ``mutants/``.  In that case
+    ``Path(__file__).parents[1]`` points at the mutants directory instead of
+    the real repository root, so release checks must walk upwards until the
+    actual checkout markers are found.
+    """
+    module_path = Path(__file__).resolve()
+    for candidate in module_path.parents:
+        if (candidate / "pyproject.toml").exists() and (candidate / "scripts").is_dir():
+            return candidate
+    return module_path.parents[1]
+
+
 def _migration_version(value: Any) -> str:
     """Return a readable migration version from strings, tuples or sqlite rows."""
     if isinstance(value, str):
@@ -345,7 +360,7 @@ def _command_docs_line() -> str:
     and report stale docs even when ``python scripts/check_command_docs.py``
     passes from the repository checkout.
     """
-    root = Path(__file__).resolve().parents[1]
+    root = _repo_root()
     script = root / "scripts" / "check_command_docs.py"
     if not script.exists():
         return _line(False, "Command docs", "check script missing")
@@ -402,7 +417,7 @@ def _config_sample_line() -> str:
 
 def _release_python_compile_line() -> str:
     """Return a release-check line for basic Python syntax/import safety."""
-    root = Path(__file__).resolve().parents[1]
+    root = _repo_root()
     targets = [
         root / "bot",
         root / "core_plugins",
@@ -426,7 +441,7 @@ def _release_python_compile_line() -> str:
 
 def _release_git_status_line() -> str:
     """Return a release-check line for uncommitted tracked changes."""
-    root = Path(__file__).resolve().parents[1]
+    root = _repo_root()
     if not (root / ".git").exists():
         return _line(None, "Git status", "not a git checkout")
     try:
