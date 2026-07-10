@@ -427,6 +427,95 @@ def test_docstring_and_formatting_helpers():
     assert help_plugin._context_label(structured) == "private"
 
 
+
+@pytest.mark.asyncio
+async def test_help_exact_primary_command_prefers_details_over_group(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    remind_cmd = command_utils.Command(
+        name="remind",
+        handler=handler,
+        role=command_utils.Role.USER,
+        aliases=["reminder"],
+        short="Create a reminder.",
+        usage="{prefix}remind <when> <text>",
+        examples=[
+            "{prefix}remind 10m check logs",
+            "{prefix}remind 2026-07-10 13:23 CEST deploy window",
+            "{prefix}remind 2026-07-10 13:23 Europe/Berlin deploy window",
+        ],
+        category="utility",
+        context="any",
+    )
+    delete_cmd = command_utils.Command(
+        name="remind delete",
+        handler=handler,
+        role=command_utils.Role.USER,
+        short="Delete one reminder.",
+        usage="{prefix}remind delete <id>",
+        examples=["{prefix}remind delete 12"],
+        category="utility",
+        context="any",
+    )
+    registry.register("remind", remind_cmd, "reminder")
+    registry.register("reminder", remind_cmd, "reminder")
+    registry.register("remind delete", delete_cmd, "reminder")
+
+    bot = DummyBot(
+        plugins={"reminder": SimpleNamespace(__doc__="Reminder plugin")},
+        role=command_utils.Role.USER,
+    )
+    msg = DummyMsg(body=",help remind")
+
+    await help_plugin.cmd_help(bot, "user@host", "Nick", ["remind"], msg, True)
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Command: ,remind" in reply
+    assert "Command group: ,remind" not in reply
+    assert "2026-07-10 13:23 CEST" in reply
+    assert "Europe/Berlin" in reply
+
+
+@pytest.mark.asyncio
+async def test_help_prefixed_alias_still_shows_focused_command(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    cmd = command_utils.Command(
+        name="remind",
+        handler=handler,
+        role=command_utils.Role.USER,
+        aliases=["reminder"],
+        short="Create a reminder.",
+        usage="{prefix}remind <when> <text>",
+        examples=["{prefix}remind 10m check logs"],
+        category="utility",
+        context="any",
+    )
+    registry.register("remind", cmd, "reminder")
+    registry.register("reminder", cmd, "reminder")
+
+    bot = DummyBot(
+        plugins={"reminder": SimpleNamespace(__doc__="Reminder plugin")},
+        role=command_utils.Role.USER,
+    )
+    msg = DummyMsg(body=",help ,reminder")
+
+    await help_plugin.cmd_help(bot, "user@host", "Nick", [",reminder"], msg, True)
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Command: ,remind" in reply
+    assert "Aliases: ,reminder" in reply
+
 @pytest.mark.asyncio
 async def test_help_command_group_prefers_subcommands_over_base_alias(
     monkeypatch,
@@ -763,6 +852,20 @@ def _command_decorator_metadata():
                     yield path.relative_to(root), node.name, str(decorator.args[0].value), {
                         kw.arg: kw.value for kw in decorator.keywords if kw.arg
                     }
+
+
+def test_all_decorated_command_details_include_usage_and_examples():
+    missing = []
+    count = 0
+    for plugin, _meta, cmd in decorated_command_records():
+        count += 1
+        detail = "\n".join(help_plugin._format_command_detail(cmd, ","))
+        if "Usage:\n  ," not in detail:
+            missing.append(f"{plugin}:{cmd.name}: missing rendered usage")
+        if "Examples:\n  ," not in detail:
+            missing.append(f"{plugin}:{cmd.name}: missing rendered examples")
+    assert count
+    assert not missing
 
 
 def test_command_help_metadata_is_complete():

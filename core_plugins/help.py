@@ -404,6 +404,20 @@ def _commands_matching_prefix(
     return commands
 
 
+def _exact_primary_command(query: str, prefix: str):
+    """Return a command only when the query matches its primary name exactly."""
+    tokens = _command_query_tokens(query, prefix)
+    if not tokens:
+        return None
+
+    cmd = COMMANDS.get(tokens)
+    if not cmd:
+        return None
+
+    primary_tokens = tuple(str(getattr(cmd, "name", "")).lower().split())
+    return cmd if primary_tokens == tokens else None
+
+
 def _format_command_group(bot, query: str, role: Role) -> list[str] | None:
     """Return an overview for command families such as `config` or `rooms`."""
     tokens = _command_query_tokens(query, bot.prefix)
@@ -548,10 +562,19 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
         return
 
     # Focused command help. Accept both ",help ,rooms add" and
-    # ",help rooms add" because the latter is easier to type.  Exact plugin
-    # names keep plugin-help priority for backwards compatibility.
+    # ",help rooms add" because the latter is easier to type. Exact plugin
+    # names keep plugin-help priority for backwards compatibility. Primary
+    # command names such as `remind` still win over group overviews, so
+    # `,help remind` shows the full reminder examples even though
+    # `remind delete` is also available. Alias-only group roots such as
+    # `config` keep the subcommand overview.
     if query.startswith(bot.prefix):
         command_query = query[len(bot.prefix):].strip()
+        exact_command = _exact_primary_command(command_query, bot.prefix)
+        if exact_command:
+            bot.reply(msg, await _command(bot, exact_command, role))
+            return
+
         command_group = _format_command_group(bot, command_query, role)
         if command_group:
             bot.reply(msg, command_group)
@@ -566,6 +589,11 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 
     if query_lc in bot.bot_plugins.plugins:
         bot.reply(msg, await _plugin(bot, query, role))
+        return
+
+    exact_command = _exact_primary_command(query, bot.prefix)
+    if exact_command:
+        bot.reply(msg, await _command(bot, exact_command, role))
         return
 
     command_group = _format_command_group(bot, query, role)
