@@ -561,3 +561,28 @@ async def test_plugin_doctor_uses_runtime_state_when_no_hook(monkeypatch):
 
     monkeypatch.setattr(pm, "plugin_state", empty_plugin_state)
     assert await pm.plugin_doctor("stateful") == ["ℹ️ stateful: no diagnostic hook"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_events_dispatch_and_cleanup():
+    bot = FakeBot()
+    pm = PluginManager(bot)
+    calls = []
+
+    def sync_handler(value):
+        calls.append(("sync", value))
+
+    async def async_handler(value):
+        calls.append(("async", value))
+
+    pm.register_runtime_event("demo", "public_groupchat_message", sync_handler)
+    pm.register_runtime_event("demo", "public_groupchat_message", async_handler)
+    pm.register_runtime_event("demo", "other", lambda value: calls.append(("other", value)))
+
+    await pm.dispatch_runtime_event("public_groupchat_message", "msg-1")
+
+    assert calls == [("sync", "msg-1"), ("async", "msg-1")]
+
+    pm._runtime_event_handlers.pop("demo", None)
+    await pm.dispatch_runtime_event("public_groupchat_message", "msg-2")
+    assert calls == [("sync", "msg-1"), ("async", "msg-1")]

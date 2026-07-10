@@ -584,6 +584,7 @@ def test_build_reply_message_formats_groupchat_private_and_hints(bot):
 @pytest.mark.asyncio
 async def test_muc_and_private_message_handlers_route_expected_messages(bot):
     bot.handle_command = AsyncMock()
+    bot.bot_plugins.dispatch_runtime_event = AsyncMock()
     bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
 
     own_msg = {
@@ -595,6 +596,7 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
     }
     await bot.on_muc_message(own_msg)
     bot.handle_command.assert_not_called()
+    bot.bot_plugins.dispatch_runtime_event.assert_not_called()
 
     room_msg = {
         "type": "groupchat",
@@ -604,6 +606,9 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
         "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
     }
     await bot.on_muc_message(room_msg)
+    bot.bot_plugins.dispatch_runtime_event.assert_awaited_once_with(
+        "public_groupchat_message", room_msg
+    )
     bot.handle_command.assert_awaited_with(
         ",help", room_msg["from"], "Alice", room_msg, True
     )

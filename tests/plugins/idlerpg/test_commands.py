@@ -171,19 +171,36 @@ async def test_message_penalty_generic_message_event_and_dedupe_by_stanza_id():
 async def test_idlerpg_on_load_registers_generic_and_groupchat_message_events():
     bot = DummyBot()
     registered = []
+    runtime_registered = []
     bot.bot_plugins = types.SimpleNamespace(
-        register_event=lambda plugin, event, handler: registered.append((plugin, event, handler))
+        register_event=lambda plugin, event, handler: registered.append(
+            (plugin, event, handler)
+        ),
+        register_runtime_event=lambda plugin, event, handler: runtime_registered.append(
+            (plugin, event, handler)
+        ),
     )
 
     await idlerpg.on_load(bot)
 
     events = [(plugin, event) for plugin, event, _handler in registered]
+    runtime_events = [(plugin, event) for plugin, event, _handler in runtime_registered]
     assert (idlerpg.PLUGIN_NAME, "groupchat_message") in events
     assert (idlerpg.PLUGIN_NAME, "message") in events
     assert (idlerpg.PLUGIN_NAME, "groupchat_presence") in events
-    groupchat_handler = next(handler for _plugin, event, handler in registered if event == "groupchat_message")
-    generic_handler = next(handler for _plugin, event, handler in registered if event == "message")
-    assert groupchat_handler == generic_handler
+    assert (idlerpg.PLUGIN_NAME, "public_groupchat_message") in runtime_events
+    groupchat_handler = next(
+        handler for _plugin, event, handler in registered if event == "groupchat_message"
+    )
+    generic_handler = next(
+        handler for _plugin, event, handler in registered if event == "message"
+    )
+    runtime_handler = next(
+        handler
+        for _plugin, event, handler in runtime_registered
+        if event == "public_groupchat_message"
+    )
+    assert groupchat_handler == generic_handler == runtime_handler
 
 
 @pytest.mark.asyncio

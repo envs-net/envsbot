@@ -120,6 +120,7 @@ class PluginManager:
         self.meta = {}
         self.plugin_sources = {}
         self._event_handlers = {}
+        self._runtime_event_handlers = {}
         self._dependents = {}  # Cache: plugin -> plugins that depend on it
 
         self._lock = asyncio.Lock()
@@ -195,7 +196,7 @@ class PluginManager:
 
     def register_event(self, plugin_name, event, handler):
         """
-        Register an event handler for a plugin.
+        Register an XMPP event handler for a plugin.
 
         Args:
             plugin_name (str): Name of the plugin.
@@ -205,6 +206,34 @@ class PluginManager:
         self.bot.add_event_handler(event, handler)
         self._event_handlers.setdefault(plugin_name,
                                         []).append((event, handler))
+
+    def register_runtime_event(self, plugin_name, event, handler):
+        """Register an internal runtime event handler for a plugin.
+
+        Runtime events are emitted explicitly by envsbot internals and do not
+        rely on the XMPP client's event fan-out.  They are useful when a core
+        routing path already sees an event and plugins need a guaranteed
+        observer hook in addition to the regular XMPP event handlers.
+        """
+        self._runtime_event_handlers.setdefault(plugin_name, []).append(
+            (event, handler)
+        )
+
+    async def dispatch_runtime_event(self, event, *args, **kwargs):
+        """Dispatch an internal runtime event to registered plugin handlers."""
+        handlers = [
+            handler
+            for plugin_handlers in tuple(self._runtime_event_handlers.values())
+            for registered_event, handler in tuple(plugin_handlers)
+            if registered_event == event
+        ]
+        for handler in handlers:
+            try:
+                result = handler(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                log.exception("[PLUGIN] runtime event handler failed: %s", event)
 
     def create_task(self, plugin_name, coro, *, name=None):
         """Create a supervised background task for a plugin.
@@ -321,6 +350,8 @@ class PluginManager:
                     event,
                     exc_info=True,
                 )
+
+        self._runtime_event_handlers.pop(name, None)
 
         try:
             await self._cancel_plugin_tasks(name)
@@ -459,6 +490,8 @@ class PluginManager:
                             " %s.%s: %s",
                             name, event, e
                         )
+
+                self._runtime_event_handlers.pop(name, None)
 
                 if removed_handlers > 0:
                     log.debug("[PLUGIN] removed %d event handlers from %s",

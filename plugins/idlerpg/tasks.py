@@ -339,6 +339,13 @@ async def on_load(bot):
         "message",
         message_handler,
     )
+    register_runtime_event = getattr(bot.bot_plugins, "register_runtime_event", None)
+    if callable(register_runtime_event):
+        register_runtime_event(
+            PLUGIN_NAME,
+            "public_groupchat_message",
+            message_handler,
+        )
     bot.bot_plugins.register_event(
         PLUGIN_NAME,
         "groupchat_presence",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -20,6 +21,12 @@ class MessageRoutingMixin:
             if bot_nick == nick:
                 return
             if msg["type"] == "groupchat":
+                plugin_manager = getattr(self, "bot_plugins", None)
+                dispatch_runtime_event = getattr(plugin_manager, "dispatch_runtime_event", None)
+                if callable(dispatch_runtime_event):
+                    result = dispatch_runtime_event("public_groupchat_message", msg)
+                    if inspect.isawaitable(result):
+                        await result
                 await self.handle_command(msg["body"], msg["from"], nick, msg, True)
         except Exception as exc:
             log.exception("[BOT] Error in on_muc_message: %s", exc)
