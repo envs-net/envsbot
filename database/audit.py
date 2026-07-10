@@ -257,4 +257,3 @@ class AuditLog:
         )
         await self.conn.commit()
         return count
-

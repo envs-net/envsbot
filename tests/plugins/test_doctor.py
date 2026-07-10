@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -214,3 +215,64 @@ async def test_doctor_release_command_selects_release_section(bot, monkeypatch):
 def test_parse_doctor_sections_supports_release_aliases():
     assert doctor._parse_doctor_sections(["release"])[1] == ("release",)
     assert doctor._parse_doctor_sections(["preflight"])[1] == ("release",)
+
+
+def test_release_command_docs_line_handles_ok_errors_and_exceptions(monkeypatch):
+    package = ModuleType("scripts")
+    module = ModuleType("scripts.check_command_docs")
+    monkeypatch.setitem(sys.modules, "scripts", package)
+    monkeypatch.setitem(sys.modules, "scripts.check_command_docs", module)
+
+    module.validate_command_docs = lambda: ([], 127)
+    assert doctor._command_docs_line() == "✅ Command docs: ok (127 commands)"
+
+    module.validate_command_docs = lambda: (["missing command"], 127)
+    assert doctor._command_docs_line() == "🔴 Command docs: 1 issue(s); regenerate docs/commands.md"
+
+    def broken_validator():
+        raise RuntimeError("validator unavailable")
+
+    module.validate_command_docs = broken_validator
+    assert doctor._command_docs_line() == "🔴 Command docs: check failed: validator unavailable"
+
+
+def test_release_config_sample_line_handles_ok_warnings_missing_and_errors(monkeypatch):
+    monkeypatch.setattr(doctor, "config", {"prefix": ",", "jid": "bot@example.org"})
+    monkeypatch.setattr(doctor, "load_default_config_for_diff", lambda: {"prefix": ","})
+    monkeypatch.setattr(doctor, "collect_config_warnings", lambda cfg: [])
+    assert doctor._config_sample_line() == "✅ Config sample: ok"
+
+    monkeypatch.setattr(
+        doctor,
+        "collect_config_warnings",
+        lambda cfg: ["first warning", "second warning", "third warning", "fourth warning"],
+    )
+    warning_line = doctor._config_sample_line()
+    assert warning_line.startswith("ℹ️ Config warnings: first warning; second warning; third warning")
+    assert warning_line.endswith("…")
+
+    monkeypatch.setattr(doctor, "load_default_config_for_diff", lambda: {"prefix": ",", "owner": "admin@example.org"})
+    monkeypatch.setattr(doctor, "collect_config_warnings", lambda cfg: [])
+    assert doctor._config_sample_line() == "🔴 Config sample: missing runtime key(s): owner"
+
+    def broken_defaults():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(doctor, "load_default_config_for_diff", broken_defaults)
+    assert doctor._config_sample_line() == "🔴 Config sample: check failed: boom"
+
+
+def test_release_backup_line_reports_empty_latest_and_errors(monkeypatch, tmp_path):
+    monkeypatch.setattr(doctor, "backup_dir", lambda: tmp_path / "backups")
+    monkeypatch.setattr(doctor, "list_backups", lambda directory: [])
+    assert doctor._release_backup_line() == "ℹ️ Latest backup: no managed backup found"
+
+    backup = SimpleNamespace(name="envsbot-backup.zip", created_at="2026-07-10 10:00")
+    monkeypatch.setattr(doctor, "list_backups", lambda directory: [backup])
+    assert doctor._release_backup_line() == "✅ Latest backup: envsbot-backup.zip · 2026-07-10 10:00"
+
+    def broken_backups(directory):
+        raise RuntimeError("backup store failed")
+
+    monkeypatch.setattr(doctor, "list_backups", broken_backups)
+    assert doctor._release_backup_line() == "🔴 Latest backup: backup store failed"

@@ -1,4 +1,5 @@
 from .helpers import (
+    AsyncMock,
     Entry,
     SimpleNamespace,
     asyncio,
@@ -386,3 +387,26 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
     )
 
     assert calls == [([room], url, "Second")]
+
+
+@pytest.mark.asyncio
+async def test_save_last_id_for_template_post_delegates_to_feed_field(monkeypatch):
+    set_field = AsyncMock(return_value=True)
+    monkeypatch.setattr(rss, "_set_feed_field", set_field)
+
+    bot = object()
+    store = object()
+    assert await rss._save_last_id_for_template_post(
+        bot,
+        store,
+        "https://example.org/feed.xml",
+        "entry-42",
+    ) is True
+
+    set_field.assert_awaited_once_with(
+        bot,
+        store,
+        "https://example.org/feed.xml",
+        "last_id",
+        "entry-42",
+    )
