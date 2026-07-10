@@ -702,3 +702,67 @@ async def test_pin_command_edit_and_tags(bot, make_msg, monkeypatch, room_jid):
         True,
     )
     assert "Pin #7 tags: #mail #support" in _reply_text(bot.reply)
+
+
+@pytest.mark.asyncio
+async def test_pin_important_marks_lists_and_unstars(bot, make_msg, monkeypatch, room_jid):
+    state = {
+        room_jid: {
+            "pins": [
+                {"id": 1, "actor_nick": "alice", "target_nick": "bob", "preview": "normal"},
+                {"id": 2, "actor_nick": "alice", "target_nick": "bob", "preview": "important"},
+            ]
+        }
+    }
+    saved = AsyncMock()
+    monkeypatch.setattr(pin, "_is_enabled_for_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "_sender_can_manage_pins_in_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+    monkeypatch.setattr(pin, "_save_pin_data", saved)
+    monkeypatch.setattr(pin, "audit_event", AsyncMock())
+    msg = make_msg(is_room=True, body=",pin important 1 on", resource="alice")
+
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "1", "on"])
+    assert state[room_jid]["pins"][0]["important"] is True
+    assert "marked as important" in bot.reply.call_args[0][1]
+    saved.assert_awaited()
+
+    bot.reply.reset_mock()
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "list"])
+    reply_lines = bot.reply.call_args[0][1]
+    assert reply_lines[0].startswith("⭐ Important pins")
+    assert any("#1" in line for line in reply_lines)
+
+    bot.reply.reset_mock()
+    await pin._pin_command_important(bot, msg, room_jid, ["unstar", "1"])
+    assert state[room_jid]["pins"][0]["important"] is False
+    assert "marked as normal" in bot.reply.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_pin_important_usage_permission_and_not_found(bot, make_msg, monkeypatch, room_jid):
+    state = {room_jid: {"pins": [{"id": 1, "preview": "x"}]}}
+    monkeypatch.setattr(pin, "_is_enabled_for_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(pin, "_load_pin_data", AsyncMock(return_value=state))
+    msg = make_msg(is_room=True, resource="alice")
+
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "list", "bad"])
+    assert "Usage" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    monkeypatch.setattr(pin, "_sender_can_manage_pins_in_room", AsyncMock(return_value=False))
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "1", "on"])
+    assert "Only room moderators" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    monkeypatch.setattr(pin, "_sender_can_manage_pins_in_room", AsyncMock(return_value=True))
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "2", "on"])
+    assert "not found" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "not-int", "on"])
+    assert "Usage" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    await pin._pin_command_important(bot, msg, room_jid, ["important", "1", "maybe"])
+    assert "Usage" in bot.reply.call_args[0][1]

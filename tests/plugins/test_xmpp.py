@@ -365,3 +365,183 @@ def test_xmpp_srv_reply_helpers(bot, msg):
     bot.reply.reset_mock()
     xmpp._reply_xmpp_srv_dns_missing(bot, m)
     assert "DNS library not installed" in bot.reply.call_args[0][1]
+
+
+def test_xmpp_feature_summary_known_features():
+    assert xmpp._xmpp_feature_summary([
+        "urn:xmpp:ping",
+        "http://jabber.org/protocol/muc",
+        "urn:xmpp:http:upload:0",
+        "urn:xmpp:unknown",
+    ]) == ["ping", "muc", "http-upload"]
+    assert xmpp._xmpp_feature_summary(None) == []
+
+
+@pytest.mark.asyncio
+async def test_xmpp_check_ping_success_timeout_iqerror_and_exception(monkeypatch, bot):
+    class FakeTimeout(Exception):
+        pass
+
+    class FakeIqError(Exception):
+        def __init__(self, condition="gone"):
+            super().__init__(condition)
+            self.iq = {"error": {"condition": condition}}
+
+    monkeypatch.setattr(xmpp.slixmpp.exceptions, "IqTimeout", FakeTimeout, raising=False)
+    monkeypatch.setattr(xmpp.slixmpp.exceptions, "IqError", FakeIqError, raising=False)
+
+    bot.plugin["xep_0199"].ping = AsyncMock(return_value=None)
+    status, line = await xmpp._xmpp_check_ping(bot, "example.org")
+    assert status == "✅"
+    assert line.startswith("ping ok")
+
+    bot.plugin["xep_0199"].ping = AsyncMock(side_effect=FakeTimeout())
+    assert await xmpp._xmpp_check_ping(bot, "example.org") == ("🔴", "ping timed out")
+
+    bot.plugin["xep_0199"].ping = AsyncMock(side_effect=FakeIqError("forbidden"))
+    assert await xmpp._xmpp_check_ping(bot, "example.org") == ("⚠️", "ping error: forbidden")
+
+    bot.plugin["xep_0199"].ping = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await xmpp._xmpp_check_ping(bot, "example.org") == ("🔴", "ping failed: boom")
+
+
+@pytest.mark.asyncio
+async def test_xmpp_check_version_success_unsupported_and_errors(monkeypatch, bot):
+    class FakeTimeout(Exception):
+        pass
+
+    class FakeIqError(Exception):
+        def __init__(self, condition="gone"):
+            super().__init__(condition)
+            self.iq = {"error": {"condition": condition}}
+
+    monkeypatch.setattr(xmpp.slixmpp.exceptions, "IqTimeout", FakeTimeout, raising=False)
+    monkeypatch.setattr(xmpp.slixmpp.exceptions, "IqError", FakeIqError, raising=False)
+
+    fake_version = SimpleNamespace(xml=[
+        MagicMock(tag="{jabber:iq:version}query", __iter__=lambda self: iter([
+            MagicMock(tag="{jabber:iq:version}name", text="Prosody"),
+            MagicMock(tag="{jabber:iq:version}version", text="13.0"),
+            MagicMock(tag="{jabber:iq:version}os", text="Debian"),
+        ]))
+    ])
+    bot.plugin["xep_0092"].get_version = AsyncMock(return_value=fake_version)
+    status, line = await xmpp._xmpp_check_version(bot, "example.org")
+    assert status == "✅"
+    assert "Prosody" in line
+
+    bot.plugin["xep_0092"].get_version = AsyncMock(return_value=SimpleNamespace(xml=[]))
+    assert await xmpp._xmpp_check_version(bot, "example.org") == ("ℹ️", "version: not advertised")
+
+    bot.plugin["xep_0092"].get_version = AsyncMock(side_effect=FakeIqError("service-unavailable"))
+    assert await xmpp._xmpp_check_version(bot, "example.org") == ("ℹ️", "version: unsupported")
+
+    bot.plugin["xep_0092"].get_version = AsyncMock(side_effect=FakeTimeout())
+    assert await xmpp._xmpp_check_version(bot, "example.org") == ("⚠️", "version: timed out")
+
+    bot.plugin["xep_0092"].get_version = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await xmpp._xmpp_check_version(bot, "example.org") == ("⚠️", "version: boom")
+
+
+@pytest.mark.asyncio
+async def test_xmpp_check_disco_success_and_errors(monkeypatch, bot):
+    class FakeTimeout(Exception):
+        pass
+
+    class FakeIqError(Exception):
+        def __init__(self, condition="gone"):
+            super().__init__(condition)
+            self.iq = {"error": {"condition": condition}}
+
+    monkeypatch.setattr(xmpp.slixmpp.exceptions, "IqTimeout", FakeTimeout, raising=False)
+    monkeypatch.setattr(xmpp.slixmpp.exceptions, "IqError", FakeIqError, raising=False)
+
+    bot.plugin["xep_0030"].get_info = AsyncMock(return_value={
+        "disco_info": {
+            "identities": [("server", "im", "Example")],
+            "features": ["urn:xmpp:ping", "urn:xmpp:mam:2"],
+        }
+    })
+    status, line = await xmpp._xmpp_check_disco(bot, "example.org")
+    assert status == "✅"
+    assert "1 identities, 2 features" in line
+    assert "ping" in line and "message-archive" in line
+
+    bot.plugin["xep_0030"].get_info = AsyncMock(side_effect=FakeIqError("forbidden"))
+    assert await xmpp._xmpp_check_disco(bot, "example.org") == ("⚠️", "disco error: forbidden")
+
+    bot.plugin["xep_0030"].get_info = AsyncMock(side_effect=FakeTimeout())
+    assert await xmpp._xmpp_check_disco(bot, "example.org") == ("🔴", "disco timed out")
+
+    bot.plugin["xep_0030"].get_info = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await xmpp._xmpp_check_disco(bot, "example.org") == ("🔴", "disco failed: boom")
+
+
+def test_xmpp_check_srv_success_none_and_failure(monkeypatch):
+    monkeypatch.setattr(xmpp, "_make_srv_resolver", lambda *_args: object())
+    monkeypatch.setattr(
+        xmpp,
+        "_collect_all_srv_records",
+        lambda *_args: {
+            "_xmpp-client._tcp": "xmpp.example.org:5222",
+            "_xmpp-server._tcp": "Not found",
+        },
+    )
+    status, line = xmpp._xmpp_check_srv("example.org")
+    assert status == "✅"
+    assert "_xmpp-client._tcp" in line
+
+    monkeypatch.setattr(
+        xmpp,
+        "_collect_all_srv_records",
+        lambda *_args: {"_xmpp-client._tcp": "Not found"},
+    )
+    assert xmpp._xmpp_check_srv("example.org") == ("⚠️", "SRV records: none found")
+
+    monkeypatch.setattr(
+        xmpp,
+        "_collect_all_srv_records",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("dns boom")),
+    )
+    assert xmpp._xmpp_check_srv("example.org") == ("⚠️", "SRV lookup failed: dns boom")
+
+
+@pytest.mark.asyncio
+async def test_cmd_xmpp_check_replies_with_combined_diagnostics(monkeypatch, bot, msg):
+    m = msg()
+    monkeypatch.setattr(xmpp, "_xmpp_check_ping", AsyncMock(return_value=("✅", "ping ok")))
+    monkeypatch.setattr(xmpp, "_xmpp_check_disco", AsyncMock(return_value=("✅", "disco ok")))
+    monkeypatch.setattr(xmpp, "_xmpp_check_version", AsyncMock(return_value=("ℹ️", "version unsupported")))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        assert fn is xmpp._xmpp_check_srv
+        assert args == ("example.org",)
+        return ("✅", "SRV records: _xmpp-client._tcp")
+
+    monkeypatch.setattr(xmpp.asyncio, "to_thread", fake_to_thread)
+    await xmpp.cmd_xmpp_check(bot, "jid", "nick", ["example.org"], m, False)
+
+    lines = bot.reply.call_args[0][1]
+    assert lines == [
+        "🩺 XMPP check for example.org",
+        "✅ ping ok",
+        "✅ disco ok",
+        "ℹ️ version unsupported",
+        "✅ SRV records: _xmpp-client._tcp",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cmd_xmpp_check_denied_missing_and_invalid(bot, msg):
+    m = msg(is_room=True)
+    bot.db.users.plugin.return_value.get_global = AsyncMock(return_value={})
+    await xmpp.cmd_xmpp_check(bot, "jid", "nick", ["example.org"], m, True)
+    bot.reply.assert_not_called()
+
+    m = msg()
+    await xmpp.cmd_xmpp_check(bot, "jid", "nick", [], m, False)
+    assert "Missing target" in bot.reply.call_args[0][1]
+
+    bot.reply.reset_mock()
+    await xmpp.cmd_xmpp_check(bot, "jid", "nick", ["not-a-domain"], m, False)
+    assert "Invalid target" in bot.reply.call_args[0][1]

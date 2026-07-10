@@ -862,3 +862,152 @@ async def test_limited_response_reader_and_save_last_id(monkeypatch):
     store = object()
     assert await rss._save_last_id(bot, store, "https://feed.example/rss", "entry-1") is True
     set_field.assert_awaited_once_with(bot, store, "https://feed.example/rss", "last_id", "entry-1")
+
+
+def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
+    now = 1_700_000_000
+    feeds = {
+        "https://ok.example/feed": {
+            "title": "OK",
+            "rooms": ["room@conf"],
+            "error_count": 0,
+            "next_retry": 0,
+            "last_success": now - 60,
+        },
+        "https://paused.example/feed": {
+            "title": "Paused",
+            "rooms": ["room@conf"],
+            "paused": True,
+            "error_count": 0,
+            "next_retry": 0,
+        },
+        "https://backoff.example/feed": {
+            "title": "Backoff",
+            "rooms": ["room@conf", "other@conf"],
+            "paused_rooms": ["other@conf"],
+            "error_count": 2,
+            "next_retry": now + 120,
+            "last_error": "x" * 140,
+        },
+        "not-a-dict": "ignored",
+    }
+
+    monkeypatch.setattr(rss, "_now", lambda: now)
+
+    summary = rss._rss_health_summary(feeds)
+    assert summary == "RSS health: 3 feeds · 1 paused · 1 in backoff · 1 with errors"
+
+    lines = rss._rss_health_lines(feeds, now=now)
+    joined = "\n".join(lines)
+    assert "ok: OK" in joined
+    assert "paused: Paused" in joined
+    assert "backoff: Backoff" in joined
+    assert "rooms: 1/2 active · paused: 1" in joined
+    assert "last error: " + ("x" * 117) + "..." in joined
+
+    broken = rss._rss_health_lines(feeds, broken_only=True, now=now)
+    broken_joined = "\n".join(broken)
+    assert "Paused" in broken_joined
+    assert "Backoff" in broken_joined
+    assert "OK" not in broken_joined
+
+
+@pytest.mark.asyncio
+async def test_rss_pause_resume_state_room_and_global(monkeypatch, make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.xml"
+    store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "period": 300,
+            "rooms": [room, room.upper(), "other@conference.example.org"],
+            "paused_rooms": [],
+            "paused": False,
+        }
+    }
+    monkeypatch.setattr(rss, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+
+    await rss._rss_set_pause_state(bot, msg, store, url, room, None, paused=True)
+    feed = store[rss.RSS_KEY][url]
+    assert feed["rooms"] == [room, "other@conference.example.org"]
+    assert feed["paused_rooms"] == [room]
+    assert "Paused RSS feed for" in _reply_text(bot.replies[-1])
+    rss._cancel_feed_task.assert_awaited_with(bot, url)
+    rss.ensure_task.assert_awaited_with(bot, store, url, 300)
+    rss.ensure_task.reset_mock()
+
+    await rss._rss_set_pause_state(bot, msg, store, url, room, None, paused=True)
+    assert "already paused" in _reply_text(bot.replies[-1])
+
+    await rss._rss_set_pause_state(bot, msg, store, url, room, None, paused=False)
+    assert feed["paused_rooms"] == []
+    rss.ensure_task.assert_awaited_with(bot, store, url, 300)
+    assert "Resumed RSS feed for" in _reply_text(bot.replies[-1])
+
+    await rss._rss_set_pause_state(bot, msg, store, url, room, "all", paused=True)
+    assert feed["paused"] is True
+    assert "globally" in _reply_text(bot.replies[-1])
+
+
+@pytest.mark.asyncio
+async def test_rss_pause_state_not_found_and_unsubscribed_room(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/feed.xml"
+    store[rss.RSS_KEY] = {url: {"rooms": ["room@conference.example.org"]}}
+    msg = {"from": SimpleNamespace(bare="room@conference.example.org"), "type": "groupchat"}
+
+    await rss._rss_set_pause_state(bot, msg, store, "https://missing.example/feed", None, None, paused=True)
+    assert _reply_text(bot.replies[-1]) == "Feed not found."
+
+    await rss._rss_set_pause_state(bot, msg, store, url, None, None, paused=True)
+    assert "needs a room context" in _reply_text(bot.replies[-1])
+
+    await rss._rss_set_pause_state(
+        bot,
+        msg,
+        store,
+        url,
+        "other@conference.example.org",
+        None,
+        paused=True,
+    )
+    assert "is not subscribed" in _reply_text(bot.replies[-1])
+
+
+@pytest.mark.asyncio
+async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    url = "https://example.org/feed.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Feed",
+            "period": 300,
+            "rooms": [room],
+            "paused": False,
+            "paused_rooms": [],
+            "error_count": rss.RSS_BROKEN_ERROR_THRESHOLD,
+            "last_error": "boom",
+        }
+    }
+    monkeypatch.setattr(rss, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+
+    await rss.rss_command(bot, "jid1", "nick1", ["health"], msg, True)
+    assert "RSS health:" in _reply_text(bot.replies[-1])
+    assert "Feed" in _reply_text(bot.replies[-1])
+
+    await rss.rss_command(bot, "jid1", "nick1", ["broken"], msg, True)
+    assert "Feed" in _reply_text(bot.replies[-1])
+
+    await rss.rss_command(bot, "jid1", "nick1", ["pause", url], msg, True)
+    assert bot.plugin_store[rss.RSS_KEY][url]["paused_rooms"] == [room]
+
+    await rss.rss_command(bot, "jid1", "nick1", ["resume", url], msg, True)
+    assert bot.plugin_store[rss.RSS_KEY][url]["paused_rooms"] == []

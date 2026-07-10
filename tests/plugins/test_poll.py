@@ -659,3 +659,65 @@ async def test_poll_restart_tasks_restarts_plugin_lifecycle(monkeypatch):
     await poll.restart_tasks(bot)
 
     assert calls == ["unload", "load"]
+
+
+def test_poll_multi_parse_normalize_totals_and_vote_choices(monkeypatch):
+    monkeypatch.setattr(poll, "DEFAULT_MULTI_MAX_CHOICES", 3)
+    assert poll._parse_multi_token("multi") == (True, 3)
+    assert poll._parse_multi_token("multiple:2") == (True, 2)
+    assert poll._parse_multi_token("multi:bad") == (True, None)
+    assert poll._parse_multi_token("single") == (False, None)
+
+    duration, question, options, multi_choice, max_choices, error = poll._parse_create_args_full(
+        "15m | multi:2 | Lunch? | Pizza | Döner | Falafel"
+    )
+    assert duration == 900
+    assert question == "Lunch?"
+    assert options == ["Pizza", "Döner", "Falafel"]
+    assert multi_choice is True
+    assert max_choices == 2
+    assert error is None
+
+    _, _, _, multi_choice, max_choices, error = poll._parse_create_args_full(
+        "multi:bad | Lunch? | Pizza | Döner"
+    )
+    assert multi_choice is False
+    assert max_choices is None
+    assert "Invalid multi-choice limit" in error
+
+    p = poll._normalize_poll("room@conf", "7", {
+        "question": "Lunch?",
+        "options": ["Pizza", "Döner", "Falafel"],
+        "votes": {"a": [0, 1], "b": [1, 2], "c": 2},
+        "multi_choice": True,
+        "max_choices": 99,
+    })
+    assert p["max_choices"] == 3
+    assert poll._poll_vote_totals(p) == [1, 2, 2]
+    assert "Tie: Döner, Falafel" in poll._winner_summary(p)
+
+    assert poll._parse_vote_choices(["vote", "7", "1, 3"], p) == ([0, 2], None)
+    choices, err = poll._parse_vote_choices(["vote", "7", "1,2,3,4"], p)
+    assert choices is None
+    assert "Option must be between 1 and 3" in err
+    choices, err = poll._parse_vote_choices(["vote", "7", "1,2,3"], {**p, "max_choices": 2})
+    assert choices is None
+    assert "at most 2 choices" in err
+
+
+@pytest.mark.asyncio
+async def test_poll_command_multi_choice_end_to_end(dummy_bot):
+    await reset_poll_data(dummy_bot)
+    bot = dummy_bot
+    create_args = ["create", "multi:2 | Lunch? | Pizza | Döner | Falafel"]
+    await poll.poll_command(bot, "alice@svr", "alice", create_args, public_room_msg(create_args), True)
+    assert _any_line(bot._reply_log, "Multi-choice: up to 2 choices")
+
+    bot._reply_log.clear()
+    await poll.poll_command(bot, "bob@svr", "bob", ["vote", "1", "1,3"], public_room_msg(["vote", "1", "1,3"], nick="bob"), True)
+    assert _any_line(bot._reply_log, "Pizza")
+    assert _any_line(bot._reply_log, "Falafel")
+
+    bot._reply_log.clear()
+    await poll.poll_command(bot, "carol@svr", "carol", ["vote", "1", "1,2,3"], public_room_msg(["vote", "1", "1,2,3"], nick="carol"), True)
+    assert _any_line(bot._reply_log, "at most 2 choices")
