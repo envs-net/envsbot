@@ -142,8 +142,14 @@ async def on_muc_presence(bot, pres):
 
         # --- Else: presence update or join (available) ---
         affiliation = affiliation if affiliation is not None else "unknown"
+        previous = nicks.get(nick, {}) if isinstance(nicks.get(nick, {}), dict) else {}
+        resolved_jid = jid_bare or previous.get("jid")
         nicks[nick] = {
-            "jid": jid_bare if jid is not None else str(pres["from"]),
+            # Some MUC presence updates do not include the real occupant JID.
+            # Keep an existing real JID instead of replacing it with the
+            # occupant JID (room@conference/nick), which is not stable and
+            # breaks plugins that need to map messages back to registered users.
+            "jid": resolved_jid,
             "affiliation": affiliation,
             "role": role if role is not None else "unknown"
         }

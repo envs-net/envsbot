@@ -98,6 +98,51 @@ async def test_message_penalty_and_logout_login(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_message_penalty_falls_back_to_registered_nick_when_real_jid_missing(monkeypatch):
+    bot = DummyBot()
+    register_msg = DummyMsg(resource="P")
+    await idlerpg._handle_register(
+        bot,
+        "p@example.org",
+        ["register", "Battal", "picker"],
+        register_msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["p@example.org"]
+    before = player["next"]
+
+    JOINED_ROOMS["room@conf"]["nicks"]["P"] = {"jid": "room@conf/P", "affiliation": "member"}
+    await idlerpg.on_message(bot, DummyMsg(body="Getting creative", resource="P"))
+
+    assert player["next"] > before
+    assert player["penalties"]["message"] > 0
+    assert player["stats"]["messages"] == 1
+
+
+@pytest.mark.asyncio
+async def test_message_penalty_uses_character_name_when_jid_is_unavailable(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(resource="Alice")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    before = player["next"]
+
+    JOINED_ROOMS["room@conf"]["nicks"]["Alice"] = {"jid": None, "affiliation": "member"}
+    await idlerpg.on_message(bot, DummyMsg(body="hello without real jid", resource="Alice"))
+
+    assert player["next"] > before
+    assert player["penalties"]["message"] > 0
+
+
+@pytest.mark.asyncio
 async def test_login_while_already_online_is_noop(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()

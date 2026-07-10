@@ -5,6 +5,7 @@ from .helpers import (
     MagicMock,
     ROOM_JID,
     USER_NICK,
+    USER_JID,
     make_presence,
     patch,
     pytest,
@@ -65,6 +66,34 @@ async def test_on_muc_presence_join_or_leave(fake_bot):
         ),
     )
     assert ROOM_JID not in rooms.JOINED_ROOMS
+
+
+@pytest.mark.asyncio
+async def test_on_muc_presence_preserves_real_jid_when_update_omits_jid(fake_bot):
+    fake_bot.boundjid.bare = BOT_JID
+
+    await rooms.on_muc_presence(
+        fake_bot,
+        make_presence(USER_NICK, jid=USER_JID),
+    )
+    assert rooms.JOINED_ROOMS[ROOM_JID]["nicks"][USER_NICK]["jid"] == USER_JID
+
+    update = make_presence(USER_NICK, jid="ignored@example.org")
+    update["muc"]._values["jid"] = None
+
+    await rooms.on_muc_presence(fake_bot, update)
+
+    assert rooms.JOINED_ROOMS[ROOM_JID]["nicks"][USER_NICK]["jid"] == USER_JID
+
+
+@pytest.mark.asyncio
+async def test_on_muc_presence_does_not_store_occupant_jid_when_real_jid_missing(fake_bot):
+    update = make_presence(USER_NICK, jid="ignored@example.org")
+    update["muc"]._values["jid"] = None
+
+    await rooms.on_muc_presence(fake_bot, update)
+
+    assert rooms.JOINED_ROOMS[ROOM_JID]["nicks"][USER_NICK]["jid"] is None
 
 
 @pytest.mark.asyncio

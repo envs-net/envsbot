@@ -10,6 +10,81 @@ from utils.formatting import format_page, parse_page_args
 from core_plugins import _core
 
 
+def _message_actor_nick(msg) -> str:
+    try:
+        return str(msg.get("mucnick") or getattr(msg["from"], "resource", None) or "").strip()
+    except Exception:
+        return ""
+
+
+def _remember_player_nick(player: dict[str, Any], msg) -> None:
+    nick = _message_actor_nick(msg)
+    if nick:
+        player["last_nick"] = nick[:128]
+
+
+def _real_bare_jid(value: Any, room_jid: str) -> str:
+    if not value:
+        return ""
+    try:
+        bare = getattr(value, "bare", None)
+        candidate = str(bare if bare else value).split("/", 1)[0].strip()
+    except Exception:
+        return ""
+    if not candidate or candidate == room_jid or "@" not in candidate:
+        return ""
+    return candidate
+
+
+def _find_player_by_last_nick(room: dict[str, Any], nick: str) -> tuple[str, dict[str, Any]] | tuple[None, None]:
+    needle = str(nick or "").strip().lower()
+    if not needle:
+        return None, None
+    players = room.get("players", {})
+    if not isinstance(players, dict):
+        return None, None
+    for jid, player in players.items():
+        if not isinstance(player, dict):
+            continue
+        seen_nicks = [player.get("last_nick"), player.get("nick"), player.get("current_nick")]
+        extra = player.get("nicks")
+        if isinstance(extra, (list, tuple, set)):
+            seen_nicks.extend(extra)
+        if any(str(value or "").strip().lower() == needle for value in seen_nicks):
+            return str(jid), player
+    return None, None
+
+
+async def _message_penalty_target_jid(bot, msg, room_jid: str, actor_nick: str) -> str:
+    sender_jid, _, _ = await _core.get_real_jid(bot, msg)
+    sender_jid = _real_bare_jid(sender_jid, room_jid)
+
+    if not sender_jid:
+        lookup = getattr(bot, "_lookup_muc_occupant_jid", None)
+        if callable(lookup):
+            try:
+                sender_jid = _real_bare_jid(lookup(room_jid, actor_nick), room_jid)
+            except Exception:
+                sender_jid = ""
+
+    data = await _get_data(bot)
+    room = _room_bucket(data, room_jid)
+    if sender_jid:
+        jid, player = _find_player(room, sender_jid)
+        if player and jid:
+            return str(jid)
+
+    if actor_nick:
+        jid, player = _find_player(room, actor_nick)
+        if player and jid:
+            return str(jid)
+        jid, player = _find_player_by_last_nick(room, actor_nick)
+        if player and jid:
+            return str(jid)
+
+    return ""
+
+
 async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
     room_jid = _room_from_context(msg, is_room)
     if not room_jid:
@@ -56,6 +131,7 @@ async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: 
         "penalties": {},
         "achievements": ["founder"],
         "title": "",
+        "last_nick": _message_actor_nick(msg),
         "x": random.randint(0, MAP_X),
         "y": random.randint(0, MAP_Y),
         "logged_out": False,
@@ -86,8 +162,10 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
         _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
     player = _normalize_player(sender_jid, player)
+    _remember_player_nick(player, msg)
     pending = player.get("pending_logout_penalty") if isinstance(player.get("pending_logout_penalty"), dict) else {}
     if not pending and _is_player_online(room_jid, str(_jid or sender_jid), player):
+        await _set_data(bot, data)
         _reply(
             bot,
             msg,
@@ -986,13 +1064,13 @@ async def on_message(bot, msg):
             return
         if not COUNT_COMMAND_MESSAGES and body.startswith(_command_prefix(bot)):
             return
-        sender_jid, _, _ = await _core.get_real_jid(bot, msg)
-        if not sender_jid:
+        target_jid = await _message_penalty_target_jid(bot, msg, room_jid, str(actor_nick or ""))
+        if not target_jid:
             return
         await _penalize_player(
             bot,
             room_jid,
-            str(sender_jid),
+            target_jid,
             "message",
             max(1, len(body)) * MESSAGE_PENALTY,
             announce=False,
