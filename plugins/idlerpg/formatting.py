@@ -145,7 +145,7 @@ def _format_top_lines(room: dict[str, Any], *, limit: int | None = None) -> list
     ranked = _ranked_players(room)[:limit]
     if not ranked:
         return ["No IdleRPG players yet."]
-    lines = ["IdleRPG Top Players:"]
+    lines = [f"IdleRPG Top {limit} Players:"]
     for rank, (_jid, player) in enumerate(ranked, start=1):
         lines.append(
             f"{_display_character(player)}, the level {player.get('level', 0)} "

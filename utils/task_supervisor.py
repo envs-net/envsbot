@@ -305,7 +305,7 @@ class TaskSupervisor:
                 try:
                     done_task.result()
                 except asyncio.CancelledError:
-                    pass
+                    continue
                 except Exception as exc:
                     log.debug(
                         "[TASKS] Task raised during cancellation",
@@ -348,7 +348,7 @@ class TaskSupervisor:
                 try:
                     done_task.result()
                 except asyncio.CancelledError:
-                    pass
+                    continue
                 except Exception as exc:
                     log.debug(
                         "[TASKS] Task raised during cancellation",

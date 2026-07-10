@@ -1023,7 +1023,7 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
     idlerpg._check_level_achievements(alice, room)
     assert "level_reward_50" in alice["achievements"]
     assert "level_reward_75" in alice["achievements"]
-    assert idlerpg._format_top_lines(room, limit=2)[0] == "IdleRPG Top Players:"
+    assert idlerpg._format_top_lines(room, limit=2)[0] == "IdleRPG Top 2 Players:"
     assert "#1" in idlerpg._topic_text(room)
     assert idlerpg._topic_text(room, custom_text="CustomText").startswith("CustomText #1")
 
@@ -1070,7 +1070,7 @@ async def test_login_announcement_and_manual_top_command(monkeypatch):
     admin_msg = DummyMsg(resource="Admin")
     bot.replies.clear()
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["announce", "top"], admin_msg, True)
-    top_replies = [text for text, _kwargs in bot.replies if "IdleRPG Top Players" in text]
+    top_replies = [text for text, _kwargs in bot.replies if "IdleRPG Top 5 Players" in text]
     assert len(top_replies) == 1
     assert "\n" in top_replies[0]
     assert "announced" in bot.replies[-1][0]
