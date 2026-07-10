@@ -27,3 +27,9 @@ def test_public_rules_include_new_options():
     assert rules["manual_duel_max_distance"] == idlerpg.MANUAL_DUEL_MAX_DISTANCE
     assert rules["manual_duel_cooldown_seconds"] == idlerpg.MANUAL_DUEL_COOLDOWN_SECONDS
     assert "season_achievement_gates_enabled" in rules
+    assert rules["boss_event_weight"] == idlerpg.BOSS_EVENT_WEIGHT
+    assert rules["boss_min_players"] == idlerpg.BOSS_MIN_PLAYERS
+    assert rules["boss_max_players"] == idlerpg.BOSS_MAX_PLAYERS
+    assert rules["boss_min_level"] == idlerpg.BOSS_MIN_LEVEL
+    assert rules["boss_reward_percent"] == idlerpg.BOSS_REWARD_PERCENT
+    assert rules["boss_loss_percent"] == idlerpg.BOSS_LOSS_PERCENT

@@ -250,6 +250,95 @@ def _run_team_battle(
         messages.append(_next_level_line(player))
 
 
+_BOSS_NAMES = (
+    "Ancient Root Daemon",
+    "The Idle Hydra",
+    "Chrono Wyrm",
+    "Packet Dragon",
+    "Lag Golem",
+)
+
+
+def _run_boss_event(
+    players: list[tuple[str, dict[str, Any]]],
+    messages: list[str],
+    room: dict[str, Any] | None = None,
+) -> bool:
+    eligible = [
+        (jid, player)
+        for jid, player in players
+        if int(player.get("level", 0) or 0) >= BOSS_MIN_LEVEL
+    ]
+    min_players = max(1, int(BOSS_MIN_PLAYERS or 1))
+    max_players = max(min_players, int(BOSS_MAX_PLAYERS or min_players))
+    if len(eligible) < min_players:
+        return False
+
+    party_size = min(len(eligible), max_players)
+    party = random.sample(eligible, party_size)
+    party_names = [_display_player(player) for _jid, player in party]
+    party_power = max(1, sum(_battle_power(player) for _jid, player in party))
+
+    min_factor = float(BOSS_POWER_MIN_FACTOR or 1.0)
+    max_factor = float(BOSS_POWER_MAX_FACTOR or min_factor)
+    if max_factor < min_factor:
+        min_factor, max_factor = max_factor, min_factor
+    boss_factor = random.uniform(min_factor, max_factor)
+    boss_power = max(1, int(party_power * boss_factor))
+    party_roll = random.randint(0, party_power)
+    boss_roll = random.randint(0, boss_power)
+    boss_name = random.choice(_BOSS_NAMES)
+    won = party_roll >= boss_roll
+    before_achievements = {
+        id(player): set(player.get("achievements", []) if isinstance(player.get("achievements"), list) else [])
+        for _jid, player in party
+    }
+
+    if won:
+        changed_values = []
+        for _jid, player in party:
+            changed_values.append(_remove_time(player, _percent_amount(player, BOSS_REWARD_PERCENT)))
+            _award(player, "boss_slayer")
+            _inc_stat(player, "bosses_defeated", 1, room)
+        messages.append(
+            f"🐉 {', '.join(party_names)} [{party_roll}/{party_power}] faced {boss_name} "
+            f"[{boss_roll}/{boss_power}] and defeated it! "
+            f"Up to {_duration_clock(max(changed_values or [0]))} is removed from their clocks."
+        )
+        result = "defeated"
+    else:
+        changed_values = []
+        for _jid, player in party:
+            changed_values.append(_add_time(player, _percent_amount(player, BOSS_LOSS_PERCENT)))
+        messages.append(
+            f"🐉 {', '.join(party_names)} [{party_roll}/{party_power}] faced {boss_name} "
+            f"[{boss_roll}/{boss_power}] and failed! "
+            f"Up to {_duration_clock(max(changed_values or [0]))} is added to their clocks."
+        )
+        result = "failed"
+
+    for _jid, player in party:
+        messages.append(_next_level_line(player))
+        messages.extend(_achievement_announcements(player, before_achievements[id(player)]))
+
+    if room is not None:
+        _record_event(
+            room,
+            "boss",
+            f"{', '.join(party_names)} {result} {boss_name}",
+            players=party_names,
+            data={
+                "boss": boss_name,
+                "result": result,
+                "party_roll": party_roll,
+                "party_power": party_power,
+                "boss_roll": boss_roll,
+                "boss_power": boss_power,
+            },
+        )
+    return True
+
+
 def _run_alignment_bonus(
     players: list[tuple[str, dict[str, Any]]],
     messages: list[str],

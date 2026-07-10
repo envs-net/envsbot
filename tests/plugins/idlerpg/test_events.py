@@ -150,3 +150,48 @@ def test_original_style_grid_battle_only_when_players_meet(monkeypatch):
     monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
     assert idlerpg._maybe_run_grid_battle(players, messages, room) is False
     assert messages == []
+
+
+
+def test_boss_event_defeat_awards_and_records_event(monkeypatch):
+    room = idlerpg._blank_room()
+    players = []
+    for idx in range(3):
+        jid = f"boss{idx}@envs.net"
+        player = idlerpg._normalize_player(
+            jid,
+            {
+                "name": f"Boss{idx}",
+                "level": idlerpg.BOSS_MIN_LEVEL,
+                "next": 10000,
+                "items": {"weapon": 50},
+            },
+        )
+        players.append((jid, player))
+
+    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: list(seq)[:count])
+    monkeypatch.setattr(idlerpg.random, "uniform", lambda _start, _stop: 1.0)
+    randint_values = itertools.cycle([9999, 0])
+    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
+    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+
+    messages = []
+    assert idlerpg._run_boss_event(players, messages, room) is True
+
+    assert any("faced Ancient Root Daemon" in message and "defeated it" in message for message in messages)
+    assert all(player["next"] < 10000 for _jid, player in players)
+    assert all(player["stats"]["bosses_defeated"] == 1 for _jid, player in players)
+    assert all("boss_slayer" in player["achievements"] for _jid, player in players)
+    assert room["events"][-1]["kind"] == "boss"
+    assert room["events"][-1]["data"]["result"] == "defeated"
+
+
+def test_boss_event_requires_enough_eligible_players():
+    player = idlerpg._normalize_player(
+        "low@envs.net",
+        {"name": "Low", "level": max(0, idlerpg.BOSS_MIN_LEVEL - 1), "next": 10000},
+    )
+    messages = []
+
+    assert idlerpg._run_boss_event([("low@envs.net", player)], messages, idlerpg._blank_room()) is False
+    assert messages == []
