@@ -293,30 +293,23 @@ class TaskSupervisor:
         was_running = not task.done()
         if was_running:
             task.cancel()
-            gather_future = asyncio.gather(task, return_exceptions=True)
-            try:
-                results = await asyncio.wait_for(gather_future, timeout=timeout)
-            except asyncio.TimeoutError:
-                gather_future.cancel()
-                try:
-                    await gather_future
-                except asyncio.CancelledError:
-                    log.debug(
-                        "[TASKS] Timed-out task future cancelled during cleanup"
-                    )
+            done, pending = await asyncio.wait({task}, timeout=timeout)
+            if pending:
                 log.warning(
                     "[TASKS] Plugin task did not stop in time: %s",
                     task.get_name(),
                 )
                 return True
 
-            for result in results:
-                if isinstance(result, asyncio.CancelledError):
-                    continue
-                if isinstance(result, Exception):
+            for done_task in done:
+                try:
+                    done_task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
                     log.debug(
                         "[TASKS] Task raised during cancellation",
-                        exc_info=result,
+                        exc_info=exc,
                     )
 
         self._prune_task_unless_failed(task)
@@ -342,44 +335,29 @@ class TaskSupervisor:
         running_tasks = [task for task in plugin_tasks if not task.done()]
         for task in running_tasks:
             task.cancel()
+        pending: set[asyncio.Task[Any]] = set()
         if running_tasks:
-            gather_future = asyncio.gather(*running_tasks, return_exceptions=True)
-            results: list[Any] = []
-            try:
-                results = await asyncio.wait_for(gather_future, timeout=timeout)
-            except asyncio.TimeoutError:
-                gather_future.cancel()
+            done, pending = await asyncio.wait(running_tasks, timeout=timeout)
+            for task in pending:
+                log.warning(
+                    "[TASKS] Plugin task did not stop in time: %s",
+                    task.get_name(),
+                )
+
+            for done_task in done:
                 try:
-                    await gather_future
+                    done_task.result()
                 except asyncio.CancelledError:
-                    log.debug(
-                        "[TASKS] Timed-out gather future cancelled during cleanup"
-                    )
-
-                pending = {task for task in running_tasks if not task.done()}
-                for task in pending:
-                    log.warning(
-                        "[TASKS] Plugin task did not stop in time: %s",
-                        task.get_name(),
-                    )
-
-                finished = [task for task in running_tasks if task.done()]
-                if finished:
-                    results = await asyncio.gather(*finished, return_exceptions=True)
-                else:
-                    results = []
-
-            for result in results:
-                if isinstance(result, asyncio.CancelledError):
-                    continue
-                if isinstance(result, Exception):
+                    pass
+                except Exception as exc:
                     log.debug(
                         "[TASKS] Task raised during cancellation",
-                        exc_info=result,
+                        exc_info=exc,
                     )
 
         for task in plugin_tasks:
-            self._prune_task_unless_failed(task)
+            if task not in pending:
+                self._prune_task_unless_failed(task)
         return len(running_tasks)
 
     async def cancel_all(self, *, timeout: float = 5.0) -> int:

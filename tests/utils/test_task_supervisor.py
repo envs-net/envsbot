@@ -146,6 +146,73 @@ async def test_cancel_task_removes_single_cancelled_task_from_tracking():
 
     await supervisor.cancel_task(beta, timeout=1.0)
 
+
+@pytest.mark.asyncio
+async def test_cancel_task_keeps_timed_out_task_tracked(caplog):
+    caplog.set_level("WARNING", logger="utils.task_supervisor")
+    supervisor = TaskSupervisor()
+    release = asyncio.Event()
+
+    async def stubborn():
+        while not release.is_set():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                continue
+
+    task = supervisor.create("example", stubborn(), name="stubborn")
+    await asyncio.sleep(0)
+
+    assert await supervisor.cancel_task(task, timeout=0.01) is True
+    snapshot = supervisor.snapshot(include_done=False)
+    assert [item.name for item in snapshot] == ["stubborn"]
+    assert snapshot[0].status == "running"
+    assert "Plugin task did not stop in time: stubborn" in caplog.text
+
+    release.set()
+    task.cancel()
+    done, pending = await asyncio.wait({task}, timeout=1.0)
+    assert task in done
+    assert not pending
+    supervisor._prune_task_unless_failed(task)
+    assert supervisor.snapshot(include_done=True) == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_plugin_uses_wait_and_keeps_pending_tasks(caplog):
+    caplog.set_level("WARNING", logger="utils.task_supervisor")
+    supervisor = TaskSupervisor()
+    release = asyncio.Event()
+
+    async def stubborn():
+        while not release.is_set():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                continue
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    stubborn_task = supervisor.create("example", stubborn(), name="stubborn")
+    supervisor.create("example", sleeper(), name="normal")
+    await asyncio.sleep(0)
+
+    assert await supervisor.cancel_plugin("example", timeout=0.01) == 2
+    snapshot = supervisor.snapshot(include_done=True)
+    assert [item.name for item in snapshot] == ["stubborn"]
+    assert snapshot[0].status == "running"
+    assert "Plugin task did not stop in time: stubborn" in caplog.text
+
+    release.set()
+    stubborn_task.cancel()
+    done, pending = await asyncio.wait({stubborn_task}, timeout=1.0)
+    assert stubborn_task in done
+    assert not pending
+    supervisor._prune_task_unless_failed(stubborn_task)
+    assert supervisor.snapshot(include_done=True) == []
+
 @pytest.mark.asyncio
 async def test_snapshot_includes_completed_tasks_by_default():
     supervisor = TaskSupervisor()
