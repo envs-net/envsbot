@@ -861,8 +861,10 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
     idlerpg._record_event(room, "level", "Alice reached level 25", players=["Alice"])
 
     monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://example.org/idlerpg/data")
-    summary = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
+    summary, room_payload = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
     assert summary["leaderboard_url"].endswith("/room_at_conf/leaderboard.json")
+    assert "_room_payload" not in summary
+    assert room_payload["achievement_catalog"] == idlerpg._achievement_catalog()
 
     import json
     room_payload = json.loads((tmp_path / "room_at_conf" / "room.json").read_text())

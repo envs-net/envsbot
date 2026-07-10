@@ -1,4 +1,14 @@
-"""Split module for plugins/idlerpg.py: export."""
+"""Export helpers for the IdleRPG plugin public-state writer.
+
+This split module is imported by ``plugins.idlerpg`` and executed with the
+shared IdleRPG namespace populated by the package facade.  The host module
+must provide the configuration constants (for example ``EXPORT_PATH`` and
+``EXPORT_PUBLIC_BASE_URL``), logging helper ``log``, game state helpers
+(``_ranked_players``, ``_is_player_online``, ``_display_player`` and related
+formatters), achievement helpers, rule constants and clock helper ``_now``.
+The functions in this module write only public JSON export data and must not
+expose private player JIDs.
+"""
 
 from __future__ import annotations
 import json
@@ -256,7 +266,12 @@ def _public_rules() -> dict[str, Any]:
     }
 
 
-def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generated_at: int) -> dict[str, Any]:
+def _export_room_state(
+    root: Path,
+    room_jid: str,
+    room: dict[str, Any],
+    generated_at: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     slug = _room_slug(room_jid)
     room_dir = root / slug
     ranked = _ranked_players(room)
@@ -321,15 +336,15 @@ def _export_room_state(root: Path, room_jid: str, room: dict[str, Any], generate
     profiles_dir = room_dir / "profiles"
     for profile in all_profiles:
         _atomic_write_json(profiles_dir / f"{_slug(profile['name'])}.json", profile)
-    return {
+    summary = {
         "room": room_jid,
         "slug": slug,
         "players_total": len(all_profiles),
         "players_online": room_payload["players_online"],
         "leaderboard_url": _public_url(slug, "leaderboard.json"),
         "map_url": _public_url(slug, "map.json"),
-        "_room_payload": room_payload,
     }
+    return summary, room_payload
 
 
 def _export_public_state(data: dict[str, Any]) -> None:
@@ -346,14 +361,9 @@ def _export_public_state(data: dict[str, Any]) -> None:
         for room_jid, room in sorted(rooms.items()):
             if not isinstance(room, dict):
                 continue
-            summary_with_payload = _export_room_state(root, str(room_jid), room, generated_at)
-            room_payload = summary_with_payload.get("_room_payload")
-            summaries.append({
-                key: value
-                for key, value in summary_with_payload.items()
-                if key != "_room_payload"
-            })
-            if default_room_payload is None and isinstance(room_payload, dict):
+            summary, room_payload = _export_room_state(root, str(room_jid), room, generated_at)
+            summaries.append(summary)
+            if default_room_payload is None:
                 default_room_payload = room_payload
         _atomic_write_json(root / "index.json", {"generated_at": generated_at, "rooms": summaries})
         if default_room_payload:
