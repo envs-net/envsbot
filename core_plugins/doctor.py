@@ -6,6 +6,7 @@ import compileall
 import os
 import py_compile
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -337,16 +338,46 @@ async def _latest_release_line(bot: Any) -> str:
 
 
 def _command_docs_line() -> str:
-    """Return a release-check line for generated command docs."""
-    try:
-        from scripts.check_command_docs import validate_command_docs
+    """Return a release-check line for generated command docs.
 
-        errors, command_count = validate_command_docs()
+    Run the same checker as CI in a fresh interpreter.  Import-based validation
+    can accidentally reuse already-loaded runtime modules from the bot process
+    and report stale docs even when ``python scripts/check_command_docs.py``
+    passes from the repository checkout.
+    """
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts" / "check_command_docs.py"
+    if not script.exists():
+        return _line(False, "Command docs", "check script missing")
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=False,
+        )
     except Exception as exc:
         return _line(False, "Command docs", f"check failed: {exc}")
-    if errors:
-        return _line(False, "Command docs", f"{len(errors)} issue(s); regenerate docs/commands.md")
-    return _line(True, "Command docs", f"ok ({command_count} commands)")
+
+    output = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
+    if proc.returncode == 0:
+        for line in output.splitlines():
+            if "Command docs check passed" in line:
+                detail = line.replace("Command docs check passed", "ok").strip().rstrip(".")
+                detail = detail.replace(" decorated commands", " commands")
+                return _line(True, "Command docs", detail)
+        return _line(True, "Command docs", "ok")
+
+    issues = [line for line in output.splitlines() if line.lstrip().startswith("- ")]
+    if issues:
+        return _line(False, "Command docs", f"{len(issues)} issue(s); regenerate docs/commands.md")
+
+    detail = output.splitlines()[-1] if output else f"checker exited with {proc.returncode}"
+    return _line(False, "Command docs", detail[:160])
 
 
 def _config_sample_line() -> str:

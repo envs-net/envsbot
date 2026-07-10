@@ -218,21 +218,30 @@ def test_parse_doctor_sections_supports_release_aliases():
 
 
 def test_release_command_docs_line_handles_ok_errors_and_exceptions(monkeypatch):
-    package = ModuleType("scripts")
-    module = ModuleType("scripts.check_command_docs")
-    monkeypatch.setitem(sys.modules, "scripts", package)
-    monkeypatch.setitem(sys.modules, "scripts.check_command_docs", module)
+    def fake_ok(*args, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout="Command docs check passed (127 decorated commands).\n",
+            stderr="",
+        )
 
-    module.validate_command_docs = lambda: ([], 127)
+    monkeypatch.setattr(doctor.subprocess, "run", fake_ok)
     assert doctor._command_docs_line() == "✅ Command docs: ok (127 commands)"
 
-    module.validate_command_docs = lambda: (["missing command"], 127)
+    def fake_errors(*args, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="Command docs check failed:\n- docs/commands.md is out of date\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(doctor.subprocess, "run", fake_errors)
     assert doctor._command_docs_line() == "🔴 Command docs: 1 issue(s); regenerate docs/commands.md"
 
-    def broken_validator():
+    def fake_exception(*args, **kwargs):
         raise RuntimeError("validator unavailable")
 
-    module.validate_command_docs = broken_validator
+    monkeypatch.setattr(doctor.subprocess, "run", fake_exception)
     assert doctor._command_docs_line() == "🔴 Command docs: check failed: validator unavailable"
 
 

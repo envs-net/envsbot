@@ -6,7 +6,7 @@ name: pytest-3.12
 steps:
 - name: test
   image: python:3.12
-  commands: &test_commands
+  commands:
     - python -m pip install --upgrade pip
     - pip install -r requirements.txt
     - pip install -r requirements-dev.txt
@@ -16,7 +16,7 @@ steps:
     - python -m build
     - pytest
 
-trigger: &test_trigger
+trigger:
   event:
     - push
     - pull_request
@@ -30,6 +30,18 @@ name: pytest-3.13
 steps:
 - name: test
   image: python:3.13
-  commands: *test_commands
+  commands:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+    - python -m pip check
+    - python -m compileall -q .
+    - python scripts/check_command_docs.py
+    - python -m build
+    - pytest
 
-trigger: *test_trigger
+trigger:
+  event:
+    - push
+    - pull_request
+    - tag
