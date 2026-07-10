@@ -161,10 +161,12 @@ async def test_message_penalty_generic_message_event_and_dedupe_by_stanza_id():
     msg = DummyMsg(body="x", resource="skx", stanza_id="msg-1")
     await idlerpg.on_message(bot, msg)
     await idlerpg.on_message(bot, msg)
+    msg2 = DummyMsg(body="x", resource="skx", stanza_id="msg-2")
+    await idlerpg.on_message(bot, msg2)
 
-    assert player["next"] == before + 1
-    assert player["penalties"]["message"] == 1
-    assert player["stats"]["messages"] == 1
+    assert player["next"] == before + 2
+    assert player["penalties"]["message"] == 2
+    assert player["stats"]["messages"] == 2
 
 
 @pytest.mark.asyncio
@@ -250,6 +252,14 @@ async def test_admin_push_setlevel_reset_delete():
     before = room["players"]["alice@envs.net"]["next"]
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["push", "Alice", "1m"], msg, True)
     assert room["players"]["alice@envs.net"]["next"] < before
+
+    invalid_before = room["players"]["alice@envs.net"]["next"]
+    bot.replies.clear()
+    await idlerpg.idlerpg_command(
+        bot, "admin@envs.net", "Admin", ["push", "Alice", "notaduration"], msg, True
+    )
+    assert room["players"]["alice@envs.net"]["next"] == invalid_before
+    assert "Invalid duration" in bot.replies[-1][0]
 
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["reset", "Alice"], msg, True)
     assert room["players"]["alice@envs.net"]["level"] == 0
@@ -501,14 +511,25 @@ async def test_mutating_admin_commands_require_room_admin():
     )
     mod_msg = DummyMsg(resource="Mod")
 
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["export"], mod_msg, True)
-    assert "Only room owners/admins" in bot.replies[-1][0]
-
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["season", "end"], mod_msg, True)
-    assert "Only room owners/admins" in bot.replies[-1][0]
-
-    await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["delete", "Alice"], mod_msg, True)
-    assert "Only room owners/admins" in bot.replies[-1][0]
+    admin_only_commands = [
+        ["export"],
+        ["season", "end"],
+        ["delete", "Alice"],
+        ["setlevel", "Alice", "1"],
+        ["reset", "Alice"],
+        ["push", "Alice", "9"],
+        ["hof", "clear", "confirm"],
+        ["season", "reset"],
+        ["season", "extend", "7"],
+        ["announce", "top"],
+        ["topic", "update"],
+    ]
+    for command_args in admin_only_commands:
+        bot.replies.clear()
+        await idlerpg.idlerpg_command(
+            bot, "mod@envs.net", "Mod", command_args, mod_msg, True
+        )
+        assert "Only room owners/admins" in bot.replies[-1][0]
 
 
 def test_ascii_map_rendering_contains_grid_and_legend():
