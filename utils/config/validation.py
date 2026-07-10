@@ -31,7 +31,7 @@ def _matches_expected_type(value: object, expected_type: object) -> bool:
     for typ in expected_types:
         if typ is int and _is_config_int(value):
             return True
-        if typ is float and isinstance(value, float):
+        if typ is float and isinstance(value, float) and not isinstance(value, bool):
             return True
         if typ is bool and isinstance(value, bool):
             return True

@@ -10,10 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.generate_commands_md import generate as generate_commands_md  # noqa: E402
+from scripts.generate_commands_md import (  # noqa: E402
+    generate as generate_commands_md,
+    generate_plugin_docs,
+)
 from utils.command_registry import decorated_command_records  # noqa: E402
 
 DOCS_COMMANDS = ROOT / "docs" / "commands.md"
+DOCS_PLUGINS = ROOT / "docs" / "plugins"
 
 
 def validate_command_docs(docs_path: Path = DOCS_COMMANDS) -> tuple[list[str], int]:
@@ -43,6 +47,18 @@ def validate_command_docs(docs_path: Path = DOCS_COMMANDS) -> tuple[list[str], i
     else:
         errors.append("docs/commands.md is missing")
 
+    plugin_docs = generate_plugin_docs()
+    for rel_name, generated_doc in plugin_docs.items():
+        path = DOCS_PLUGINS / rel_name
+        if not path.exists():
+            errors.append(f"docs/plugins/{rel_name} is missing")
+            continue
+        if path.read_text(encoding="utf-8") != generated_doc:
+            errors.append(
+                f"docs/plugins/{rel_name} is out of date; run "
+                "python scripts/generate_commands_md.py"
+            )
+
     for plugin, _meta, cmd in commands:
         name = str(getattr(cmd, "name", "")).lower()
         if not name:
@@ -57,6 +73,10 @@ def validate_command_docs(docs_path: Path = DOCS_COMMANDS) -> tuple[list[str], i
             errors.append(f"{plugin}:{name}: missing examples")
         if docs_text and f"`,{name}`" not in docs_text:
             errors.append(f"docs/commands.md: missing primary command {name!r}")
+        plugin_doc_name = f"{plugin.replace('/', '_')}.md"
+        plugin_doc = plugin_docs.get(plugin_doc_name, "")
+        if plugin_doc and f"### `,{name}`" not in plugin_doc:
+            errors.append(f"docs/plugins/{plugin_doc_name}: missing command {name!r}")
 
     return errors, len(commands)
 

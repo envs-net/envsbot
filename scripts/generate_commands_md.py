@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/commands.md from plugin command metadata."""
+"""Generate command docs from plugin command metadata."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from utils.command_registry import (  # noqa: E402
 )
 
 PREFIX = config.get("prefix", ",")
+PLUGIN_DOCS_DIR = ROOT / "docs" / "plugins"
 
 
 def _metadata(cmd):
@@ -56,6 +57,24 @@ def _commands_from_module(module):
 
 def _category_title(category: str) -> str:
     return category.replace("_", " ").replace("-", " ").title()
+
+
+def _table_cell(value: object) -> str:
+    """Return markdown table-safe text."""
+    return str(value).replace("\n", " ").replace("|", "\\|")
+
+
+def _inline_code(value: object) -> str:
+    """Return text that is safe to show inside inline backticks."""
+    return str(value).replace("\n", "\\n")
+
+
+def _plugin_doc_filename(name: str) -> str:
+    return f"{name.replace('/', '_')}.md"
+
+
+def _plugin_doc_relpath(name: str) -> str:
+    return f"plugins/{_plugin_doc_filename(name)}"
 
 
 def _room_feature_names() -> list[str]:
@@ -117,6 +136,141 @@ def _collect():
     return plugins, commands
 
 
+def _reminder_notes() -> list[str]:
+    return [
+        "## Timezone-aware reminders",
+        "",
+        "Relative reminders do not need a timezone:",
+        "",
+        "```text",
+        f"{PREFIX}remind 10m check the logs",
+        f"{PREFIX}remind 1h30m restart the service",
+        f"{PREFIX}remind 2d review the backup plan",
+        "```",
+        "",
+        "Absolute reminders use the user's configured timezone, the bot fallback, or an explicit timezone token:",
+        "",
+        "```text",
+        f"{PREFIX}remind 2026-07-10 13:23 deploy window",
+        f"{PREFIX}remind 2026-07-10 13:23 CEST deploy window",
+        f"{PREFIX}remind 2026-07-10 13:23 Europe/Berlin deploy window",
+        f"{PREFIX}remind 2026-07-10 13:23 +02:00 deploy window",
+        "```",
+        "",
+        "For absolute dates without an explicit timezone, the plugin resolves the timezone in this order:",
+        "",
+        "1. explicit timezone in the command, for example `CEST`, `Europe/Berlin` or `+02:00`",
+        f"2. the user's stored `TIMEZONE`, set with `{PREFIX}timezone set Europe/Berlin`",
+        "3. `REMINDER_DEFAULT_TIMEZONE` from `config.py`",
+        "4. UTC as final fallback",
+        "",
+        "Supported command timezone forms:",
+        "",
+        "- `UTC`, `GMT`, `Z`",
+        "- `CET` / `MEZ`",
+        "- `CEST` / `MESZ`",
+        "- IANA timezone names such as `Europe/Berlin`",
+        "- fixed offsets such as `+02:00`, `+0200` or `-05:00`",
+        "",
+        "Prefer IANA timezone names such as `Europe/Berlin` for user profiles and bot defaults because they handle daylight saving time automatically. `CET` and `CEST` are fixed offsets and mean exactly UTC+1 and UTC+2.",
+        "",
+        "Configuration fallback:",
+        "",
+        "```python",
+        'REMINDER_DEFAULT_TIMEZONE = "UTC"',
+        "```",
+        "",
+    ]
+
+
+def _plugin_extra_notes(name: str) -> list[str]:
+    if name == "reminder":
+        return _reminder_notes()
+    return []
+
+
+def generate_plugin_doc(name: str, meta: dict, plugin_commands: list[object]) -> str:
+    """Generate one detailed plugin documentation page."""
+    title = str(meta.get("name") or name)
+    lines = [
+        f"# {title} plugin",
+        "",
+        "This file is generated from command metadata. Do not edit command sections by hand.",
+        "",
+        "```bash",
+        "python scripts/generate_commands_md.py",
+        "```",
+        "",
+        f"Source: `{meta.get('source', 'plugins')}`",
+        f"Category: `{meta['category']}`",
+        "",
+        str(meta["description"]),
+        "",
+    ]
+    lines.extend(_plugin_extra_notes(name))
+    lines += ["## Commands", ""]
+
+    for cmd in sorted(plugin_commands, key=lambda item: item.name):
+        data = _metadata(cmd)
+        aliases = sorted(set(a for a in (cmd.aliases or []) if a != cmd.name))
+        lines += [
+            f"### `{PREFIX}{cmd.name}`",
+            "",
+            data["short"],
+            "",
+            f"Role: `{data['role']}`<br>",
+            f"Context: `{data['context']}`<br>",
+            f"Category: `{data['category']}`<br>",
+            f"Usage: `{data['usage']}`",
+            "",
+        ]
+        if aliases:
+            lines += ["Aliases: " + ", ".join(f"`{PREFIX}{alias}`" for alias in aliases), ""]
+        if data["examples"]:
+            lines.append("Examples:")
+            lines.append("")
+            for example in data["examples"]:
+                lines.append(f"- `{_inline_code(example)}`")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def generate_plugin_index(plugins: list[tuple[str, dict, list[object]]]) -> str:
+    """Generate docs/plugins/README.md."""
+    lines = [
+        "# Plugin documentation",
+        "",
+        "This file is generated from command metadata. Do not edit it by hand.",
+        "",
+        "```bash",
+        "python scripts/generate_commands_md.py",
+        "```",
+        "",
+        "`docs/commands.md` is the compact command overview. These plugin pages contain the detailed command usage, aliases and examples for each plugin.",
+        "",
+        "| Plugin | Source | Category | Description |",
+        "| --- | --- | --- | --- |",
+    ]
+    for name, meta, _plugin_commands in plugins:
+        filename = _plugin_doc_filename(name)
+        lines.append(
+            f"| [`{name}`]({filename}) | `{_table_cell(meta.get('source', 'plugins'))}` | `{_table_cell(meta['category'])}` | {_table_cell(meta['description'])} |"
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def generate_plugin_docs() -> dict[str, str]:
+    """Generate all plugin docs under docs/plugins/.
+
+    Returned keys are filenames relative to docs/plugins/.
+    """
+    plugins, _commands = _collect()
+    docs = {"README.md": generate_plugin_index(plugins)}
+    for name, meta, plugin_commands in plugins:
+        docs[_plugin_doc_filename(name)] = generate_plugin_doc(name, meta, plugin_commands)
+    return docs
+
+
 def generate() -> str:
     plugins, commands = _collect()
     lines = [
@@ -168,12 +322,14 @@ def generate() -> str:
         "",
         "## Plugin overview",
         "",
-        "| Plugin | Source | Category | Description |",
-        "| --- | --- | --- | --- |",
+        "| Plugin | Source | Category | Description | Detailed docs |",
+        "| --- | --- | --- | --- | --- |",
     ]
 
     for name, meta, _plugin_commands in plugins:
-        lines.append(f"| `{name}` | `{meta['source']}` | `{meta['category']}` | {meta['description']} |")
+        lines.append(
+            f"| `{name}` | `{_table_cell(meta['source'])}` | `{_table_cell(meta['category'])}` | {_table_cell(meta['description'])} | [`docs/plugins/{_plugin_doc_filename(name)}`]({_plugin_doc_relpath(name)}) |"
+        )
 
     by_category: dict[str, list[tuple[str, object, dict]]] = {}
     for _plugin_name, _meta, cmd, data in commands:
@@ -182,50 +338,40 @@ def generate() -> str:
     lines += ["", "## Commands by category", ""]
     for category in sorted(by_category):
         items = sorted(by_category[category], key=lambda item: item[1].name)
-        lines += [f"### {_category_title(category)}", "", "| Command | Role | Context | Description |", "| --- | --- | --- | --- |"]
-        for _plugin_name, cmd, data in items:
+        lines += [f"### {_category_title(category)}", "", "| Command | Plugin | Role | Context | Description |", "| --- | --- | --- | --- | --- |"]
+        for plugin_name, cmd, data in items:
             lines.append(
-                f"| `{PREFIX}{cmd.name}` | `{data['role']}` | `{data['context']}` | {data['short']} |"
+                f"| `{PREFIX}{cmd.name}` | [`{plugin_name}`]({_plugin_doc_relpath(plugin_name)}) | `{data['role']}` | `{_table_cell(data['context'])}` | {_table_cell(data['short'])} |"
             )
         lines.append("")
 
-    lines += ["## Plugin command details", ""]
-    for name, meta, plugin_commands in plugins:
-        lines += [
-            f"### {meta['name']}",
-            "",
-            f"Source: `{meta.get('source', 'plugins')}`",
-            f"Category: `{meta['category']}`",
-            "",
-            str(meta["description"]),
-            "",
-        ]
-        for cmd in plugin_commands:
-            data = _metadata(cmd)
-            aliases = sorted(set(a for a in (cmd.aliases or []) if a != cmd.name))
-            lines += [
-                f"#### `{PREFIX}{cmd.name}`",
-                "",
-                data["short"],
-                "",
-                f"Role: `{data['role']}`<br>",
-                f"Context: `{data['context']}`<br>",
-                f"Category: `{data['category']}`<br>",
-                f"Usage: `{data['usage']}`",
-                "",
-            ]
-            if aliases:
-                lines += ["Aliases: " + ", ".join(f"`{PREFIX}{alias}`" for alias in aliases), ""]
-            if data["examples"]:
-                lines.append("Examples:")
-                lines.append("")
-                for example in data["examples"]:
-                    lines.append(f"- `{example}`")
-                lines.append("")
+    lines += [
+        "## Detailed plugin docs",
+        "",
+        "This generated file is intentionally an overview. Detailed usage, aliases and examples are generated into dedicated plugin documents:",
+        "",
+        "- [`docs/plugins/`](plugins/) - plugin command guides",
+        "",
+    ]
+
     return "\n".join(lines).rstrip() + "\n"
 
 
+def write_generated_docs() -> list[Path]:
+    """Write docs/commands.md and docs/plugins/*.md."""
+    written: list[Path] = []
+    commands_path = ROOT / "docs" / "commands.md"
+    commands_path.write_text(generate(), encoding="utf-8")
+    written.append(commands_path)
+
+    PLUGIN_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    for filename, text in generate_plugin_docs().items():
+        path = PLUGIN_DOCS_DIR / filename
+        path.write_text(text, encoding="utf-8")
+        written.append(path)
+    return written
+
+
 if __name__ == "__main__":
-    output = ROOT / "docs" / "commands.md"
-    output.write_text(generate(), encoding="utf-8")
-    print(f"wrote {output.relative_to(ROOT)}")
+    for path in write_generated_docs():
+        print(f"wrote {path.relative_to(ROOT)}")

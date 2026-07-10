@@ -229,26 +229,10 @@ rss, pin, poll
 
 ## 9. Timezone-aware reminders
 
-Relative reminders do not need a timezone:
+Relative reminders such as `,remind 10m check the logs` do not need a timezone.
+Absolute reminders can use your stored timezone, `REMINDER_DEFAULT_TIMEZONE`, or an explicit token such as `CEST`, `Europe/Berlin` or `+02:00`.
 
-```text
-,remind 10m check the logs
-,remind 1h30m restart the service
-```
-
-Absolute reminders can use the sender's stored timezone, the bot-side fallback
-from `REMINDER_DEFAULT_TIMEZONE`, or an explicit timezone token in the command:
-
-```text
-,timezone set Europe/Berlin
-,remind 2026-07-10 13:23 deploy window
-,remind 2026-07-10 13:23 CEST deploy window
-,remind 2026-07-10 13:23 Europe/Berlin deploy window
-,remind 2026-07-10 13:23 +02:00 deploy window
-```
-
-Use IANA names such as `Europe/Berlin` for automatic daylight saving time
-handling. `CET` and `CEST` are treated as explicit fixed offsets.
+See [`plugins/reminder.md`](plugins/reminder.md) for the full reminder timezone guide.
 
 ## 10. Roles and user management
 

@@ -4,7 +4,8 @@ This directory contains the operator and command documentation for EnvsBot.
 
 ## Index
 
-- [`commands.md`](commands.md) - generated command reference from the live command metadata
+- [`commands.md`](commands.md) - generated compact command overview from live command metadata
+- [`plugins/`](plugins/) - longer plugin-specific guides and examples
 - [`help.md`](help.md) - runtime help behavior and usage examples
 - [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, reminders, RSS and grants
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
@@ -41,9 +42,9 @@ Operational notes:
   Use `,audit user`, `,audit target` or `,audit action` to filter the log.
 - Role changes are guarded so the configured owner and superadmins cannot be modified by lower roles.
 
-## Regenerate command reference
+## Regenerate command docs
 
-Run this after changing command decorators:
+Run this after changing command decorators. It updates the compact overview in `docs/commands.md` and the detailed generated plugin docs under `docs/plugins/`:
 
 ```bash
 python scripts/generate_commands_md.py
@@ -72,12 +73,4 @@ The sender must be a room admin/owner in the target room or have a bot moderator
 
 ## Reminder timezones
 
-Absolute reminders can include an explicit timezone token after the time:
-
-```text
-,remind 2026-07-10 13:23 CEST deploy window
-,remind 2026-07-10 13:23 Europe/Berlin deploy window
-,remind 2026-07-10 13:23 +02:00 deploy window
-```
-
-When no timezone is given, reminders use the user's stored `TIMEZONE` from `,timezone set <IANA timezone>`, then `REMINDER_DEFAULT_TIMEZONE` from `config.py`, then UTC.
+Reminder timezone handling now lives in the plugin docs: [`plugins/reminder.md`](plugins/reminder.md).

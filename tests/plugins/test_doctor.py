@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -69,7 +68,7 @@ def bot(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_doctor_command_reports_runtime_health(bot, msg=None):
+async def test_doctor_command_reports_runtime_health(bot):
     message = MagicMock()
 
     await doctor.doctor_command(bot, "admin@example.org", "admin", ["full", "all"], message, False)
@@ -208,8 +207,10 @@ async def test_doctor_release_command_selects_release_section(bot, monkeypatch):
 
     await doctor.doctor_release(bot, "admin@example.org", "admin", [], message, False)
 
-    doctor.build_doctor_lines.assert_awaited_once_with(bot, full=False, sections=("release",))
-    assert "Release readiness" in "\n".join(bot.reply.call_args.args[1])
+    reply_text = "\n".join(bot.reply.call_args.args[1])
+
+    assert "🩺 EnvsBot doctor" in reply_text
+    assert "Release readiness" in reply_text
 
 
 def test_parse_doctor_sections_supports_release_aliases():

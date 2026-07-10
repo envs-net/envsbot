@@ -14,7 +14,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 
 * Modular plugin architecture with dynamic load, unload and reload support
 * Decorator-based command registry with roles, aliases, usage metadata and generated help
-* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command reference in [`docs/commands.md`](docs/commands.md), runtime help guide in [`docs/help.md`](docs/help.md), diagnostics guide in [`docs/diagnostics.md`](docs/diagnostics.md), and architecture overview in [`docs/architecture.md`](docs/architecture.md)
+* Practical tutorial in [`docs/tutorial.md`](docs/tutorial.md), generated command overview in [`docs/commands.md`](docs/commands.md), plugin guides in [`docs/plugins/`](docs/plugins/), runtime help guide in [`docs/help.md`](docs/help.md), diagnostics guide in [`docs/diagnostics.md`](docs/diagnostics.md), and architecture overview in [`docs/architecture.md`](docs/architecture.md)
 * XMPP MUC and direct-message command handling
 * Room management with persistent autojoin rooms and per-room plugin toggles
 * User registration, hardened role management, last-seen tracking and nickname lookup
