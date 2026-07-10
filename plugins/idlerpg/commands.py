@@ -10,6 +10,42 @@ from utils.formatting import format_page, parse_page_args
 from core_plugins import _core
 
 
+_MESSAGE_PENALTY_DEDUPE_TTL = 30
+_MESSAGE_PENALTY_SEEN: dict[str, int] = {}
+
+
+def _message_penalty_dedupe_key(msg) -> str:
+    """Return a stable key for one inbound groupchat stanza.
+
+    The plugin registers both ``groupchat_message`` and the generic
+    ``message`` event so deployments where only one event fires still apply
+    penalties.  When both events fire for the same stanza, this key prevents a
+    double penalty.
+    """
+    try:
+        room = str(getattr(msg["from"], "bare", "") or "")
+        nick = str(msg.get("mucnick") or getattr(msg["from"], "resource", "") or "")
+        stanza_id = str(msg.get("id") or msg.get("stanza_id") or "")
+        if stanza_id:
+            return f"id:{room}|{nick}|{stanza_id}"
+    except Exception:
+        return f"obj:{id(msg)}"
+    return f"obj:{id(msg)}"
+
+
+def _message_penalty_seen(msg) -> bool:
+    now = _now()
+    cutoff = now - _MESSAGE_PENALTY_DEDUPE_TTL
+    for key, seen_at in list(_MESSAGE_PENALTY_SEEN.items()):
+        if seen_at < cutoff:
+            _MESSAGE_PENALTY_SEEN.pop(key, None)
+    key = _message_penalty_dedupe_key(msg)
+    if key in _MESSAGE_PENALTY_SEEN:
+        return True
+    _MESSAGE_PENALTY_SEEN[key] = now
+    return False
+
+
 def _message_actor_nick(msg) -> str:
     try:
         return str(msg.get("mucnick") or getattr(msg["from"], "resource", None) or "").strip()
@@ -1063,6 +1099,8 @@ async def on_message(bot, msg):
         if bot_nick and actor_nick and str(bot_nick).lower() == str(actor_nick).lower():
             return
         if not COUNT_COMMAND_MESSAGES and body.startswith(_command_prefix(bot)):
+            return
+        if _message_penalty_seen(msg):
             return
         target_jid = await _message_penalty_target_jid(bot, msg, room_jid, str(actor_nick or ""))
         if not target_jid:

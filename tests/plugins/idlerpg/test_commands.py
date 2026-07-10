@@ -143,6 +143,50 @@ async def test_message_penalty_uses_character_name_when_jid_is_unavailable(monke
 
 
 @pytest.mark.asyncio
+async def test_message_penalty_generic_message_event_and_dedupe_by_stanza_id():
+    bot = DummyBot()
+    register_msg = DummyMsg(resource="skx")
+    JOINED_ROOMS["room@conf"]["nicks"]["skx"] = {"jid": "skx@example.org", "affiliation": "member"}
+    await idlerpg._handle_register(
+        bot,
+        "skx@example.org",
+        ["register", "skx", "test"],
+        register_msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["skx@example.org"]
+    before = player["next"]
+
+    msg = DummyMsg(body="x", resource="skx", stanza_id="msg-1")
+    await idlerpg.on_message(bot, msg)
+    await idlerpg.on_message(bot, msg)
+
+    assert player["next"] == before + 1
+    assert player["penalties"]["message"] == 1
+    assert player["stats"]["messages"] == 1
+
+
+@pytest.mark.asyncio
+async def test_idlerpg_on_load_registers_generic_and_groupchat_message_events():
+    bot = DummyBot()
+    registered = []
+    bot.bot_plugins = types.SimpleNamespace(
+        register_event=lambda plugin, event, handler: registered.append((plugin, event, handler))
+    )
+
+    await idlerpg.on_load(bot)
+
+    events = [(plugin, event) for plugin, event, _handler in registered]
+    assert (idlerpg.PLUGIN_NAME, "groupchat_message") in events
+    assert (idlerpg.PLUGIN_NAME, "message") in events
+    assert (idlerpg.PLUGIN_NAME, "groupchat_presence") in events
+    groupchat_handler = next(handler for _plugin, event, handler in registered if event == "groupchat_message")
+    generic_handler = next(handler for _plugin, event, handler in registered if event == "message")
+    assert groupchat_handler == generic_handler
+
+
+@pytest.mark.asyncio
 async def test_login_while_already_online_is_noop(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
@@ -920,6 +964,7 @@ async def test_on_load_registers_message_and_presence_handlers():
 
     assert [entry[:2] for entry in registered] == [
         (idlerpg.PLUGIN_NAME, "groupchat_message"),
+        (idlerpg.PLUGIN_NAME, "message"),
         (idlerpg.PLUGIN_NAME, "groupchat_presence"),
     ]
     assert all(callable(entry[2]) for entry in registered)

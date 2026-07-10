@@ -74,7 +74,7 @@ class DummyTask:
 
 
 class DummyMsg:
-    def __init__(self, body=",idlerpg", bare="room@conf", resource="Alice", mtype="groupchat"):
+    def __init__(self, body=",idlerpg", bare="room@conf", resource="Alice", mtype="groupchat", stanza_id=None):
         self.data = {
             "from": types.SimpleNamespace(bare=bare, resource=resource),
             "to": types.SimpleNamespace(bare="bot@envs.net"),
@@ -82,6 +82,8 @@ class DummyMsg:
             "body": body,
             "mucnick": resource,
         }
+        if stanza_id is not None:
+            self.data["id"] = stanza_id
 
     def __getitem__(self, key):
         return self.data[key]
@@ -94,6 +96,7 @@ class DummyMsg:
 @pytest.fixture(autouse=True)
 def clear_idlerpg_state():
     idlerpg.ROOM_TASKS.clear()
+    getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
     JOINED_ROOMS.clear()
@@ -107,6 +110,7 @@ def clear_idlerpg_state():
     }
     yield
     idlerpg.ROOM_TASKS.clear()
+    getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
     JOINED_ROOMS.clear()

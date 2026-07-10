@@ -328,10 +328,16 @@ async def on_ready(bot):
 
 async def on_load(bot):
     log.info("[IDLERPG] Plugin loading...")
+    message_handler = partial(on_message, bot)
     bot.bot_plugins.register_event(
         PLUGIN_NAME,
         "groupchat_message",
-        partial(on_message, bot),
+        message_handler,
+    )
+    bot.bot_plugins.register_event(
+        PLUGIN_NAME,
+        "message",
+        message_handler,
     )
     bot.bot_plugins.register_event(
         PLUGIN_NAME,
