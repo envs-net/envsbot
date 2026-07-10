@@ -102,22 +102,22 @@ def _line(ok: bool | None, label: str, text: str) -> str:
     return f"{icon} {label}: {text}"
 
 
-def _repo_root(start: Path | None = None) -> Path:
+def _repo_root(start: Path | None = None, *, fallback: Path | None = None) -> Path:
     """Return the repository checkout root, even when running under mutmut.
 
     mutmut copies mutated modules below ``mutants/``.  In that case the
     module file can live below ``<repo>/mutants/`` instead of the normal
     package directory.  Walk upward from the module directory until the real
     checkout markers are found.  When no checkout marker is available, fall
-    back to the current working directory so callers can still report a
-    readable release-check error.
+    back to ``fallback`` or the current working directory so callers can still
+    report a readable release-check error.
     """
     module_path = (start or Path(__file__)).resolve()
     search_from = module_path if module_path.is_dir() else module_path.parent
     for candidate in (search_from, *search_from.parents):
         if (candidate / "pyproject.toml").exists() and (candidate / "scripts").is_dir():
             return candidate
-    return Path.cwd().resolve()
+    return (fallback or Path.cwd()).resolve()
 
 
 def _migration_version(value: Any) -> str:

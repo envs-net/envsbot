@@ -230,13 +230,12 @@ def test_repo_root_handles_mutmut_module_paths(tmp_path):
     assert doctor._repo_root(mutant_module.parent) == tmp_path
 
 
-def test_repo_root_falls_back_to_cwd_for_non_checkout_paths(tmp_path, monkeypatch):
+def test_repo_root_falls_back_to_explicit_fallback_for_non_checkout_paths(tmp_path):
     orphan_module = tmp_path / "outside" / "doctor.py"
     orphan_module.parent.mkdir()
     orphan_module.write_text("# no checkout markers nearby\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
 
-    assert doctor._repo_root(orphan_module) == tmp_path
+    assert doctor._repo_root(orphan_module, fallback=tmp_path) == tmp_path
 
 
 def test_release_command_docs_line_reports_missing_script(monkeypatch, tmp_path):
