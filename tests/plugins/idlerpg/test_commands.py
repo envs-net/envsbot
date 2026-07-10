@@ -1325,3 +1325,51 @@ async def test_manual_duel_rejects_far_offline_and_self(monkeypatch):
     room["players"]["bob@envs.net"].update({"x": 1, "y": 1, "logged_out": True})
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Bob"], msg, True)
     assert "not online" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_message_penalty_scans_players_when_name_index_is_stale():
+    bot = DummyBot()
+    msg = DummyMsg(resource="skx")
+    await idlerpg._handle_register(
+        bot,
+        "skx@example.org",
+        ["register", "skx", "test"],
+        msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["skx@example.org"]
+    room["name_index"] = {"someone-else": "other@example.org"}
+    JOINED_ROOMS["room@conf"]["nicks"]["skx"] = {"jid": "room@conf/skx", "affiliation": "member"}
+
+    before = player["next"]
+    await idlerpg.on_message(bot, DummyMsg(body="test2", resource="skx", stanza_id="stale-index"))
+
+    assert player["next"] > before
+    assert player["penalties"]["message"] > 0
+    assert player["stats"]["messages"] == 1
+    assert any("is penalized" in text for text, _kwargs in bot.replies)
+
+
+@pytest.mark.asyncio
+async def test_message_penalty_dedupe_only_after_player_is_found():
+    bot = DummyBot()
+    unknown = DummyMsg(body="hello", resource="stranger", stanza_id="same-id")
+    await idlerpg.on_message(bot, unknown)
+
+    msg = DummyMsg(resource="stranger")
+    await idlerpg._handle_register(
+        bot,
+        "stranger@example.org",
+        ["register", "stranger", "test"],
+        msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["stranger@example.org"]
+    before = player["next"]
+    await idlerpg.on_message(bot, DummyMsg(body="hello", resource="stranger", stanza_id="same-id"))
+
+    assert player["next"] > before
+    assert player["stats"]["messages"] == 1

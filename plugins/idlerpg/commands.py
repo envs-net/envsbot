@@ -46,11 +46,34 @@ def _message_penalty_seen(msg) -> bool:
     return False
 
 
-def _message_actor_nick(msg) -> str:
+def _safe_message_value(getter) -> Any:
     try:
-        return str(msg.get("mucnick") or getattr(msg["from"], "resource", None) or "").strip()
+        return getter()
     except Exception:
-        return ""
+        return None
+
+
+def _message_actor_nick(msg) -> str:
+    """Return the MUC nickname for a public room message.
+
+    Different Slixmpp paths expose the nickname in slightly different ways.
+    Use all cheap sources before falling back to parsing the full JID string.
+    """
+    getter = getattr(msg, "get_mucnick", None)
+    raw_from = _safe_message_value(lambda: str(msg["from"]))
+    candidates: list[Any] = [
+        getter() if callable(getter) else None,
+        _safe_message_value(lambda: msg.get("mucnick")),
+        _safe_message_value(lambda: msg["mucnick"]),
+        _safe_message_value(lambda: getattr(msg["from"], "resource", None)),
+        str(raw_from).rsplit("/", 1)[1] if raw_from and "/" in str(raw_from) else None,
+    ]
+
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _remember_player_nick(player: dict[str, Any], msg) -> None:
@@ -72,22 +95,55 @@ def _real_bare_jid(value: Any, room_jid: str) -> str:
     return candidate
 
 
-def _find_player_by_last_nick(room: dict[str, Any], nick: str) -> tuple[str, dict[str, Any]] | tuple[None, None]:
-    needle = str(nick or "").strip().lower()
-    if not needle:
+def _identity_values_match(value: Any, needle: str) -> bool:
+    candidate = str(value or "").strip().lower()
+    return bool(candidate) and candidate == needle
+
+
+def _find_player_by_message_identity(
+    room: dict[str, Any],
+    *,
+    sender_jid: str = "",
+    actor_nick: str = "",
+) -> tuple[str, dict[str, Any]] | tuple[None, None]:
+    """Find a player from a live room message without trusting stale indexes.
+
+    Some real MUC deployments do not expose the occupant's real JID for every
+    message.  Existing players may also have been registered before we stored
+    ``last_nick``.  Therefore message penalties must do a direct player scan and
+    compare all stable identity fields instead of relying only on ``name_index``.
+    """
+    jid_needle = str(sender_jid or "").strip().lower()
+    nick_needle = str(actor_nick or "").strip().lower()
+    if not jid_needle and not nick_needle:
         return None, None
+
     players = room.get("players", {})
     if not isinstance(players, dict):
         return None, None
+
     for jid, player in players.items():
         if not isinstance(player, dict):
             continue
-        seen_nicks = [player.get("last_nick"), player.get("nick"), player.get("current_nick")]
-        extra = player.get("nicks")
-        if isinstance(extra, (list, tuple, set)):
-            seen_nicks.extend(extra)
-        if any(str(value or "").strip().lower() == needle for value in seen_nicks):
+        if jid_needle and (
+            _identity_values_match(jid, jid_needle)
+            or _identity_values_match(player.get("jid"), jid_needle)
+        ):
             return str(jid), player
+
+        if nick_needle:
+            seen_nicks = [
+                player.get("name"),
+                player.get("character"),
+                player.get("last_nick"),
+                player.get("nick"),
+                player.get("current_nick"),
+            ]
+            extra = player.get("nicks")
+            if isinstance(extra, (list, tuple, set)):
+                seen_nicks.extend(extra)
+            if any(_identity_values_match(value, nick_needle) for value in seen_nicks):
+                return str(jid), player
     return None, None
 
 
@@ -105,18 +161,13 @@ async def _message_penalty_target_jid(bot, msg, room_jid: str, actor_nick: str) 
 
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
-    if sender_jid:
-        jid, player = _find_player(room, sender_jid)
-        if player and jid:
-            return str(jid)
-
-    if actor_nick:
-        jid, player = _find_player(room, actor_nick)
-        if player and jid:
-            return str(jid)
-        jid, player = _find_player_by_last_nick(room, actor_nick)
-        if player and jid:
-            return str(jid)
+    jid, player = _find_player_by_message_identity(
+        room,
+        sender_jid=sender_jid,
+        actor_nick=actor_nick,
+    )
+    if player and jid:
+        return str(jid)
 
     return ""
 
@@ -1100,10 +1151,15 @@ async def on_message(bot, msg):
             return
         if not COUNT_COMMAND_MESSAGES and body.startswith(_command_prefix(bot)):
             return
-        if _message_penalty_seen(msg):
-            return
         target_jid = await _message_penalty_target_jid(bot, msg, room_jid, str(actor_nick or ""))
         if not target_jid:
+            log.debug(
+                "[IDLERPG] Message penalty skipped: no player for room=%s nick=%s",
+                room_jid,
+                actor_nick,
+            )
+            return
+        if _message_penalty_seen(msg):
             return
         await _penalize_player(
             bot,
@@ -1111,7 +1167,7 @@ async def on_message(bot, msg):
             target_jid,
             "message",
             max(1, len(body)) * MESSAGE_PENALTY,
-            announce=False,
+            announce=True,
         )
     except Exception:
         log.exception("[IDLERPG] Error in on_message")
