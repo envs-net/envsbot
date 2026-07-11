@@ -94,10 +94,10 @@ def test_timezone_from_token_and_default_config(monkeypatch):
     assert reminder._timezone_from_token("+02:30").utcoffset(None).total_seconds() == 9000
     assert reminder._timezone_from_token("Mars/Base") is None
 
-    monkeypatch.setitem(reminder.config, "reminder_default_timezone", "Europe/Berlin")
+    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "Europe/Berlin")
     assert str(reminder._reminder_default_tzinfo()) == "Europe/Berlin"
 
-    monkeypatch.setitem(reminder.config, "reminder_default_timezone", "Invalid/Zone")
+    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "Invalid/Zone")
     assert str(reminder._reminder_default_tzinfo()) == "UTC"
 
 
@@ -109,7 +109,7 @@ async def test_get_reminder_tzinfo_uses_user_timezone_or_config_default(monkeypa
     assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "UTC"
 
     store.get = AsyncMock(return_value=None)
-    monkeypatch.setitem(reminder.config, "reminder_default_timezone", "Europe/Berlin")
+    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "Europe/Berlin")
     assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "Europe/Berlin"
 
     store.get = AsyncMock(side_effect=RuntimeError("db"))

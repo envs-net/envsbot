@@ -11,6 +11,10 @@ from core_plugins._core import JOINED_ROOMS, _is_muc_pm, _normalize_bare_jid, pa
 
 log = logging.getLogger(__name__)
 
+REMINDER_DEFAULT_TIMEZONE = str(
+    config.get("reminder_default_timezone", "UTC") or "UTC"
+)
+
 
 def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
@@ -69,7 +73,7 @@ def _timezone_from_token(token: str) -> datetime.tzinfo | None:
 
 def _reminder_default_tzinfo() -> datetime.tzinfo:
     """Return the reminder fallback timezone from config, defaulting to UTC."""
-    timezone_name = str(config.get("reminder_default_timezone", "UTC") or "UTC")
+    timezone_name = str(REMINDER_DEFAULT_TIMEZONE or "UTC")
     timezone = _timezone_from_token(timezone_name)
     if timezone is not None:
         return timezone

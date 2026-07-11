@@ -263,6 +263,10 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         "plugins.rss": _rss_values(cfg),
         "plugins.reminder": {
             "REMINDER_ENABLED": _to_bool(cfg.get("reminder_enabled"), True),
+            "REMINDER_DEFAULT_TIMEZONE": _to_str(
+                cfg.get("reminder_default_timezone") or "UTC",
+                "UTC",
+            ),
         },
         "plugins.urlcheck": {
             "URLCHECK_WAIT_SECONDS": _to_int(cfg.get("urlcheck_wait_seconds") or 120, 120),

@@ -108,3 +108,18 @@ def test_idlerpg_runtime_values_include_original_balance_options():
     assert values["QUEST_MIN_ONLINE_SECONDS"] == 36000
     assert values["LEVEL_BATTLE_CHANCE_BELOW_25"] == 0.25
     assert values["LEVEL_BATTLE_CHANCE_AT_25"] == 1.0
+
+
+def test_runtime_refresh_updates_reminder_default_timezone(monkeypatch):
+    from plugins import reminder
+
+    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "UTC")
+
+    refreshed = runtime.refresh_runtime_config_constants({
+        "reminder_enabled": True,
+        "reminder_default_timezone": "Europe/Berlin",
+    })
+
+    assert reminder.REMINDER_DEFAULT_TIMEZONE == "Europe/Berlin"
+    assert str(reminder._reminder_default_tzinfo()) == "Europe/Berlin"
+    assert any("plugins.reminder" in line for line in refreshed)
