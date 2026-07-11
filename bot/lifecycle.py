@@ -14,6 +14,23 @@ from utils.logging_helpers import kv
 log = logging.getLogger(__name__)
 
 
+def _database_shutdown_timeout(config_obj: Any) -> float:
+    """Return the database shutdown timeout in seconds.
+
+    SQLite shutdown may need a little longer than the flush timeout because
+    aiosqlite still has to drain its worker queue and close the connection.
+    Keep a sane lower bound so DB close is never raced by an equal or shorter
+    outer timeout.
+    """
+    try:
+        getter = getattr(config_obj, "get", None)
+        value = getter("database_shutdown_timeout_seconds", 15.0) if callable(getter) else 15.0
+        timeout = float(value)
+    except Exception:
+        timeout = 15.0
+    return max(6.0, timeout)
+
+
 async def call_with_timeout(label: str, func: Callable[[], Awaitable[Any]], timeout: float) -> Any:
     """Run one lifecycle step with logging and an optional timeout."""
     log.debug("[LIFECYCLE] step=%s status=start", label)
@@ -164,8 +181,15 @@ class LifecycleMixin:
             log.info("[LIFECYCLE] event=shutdown phase=tasks %s", kv(status=task_status, cancelled=cancelled))
 
         db_status = "ok"
+        db_timeout = _database_shutdown_timeout(getattr(self, "config", {}))
         try:
-            await asyncio.wait_for(self.db.close(), timeout=5.0)
+            await asyncio.wait_for(self.db.close(), timeout=db_timeout)
+        except asyncio.TimeoutError:
+            db_status = "timeout"
+            log.warning(
+                "[LIFECYCLE] event=shutdown phase=db status=timeout timeout=%.1fs",
+                db_timeout,
+            )
         except Exception as exc:
             db_status = "failed"
             log.exception("[LIFECYCLE] event=shutdown phase=db status=failed error=%s", exc)

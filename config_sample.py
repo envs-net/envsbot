@@ -69,6 +69,9 @@ COMMAND_SLOW_LOG_SECONDS = 2.0
 # disabled unless your backup/maintenance workflow expects WAL sidecar files.
 DATABASE_BUSY_TIMEOUT_MS = 5000
 DATABASE_WAL_ENABLED = False
+# Grace period for shutdown/restart DB cleanup. Keep this larger than the
+# internal flush wait so the SQLite connection can close cleanly.
+DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
 
 
 # ================= BACKUPS =================

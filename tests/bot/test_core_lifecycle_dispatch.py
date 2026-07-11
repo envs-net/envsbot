@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import envsbot
+import bot.lifecycle as lifecycle
 from bot.dispatch import CommandDispatchMixin
 from bot.lifecycle import LifecycleMixin, call_with_timeout
 from utils.command import Role
@@ -55,8 +56,9 @@ def test_can_manage_room_role_threshold():
 
 
 class DummyLifecycle(LifecycleMixin):
-    def __init__(self, *, unload=None, cancel_all=None, close=None):
+    def __init__(self, *, unload=None, cancel_all=None, close=None, config=None):
         self.accepting_commands = True
+        self.config = config or {}
         self.bot_plugins = SimpleNamespace(unload_all=unload) if unload is not None else SimpleNamespace()
         self.tasks = SimpleNamespace(cancel_all=cancel_all) if cancel_all is not None else SimpleNamespace()
         self.db = SimpleNamespace(close=close or AsyncMock())
@@ -103,6 +105,36 @@ async def test_shutdown_runtime_handles_skipped_and_failed_components():
     skipped = DummyLifecycle(close=AsyncMock())
     await skipped.shutdown_runtime()
     assert skipped.accepting_commands is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_runtime_uses_configured_db_timeout(monkeypatch):
+    calls: list[object] = []
+
+    async def close():
+        calls.append("db.close")
+
+    async def fake_wait_for(awaitable, timeout):
+        calls.append(("wait_for", timeout))
+        return await awaitable
+
+    monkeypatch.setattr(lifecycle.asyncio, "wait_for", fake_wait_for)
+
+    bot = DummyLifecycle(
+        close=close,
+        config={"database_shutdown_timeout_seconds": 17},
+    )
+
+    await bot.shutdown_runtime()
+
+    assert ("wait_for", 17.0) in calls
+    assert "db.close" in calls
+
+
+def test_database_shutdown_timeout_has_sane_lower_bound():
+    assert lifecycle._database_shutdown_timeout({}) == 15.0
+    assert lifecycle._database_shutdown_timeout({"database_shutdown_timeout_seconds": 1}) == 6.0
+    assert lifecycle._database_shutdown_timeout({"database_shutdown_timeout_seconds": "bad"}) == 15.0
 
 
 @pytest.mark.asyncio
