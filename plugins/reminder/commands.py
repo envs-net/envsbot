@@ -3,6 +3,7 @@
 import datetime
 import pytz
 from utils.command import command, Role
+from utils.formatting import format_page, parse_page_args
 from .parsing import get_reminder_tzinfo
 
 
@@ -83,7 +84,8 @@ async def list_reminders(bot, sender_jid, nick, args, msg, is_room):
             bot.reply(msg, "✅ No pending reminders.")
             return
 
-        lines = ["⏰ Your pending reminders:"]
+        page_request = parse_page_args(args or [])
+        lines = []
 
         for reminder in reminders:
             remind_at = _parse_datetime(reminder["remind_at"])
@@ -96,7 +98,16 @@ async def list_reminders(bot, sender_jid, nick, args, msg, is_room):
                 f"(in {time_str}, at {local_time})"
             )
 
-        bot.reply(msg, "\n".join(lines))
+        bot.reply(
+            msg,
+            "\n".join(format_page(
+                "⏰ Your pending reminders:",
+                lines,
+                page_request=page_request,
+                page_size=10,
+                command_hint=f"{getattr(bot, 'prefix', ',')}reminders",
+            )),
+        )
 
     except Exception as exc:
         log.exception("[REMINDER] Error listing reminders: %s", exc)

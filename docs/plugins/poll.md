@@ -28,4 +28,5 @@ Examples:
 - `,poll create Tea? | yes | no`
 - `,poll create multi:2 | Lunch? | Pizza | Döner | Falafel`
 - `,poll list`
+- `,poll list 2`
 - `,rooms enable poll`

@@ -2,6 +2,7 @@
 
 from slixmpp import JID
 from utils.command import command, Role
+from utils.formatting import format_page, parse_page_args
 from .formatting import _audit_reason, _send_user_info, _write_user_audit
 from .lookup import _parse_user_jid, _valid_plugin_names, find_users_by_nick_safe
 from .permissions import (
@@ -91,8 +92,11 @@ async def users_info(bot, sender, nick, args, msg, is_room):
     role=Role.ADMIN,
     aliases=["user list"],
     short="List users currently known in one joined room.",
-    usage="{prefix}users list [room_jid]",
-    examples=["{prefix}users list test@conference.example.org"],
+    usage="{prefix}users list [room_jid] [all|page|last]",
+    examples=[
+        "{prefix}users list test@conference.example.org",
+        "{prefix}users list test@conference.example.org 2",
+    ],
     category="users",
     context="private chat only",
 )
@@ -102,7 +106,7 @@ async def users_list(bot, sender, nick, args, msg, is_room):
     JID (private chat context).
 
     Usage:
-        {prefix}users list [room_jid]
+        {prefix}users list [room_jid] [all|page|last]
     """
     try:
         # Import JOINED_ROOMS from rooms plugin
@@ -130,9 +134,14 @@ async def users_list(bot, sender, nick, args, msg, is_room):
             )
             return
 
-        # Determine room_jid
-        if args:
+        # Determine room_jid and optional pagination.
+        page_tokens = {"all", "last"}
+        if args and (str(args[0]).lower() in page_tokens or str(args[0]).isdigit()):
+            room_jid = msg["from"].bare
+            page_args = args[:1]
+        elif args:
             room_jid = args[0]
+            page_args = args[1:2]
             if room_jid not in JOINED_ROOMS:
                 log.warning(
                     "[USERS] 🚫 Room JID not found in JOINED_ROOMS: %s",
@@ -145,6 +154,7 @@ async def users_list(bot, sender, nick, args, msg, is_room):
                 return
         else:
             room_jid = msg["from"].bare
+            page_args = []
             if room_jid not in JOINED_ROOMS:
                 log.warning(
                     "[USERS] 🚫 Room JID not in JOINED_ROOMS: %s",
@@ -179,13 +189,22 @@ async def users_list(bot, sender, nick, args, msg, is_room):
             )
 
         lines.sort()
-        output = [f"📋 Users in {room_jid}:"] + lines
+        page_request = parse_page_args(page_args)
 
         log.info(
             "[USERS] 📋 Listed users for room: %s",
             room_jid
         )
-        bot.reply(msg, "\n".join(output))
+        bot.reply(
+            msg,
+            "\n".join(format_page(
+                f"📋 Users in {room_jid}:",
+                lines,
+                page_request=page_request,
+                page_size=20,
+                command_hint=f"{_command_prefix(bot)}users list {room_jid}",
+            )),
+        )
 
     except Exception:
         log.exception("[USERS] 🔴  users list failed")

@@ -66,13 +66,14 @@ List pending acronym additions and removals.
 Role: `admin`<br>
 Context: `any`<br>
 Category: `info`<br>
-Usage: `,acronyms list`
+Usage: `,acronyms list [all|page|last]`
 
 Aliases: `,acro list`, `,acronym list`
 
 Examples:
 
 - `,acro list`
+- `,acro list 2`
 
 ### `,acronyms merge`
 

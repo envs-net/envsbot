@@ -14,10 +14,10 @@ Commands:
     {prefix}poll create <question> | <option1> | <option2> | option3 ...]
     {prefix}poll create <duration> | <question> | <option1> | <option2> ...]
     {prefix}poll create multi[:max] | <question> | <option1> | <option2> ...]
-    {prefix}poll list
+    {prefix}poll list [all|page|last]
     {prefix}poll show <id>
     {prefix}poll result <id>
-    {prefix}poll history [limit]
+    {prefix}poll history [all|page|last]
     {prefix}poll vote <id> <option-number>[,<option-number>...]
     {prefix}poll close <id>
     {prefix}poll cancel <id>
@@ -38,6 +38,7 @@ import time
 from utils.command import command, Role
 from utils.audit import audit_event
 from utils.config import config
+from utils.formatting import format_page, parse_page_args
 from core_plugins.users import user_has_room_plugin_grant
 from core_plugins import _core
 
@@ -655,7 +656,7 @@ async def _poll_handle_create(bot, sender_jid, nick, msg, room_jid,
     _poll_reply(bot, msg, "\n".join(lines))
 
 
-async def _poll_handle_list(bot, msg, room_jid, room):
+async def _poll_handle_list(bot, msg, room_jid, room, args):
     open_polls = []
     for poll_id, raw_poll in room.get("polls", {}).items():
         poll = _normalize_poll(room_jid, poll_id, raw_poll)
@@ -667,7 +668,7 @@ async def _poll_handle_list(bot, msg, room_jid, room):
         return
 
     open_polls.sort(key=lambda p: p["id"])
-    lines = ["📋 Open polls in this room:"]
+    lines = []
     for poll in open_polls:
         if poll.get("ends_at"):
             suffix = f", ends {_format_ts(poll['ends_at'])}"
@@ -679,13 +680,21 @@ async def _poll_handle_list(bot, msg, room_jid, room):
             f"{', multi-choice' if poll.get('multi_choice') else ''}{suffix})"
         )
 
-    _poll_reply(bot, msg, "\n".join(lines))
+    _poll_reply(
+        bot,
+        msg,
+        "\n".join(format_page(
+            "📋 Open polls in this room:",
+            lines,
+            page_request=parse_page_args(args[1:2]),
+            page_size=10,
+            command_hint=f"{_command_prefix(bot)}poll list",
+        )),
+    )
 
 
 async def _poll_handle_history(bot, msg, room_jid, room, args):
-    limit = 10
-    if len(args) > 1 and str(args[1]).isdigit():
-        limit = max(1, min(50, int(args[1])))
+    page_request = parse_page_args(args[1:2])
 
     closed_polls = []
     for poll_id, raw_poll in room.get("polls", {}).items():
@@ -701,11 +710,22 @@ async def _poll_handle_history(bot, msg, room_jid, room, args):
         key=lambda p: (-int(p.get("closed_at")
                             or p.get("created_at") or 0), -p["id"])
     )
-    lines = ["🗂️ Poll history:"]
-    for poll in closed_polls[:limit]:
-        lines.append(f"#{poll['id']} [{poll['status']}] {poll['question']}")
+    lines = [
+        f"#{poll['id']} [{poll['status']}] {poll['question']}"
+        for poll in closed_polls
+    ]
 
-    _poll_reply(bot, msg, "\n".join(lines))
+    _poll_reply(
+        bot,
+        msg,
+        "\n".join(format_page(
+            "🗂️ Poll history:",
+            lines,
+            page_request=page_request,
+            page_size=10,
+            command_hint=f"{_command_prefix(bot)}poll history",
+        )),
+    )
 
 
 async def _poll_handle_show_result(bot, msg, room_jid, room, args, sub):
@@ -862,6 +882,7 @@ async def _poll_handle_manage(
         "{prefix}poll create Tea? | yes | no",
         "{prefix}poll create multi:2 | Lunch? | Pizza | Döner | Falafel",
         "{prefix}poll list",
+        "{prefix}poll list 2",
         "{prefix}rooms enable poll",
     ],
     category="rooms",
@@ -876,10 +897,10 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
         {prefix}poll off
         {prefix}poll status
         {prefix}poll create [duration] | [multi[:max]] | question | option1 | option2 | ...]
-        {prefix}poll list
+        {prefix}poll list [all|page|last]
         {prefix}poll show <id>
         {prefix}poll result <id>
-        {prefix}poll history [limit]
+        {prefix}poll history [all|page|last]
         {prefix}poll vote <id> <option-number>[,<option-number>...]
         {prefix}poll close <id>
         {prefix}poll cancel <id>
@@ -929,7 +950,7 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
             return
 
         if sub == "list":
-            await _poll_handle_list(bot, msg, room_jid, room)
+            await _poll_handle_list(bot, msg, room_jid, room, args)
             return
 
         if sub == "history":

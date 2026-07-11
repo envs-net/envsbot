@@ -32,6 +32,7 @@ from bs4 import BeautifulSoup
 
 from utils.command import command, Role
 from utils.config import config
+from utils.formatting import format_page, parse_page_args
 from utils.http_fetch import fetch_json, passthrough_validator
 from core_plugins._core import (
     handle_room_toggle_command,
@@ -633,8 +634,8 @@ async def acronyms_remove_cmd(bot, sender, nick, args, msg, is_room):
     role=Role.ADMIN,
     aliases=["acro list", "acronym list"],
     short="List pending acronym additions and removals.",
-    usage="{prefix}acronyms list",
-    examples=["{prefix}acro list"],
+    usage="{prefix}acronyms list [all|page|last]",
+    examples=["{prefix}acro list", "{prefix}acro list 2"],
     category="info",
     context="any",
 )
@@ -644,9 +645,9 @@ async def acronyms_list_cmd(bot, sender, nick, args, msg, is_room):
     admin review.
 
     Usage:
-        {prefix}acronyms list
-        {prefix}acro list
-        {prefix}acronym list
+        {prefix}acronyms list [all|page|last]
+        {prefix}acro list [all|page|last]
+        {prefix}acronym list [all|page|last]
     """
     enabled_rooms = await _get_enabled_rooms(bot, INFO_KEY, "information")
     if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
@@ -673,16 +674,27 @@ async def acronyms_list_cmd(bot, sender, nick, args, msg, is_room):
         f"[ACRONYMS] Admin {sender} reviewed {len(addition_lines)} "
         f"additions and {len(removal_lines)} removals."
     )
-    sections = []
-    if addition_lines:
-        sections.append("Pending Additions:\n" + "\n".join(addition_lines))
-    else:
-        sections.append("No pending additions.")
-    if removal_lines:
-        sections.append("Pending Removals:\n" + "\n".join(removal_lines))
-    else:
-        sections.append("No pending removals.")
-    bot.reply(msg, "\n\n".join(sections))
+    lines = ["Pending Additions:"]
+    lines.extend(f"• {line}" for line in addition_lines)
+    if not addition_lines:
+        lines.append("—")
+    lines.append("")
+    lines.append("Pending Removals:")
+    lines.extend(f"• {line}" for line in removal_lines)
+    if not removal_lines:
+        lines.append("—")
+
+    page_request = parse_page_args(args or [])
+    bot.reply(
+        msg,
+        "\n".join(format_page(
+            "📚 Pending acronym changes",
+            lines,
+            page_request=page_request,
+            page_size=10,
+            command_hint=f"{_command_prefix(bot)}acronyms list",
+        )),
+    )
     return None
 
 
