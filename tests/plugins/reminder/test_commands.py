@@ -123,6 +123,18 @@ async def test_reminders_list_and_delete(dummy_bot, dummy_msg):
 def test_reminder_split_commands_preserve_command_metadata():
     expected = {
         reminder.remind_command: ("remind", ["rem", "reminder"]),
+        reminder.remind_status_command: (
+            "remind status",
+            ["rem status", "reminder status"],
+        ),
+        reminder.remind_on_command: (
+            "remind on",
+            ["rem on", "reminder on"],
+        ),
+        reminder.remind_off_command: (
+            "remind off",
+            ["rem off", "reminder off"],
+        ),
         reminder.list_reminders: ("reminders", ["rems", "remind list"]),
         reminder.delete_reminder: (
             "remind delete",
@@ -134,6 +146,29 @@ def test_reminder_split_commands_preserve_command_metadata():
         assert handler._command == command_name
         assert handler._aliases == aliases
         assert handler._required_role is reminder.Role.USER
+
+
+@pytest.mark.asyncio
+async def test_remind_control_commands_delegate_to_base_command(dummy_bot, dummy_msg, monkeypatch):
+    calls = []
+
+    async def fake_remind_command(bot, sender_jid, nick, args, msg, is_room):
+        calls.append((sender_jid, nick, list(args), msg, is_room))
+
+    monkeypatch.setattr(reminder, "remind_command", fake_remind_command)
+
+    await reminder.remind_status_command(
+        dummy_bot, "a@b", "TestNick", [], dummy_msg, False
+    )
+    await reminder.remind_on_command(
+        dummy_bot, "a@b", "TestNick", [], dummy_msg, False
+    )
+    await reminder.remind_off_command(
+        dummy_bot, "a@b", "TestNick", [], dummy_msg, False
+    )
+
+    assert [call[2] for call in calls] == [["status"], ["on"], ["off"]]
+
 
 
 @pytest.mark.asyncio

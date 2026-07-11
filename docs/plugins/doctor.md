@@ -20,14 +20,15 @@ Run operator health checks for config, DB, rooms, plugins, tasks, backups, netwo
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all] [full] [page|last|all]`
+Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all|full] [page|last|all]`
 
 Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
 
 Examples:
 
 - `,doctor`
-- `,doctor all full`
+- `,doctor full`
+- `,doctor all`
 - `,doctor rss`
 - `,doctor tasks full`
 - `,doctor release`

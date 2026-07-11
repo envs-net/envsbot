@@ -248,6 +248,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,ping` | [`tools`](plugins/tools.md) | `user` | `any` | Check whether the bot is alive. |
 | `,remind` | [`reminder`](plugins/reminder.md) | `user` | `any` | Create a reminder. |
 | `,remind delete` | [`reminder`](plugins/reminder.md) | `user` | `any` | Delete one reminder. |
+| `,remind off` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Disable reminders globally or for the current room. |
+| `,remind on` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Enable reminders globally or for the current room. |
+| `,remind status` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Show whether reminders are enabled. |
 | `,reminders` | [`reminder`](plugins/reminder.md) | `user` | `any` | List your reminders. |
 | `,sed` | [`sed`](plugins/sed.md) | `user` | `any` | Apply sed-style corrections or control room access to sed. |
 | `,seen` | [`tools`](plugins/tools.md) | `user` | `any` | Show when a user was last seen. |

@@ -62,13 +62,12 @@ Create a reminder.
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,remind <on|off|status|when> [text]`
+Usage: `,remind <when> <text>`
 
 Aliases: `,rem`, `,reminder`
 
 Examples:
 
-- `,remind status`
 - `,remind 10m check logs`
 - `,remind 2026-05-01 14:30 Take a break`
 - `,remind 2026-05-01 14:30 CEST Take a break`
@@ -91,6 +90,53 @@ Aliases: `,remind cancel`, `,remind rm`
 Examples:
 
 - `,remind delete 12`
+
+### `,remind off`
+
+Disable reminders globally or for the current room.
+
+Role: `user`<br>
+Context: `room, MUC PM or private chat`<br>
+Category: `utility`<br>
+Usage: `,remind off`
+
+Aliases: `,rem off`, `,reminder off`
+
+Examples:
+
+- `,remind off`
+- `,rooms disable reminder`
+
+### `,remind on`
+
+Enable reminders globally or for the current room.
+
+Role: `user`<br>
+Context: `room, MUC PM or private chat`<br>
+Category: `utility`<br>
+Usage: `,remind on`
+
+Aliases: `,rem on`, `,reminder on`
+
+Examples:
+
+- `,remind on`
+- `,rooms enable reminder`
+
+### `,remind status`
+
+Show whether reminders are enabled.
+
+Role: `user`<br>
+Context: `room, MUC PM or private chat`<br>
+Category: `utility`<br>
+Usage: `,remind status`
+
+Aliases: `,rem status`, `,reminder status`
+
+Examples:
+
+- `,remind status`
 
 ### `,reminders`
 

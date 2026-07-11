@@ -439,9 +439,8 @@ async def _restore_pending_reminders(bot) -> int:
     role=Role.USER,
     aliases=["rem", "reminder"],
     short="Create a reminder.",
-    usage="{prefix}remind <on|off|status|when> [text]",
+    usage="{prefix}remind <when> <text>",
     examples=[
-        "{prefix}remind status",
         "{prefix}remind 10m check logs",
         "{prefix}remind 2026-05-01 14:30 Take a break",
         "{prefix}remind 2026-05-01 14:30 CEST Take a break",
@@ -561,6 +560,51 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
     except Exception as exc:
         log.exception("[REMINDER] Error creating reminder: %s", exc)
         bot.reply(msg, "❌ Error creating reminder. Please try again.")
+
+
+@command(
+    "remind status",
+    role=Role.USER,
+    aliases=["rem status", "reminder status"],
+    short="Show whether reminders are enabled.",
+    usage="{prefix}remind status",
+    examples=["{prefix}remind status"],
+    category="utility",
+    context="room, MUC PM or private chat",
+)
+async def remind_status_command(bot, sender_jid, nick, args, msg, is_room):
+    """Show reminder status for the current context."""
+    await remind_command(bot, sender_jid, nick, ["status", *(args or [])], msg, is_room)
+
+
+@command(
+    "remind on",
+    role=Role.USER,
+    aliases=["rem on", "reminder on"],
+    short="Enable reminders globally or for the current room.",
+    usage="{prefix}remind on",
+    examples=["{prefix}remind on", "{prefix}rooms enable reminder"],
+    category="utility",
+    context="room, MUC PM or private chat",
+)
+async def remind_on_command(bot, sender_jid, nick, args, msg, is_room):
+    """Enable reminders in the current context."""
+    await remind_command(bot, sender_jid, nick, ["on", *(args or [])], msg, is_room)
+
+
+@command(
+    "remind off",
+    role=Role.USER,
+    aliases=["rem off", "reminder off"],
+    short="Disable reminders globally or for the current room.",
+    usage="{prefix}remind off",
+    examples=["{prefix}remind off", "{prefix}rooms disable reminder"],
+    category="utility",
+    context="room, MUC PM or private chat",
+)
+async def remind_off_command(bot, sender_jid, nick, args, msg, is_room):
+    """Disable reminders in the current context."""
+    await remind_command(bot, sender_jid, nick, ["off", *(args or [])], msg, is_room)
 
 
 @command(

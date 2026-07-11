@@ -96,7 +96,7 @@ source_paths = [
     "utils/",
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
-pytest_add_cli_args = ["--no-cov", "-q"]
+pytest_add_cli_args = ["--no-cov", "-q", "-x", "--tb=short", "--disable-warnings"]
 also_copy = [
     "config_sample.py",
     "vcard_sample.py",

@@ -219,6 +219,51 @@ def test_parse_doctor_sections_supports_release_aliases():
     assert doctor._parse_doctor_sections(["preflight"])[1] == ("release",)
 
 
+def test_parse_doctor_sections_full_selects_every_section():
+    full, sections, page_args = doctor._parse_doctor_sections(["full"])
+
+    assert full is True
+    assert sections == doctor._ALL_SECTIONS
+    assert "network" in sections
+    assert "release" in sections
+    assert page_args == []
+
+    full, sections, page_args = doctor._parse_doctor_sections(["tasks", "full"])
+
+    assert full is True
+    assert sections == ("tasks",)
+    assert page_args == []
+
+
+def test_network_lines_warn_when_private_fetch_urls_are_allowed(monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "config",
+        {
+            "http_timeout_seconds": 8,
+            "http_user_agent": "agent",
+            "allow_private_fetch_urls": True,
+        },
+    )
+
+    lines = doctor._network_lines()
+
+    assert "⚠️ Private fetch URLs: allowed" in lines
+    assert doctor._overall_status(lines) == "Overall: ⚠️ 1 warning(s)"
+
+    monkeypatch.setattr(
+        doctor,
+        "config",
+        {
+            "http_timeout_seconds": 8,
+            "http_user_agent": "agent",
+            "allow_private_fetch_urls": False,
+        },
+    )
+
+    assert "✅ Private fetch URLs: blocked" in doctor._network_lines()
+
+
 def test_repo_root_handles_mutmut_module_paths(tmp_path):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")

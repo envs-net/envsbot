@@ -94,12 +94,17 @@ _DEFAULT_SECTIONS = (
     "backups",
     "plugin-health",
 )
-_ALL_SECTIONS = _DEFAULT_SECTIONS + ("network",)
+_ALL_SECTIONS = _DEFAULT_SECTIONS + ("network", "release")
 
 
 def _line(ok: bool | None, label: str, text: str) -> str:
     icon = "✅" if ok is True else "🔴" if ok is False else "ℹ️"
     return f"{icon} {label}: {text}"
+
+
+def _warning_line(label: str, text: str) -> str:
+    """Return a warning line that affects the overall doctor status."""
+    return f"⚠️ {label}: {text}"
 
 
 def _repo_root(start: Path | None = None, *, fallback: Path | None = None) -> Path:
@@ -322,10 +327,15 @@ def _config_lines() -> list[str]:
 
 
 def _network_lines() -> list[str]:
+    private_fetch_allowed = bool(config.get("allow_private_fetch_urls", False))
     return [
         _line(True, "HTTP timeout", f"{config.get('http_timeout_seconds', 8)}s"),
         _line(True, "HTTP user-agent", str(config.get("http_user_agent", ""))[:80]),
-        _line(not bool(config.get("allow_private_fetch_urls", False)), "Private fetch URLs", "allowed" if config.get("allow_private_fetch_urls", False) else "blocked"),
+        (
+            _warning_line("Private fetch URLs", "allowed")
+            if private_fetch_allowed
+            else _line(True, "Private fetch URLs", "blocked")
+        ),
     ]
 
 
@@ -657,7 +667,12 @@ def _parse_doctor_args(args: list[str]) -> tuple[bool, list[str]]:
 
 
 def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list[str]]:
-    """Return ``(full, sections, page_args)`` for doctor command arguments."""
+    """Return ``(full, sections, page_args)`` for doctor command arguments.
+
+    ``doctor full`` should be a full health sweep, while
+    ``doctor tasks full`` should remain a detailed view of only the selected
+    section.
+    """
     normalized = [str(arg).strip().lower() for arg in args if str(arg).strip()]
     full = False
     page_args: list[str] = []
@@ -676,6 +691,8 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
                 sections.append(mapped)
             continue
         page_args.append(arg)
+    if full and not sections:
+        sections = list(_ALL_SECTIONS)
     return full, tuple(sections or _DEFAULT_SECTIONS), page_args
 
 
@@ -684,10 +701,11 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
     role=Role.ADMIN,
     aliases=["bot doctor", "healthcheck", "bot health"],
     short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness.",
-    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all] [full] [page|last|all]",
+    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all|full] [page|last|all]",
     examples=[
         "{prefix}doctor",
-        "{prefix}doctor all full",
+        "{prefix}doctor full",
+        "{prefix}doctor all",
         "{prefix}doctor rss",
         "{prefix}doctor tasks full",
         "{prefix}doctor release",
