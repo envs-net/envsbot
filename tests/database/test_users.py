@@ -1,6 +1,7 @@
 from database.users import PluginRuntimeStore
 import asyncio
 import json
+import sqlite3
 import logging
 import pytest
 
@@ -558,3 +559,25 @@ async def test_runtime_store_update_global_uses_default_and_serializes():
         "room-b": True,
     }
 
+
+@pytest.mark.asyncio
+async def test_flush_all_treats_missing_release_savepoint_as_committed():
+    class MissingReleaseSavepointDB(RichDummyDB):
+        async def execute(self, query, params=()):
+            normalized = " ".join(query.split())
+            if normalized == "RELEASE flush_checkpoint":
+                self.calls.append((normalized, params))
+                raise sqlite3.OperationalError("no such savepoint: flush_checkpoint")
+            return await super().execute(query, params)
+
+    db = MissingReleaseSavepointDB()
+    um = UserManager(db)
+    await um.create("release@jid", "Release")
+
+    await um.flush_all()
+
+    queries = _queries(db)
+    assert "SAVEPOINT flush_checkpoint" in queries
+    assert "RELEASE flush_checkpoint" in queries
+    assert not um._dirty_users
+    assert not um._dirty_runtime

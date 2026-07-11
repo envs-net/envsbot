@@ -33,7 +33,6 @@ _FIXED_TIMEZONE_ALIASES: dict[str, datetime.tzinfo] = {
 _OFFSET_TIMEZONE_RE = re.compile(r"^([+-])(\d{2}):?(\d{2})$")
 
 
-
 def _timezone_from_token(token: str) -> datetime.tzinfo | None:
     """Resolve one command-line timezone token.
 
@@ -115,12 +114,17 @@ async def get_reminder_tzinfo(bot, timezone_jid: str | None) -> datetime.tzinfo:
 
 def _timezone_lookup_jid(bot, sender_jid, msg, is_room: bool) -> str | None:
     """Return the best real JID to use for vCard TIMEZONE lookup."""
-    if not is_room and not _is_muc_pm(msg, is_room):
+    is_muc_private = _is_muc_pm(msg)
+
+    # Direct 1:1 chat: the sender bare JID is already the real account.
+    if not is_room and not is_muc_private:
         try:
             return str(msg["from"].bare)
         except Exception:
             return _normalize_bare_jid(sender_jid)
 
+    # MUC context, either public room message or MUC PM: resolve room nick to
+    # the real JID before looking up the sender's vCard TIMEZONE.
     try:
         muc = getattr(bot, "plugin", {}).get("xep_0045", None)
         if muc:
@@ -161,8 +165,9 @@ def _localize_naive_datetime(
         try:
             return tz.localize(dt, is_dst=None)
         except pytz.NonExistentTimeError:
-            # DST spring-forward gap: move to the next valid local hour.
-            return tz.localize(dt + datetime.timedelta(hours=1), is_dst=True)
+            # DST spring-forward gap: prefer the daylight-saving side of the
+            # transition without assuming the gap is exactly one hour long.
+            return tz.localize(dt, is_dst=True)
         except pytz.AmbiguousTimeError:
             # DST fall-back duplicate hour: choose standard time.
             return tz.localize(dt, is_dst=False)
@@ -368,8 +373,9 @@ def parse_reminder_when(
     if seconds is None:
         return None, None, None
 
-    display_when = f"on {_format_local_datetime(
-        remind_at, display_tz or user_tz or _reminder_default_tzinfo())}"
+    display_timezone = display_tz or user_tz or _reminder_default_tzinfo()
+    formatted_remind_at = _format_local_datetime(remind_at, display_timezone)
+    display_when = f"on {formatted_remind_at}"
     return seconds, message, display_when
 
 

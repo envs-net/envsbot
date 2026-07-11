@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import logging
 import asyncio
 from typing import Callable
@@ -513,6 +514,25 @@ class UserManager:
             (jid, timestamp, json.dumps(data)),
         )
 
+    @staticmethod
+    def _is_missing_savepoint_error(exc: Exception) -> bool:
+        return (
+            isinstance(exc, sqlite3.OperationalError)
+            and "no such savepoint" in str(exc).lower()
+        )
+
+    async def _release_flush_savepoint(self) -> None:
+        try:
+            await self.db.execute("RELEASE flush_checkpoint")
+        except Exception as exc:
+            if self._is_missing_savepoint_error(exc):
+                log.debug(
+                    "[DB] flush checkpoint already released by another "
+                    "commit; treating flush as committed"
+                )
+                return
+            raise
+
     async def flush_all(self):
         """
         Flush cached data atomically in a single transaction.
@@ -577,8 +597,11 @@ class UserManager:
                     if is_still_dirty or is_same_version:
                         await self._write_runtime(jid, data)
 
-                # Commit transaction
-                await self.db.execute("RELEASE flush_checkpoint")
+                # Commit transaction.  If another task committed on the same
+                # SQLite connection while this savepoint was open, SQLite may
+                # have already released it; that still means the flush writes
+                # reached the database, so we treat that specific case as ok.
+                await self._release_flush_savepoint()
                 log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
 
             except Exception:

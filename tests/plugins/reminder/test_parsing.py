@@ -156,7 +156,7 @@ def test_timezone_lookup_jid_direct_muc_plugin_joined_and_fallback(dummy_bot, mo
     dummy_bot.plugin = {}
     assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, True) == "sender@example.org"
 
-    monkeypatch.setattr(reminder, "_is_muc_pm", lambda _msg, _is_room: False)
+    monkeypatch.setattr(reminder, "_is_muc_pm", lambda _msg: False)
     msg.__getitem__.side_effect = KeyError("from")
     assert reminder._timezone_lookup_jid(dummy_bot, "fallback@example.org/res", msg, False) == "fallback@example.org"
 

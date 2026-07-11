@@ -14,7 +14,7 @@ Commands:
 
 import aiohttp
 import logging
-import urllib
+import urllib.parse
 from core_plugins import _core
 from plugins import vcard
 from utils.command import command, Role
@@ -91,6 +91,7 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     state = await get_runtime_state(bot, room_jid=room_jid)
     scope = f" for {room_jid}" if room_jid else ""
     return [f"✅ Weather{scope}: enabled_rooms={state.get('enabled_rooms', 0)}, timeout={WEATHER_HTTP_TIMEOUT:g}s"]
+
 
 @command(
     "weather",
@@ -233,8 +234,8 @@ async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
 
 
 async def _handle_weather_dm(bot, msg, args):
-    target_nick = msg["from"].bare
-    display_name = target_nick
+    target_jid = msg["from"].bare
+    display_name = str(msg.get("mucnick") or "you")
 
     if args:
         direct_location = _location_from_args(args)
@@ -246,7 +247,7 @@ async def _handle_weather_dm(bot, msg, args):
             return
         log.debug(
             "[WEATHER] Command invoked by %r in DM for direct location: %s",
-            target_nick,
+            target_jid,
             direct_location,
         )
         await _reply_with_weather_for_location(
@@ -258,11 +259,11 @@ async def _handle_weather_dm(bot, msg, args):
         return
 
     try:
-        vcard_data = await vcard.get_user_vcard(bot, msg, target_nick)
+        vcard_data = await vcard.get_user_vcard(bot, msg, target_jid)
         locality, region, country = _extract_location_fields(vcard_data)
     except Exception as e:
         log.warning(f"[WEATHER] Failed to get vCard fields for"
-                    f" {target_nick}: {e}")
+                    f" {target_jid}: {e}")
         bot.reply(msg, "🔴  Failed to retrieve your vCard information.")
         return
 
@@ -325,7 +326,7 @@ async def _process_weather_for_jid(bot, msg, jid, target_nick, muc_jid, is_dm):
         locality, region, country = _extract_location_fields(vcard_data)
     except Exception as e:
         log.warning(f"[WEATHER] Failed to get vCard fields for"
-                    f" {target_nick}: {e}")
+                    f" {jid}: {e}")
         bot.reply(
             msg,
             f"🔴  Failed to retrieve vCard information for '{target_nick}'.",
@@ -354,28 +355,23 @@ async def _reply_with_weather_for_location(bot, msg, display_name, location):
     forecast_url, weather_url = _build_wttr_urls(location)
 
     try:
-        result = await fetch_text(
-            weather_url,
-            timeout_seconds=WEATHER_HTTP_TIMEOUT,
-            max_bytes=8192,
-            session_factory=aiohttp.ClientSession,
-            validator=passthrough_validator,
-            raise_for_status=False,
+        weather = await _fetch_wttr_weather_text(weather_url)
+    except WeatherFetchError as exc:
+        bot.reply(msg, f"🌦️ Failed to fetch weather for {display_name}.")
+        log.warning(
+            "[WEATHER] 🌦️ Failed to fetch weather for %s at %s: %s",
+            display_name,
+            location,
+            exc,
         )
-        if result.status != 200:
-            bot.reply(msg, f"🌦️ Failed to fetch weather for"
-                           f" {display_name}.")
-            log.warning(
-                f"[WEATHER] 🌦️ HTTP error {result.status} for"
-                f" {display_name} at {location}"
-            )
-            return
-        weather = result.text
+        return
     except Exception:
         bot.reply(msg, f"🌦️ Failed to fetch weather for {display_name}.")
         log.warning(
-            f"[WEATHER] 🌦️ Exception fetching weather for"
-            f" {display_name} at {location}"
+            "[WEATHER] 🌦️ Exception fetching weather for %s at %s",
+            display_name,
+            location,
+            exc_info=True,
         )
         return
 
@@ -404,6 +400,57 @@ def _format_weather_reply(display_name, location, weather):
         weather_desc = f"{weather_loc.title()}: {weather_desc}"
 
     return f"{header}: {weather_desc.strip()}"
+
+
+class WeatherFetchError(RuntimeError):
+    """Raised when wttr.in returns an unusable weather response."""
+
+
+def _wttr_fetch_candidates(weather_url: str) -> list[str]:
+    """Return wttr.in fetch URLs, including a plain-HTTP fallback."""
+    urls = [weather_url]
+    if weather_url.startswith("https://wttr.in/"):
+        urls.append(weather_url.replace("https://", "http://", 1))
+    return urls
+
+
+async def _fetch_wttr_weather_text(weather_url: str) -> str:
+    """Fetch and validate the compact wttr.in weather response."""
+    errors: list[str] = []
+    for candidate_url in _wttr_fetch_candidates(weather_url):
+        try:
+            result = await fetch_text(
+                candidate_url,
+                timeout_seconds=WEATHER_HTTP_TIMEOUT,
+                max_bytes=8192,
+                session_factory=aiohttp.ClientSession,
+                validator=passthrough_validator,
+                raise_for_status=False,
+            )
+        except Exception as exc:
+            errors.append(f"{candidate_url}: {exc}")
+            log.debug(
+                "[WEATHER] wttr.in fetch attempt failed for %s",
+                candidate_url,
+                exc_info=True,
+            )
+            continue
+
+        if result.status != 200:
+            errors.append(f"{candidate_url}: HTTP {result.status}")
+            continue
+
+        weather = result.text.strip()
+        if not weather:
+            errors.append(f"{candidate_url}: empty response")
+            continue
+        if weather.lower().startswith("unknown location"):
+            errors.append(f"{candidate_url}: {weather}")
+            continue
+
+        return weather
+
+    raise WeatherFetchError("; ".join(errors) or "no usable response")
 
 
 def _parse_wttr_weather(weather):

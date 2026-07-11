@@ -323,7 +323,7 @@ async def test_weather_command_direct_message_success(
 
     fake_bot.reply.assert_called()
     out = output_of_reply(fake_bot.reply)
-    assert "Weather for alice@example.org" in out
+    assert "Weather for you" in out
     assert "Berlin" in out
 
 
@@ -589,3 +589,43 @@ async def test_weather_store_getter_uses_plugin_store():
     )
     assert await ORIGINAL_GET_WEATHER_STORE(bot) is marker
     bot.db.users.plugin.assert_called_once_with("weather")
+
+
+@pytest.mark.asyncio
+async def test_fetch_wttr_weather_falls_back_to_plain_http(monkeypatch):
+    calls = []
+
+    async def fake_fetch_text(url, **kwargs):
+        calls.append(url)
+        if url.startswith("https://"):
+            raise OSError("tls failed")
+        return SimpleNamespace(status=200, text="Berlin: Sunny 21°C")
+
+    monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
+
+    result = await weather._fetch_wttr_weather_text(
+        "https://wttr.in/Berlin?format=4&m"
+    )
+
+    assert result == "Berlin: Sunny 21°C"
+    assert calls == [
+        "https://wttr.in/Berlin?format=4&m",
+        "http://wttr.in/Berlin?format=4&m",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_wttr_weather_reports_all_failed_candidates(monkeypatch):
+    async def fake_fetch_text(url, **kwargs):
+        return SimpleNamespace(status=503, text="temporarily unavailable")
+
+    monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
+
+    with pytest.raises(weather.WeatherFetchError) as exc_info:
+        await weather._fetch_wttr_weather_text(
+            "https://wttr.in/Berlin?format=4&m"
+        )
+
+    message = str(exc_info.value)
+    assert "https://wttr.in/Berlin?format=4&m: HTTP 503" in message
+    assert "http://wttr.in/Berlin?format=4&m: HTTP 503" in message
