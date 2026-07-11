@@ -183,3 +183,24 @@ def test_debug_leaks_outputs_registry_state(monkeypatch, capsys):
     assert "Handlers still referenced" in out
     assert "Plugins still registered" in out
     assert "pluginA" in out
+
+
+def test_registry_remove_accepts_space_separated_name_and_tokens():
+    reg = CommandRegistry()
+    cmd = command_mod.Command(name="foo bar", handler=fake_handler1, role=Role.USER)
+
+    reg.register("foo bar", cmd, "pluginA")
+    reg.remove("foo bar")
+
+    assert ("foo", "bar") not in reg.index
+    assert reg.by_handler == {}
+    assert reg.by_plugin == {}
+    assert reg.by_prefix == {}
+
+    reg.register("foo bar", cmd, "pluginA")
+    reg.remove(("foo", "bar"))
+
+    assert reg.index == {}
+    assert reg.by_handler == {}
+    assert reg.by_plugin == {}
+    assert reg.by_prefix == {}

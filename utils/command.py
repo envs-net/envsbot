@@ -8,7 +8,7 @@ including role-based permissions and plugin integration.
 from __future__ import annotations
 from enum import IntEnum
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 
 class Role(IntEnum):
@@ -94,7 +94,16 @@ class CommandRegistry:
         if handler is not None:
             self.by_handler.setdefault(handler, set()).add(tokens)
 
-    def remove(self, tokens: Tuple[str, ...]):
+    def _normalize_tokens(self, tokens: str | Iterable[str]) -> Tuple[str, ...]:
+        """Normalize command names or token iterables to registry keys."""
+        if isinstance(tokens, str):
+            return tuple(tokens.lower().split())
+        return tuple(str(token).lower() for token in tokens)
+
+    def remove(self, tokens: str | Iterable[str]):
+        tokens = self._normalize_tokens(tokens)
+        if not tokens:
+            return
         cmd = self.index.pop(tokens, None)
         if not cmd:
             return
