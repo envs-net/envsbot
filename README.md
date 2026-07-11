@@ -312,7 +312,8 @@ Example service unit:
 
 ```ini
 [Unit]
-Description=EnvsBot XMPP Bot
+Description=EnvsBot XMPP bot
+Documentation=https://github.com/envs-net/envsbot
 After=network-online.target
 Wants=network-online.target
 
@@ -320,23 +321,18 @@ Wants=network-online.target
 Type=simple
 User=envsbot
 Group=envsbot
-WorkingDirectory=/srv/envsbot/envsbot
-ExecStart=/srv/envsbot/envsbot/venv/bin/python /srv/envsbot/envsbot/envsbot.py
-
-Restart=always
-RestartSec=5s
-StartLimitIntervalSec=300
-StartLimitBurst=10
-
-# Give the process time to close the SQLite database before a restart.
-ExecStopPost=/usr/bin/sleep 5
-
+WorkingDirectory=/srv/envsbot
 Environment=PYTHONUNBUFFERED=1
-StandardOutput=journal
-StandardError=journal
+ExecStart=/srv/envsbot/.venv/bin/envsbot
+Restart=always
+RestartSec=5
 
-KillSignal=SIGINT
-TimeoutStopSec=30
+# Basic hardening. Adjust ReadWritePaths when using a different data/log path.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/envsbot
 
 [Install]
 WantedBy=multi-user.target

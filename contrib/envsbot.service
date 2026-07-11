@@ -11,8 +11,8 @@ Group=envsbot
 WorkingDirectory=/srv/envsbot
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/srv/envsbot/.venv/bin/envsbot
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=5
 
 # Basic hardening. Adjust ReadWritePaths when using a different data/log path.
 NoNewPrivileges=true
