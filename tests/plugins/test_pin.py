@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import types
 
 import plugins.pin as pin
+from utils import formatting
 
 
 @pytest.fixture
@@ -530,9 +531,9 @@ def test_pin_search_helpers_parse_and_match_expected_fields():
     }
 
     assert pin._parse_pin_search_args(["search"]) is None
-    assert pin._parse_pin_search_args(["search", "123"]) == ("123", 1)
-    assert pin._parse_pin_search_args(["search", "mail", "2"]) == ("mail", 2)
-    assert pin._parse_pin_search_args(["find", "ssh", "key"]) == ("ssh key", 1)
+    assert pin._parse_pin_search_args(["search", "123"]) == ("123", formatting.PageRequest(all=True))
+    assert pin._parse_pin_search_args(["search", "mail", "2"]) == ("mail", formatting.PageRequest(page=2))
+    assert pin._parse_pin_search_args(["find", "ssh", "key"]) == ("ssh key", formatting.PageRequest(all=True))
 
     assert pin._pin_matches_query(entry, "MAIL imap")
     assert pin._pin_matches_query(entry, "creme")
@@ -585,10 +586,10 @@ async def test_pin_command_search_matches_all_terms_and_paginates(bot, make_msg,
     await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "mail"], msg, True)
     out = _reply_text(bot.reply)
     assert "Pin search" in out
-    assert "\"mail\" (2 matches) - Page 1/2" in out
+    assert "\"mail\" (2 matches) - all" in out
     assert "#3" in out
-    assert "Use ,pin search mail 2" in out
-    assert "#1" not in out
+    assert "#1" in out
+    assert "next page" not in out
 
     bot.reply.reset_mock()
     await pin.pin_command(bot, "alice@example.com", "Alice", ["search", "mail", "2"], msg, True)

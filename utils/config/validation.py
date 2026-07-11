@@ -113,6 +113,18 @@ def _validate_numeric_ranges(cfg, errors):
         "xkcd_index_request_delay_seconds",
     }
     zero_or_greater_integer_keys = {"max_new_feed_entries"}
+    default_pagination = cfg.get("default_pagination")
+    if default_pagination is not None:
+        if str(default_pagination).strip().lower() != "all":
+            if isinstance(default_pagination, bool):
+                errors.append("default_pagination: expected 'all' or positive integer")
+            else:
+                try:
+                    parsed_default_pagination = int(str(default_pagination).strip())
+                except (TypeError, ValueError):
+                    parsed_default_pagination = 0
+                if parsed_default_pagination <= 0:
+                    errors.append("default_pagination: expected 'all' or positive integer")
     range_integer_keys = {"port": (1, 65535)}
     min_integer_keys = {"version_check_interval": 60}
     range_number_keys = {"rss_similarity_threshold": (0, 1)}

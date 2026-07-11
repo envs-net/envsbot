@@ -24,7 +24,7 @@ Operational notes:
 - Runtime help should use `,help <plugin>` for plugin help and `,help ,<command>` for unambiguous command help.
 - Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
-- Operator-tunable plugin limits, timeouts and reminder timezone defaults are documented directly in `config_sample.py`.
+- Operator-tunable plugin limits, timeouts, default pagination and reminder timezone defaults are documented directly in `config_sample.py`.
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status full` includes supervised background-task state.
 - `,tasks` shows supervised background tasks without the rest of the status output.

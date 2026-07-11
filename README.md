@@ -137,7 +137,9 @@ CONNECT_DIRECT_TLS = True
 CONNECT_PORT = 5223
 ```
 
-`config_sample.py` also contains operator tuning sections for network timeouts, URL checks, RSS backoff and per-poll burst limits, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
+`config_sample.py` also contains operator tuning sections for network timeouts, default pagination, URL checks, RSS backoff and per-poll burst limits, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
+
+`DEFAULT_PAGINATION = "all"` makes paginated commands show all entries by default. Set it to a positive integer, for example `20`, to show page 1 with that many entries unless the user explicitly passes `all`, `last` or a page number.
 
 Runtime-safe configuration checks are available through:
 

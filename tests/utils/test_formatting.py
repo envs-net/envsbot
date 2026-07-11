@@ -1,12 +1,20 @@
 from utils import formatting
 
 
-def test_parse_page_args_all_last_invalid_and_bounds():
-    assert formatting.parse_page_args([]) == formatting.PageRequest(page=1, all=False)
+def test_parse_page_args_all_last_invalid_and_bounds(monkeypatch):
+    monkeypatch.setattr(formatting, "DEFAULT_PAGINATION", "all")
+    assert formatting.parse_page_args([]) == formatting.PageRequest(page=1, all=True)
     assert formatting.parse_page_args(["all"]) == formatting.PageRequest(page=1, all=True)
     assert formatting.parse_page_args(["last"]) == formatting.PageRequest(page=-1, all=False)
     assert formatting.parse_page_args(["0"]) == formatting.PageRequest(page=1, all=False)
     assert formatting.parse_page_args(["bad"], default_page=3) == formatting.PageRequest(page=3, all=False)
+
+    monkeypatch.setattr(formatting, "DEFAULT_PAGINATION", 20)
+    assert formatting.parse_page_args([]) == formatting.PageRequest(page=1, all=False, page_size=20)
+    assert formatting.page_size_for(10, formatting.parse_page_args([])) == 20
+
+    monkeypatch.setattr(formatting, "DEFAULT_PAGINATION", "bad")
+    assert formatting.parse_page_args([]) == formatting.PageRequest(page=1, all=False)
 
 
 def test_paginate_and_format_pages():

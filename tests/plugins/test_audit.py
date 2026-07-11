@@ -129,7 +129,7 @@ async def test_audit_user_usage_invalid_jid_empty_and_rows(bot, msg, monkeypatch
     bot.db = SimpleNamespace(audit=audit_log)
     await audit_mod.audit_user(bot, "admin@example.org", "admin", ["Admin@Example.Org/resource"], msg, False)
     audit_log.count.assert_awaited_with(actor="admin@example.org", target=None, event=None)
-    audit_log.list.assert_awaited_with(limit=10, offset=0, actor="admin@example.org", target=None, event=None)
+    audit_log.list.assert_awaited_with(limit=1, offset=0, actor="admin@example.org", target=None, event=None)
     assert "No audit events found for admin@example.org." in bot.reply.call_args.args[1]
 
     audit_log = SimpleNamespace(
@@ -168,7 +168,7 @@ async def test_audit_target_and_action_filters(msg):
         False,
     )
     audit_log.list.assert_awaited_with(
-        limit=10,
+        limit=1,
         offset=0,
         actor=None,
         target="room@example.org",
@@ -185,7 +185,7 @@ async def test_audit_target_and_action_filters(msg):
         False,
     )
     audit_log.list.assert_awaited_with(
-        limit=10,
+        limit=1,
         offset=0,
         actor=None,
         target=None,

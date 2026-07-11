@@ -35,6 +35,7 @@ from typing import Any
 from utils.command import command, Role
 from utils.audit import audit_event
 from utils.config import config
+from utils.formatting import page_size_for, parse_page_args
 from core_plugins.users import user_has_room_plugin_grant
 from core_plugins._core import (
     JOINED_ROOMS,
@@ -294,12 +295,12 @@ def _format_pin_tags(raw: Any) -> str:
     tags = _normalize_pin_tags(raw)
     return " ".join(f"#{tag}" for tag in tags)
 
-def _parse_pin_search_args(args: list[Any]) -> tuple[str, int] | None:
-    """Return ``(query, page)`` for ``pin search/find`` arguments.
+def _parse_pin_search_args(args: list[Any]):
+    """Return ``(query, page_request)`` for ``pin search/find`` arguments.
 
-    A trailing positive integer is treated as the page only when there is at
-    least one non-page query token before it, so ``pin search 123`` still
-    searches for ``123``.
+    A trailing ``all``, ``last`` or positive integer is treated as paging only
+    when there is at least one query token before it, so ``pin search 123``
+    still searches for ``123``.
     """
     if len(args) < 2:
         return None
@@ -308,21 +309,38 @@ def _parse_pin_search_args(args: list[Any]) -> tuple[str, int] | None:
     if not query_parts:
         return None
 
-    page = 1
+    page_args: list[str] = []
     if len(query_parts) > 1:
-        try:
-            parsed_page = int(query_parts[-1])
-        except ValueError:
-            parsed_page = None
-        if parsed_page and parsed_page > 0:
-            page = parsed_page
-            query_parts = query_parts[:-1]
+        last = query_parts[-1].lower()
+        if last in {"all", "last"} or last.isdigit():
+            page_args = [query_parts.pop()]
 
     query = " ".join(query_parts).strip()
     if not query:
         return None
 
-    return query, page
+    return query, parse_page_args(page_args)
+
+
+def _format_pin_page(title: str, pins: list[dict[str, Any]], page_request, next_hint: str) -> list[str]:
+    """Return formatted pin list output honoring global default pagination."""
+    if page_request.all:
+        lines = [f"{title} - all", ""]
+        lines.extend(_format_pin_line(entry) for entry in pins)
+        return lines
+
+    page_size = page_size_for(PAGE_SIZE, page_request)
+    page_items, page, total_pages, _total = paginate_items(
+        pins,
+        page_request.page,
+        page_size,
+    )
+    lines = [f"{title} - Page {page}/{total_pages}", ""]
+    lines.extend(_format_pin_line(entry) for entry in page_items)
+    if page < total_pages:
+        lines.append("")
+        lines.append(f"Use {next_hint} {page + 1} for the next page.")
+    return lines
 
 
 def _pin_search_haystack(entry: dict[str, Any]) -> str:
@@ -727,13 +745,10 @@ async def _pin_command_list(bot, msg, room, args):
         bot.reply(msg, "ℹ️ Pin plugin is disabled in this room.")
         return
 
-    page = 1
-    if len(args) >= 2:
-        try:
-            page = max(1, int(args[1]))
-        except ValueError:
-            bot.reply(msg, f"❌ Usage: {_prefix()}pin list [page]")
-            return
+    if len(args) >= 2 and str(args[1]).lower() not in {"all", "last"} and not str(args[1]).isdigit():
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin list [page|last|all]")
+        return
+    page_request = parse_page_args(args[1:2])
 
     state = await _load_pin_data(bot)
     bucket = _room_bucket(state, room)
@@ -745,15 +760,12 @@ async def _pin_command_list(bot, msg, room, args):
                   mention=False)
         return
 
-    page_items, page, total_pages, total = paginate_items(pins, page,
-                                                          PAGE_SIZE)
-
-    lines = [f"📌 Pins for {room} ({total}) - Page {page}/{total_pages}", ""]
-    lines.extend(_format_pin_line(entry) for entry in page_items)
-
-    if page < total_pages:
-        lines.append("")
-        lines.append(f"Use {_prefix()}pin list {page + 1} for the next page.")
+    lines = _format_pin_page(
+        f"📌 Pins for {room} ({len(pins)})",
+        pins,
+        page_request,
+        f"{_prefix()}pin list",
+    )
 
     bot.reply(msg, lines, mention=False)
 
@@ -768,7 +780,7 @@ async def _pin_command_search(bot, msg, room, args):
         bot.reply(msg, f"❌ Usage: {_prefix()}pin search <query> [page]")
         return
 
-    query, page = parsed
+    query, page_request = parsed
     state = await _load_pin_data(bot)
     bucket = _room_bucket(state, room)
     pins = list(bucket.get(PINS_FIELD, []))
@@ -783,24 +795,12 @@ async def _pin_command_search(bot, msg, room, args):
         )
         return
 
-    page_items, page, total_pages, total = paginate_items(
+    lines = _format_pin_page(
+        f'📌 Pin search for {room}: "{query}" ({len(matches)} matches)',
         matches,
-        page,
-        PAGE_SIZE,
+        page_request,
+        f"{_prefix()}pin search {query}",
     )
-
-    lines = [
-        f'📌 Pin search for {room}: "{query}" ({total} matches) - '
-        f"Page {page}/{total_pages}",
-        "",
-    ]
-    lines.extend(_format_pin_line(entry) for entry in page_items)
-
-    if page < total_pages:
-        lines.append("")
-        lines.append(
-            f"Use {_prefix()}pin search {query} {page + 1} for the next page."
-        )
 
     bot.reply(msg, lines, mention=False)
 
@@ -971,13 +971,10 @@ async def _pin_command_important(bot, msg, room, args):
         args = ["important", *(args[1:]), "on"]
 
     if len(args) == 1 or str(args[1]).lower() in {"list", "ls"}:
-        page = 1
-        if len(args) >= 3:
-            try:
-                page = max(1, int(args[2]))
-            except ValueError:
-                bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
-                return
+        if len(args) >= 3 and str(args[2]).lower() not in {"all", "last"} and not str(args[2]).isdigit():
+            bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page|last|all]|<id> on|off]")
+            return
+        page_request = parse_page_args(args[2:3])
 
         state = await _load_pin_data(bot)
         bucket = _room_bucket(state, room)
@@ -989,17 +986,17 @@ async def _pin_command_important(bot, msg, room, args):
         if not pins:
             bot.reply(msg, "⭐ No important pins stored for this room.", mention=False)
             return
-        page_items, page, total_pages, total = paginate_items(pins, page, PAGE_SIZE)
-        lines = [f"⭐ Important pins for {room} ({total}) - Page {page}/{total_pages}", ""]
-        lines.extend(_format_pin_line(entry) for entry in page_items)
-        if page < total_pages:
-            lines.append("")
-            lines.append(f"Use {_prefix()}pin important list {page + 1} for the next page.")
+        lines = _format_pin_page(
+            f"⭐ Important pins for {room} ({len(pins)})",
+            pins,
+            page_request,
+            f"{_prefix()}pin important list",
+        )
         bot.reply(msg, lines, mention=False)
         return
 
     if len(args) not in (2, 3):
-        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page|last|all]|<id> on|off]")
         return
 
     if not await _sender_can_manage_pins_in_room(bot, msg, room):
@@ -1013,12 +1010,12 @@ async def _pin_command_important(bot, msg, room, args):
     try:
         pin_id = int(args[1])
     except ValueError:
-        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page|last|all]|<id> on|off]")
         return
 
     value = str(args[2]).lower() if len(args) == 3 else "on"
     if value not in {"on", "off", "yes", "no", "true", "false", "1", "0"}:
-        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page]|<id> on|off]")
+        bot.reply(msg, f"❌ Usage: {_prefix()}pin important [list [page|last|all]|<id> on|off]")
         return
     important = value in {"on", "yes", "true", "1"}
 

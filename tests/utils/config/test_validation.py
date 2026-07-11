@@ -471,3 +471,31 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     assert "xkcd_index_request_delay_seconds: must be greater than 0" in msg
     assert "backup_keep: must be greater than 0" in msg
     assert "room_plugin_defaults.pin: expected bool, got str" in msg
+
+
+def test_validate_config_accepts_default_pagination_values():
+    cfg = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+        "default_pagination": "all",
+    }
+    config_mod.validate_config(cfg, require_required_keys=True)
+
+    cfg["default_pagination"] = 20
+    config_mod.validate_config(cfg, require_required_keys=True)
+
+
+def test_validate_config_rejects_invalid_default_pagination():
+    cfg = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+        "default_pagination": 0,
+    }
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(cfg, require_required_keys=True)
+
+    assert "default_pagination: expected 'all' or positive integer" in str(exc.value)

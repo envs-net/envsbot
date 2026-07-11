@@ -336,12 +336,11 @@ async def test_rss_list_uses_pagination(monkeypatch, make_bot):
     }
 
     await rss.rss_command(bot, "jid", "nick", ["list"], msg, True)
-    page_one = "\n".join(bot.replies[-1][1])
-    assert "Watched RSS feeds (12) - Page 1/3" in page_one
-    assert "https://example.org/feed-0.xml" in page_one
-    assert "https://example.org/feed-4.xml" in page_one
-    assert "https://example.org/feed-5.xml" not in page_one
-    assert "Use ,rss list 2 for the next page." in page_one
+    all_page = "\n".join(bot.replies[-1][1])
+    assert "Watched RSS feeds (12) - all" in all_page
+    assert "https://example.org/feed-0.xml" in all_page
+    assert "https://example.org/feed-11.xml" in all_page
+    assert "next page" not in all_page
 
     await rss.rss_command(bot, "jid", "nick", ["list", "2"], msg, True)
     page_two = "\n".join(bot.replies[-1][1])

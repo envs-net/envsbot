@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from math import ceil
 from typing import Iterable, Sequence
 
+from utils.config import config
+
+
+DEFAULT_PAGINATION = config.get("default_pagination", "all")
+
 
 @dataclass(frozen=True)
 class PageRequest:
@@ -13,6 +18,44 @@ class PageRequest:
 
     page: int = 1
     all: bool = False
+    page_size: int | None = None
+
+
+def _positive_int(value: object) -> int | None:
+    """Return a positive integer from *value*, excluding bools."""
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def default_page_request(*, default_page: int = 1) -> PageRequest:
+    """Return the configured default pagination request.
+
+    ``DEFAULT_PAGINATION = "all"`` shows all items when the user omitted
+    explicit paging.  A positive integer, for example ``20``, shows page 1
+    with that many items.  Any invalid value falls back to page 1 and the
+    command's normal page size.
+    """
+    value = DEFAULT_PAGINATION
+    if str(value).strip().lower() == "all":
+        return PageRequest(page=1, all=True)
+
+    page_size = _positive_int(value)
+    if page_size is not None:
+        return PageRequest(page=default_page, all=False, page_size=page_size)
+
+    return PageRequest(page=default_page, all=False)
+
+
+def page_size_for(default: int, page_request: PageRequest | None = None) -> int:
+    """Return the effective page size for a paginated output."""
+    if page_request is not None and page_request.page_size is not None:
+        return page_request.page_size
+    return max(1, int(default or 10))
 
 
 def parse_page_args(args: Sequence[str], *, default_page: int = 1) -> PageRequest:
@@ -20,10 +63,12 @@ def parse_page_args(args: Sequence[str], *, default_page: int = 1) -> PageReques
 
     Unknown values fall back to the default page so existing commands remain
     forgiving.  Command-specific arguments should be stripped before calling
-    this helper.
+    this helper.  When no paging argument is supplied, the configured
+    ``DEFAULT_PAGINATION`` setting decides whether to show all items or use a
+    configured default page size.
     """
     if not args:
-        return PageRequest(page=default_page, all=False)
+        return default_page_request(default_page=default_page)
 
     value = str(args[0]).strip().lower()
     if value == "all":
@@ -80,6 +125,7 @@ def format_page(
             result.append("—")
         return result
 
+    page_size = page_size_for(page_size, page_request)
     page_lines, page, total_pages = paginate_lines(
         materialized,
         page=page_request.page,

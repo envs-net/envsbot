@@ -249,6 +249,9 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
     """Refresh module-level constants that snapshot config.py at import time."""
     refreshed: list[str] = []
     module_values: dict[str, dict[str, object]] = {
+        "utils.formatting": {
+            "DEFAULT_PAGINATION": cfg.get("default_pagination", "all"),
+        },
         "core_plugins._admin": {
             "RESTART_NOTIFICATION_FILE": _to_str(
                 cfg.get("restart_notification_file")

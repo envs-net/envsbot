@@ -123,3 +123,15 @@ def test_runtime_refresh_updates_reminder_default_timezone(monkeypatch):
     assert reminder.REMINDER_DEFAULT_TIMEZONE == "Europe/Berlin"
     assert str(reminder._reminder_default_tzinfo()) == "Europe/Berlin"
     assert any("plugins.reminder" in line for line in refreshed)
+
+
+def test_runtime_refresh_updates_default_pagination(monkeypatch):
+    from utils import formatting
+
+    monkeypatch.setattr(formatting, "DEFAULT_PAGINATION", "all")
+
+    refreshed = runtime.refresh_runtime_config_constants({"default_pagination": 20})
+
+    assert formatting.DEFAULT_PAGINATION == 20
+    assert formatting.parse_page_args([]) == formatting.PageRequest(page=1, all=False, page_size=20)
+    assert any("utils.formatting" in line for line in refreshed)

@@ -73,6 +73,12 @@ DATABASE_WAL_ENABLED = False
 # internal flush wait so the SQLite connection can close cleanly.
 DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
 
+# Default paging behavior for commands supporting [page|last|all].
+# "all" shows the full list by default. A positive integer, e.g. 20,
+# shows page 1 with that many entries unless the user explicitly asks for
+# all/last/page.
+DEFAULT_PAGINATION = "all"
+
 
 # ================= BACKUPS =================
 

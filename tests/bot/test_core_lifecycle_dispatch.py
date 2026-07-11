@@ -45,6 +45,7 @@ def test_can_execute_command_in_room_edges(monkeypatch):
 
     monkeypatch.setattr(rooms_plugin, "room_invite_admin_rooms", lambda: {"admin@example.org"})
     assert bot._can_execute_command_in_room(invite_cmd, is_room=True, room="ADMIN@example.org") is True
+    assert bot._can_execute_command_in_room(invite_cmd, is_room=True, room="other@example.org") is False
 
 
 def test_can_manage_room_role_threshold():
@@ -131,6 +132,8 @@ async def test_shutdown_runtime_uses_configured_db_timeout(monkeypatch):
 
 
 def test_database_shutdown_timeout_has_sane_lower_bound():
+    # The configured timeout is clamped to a minimum of 6.0 seconds to avoid
+    # unrealistically small values; e.g. 1 second is raised to 6.0.
     assert lifecycle._database_shutdown_timeout({}) == 15.0
     assert lifecycle._database_shutdown_timeout({"database_shutdown_timeout_seconds": 1}) == 6.0
     assert lifecycle._database_shutdown_timeout({"database_shutdown_timeout_seconds": "bad"}) == 15.0
@@ -152,7 +155,7 @@ async def test_envsbot_wrappers_resolve_permission_and_preflight(monkeypatch):
         assert envsbot.check_permission(Role.OWNER, cmd_obj) is True
         assert envsbot.check_permission(Role.USER, cmd_obj) is False
     finally:
-        COMMANDS.remove(("wrapper", "test"))
+        COMMANDS.remove("wrapper test")
 
     async def fake_run_preflight(config):
         assert config is envsbot.config

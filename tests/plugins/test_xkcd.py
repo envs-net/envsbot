@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import plugins.xkcd as xkcd
+from utils import formatting
 
 
 @pytest.fixture
@@ -306,17 +307,17 @@ def test_xkcd_index_and_search_helpers(monkeypatch):
         11,
     ]
     assert xkcd._parse_xkcd_search_args(["search", "python", "3"]) == (
-        3,
+        formatting.PageRequest(page=3),
         "python",
     )
     assert xkcd._parse_xkcd_search_args(["search", "python", "comic"]) == (
-        1,
+        formatting.PageRequest(all=True),
         "python comic",
     )
-    assert xkcd._parse_xkcd_search_args(["search", ""]) == (1, "")
-    assert xkcd._parse_xkcd_search_args(["search", "2"]) == (1, "2")
+    assert xkcd._parse_xkcd_search_args(["search", ""]) == (formatting.PageRequest(all=True), "")
+    assert xkcd._parse_xkcd_search_args(["search", "2"]) == (formatting.PageRequest(all=True), "2")
     assert xkcd._parse_xkcd_search_args(["search", "python", "-2"]) == (
-        1,
+        formatting.PageRequest(all=True),
         "python -2",
     )
     assert xkcd._truncate_alt_text("x" * 81).endswith("...")

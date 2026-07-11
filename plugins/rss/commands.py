@@ -6,6 +6,7 @@ from utils.config import config
 from utils.url_safety import FetchURLTooLarge
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins._core import paginate_items
+from utils.formatting import page_size_for, parse_page_args
 from core_plugins.users import user_has_room_plugin_grant
 from utils.audit import audit_event
 from .config import (
@@ -185,29 +186,32 @@ def _rss_list_usage(bot=None) -> str:
 def _rss_list_page(args, total: int, page_size: int):
     """Parse RSS list paging arguments.
 
-    Returns ``(page, show_all)`` for valid input, or ``None`` for invalid
-    arguments. The ``args`` list includes the ``list`` subcommand itself.
+    Returns ``(page, show_all, page_size)`` for valid input, or ``None`` for
+    invalid arguments. The ``args`` list includes the ``list``/``health``
+    subcommand itself.
     """
     if len(args) > 2:
         return None
 
     if len(args) == 1:
-        return 1, False
+        request = parse_page_args([])
+    else:
+        value = str(args[1]).strip().lower()
+        if value not in {"all", "last"}:
+            try:
+                if int(value) <= 0:
+                    return None
+            except ValueError:
+                return None
+        request = parse_page_args([args[1]])
 
-    value = str(args[1]).strip().lower()
+    effective_page_size = page_size_for(page_size, request)
+    if request.all:
+        return 1, True, effective_page_size
 
-    if value == "all":
-        return 1, True
-
-    total_pages = max(1, (total + page_size - 1) // page_size)
-
-    if value == "last":
-        return total_pages, False
-
-    try:
-        return max(1, int(value)), False
-    except ValueError:
-        return None
+    total_pages = max(1, (total + effective_page_size - 1) // effective_page_size)
+    page = total_pages if request.page == -1 else max(1, request.page)
+    return page, False, effective_page_size
 
 
 async def _initialize_missing_last_id(bot, store, url, last_id, parsed):
@@ -901,7 +905,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             if parsed is None:
                 bot.reply(msg, f"Usage: {_command_prefix(bot)}rss {sub} [room_jid] [page|all|last]")
                 return
-            page, show_all = parsed
+            page, show_all, page_size = parsed
             if show_all:
                 page_items = detail_lines
                 lines[0] += " - all"

@@ -9,6 +9,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 from utils.config import config
 from core_plugins._core import paginate_items
+from utils.formatting import page_size_for, parse_page_args
 from utils.http_fetch import fetch_bytes
 from utils.url_safety import (
     FetchURLTooLarge,
@@ -579,7 +580,7 @@ def _format_feed_list(feeds: dict, args, bot=None, now=None) -> list[str] | None
     if parsed is None:
         return None
 
-    page, show_all = parsed
+    page, show_all, page_size = parsed
     now = _now() if now is None else int(now)
 
     if show_all:

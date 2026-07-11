@@ -28,6 +28,7 @@ from core_plugins.rooms import JOINED_ROOMS
 from utils.command import Role, command
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
+from utils.formatting import page_size_for, parse_page_args
 
 from utils.task_supervisor import create_plugin_task
 log = logging.getLogger(__name__)
@@ -641,16 +642,12 @@ async def _handle_xkcd_search(bot, msg, args, lowered_args, command_prefix):
         bot.reply(msg, f"❌ Usage: {command_prefix}xkcd search <query> [page]")
         return
 
-    page, query = _parse_xkcd_search_args(args)
+    page_request, query = _parse_xkcd_search_args(args)
     if not query:
         bot.reply(msg, f"❌ Usage: {command_prefix}xkcd search <query> [page]")
         return
 
-    if page < 1:
-        bot.reply(msg, "❌ Page number must be 1 or greater.")
-        return
-
-    log.debug("[XKCD] Searching for: %s (page %s)", query, page)
+    log.debug("[XKCD] Searching for: %s", query)
 
     store = await get_xkcd_store(bot)
     search_index = await store.get_global(XKCD_INDEX_KEY, default={})
@@ -668,17 +665,23 @@ async def _handle_xkcd_search(bot, msg, args, lowered_args, command_prefix):
 
     results.sort(key=lambda item: item["id"], reverse=True)
 
-    per_page = 10
-    page_results, page, total_pages, total_results = _core.paginate_items(
-        results,
-        page,
-        per_page,
-    )
-
-    msg_lines = [
-        f"🔎 Found {total_results} results for '{query}'"
-        f" (page {page}/{total_pages}):"
-    ]
+    per_page = page_size_for(10, page_request)
+    if page_request.all:
+        page_results = results
+        page = 1
+        total_pages = 1
+        total_results = len(results)
+        msg_lines = [f"🔎 Found {total_results} results for '{query}' - all:"]
+    else:
+        page_results, page, total_pages, total_results = _core.paginate_items(
+            results,
+            page_request.page,
+            per_page,
+        )
+        msg_lines = [
+            f"🔎 Found {total_results} results for '{query}'"
+            f" (page {page}/{total_pages}):"
+        ]
 
     start_index = (page - 1) * per_page
     for i, result in enumerate(page_results, start_index + 1):
@@ -697,13 +700,13 @@ async def _handle_xkcd_search(bot, msg, args, lowered_args, command_prefix):
 
 
 def _parse_xkcd_search_args(args):
-    page = 1
-    if len(args) >= 3 and str(args[-1]).isdigit():
-        page = int(args[-1])
-        query = " ".join(str(arg) for arg in args[1:-1]).lower()
-    else:
-        query = " ".join(str(arg) for arg in args[1:]).lower()
-    return page, query
+    page_args = []
+    query_parts = [str(arg) for arg in args[1:]]
+    if len(query_parts) > 1:
+        last = query_parts[-1].strip().lower()
+        if last in {"all", "last"} or last.isdigit():
+            page_args = [query_parts.pop()]
+    return parse_page_args(page_args), " ".join(query_parts).lower()
 
 
 def _search_xkcd_index(search_index, query):

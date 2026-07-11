@@ -9,7 +9,7 @@ from slixmpp import JID
 from utils.audit import audit_event
 from utils.command import Role, command
 from utils.config import config
-from utils.formatting import parse_page_args
+from utils.formatting import page_size_for, parse_page_args
 
 log = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ async def _reply_audit_query(
 ) -> None:
     """Reply with a database-backed, paginated audit query."""
     page_request = parse_page_args(page_args or [])
-    page_size = 10
+    page_size = page_size_for(10, page_request)
     command_hint = command_hint or f"{config.get('prefix', ',')}audit last"
     total = await _count_events(bot, actor=actor, target=target, event=event)
 
@@ -500,7 +500,7 @@ async def audit_summary(bot, sender, nick, args, msg, is_room):
 async def audit_errors(bot, sender, nick, args, msg, is_room):
     """Show audit events that look like errors or failures."""
     page_request = parse_page_args(args or [])
-    page_size = 10
+    page_size = page_size_for(10, page_request)
     if page_request.all:
         rows, total = await _list_error_events(bot, limit=1000, offset=0)
     else:
