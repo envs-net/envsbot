@@ -8,7 +8,6 @@ import pytest
 import envsbot
 import bot.lifecycle as lifecycle
 from bot.dispatch import CommandDispatchMixin
-from bot.lifecycle import LifecycleMixin, call_with_timeout
 from utils.command import Role
 from utils.permissions import can_manage_room_role
 
@@ -21,10 +20,10 @@ async def test_call_with_timeout_success_no_timeout_and_failure():
     async def boom():
         raise RuntimeError("broken")
 
-    assert await call_with_timeout("ok", ok, timeout=1.0) == "done"
-    assert await call_with_timeout("no-timeout", ok, timeout=0) == "done"
+    assert await lifecycle.call_with_timeout("ok", ok, timeout=1.0) == "done"
+    assert await lifecycle.call_with_timeout("no-timeout", ok, timeout=0) == "done"
     with pytest.raises(RuntimeError, match="broken"):
-        await call_with_timeout("boom", boom, timeout=1.0)
+        await lifecycle.call_with_timeout("boom", boom, timeout=1.0)
 
 
 class DispatchOnly(CommandDispatchMixin):
@@ -55,7 +54,7 @@ def test_can_manage_room_role_threshold():
     assert can_manage_room_role(Role.USER) is False
 
 
-class DummyLifecycle(LifecycleMixin):
+class DummyLifecycle(lifecycle.LifecycleMixin):
     def __init__(self, *, unload=None, cancel_all=None, close=None, config=None):
         self.accepting_commands = True
         self.config = config or {}
