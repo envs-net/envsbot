@@ -6,7 +6,7 @@ import logging
 from utils.command import command, Role
 from utils.config import config
 from core_plugins._core import handle_room_toggle_command
-from .parsing import get_reminder_tzinfo
+from .parsing import explain_invalid_reminder_time, get_reminder_tzinfo
 
 
 log = logging.getLogger(__name__)
@@ -497,13 +497,18 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         seconds, message, display_when = parse_reminder_when(args, user_tz)
 
         if seconds is None or seconds < 1 or not message:
-            bot.reply(
-                msg,
-                "❌ Invalid reminder time.\n"
-                "Use relative format: 10s, 5m, 1h, 2d, 1h30m\n"
-                "Or absolute format: 2026-05-01 14:30, "
-                "2026-05-01 14:30 CEST, 01.05.2026 14:30",
-            )
+            detail = explain_invalid_reminder_time(args, user_tz)
+            if detail:
+                bot.reply(msg, detail)
+            else:
+                bot.reply(
+                    msg,
+                    "❌ Invalid reminder time.\n"
+                    "Use relative format: 10s, 5m, 1h, 2d, 1h30m\n"
+                    "Or absolute format: 2026-05-01 14:30, "
+                    "2026-05-01 14:30 CEST, "
+                    "2026-05-01 14:30 +02:00, 01.05.2026 14:30",
+                )
             return
 
         max_days = config.get("reminder_max_age_days", 365)

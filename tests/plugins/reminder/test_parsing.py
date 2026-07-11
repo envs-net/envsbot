@@ -159,3 +159,34 @@ def test_timezone_lookup_jid_direct_muc_plugin_joined_and_fallback(dummy_bot, mo
     monkeypatch.setattr(reminder, "_is_muc_pm", lambda _msg, _is_room: False)
     msg.__getitem__.side_effect = KeyError("from")
     assert reminder._timezone_lookup_jid(dummy_bot, "fallback@example.org/res", msg, False) == "fallback@example.org"
+
+
+def test_parse_reminder_when_allows_current_minute_grace(monkeypatch):
+    fixed_now = datetime.datetime(
+        2026, 7, 11, 7, 30, 45, tzinfo=datetime.timezone.utc)
+    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+
+    sec, msg, when = reminder.parse_reminder_when(
+        ["2026-07-11", "09:30", "CEST", "Test"],
+        pytz.UTC,
+    )
+
+    assert sec == 1
+    assert msg == "Test"
+    assert when == "on 2026-07-11 09:30 CEST"
+
+
+def test_explain_invalid_reminder_time_for_past_timezone(monkeypatch):
+    fixed_now = datetime.datetime(
+        2026, 7, 11, 7, 30, 0, tzinfo=datetime.timezone.utc)
+    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+
+    detail = reminder.explain_invalid_reminder_time(
+        ["2026-07-11", "09:30", "+03:00", "Test"],
+        pytz.UTC,
+    )
+
+    assert detail is not None
+    assert "Reminder time must be in the future" in detail
+    assert "Parsed target: 2026-07-11 09:30 +03:00" in detail
+    assert "Current time: 2026-07-11 10:30 +03:00" in detail

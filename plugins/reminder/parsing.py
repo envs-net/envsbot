@@ -284,6 +284,55 @@ def parse_absolute_datetime(
     return remind_at, consumed
 
 
+def _seconds_until_reminder(remind_at: datetime.datetime) -> int | None:
+    """Return seconds until a reminder, with a small minute-grace window.
+
+    Absolute reminder commands only accept minute precision in the common
+    formats.  When a user sends ``09:30`` at ``09:30:xx``, the target
+    timestamp is technically already in the past.  Treat that same-minute case
+    as an immediate reminder instead of rejecting it as invalid.
+    """
+    seconds_float = (remind_at - _utcnow()).total_seconds()
+    if seconds_float >= 1:
+        return int(seconds_float)
+    if -60 < seconds_float < 1:
+        return 1
+    return None
+
+
+def explain_invalid_reminder_time(
+    args: list[str],
+    user_tz: datetime.tzinfo | None = None,
+) -> str | None:
+    """Return a specific user-facing parse error, when one is known."""
+    remind_at, consumed, display_tz = _parse_absolute_datetime_with_timezone(
+        args,
+        user_tz,
+    )
+    if remind_at is None:
+        return None
+
+    timezone = display_tz or user_tz or _reminder_default_tzinfo()
+
+    if len(args) <= consumed or not " ".join(args[consumed:]).strip():
+        return (
+            "❌ Missing reminder text after the time.\n"
+            "Example: ,remind 2026-05-01 14:30 CEST Take a break"
+        )
+
+    if _seconds_until_reminder(remind_at) is None:
+        parsed = _format_local_datetime(remind_at, timezone)
+        now = _format_local_datetime(_utcnow(), timezone)
+        return (
+            "❌ Reminder time must be in the future.\n"
+            f"Parsed target: {parsed}\n"
+            f"Current time: {now}\n"
+            "Use a later time or a relative duration like 10m or 1h30m."
+        )
+
+    return None
+
+
 def parse_reminder_when(
     args: list[str],
     user_tz: datetime.tzinfo | None = None,
@@ -315,8 +364,8 @@ def parse_reminder_when(
     if not message:
         return None, None, None
 
-    seconds = int((remind_at - _utcnow()).total_seconds())
-    if seconds < 1:
+    seconds = _seconds_until_reminder(remind_at)
+    if seconds is None:
         return None, None, None
 
     display_when = f"on {_format_local_datetime(

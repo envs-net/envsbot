@@ -134,3 +134,24 @@ def test_reminder_split_commands_preserve_command_metadata():
         assert handler._command == command_name
         assert handler._aliases == aliases
         assert handler._required_role is reminder.Role.USER
+
+
+@pytest.mark.asyncio
+async def test_remind_command_reports_past_absolute_time(dummy_bot, dummy_msg, monkeypatch):
+    fixed_now = datetime.datetime(
+        2026, 7, 11, 7, 30, 0, tzinfo=datetime.timezone.utc)
+    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+
+    await reminder.remind_command(
+        dummy_bot,
+        "a@b",
+        "TestNick",
+        ["2026-07-11", "09:30", "+03:00", "Test"],
+        dummy_msg,
+        False,
+    )
+
+    reply = dummy_bot.reply.call_args[0][1]
+    assert "Reminder time must be in the future" in reply
+    assert "Parsed target: 2026-07-11 09:30 +03:00" in reply
+    assert "Current time: 2026-07-11 10:30 +03:00" in reply
