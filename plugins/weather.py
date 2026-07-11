@@ -36,6 +36,11 @@ PLUGIN_META = {
 
 WEATHER_KEY = "WEATHER"
 WEATHER_HTTP_TIMEOUT = float(config.get("http_timeout_seconds", 8) or 8)
+WEATHER_MAX_BYTES = 65536
+WTTR_HEADERS = {
+    "User-Agent": "curl/8.0 (envsbot weather; +https://github.com/envs-net/envsbot)",
+    "Accept": "text/plain, */*;q=0.1",
+}
 
 
 async def get_display_name(bot, jid):
@@ -422,7 +427,8 @@ async def _fetch_wttr_weather_text(weather_url: str) -> str:
             result = await fetch_text(
                 candidate_url,
                 timeout_seconds=WEATHER_HTTP_TIMEOUT,
-                max_bytes=8192,
+                max_bytes=WEATHER_MAX_BYTES,
+                headers=WTTR_HEADERS,
                 session_factory=aiohttp.ClientSession,
                 validator=passthrough_validator,
                 raise_for_status=False,
@@ -444,13 +450,31 @@ async def _fetch_wttr_weather_text(weather_url: str) -> str:
         if not weather:
             errors.append(f"{candidate_url}: empty response")
             continue
-        if weather.lower().startswith("unknown location"):
-            errors.append(f"{candidate_url}: {weather}")
+        unusable_reason = _wttr_unusable_response_reason(weather)
+        if unusable_reason:
+            errors.append(f"{candidate_url}: {unusable_reason}")
             continue
 
         return weather
 
     raise WeatherFetchError("; ".join(errors) or "no usable response")
+
+
+def _wttr_unusable_response_reason(weather: str) -> str:
+    """Return a reason when wttr.in did not return compact weather text."""
+    normalized = weather.strip()
+    lowered = normalized.lower()
+    if not normalized:
+        return "empty response"
+    if lowered.startswith("unknown location"):
+        return normalized
+    if "<html" in lowered or "<!doctype" in lowered:
+        return "HTML response instead of compact weather text"
+    if len(normalized) > 1000:
+        return "unexpectedly large compact weather response"
+    if normalized.count("\n") > 6:
+        return "unexpected multiline weather response"
+    return ""
 
 
 def _parse_wttr_weather(weather):

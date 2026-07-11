@@ -629,3 +629,41 @@ async def test_fetch_wttr_weather_reports_all_failed_candidates(monkeypatch):
     message = str(exc_info.value)
     assert "https://wttr.in/Berlin?format=4&m: HTTP 503" in message
     assert "http://wttr.in/Berlin?format=4&m: HTTP 503" in message
+
+
+@pytest.mark.asyncio
+async def test_fetch_wttr_weather_uses_curl_like_plain_text_headers(monkeypatch):
+    captured = []
+
+    async def fake_fetch_text(url, **kwargs):
+        captured.append((url, kwargs))
+        return SimpleNamespace(status=200, text="Berlin: Sunny 21°C")
+
+    monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
+
+    assert await weather._fetch_wttr_weather_text(
+        "https://wttr.in/Berlin?format=4&m"
+    ) == "Berlin: Sunny 21°C"
+
+    _url, kwargs = captured[0]
+    assert kwargs["headers"]["User-Agent"].startswith("curl/")
+    assert "text/plain" in kwargs["headers"]["Accept"]
+    assert kwargs["max_bytes"] == weather.WEATHER_MAX_BYTES
+
+
+@pytest.mark.asyncio
+async def test_fetch_wttr_weather_rejects_html_response(monkeypatch):
+    async def fake_fetch_text(url, **kwargs):
+        return SimpleNamespace(
+            status=200,
+            text="<!doctype html><html>no compact weather</html>",
+        )
+
+    monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
+
+    with pytest.raises(weather.WeatherFetchError) as exc_info:
+        await weather._fetch_wttr_weather_text(
+            "https://wttr.in/Berlin?format=4&m"
+        )
+
+    assert "HTML response" in str(exc_info.value)
