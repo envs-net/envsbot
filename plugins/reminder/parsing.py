@@ -295,7 +295,7 @@ def _seconds_until_reminder(remind_at: datetime.datetime) -> int | None:
     seconds_float = (remind_at - _utcnow()).total_seconds()
     if seconds_float >= 1:
         return int(seconds_float)
-    if -60 < seconds_float < 1:
+    if seconds_float > -60:
         return 1
     return None
 
