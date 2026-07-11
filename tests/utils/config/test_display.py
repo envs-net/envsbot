@@ -59,6 +59,11 @@ def test_get_config_diff_sections_groups_differences_by_sample_sections():
         "jid": "bot@example.org",
         "prefix": "!",
         "ducks": {"spawn_chance": 10, "max_messages": 500},
+        "idlerpg": {
+            "topic_custom_text": "Welcome to IdleRPG",
+            "export_enabled": True,
+            "nested": {"enabled": False, "unchanged": 1},
+        },
         "room_plugin_defaults": {"pin": False, "xkcd": False},
     })
     defaults = config_mod.DEFAULT_CONFIG.copy()
@@ -66,6 +71,11 @@ def test_get_config_diff_sections_groups_differences_by_sample_sections():
         "jid": "envsbot@domain.tld",
         "prefix": ",",
         "ducks": {"spawn_chance": 20, "max_messages": 500},
+        "idlerpg": {
+            "topic_custom_text": "",
+            "export_enabled": True,
+            "nested": {"enabled": True, "unchanged": 1},
+        },
         "room_plugin_defaults": {"pin": True, "xkcd": False},
     })
 
@@ -76,6 +86,14 @@ def test_get_config_diff_sections_groups_differences_by_sample_sections():
     assert ("COMMAND_PREFIX", "!", ",") in by_title["Bot Runtime"]
     assert ("DUCKS.spawn_chance", 10, 20) in by_title["Duck Game"]
     assert all(entry[0] != "DUCKS.max_messages" for entry in by_title["Duck Game"])
+    assert (
+        "IDLERPG.topic_custom_text",
+        "Welcome to IdleRPG",
+        "",
+    ) in by_title["IdleRPG"]
+    assert ("IDLERPG.nested.enabled", False, True) in by_title["IdleRPG"]
+    assert all(entry[0] != "IDLERPG.export_enabled" for entry in by_title["IdleRPG"])
+    assert all(entry[0] != "IDLERPG.nested.unchanged" for entry in by_title["IdleRPG"])
     assert (
         "ROOM_PLUGIN_DEFAULTS.pin",
         False,

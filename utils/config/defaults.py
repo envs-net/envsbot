@@ -460,7 +460,7 @@ CONFIG_DISPLAY_SECTIONS = (
     ),
     (
         "Reminders",
-        ("REMINDER_ENABLED", "REMINDER_MAX_AGE_DAYS"),
+        ("REMINDER_ENABLED", "REMINDER_MAX_AGE_DAYS", "REMINDER_DEFAULT_TIMEZONE"),
     ),
     (
         "Duck Game",
@@ -469,6 +469,10 @@ CONFIG_DISPLAY_SECTIONS = (
     (
         "User Tracking",
         ("USERS",),
+    ),
+    (
+        "IdleRPG",
+        ("IDLERPG",),
     ),
     (
         "Sed Corrections",

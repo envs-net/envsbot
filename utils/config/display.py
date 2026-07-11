@@ -68,12 +68,18 @@ def load_default_config_for_diff() -> dict:
 
 
 def _flatten_config_value(name: str, value: object) -> list[tuple[str, object]]:
+    """Return leaf-level config entries using dotted names for nested dicts."""
     if not isinstance(value, dict):
         return [(name, value)]
 
-    flattened = []
+    flattened: list[tuple[str, object]] = []
     for key in sorted(value):
-        flattened.append((f"{name}.{key}", value[key]))
+        child_name = f"{name}.{key}"
+        child_value = value[key]
+        if isinstance(child_value, dict):
+            flattened.extend(_flatten_config_value(child_name, child_value))
+        else:
+            flattened.append((child_name, child_value))
     return flattened
 
 
@@ -85,7 +91,8 @@ def get_config_diff_sections(
 
     The result mirrors ``get_config_display_sections`` but entries are
     ``(display_name, current_value, default_value)`` tuples. Nested dictionaries
-    are compared one level deep as dotted keys such as ``DUCKS.spawn_chance``.
+    are compared recursively as dotted keys such as ``DUCKS.spawn_chance`` or
+    ``IDLERPG.topic_custom_text``.
     """
     if current_cfg is None:
         from . import config as current

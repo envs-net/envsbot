@@ -165,7 +165,7 @@ _STATUS_ICONS = {
 
 
 def status_icon(status: str | None) -> str:
-    """Return the standard operator icon for a status string."""
+    """Return the standard status icon for a status string."""
     return _STATUS_ICONS.get(str(status or "").strip().lower(), "ℹ️")
 
 

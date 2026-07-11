@@ -58,6 +58,33 @@ def test_format_diff_lines_reports_muc_banbot_style_and_skips_secrets(monkeypatc
     ]
 
 
+
+def test_format_diff_lines_shows_idlerpg_leaf_changes(monkeypatch):
+    monkeypatch.setattr(
+        config_cmd,
+        "get_config_diff_sections",
+        lambda cfg: [
+            (
+                "IdleRPG",
+                [
+                    (
+                        "IDLERPG.topic_custom_text",
+                        "Welcome to IdleRPG",
+                        "",
+                    ),
+                    ("IDLERPG.export_top_limit", 100, 50),
+                ],
+            ),
+        ],
+    )
+
+    lines = config_cmd._format_diff_lines({})
+
+    assert "• IDLERPG.topic_custom_text" in lines
+    assert "  current: 'Welcome to IdleRPG'" in lines
+    assert "• IDLERPG.export_top_limit" in lines
+    assert "current: {'tick_seconds'" not in "\n".join(lines)
+
 def test_format_diff_lines_handles_no_changes(monkeypatch):
     monkeypatch.setattr(config_cmd, "get_config_diff_sections", lambda cfg: [])
 

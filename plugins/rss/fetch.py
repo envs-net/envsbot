@@ -9,7 +9,6 @@ import aiohttp
 from bs4 import BeautifulSoup
 from utils.config import config
 from core_plugins._core import paginate_items
-from utils.formatting import page_size_for, parse_page_args
 from utils.http_fetch import fetch_bytes
 from utils.url_safety import (
     FetchURLTooLarge,
