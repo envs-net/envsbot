@@ -93,23 +93,61 @@ def test_resolve_url_with_urljoin():
 
 @pytest.mark.asyncio
 async def test_fetch_url_title_basic(monkeypatch):
-    async def fake_fetch_bytes(url, **kwargs):
+    async def fake_fetch_preview(url, **kwargs):
         assert url == "https://xx"
+        assert kwargs["stop_when"](
+            b"<title>X</title><meta name='description' content='desc'>"
+        )
         return types.SimpleNamespace(
             url="https://final",
             status=200,
             content_type="text/html",
+            content_length=4096,
             body=b"<title>X</title><meta name='description' content='desc'>",
         )
 
-    monkeypatch.setattr(urlcheck, "fetch_bytes", fake_fetch_bytes)
-    final_url, status, ctype, title, _, desc = await urlcheck.fetch_url_title(
+    monkeypatch.setattr(urlcheck, "fetch_preview", fake_fetch_preview)
+    final_url, status, ctype, title, content_size, desc = await urlcheck.fetch_url_title(
         "https://xx")
     assert final_url == "https://final"
     assert status == 200
     assert "text/html" in ctype
     assert title == "X"
+    assert content_size == 4096
     assert desc == "desc"
+
+
+def test_html_metadata_preview_complete_handles_title_and_head():
+    assert not urlcheck._html_metadata_preview_complete(b"<html><title>X")
+    assert urlcheck._html_metadata_preview_complete(b"<title>X</title></head>")
+    assert urlcheck._html_metadata_preview_complete(
+        b"<title>X</title><meta name=\"description\" content=\"d\">"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_title_accepts_truncated_html_with_early_title(monkeypatch):
+    async def fake_fetch_preview(url, **kwargs):
+        return types.SimpleNamespace(
+            url=url,
+            status=200,
+            content_type="text/html; charset=utf-8",
+            content_length=800000,
+            body=b"<html><head><title>Large page</title></head>",
+        )
+
+    monkeypatch.setattr(urlcheck, "fetch_preview", fake_fetch_preview)
+
+    final_url, status, ctype, title, content_size, desc = await urlcheck.fetch_url_title(
+        "https://example.org/large"
+    )
+
+    assert final_url == "https://example.org/large"
+    assert status == 200
+    assert "text/html" in ctype
+    assert title == "Large page"
+    assert content_size == 800000
+    assert desc is None
 
 
 @pytest.mark.asyncio
@@ -120,10 +158,10 @@ async def test_fetch_url_title_blocks_unsafe_initial_url():
 
 @pytest.mark.asyncio
 async def test_fetch_url_title_blocks_unsafe_redirect(monkeypatch):
-    async def blocked_fetch_bytes(*args, **kwargs):
+    async def blocked_fetch_preview(*args, **kwargs):
         raise urlcheck.UnsafeFetchURL("blocked")
 
-    monkeypatch.setattr(urlcheck, "fetch_bytes", blocked_fetch_bytes)
+    monkeypatch.setattr(urlcheck, "fetch_preview", blocked_fetch_preview)
 
     with pytest.raises(urlcheck.UnsafeFetchURL):
         await urlcheck.fetch_url_title("https://example.org/feed")

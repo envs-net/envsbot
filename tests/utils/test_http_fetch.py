@@ -9,6 +9,7 @@ from utils.http_fetch import (
     _response_content_type,
     fetch_bytes,
     fetch_json,
+    fetch_preview,
     passthrough_validator,
 )
 from utils.url_safety import UnsafeFetchURL
@@ -36,6 +37,21 @@ class FakeResponse:
 
     async def text(self):
         return self._body.decode("utf-8")
+
+
+class FakeStreamContent:
+    def __init__(self, chunks):
+        self._chunks = tuple(chunks)
+
+    async def iter_chunked(self, _size):
+        for chunk in self._chunks:
+            yield chunk
+
+
+class FakeStreamResponse(FakeResponse):
+    def __init__(self, *, chunks, **kwargs):
+        super().__init__(body=b"", **kwargs)
+        self.content = FakeStreamContent(chunks)
 
 
 class FakeSession:
@@ -148,3 +164,49 @@ async def test_fetch_bytes_redirect_without_location_raises():
             session_factory=_factory_for(response, []),
         )
 
+
+
+@pytest.mark.asyncio
+async def test_fetch_preview_returns_partial_body_without_large_error():
+    calls = []
+    body = b"<html><head><title>Example</title></head>" + b"x" * 1000
+
+    result = await fetch_preview(
+        "https://example.test/large.html",
+        validator=passthrough_validator,
+        session_factory=_factory_for(
+            FakeResponse(
+                body=body,
+                headers={
+                    "Content-Type": "text/html",
+                    "Content-Length": str(len(body)),
+                },
+            ),
+            calls,
+        ),
+        max_bytes=64,
+    )
+
+    assert result.body == body[:64]
+    assert result.content_length == len(body)
+    assert result.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_preview_obeys_stop_predicate():
+    result = await fetch_preview(
+        "https://example.test/large.html",
+        validator=passthrough_validator,
+        session_factory=_factory_for(
+            FakeStreamResponse(
+                chunks=[b"<html><head>", b"<title>Example</title>", b"x" * 1000],
+                headers={"Content-Type": "text/html"},
+            ),
+            [],
+        ),
+        max_bytes=256,
+        stop_when=lambda data: b"</title>" in data,
+    )
+
+    assert result.body == b"<html><head><title>Example</title>"
+    assert result.truncated is False

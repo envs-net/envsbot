@@ -36,7 +36,7 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
-from utils.http_fetch import fetch_bytes, fetch_json, passthrough_validator
+from utils.http_fetch import fetch_preview, fetch_json, passthrough_validator
 from utils.urlcheck_extraction import extract_urls_from_message_text
 from utils.url_safety import UnsafeFetchURL
 from core_plugins.rooms import JOINED_ROOMS
@@ -414,24 +414,48 @@ def has_xep_0392_link_metadata(msg):
     )
 
 
+def _html_metadata_preview_complete(body: bytes) -> bool:
+    """Return True once a partial HTML body contains enough metadata."""
+    lower = body.lower()
+    if b"</head" in lower:
+        return True
+    if b"</title" not in lower:
+        return False
+    has_description_hint = (
+        b"name=\"description\"" in lower
+        or b"name='description'" in lower
+        or b"property=\"og:description\"" in lower
+        or b"property='og:description'" in lower
+    )
+    return has_description_hint
+
+
 async def fetch_url_title(url, max_redirects=None):
     """
-    Fetch the final URL after redirects, status code, content type, title
-    and description using the shared HTTP utility.
+    Fetch URL metadata without reading the complete response body.
+
+    Many modern pages, especially GitHub release pages, are far larger than
+    the URLCheck title limit while still placing the title in the first few
+    kilobytes.  Use a streaming preview fetch so large HTML pages can still be
+    summarized without raising ``FetchURLTooLarge``.
     """
     parsed_orig = urlparse(url)
     orig_fragment = parsed_orig.fragment
     if max_redirects is None:
         max_redirects = URLCHECK_MAX_REDIRECTS
 
-    result = await fetch_bytes(
+    result = await fetch_preview(
         url,
-        headers={"User-Agent": URLCHECK_USER_AGENT},
+        headers={
+            "User-Agent": URLCHECK_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+        },
         timeout_seconds=URLCHECK_FETCH_TIMEOUT_SECONDS,
         max_redirects=max_redirects,
         max_bytes=URLCHECK_MAX_READ_BYTES,
         allow_private=ALLOW_PRIVATE_FETCH_URLS,
         raise_for_status=False,
+        stop_when=_html_metadata_preview_complete,
     )
 
     final_url = result.url
@@ -440,17 +464,18 @@ async def fetch_url_title(url, max_redirects=None):
         final_url = urlunparse(parsed_final._replace(fragment=orig_fragment))
 
     ctype = result.content_type
+    content_size = result.content_length if result.content_length is not None else len(result.body)
     if "text/html" in ctype:
         buffer = result.body.decode("utf-8", errors="replace")
         title_found, desc_found = extract_html_title_desc(buffer)
         return (
             final_url, result.status,
-            ctype, title_found, None, desc_found
+            ctype, title_found, content_size, desc_found
         )
 
     return (
         final_url, result.status, ctype,
-        None, len(result.body), None
+        None, content_size, None
     )
 
 

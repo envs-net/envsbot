@@ -27,6 +27,23 @@ class HTTPFetchResult:
 
 
 @dataclass(frozen=True)
+class HTTPPreviewResult:
+    """Partial HTTP response payload for metadata previews.
+
+    ``truncated`` is true when the read stopped due to the configured byte
+    limit before the response body ended. Callers should treat the body as a
+    preview and never assume it contains a complete document.
+    """
+
+    body: bytes
+    url: str
+    content_type: str
+    status: int
+    content_length: int | None
+    truncated: bool
+
+
+@dataclass(frozen=True)
 class HTTPTextResult:
     """HTTP response payload decoded as text."""
 
@@ -144,6 +161,50 @@ async def _read_limited_response(resp: aiohttp.ClientResponse, max_bytes: int) -
     return b""
 
 
+def _content_length(resp: aiohttp.ClientResponse) -> int | None:
+    value = _response_headers(resp).get("Content-Length")
+    if value is None:
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+async def _read_preview_response(
+    resp: aiohttp.ClientResponse,
+    *,
+    max_bytes: int,
+    stop_when: Callable[[bytes], bool] | None = None,
+) -> tuple[bytes, bool]:
+    chunks = bytearray()
+    content = getattr(resp, "content", None)
+    if content is not None and hasattr(content, "iter_chunked"):
+        async for chunk in content.iter_chunked(8192):
+            chunks.extend(chunk)
+            if len(chunks) >= max_bytes:
+                clipped = bytes(chunks[:max_bytes])
+                return clipped, not (stop_when and stop_when(clipped))
+            if stop_when and stop_when(bytes(chunks)):
+                return bytes(chunks), False
+        return bytes(chunks), False
+
+    text_reader = getattr(resp, "text", None)
+    if callable(text_reader):
+        data = (await text_reader()).encode("utf-8", errors="replace")
+        truncated = len(data) > max_bytes
+        return data[:max_bytes], truncated
+
+    json_reader = getattr(resp, "json", None)
+    if callable(json_reader):
+        data = json.dumps(await json_reader()).encode("utf-8")
+        truncated = len(data) > max_bytes
+        return data[:max_bytes], truncated
+
+    return b"", False
+
+
 def _decode_text(body: bytes, content_type: str, encoding: str | None = None) -> str:
     selected = encoding or "utf-8"
     if encoding is None and "charset=" in content_type.lower():
@@ -194,6 +255,63 @@ async def fetch_bytes(
                     url=_response_url(resp, current_url),
                     content_type=_response_content_type(resp),
                     status=status,
+                )
+        raise UnsafeFetchURL("too many redirects")
+
+
+async def fetch_preview(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float | None = None,
+    max_redirects: int | None = None,
+    max_bytes: int | None = None,
+    allow_private: bool | None = None,
+    validator: Callable[..., object] | None = None,
+    session_factory: Callable[..., aiohttp.ClientSession] | None = None,
+    raise_for_status: bool = True,
+    stop_when: Callable[[bytes], bool] | None = None,
+) -> HTTPPreviewResult:
+    """Fetch a small response preview without requiring the full body.
+
+    This is intended for URL metadata/title extraction, where the interesting
+    information is usually in the first part of a potentially large HTML page.
+    The same redirect and SSRF rules as :func:`fetch_bytes` are applied.
+    """
+    timeout_seconds = float(timeout_seconds or config.get("http_timeout_seconds", 8) or 8)
+    max_redirects = int(max_redirects if max_redirects is not None else config.get("http_max_redirects", 5) or 5)
+    max_bytes = int(max_bytes if max_bytes is not None else config.get("http_max_read_bytes", 1048576) or 1048576)
+    allow_private = bool(config.get("allow_private_fetch_urls", False) if allow_private is None else allow_private)
+    effective_headers = {"User-Agent": default_user_agent(), **(headers or {})}
+    validator = validator or validate_fetch_url_async
+    session_factory = session_factory or aiohttp.ClientSession
+
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    current_url = str(url)
+    async with _session_from_factory(session_factory, timeout=timeout, headers=effective_headers) as session:
+        for _ in range(max_redirects + 1):
+            current_url = await validator(current_url, allow_private=allow_private)
+            async with _session_get(session, current_url, timeout) as resp:
+                status = int(getattr(resp, "status", 0) or 0)
+                if status in REDIRECT_STATUSES:
+                    location = _response_location(resp)
+                    if not location:
+                        raise UnsafeFetchURL("redirect response without Location header")
+                    current_url = urljoin(_response_url(resp, current_url), location)
+                    continue
+                _maybe_raise_for_status(resp, raise_for_status=raise_for_status)
+                body, truncated = await _read_preview_response(
+                    resp,
+                    max_bytes=max_bytes,
+                    stop_when=stop_when,
+                )
+                return HTTPPreviewResult(
+                    body=body,
+                    url=_response_url(resp, current_url),
+                    content_type=_response_content_type(resp),
+                    status=status,
+                    content_length=_content_length(resp),
+                    truncated=truncated,
                 )
         raise UnsafeFetchURL("too many redirects")
 
