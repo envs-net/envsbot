@@ -116,6 +116,13 @@ async def test_get_reminder_tzinfo_uses_user_timezone_or_config_default(monkeypa
     assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "Europe/Berlin"
 
 
+def test_utcnow_returns_timezone_aware_utc():
+    now = reminder._utcnow()
+
+    assert now.tzinfo is datetime.timezone.utc
+    assert now.utcoffset() == datetime.timedelta(0)
+
+
 def test_format_seconds():
     assert reminder.format_seconds(3661) == "1h 1m 1s"
     assert reminder.format_seconds(61) == "1m 1s"
