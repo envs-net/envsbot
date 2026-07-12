@@ -266,8 +266,12 @@ async def test_cmd_xmpp_compliance(bot, msg):
     m = msg()
     bot.db.users.plugin.return_value.get_global = AsyncMock(
         return_value={"room@muc.example": True})
-    async def fake_fetch_text(url, **kwargs):
-        return SimpleNamespace(status=200, text="<html></html>")
+    fetch_kwargs = {}
+
+    async def fake_fetch_preview(url, **kwargs):
+        fetch_kwargs.update(kwargs)
+        body = b'<html><span class="stat_result">110/120</span></html>'
+        return SimpleNamespace(status=200, body=body)
 
     class FakeSoup:
         def find(self, *a, **kw):
@@ -275,13 +279,21 @@ async def test_cmd_xmpp_compliance(bot, msg):
                 def get_text(self, **_): return "110/120"
             return Score()
 
-    with patch.object(xmpp, "fetch_text", fake_fetch_text), \
+    with patch.object(xmpp, "fetch_preview", fake_fetch_preview), \
             patch("bs4.BeautifulSoup", return_value=FakeSoup()):
         await xmpp.cmd_xmpp_compliance(bot, "jid", "nick",
                                        ["conversations.im"], m, True)
         bot.reply.assert_called()
         assert "Compliance score" in "".join(
             str(a) for a in bot.reply.call_args[0])
+        assert fetch_kwargs["max_bytes"] == xmpp.XMPP_COMPLIANCE_MAX_READ_BYTES
+        assert fetch_kwargs["stop_when"] is xmpp._compliance_preview_complete
+
+
+def test_compliance_preview_stops_on_score_marker_or_end():
+    assert xmpp._compliance_preview_complete(b'<div class="stat_result">')
+    assert xmpp._compliance_preview_complete(b"<html></html>")
+    assert not xmpp._compliance_preview_complete(b"<html><body>")
 
 
 @pytest.mark.asyncio

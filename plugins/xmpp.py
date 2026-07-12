@@ -29,7 +29,7 @@ import slixmpp
 import asyncio
 from utils.command import command, Role
 from utils.config import config
-from utils.http_fetch import fetch_text, passthrough_validator
+from utils.http_fetch import fetch_preview, passthrough_validator
 from core_plugins._core import (
         handle_room_toggle_command,
         _is_muc_pm,
@@ -39,6 +39,17 @@ from core_plugins._core import (
 XMPP_KEY = "XMPP"
 XMPP_QUERY_TIMEOUT_SECONDS = float(config.get("xmpp_query_timeout_seconds", 8) or 8)
 XMPP_HTTP_TIMEOUT_SECONDS = float(config.get("http_timeout_seconds", 8) or 8)
+XMPP_COMPLIANCE_MAX_READ_BYTES = max(
+    8192,
+    int(config.get("xmpp_compliance_max_read_bytes", 262144) or 262144),
+)
+
+
+def _compliance_preview_complete(body: bytes) -> bool:
+    """Return True once a compliance-page preview has enough score data."""
+    lower = body.lower()
+    return b"stat_result" in lower or b"</html" in lower
+
 
 PLUGIN_META = {
     "name": "xmpp",
@@ -1099,16 +1110,18 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         url = f"https://compliance.conversations.im/server/{domain}/"
-        resp = await fetch_text(
+        resp = await fetch_preview(
             url,
             timeout_seconds=XMPP_HTTP_TIMEOUT_SECONDS,
-            max_bytes=262144,
+            max_bytes=XMPP_COMPLIANCE_MAX_READ_BYTES,
             validator=passthrough_validator,
             raise_for_status=False,
+            stop_when=_compliance_preview_complete,
         )
         if resp.status == 200:
             from bs4 import BeautifulSoup
-            soup = BeautifulSoup(resp.text, 'html.parser')
+            html_text = resp.body.decode("utf-8", errors="replace")
+            soup = BeautifulSoup(html_text, 'html.parser')
             score_elem = soup.find(class_='stat_result')
             if score_elem:
                 score = score_elem.get_text(strip=True)
