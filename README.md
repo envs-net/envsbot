@@ -53,17 +53,16 @@ sudo useradd -m -s /bin/bash envsbot -d /srv/envsbot
 sudo su - envsbot
 
 cd /srv/envsbot
-git clone https://git.envs.net/envs/envsbot.git
-cd envsbot
+git clone https://git.envs.net/envs/envsbot.git .
 git fetch --tags
 LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -e .
 
 cp config_sample.py config.py
 $EDITOR config.py
@@ -71,7 +70,8 @@ $EDITOR config.py
 cp vcard_sample.py vcard.py
 $EDITOR vcard.py
 
-python envsbot.py
+envsbot --check
+envsbot
 ```
 
 ---
@@ -87,15 +87,16 @@ Example update flow for a systemd installation:
 sudo systemctl stop envsbot.service
 
 sudo su - envsbot
-cd /srv/envsbot/envsbot
+cd /srv/envsbot
 git fetch --tags
 LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
 git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
-source venv/bin/activate
+source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -e .
+envsbot --check
 exit
 
 sudo systemctl start envsbot.service
