@@ -898,9 +898,9 @@ def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
 
     lines = rss._rss_health_lines(feeds, now=now)
     joined = "\n".join(lines)
-    assert "ok: OK" in joined
-    assert "paused: Paused" in joined
-    assert "backoff: Backoff" in joined
+    assert "✅ ok: OK" in joined
+    assert "⏸️ paused: Paused" in joined
+    assert "🟡 backoff: Backoff" in joined
     assert "rooms: 1/2 active · paused: 1" in joined
     assert "last error: " + ("x" * 117) + "..." in joined
 

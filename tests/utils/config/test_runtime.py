@@ -135,3 +135,16 @@ def test_runtime_refresh_updates_default_pagination(monkeypatch):
     assert formatting.DEFAULT_PAGINATION == 20
     assert formatting.parse_page_args([]) == formatting.PageRequest(page=1, all=False, page_size=20)
     assert any("utils.formatting" in line for line in refreshed)
+
+
+def test_runtime_refresh_updates_xmpp_compliance_limit(monkeypatch):
+    from plugins import xmpp
+
+    monkeypatch.setattr(xmpp, "XMPP_COMPLIANCE_MAX_READ_BYTES", 262144)
+
+    refreshed = runtime.refresh_runtime_config_constants({
+        "xmpp_compliance_max_read_bytes": 131072,
+    })
+
+    assert xmpp.XMPP_COMPLIANCE_MAX_READ_BYTES == 131072
+    assert any("plugins.xmpp" in line for line in refreshed)

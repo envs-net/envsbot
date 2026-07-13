@@ -29,6 +29,7 @@ async def test_register_status_and_lists():
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["top"], msg, True)
     assert "IdleRPG Top Players" in bot.replies[-1][0]
+    assert "🟢 online" in bot.replies[-1][0]
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["players"], msg, True)
     assert "Alice" in bot.replies[-1][0]
@@ -1196,6 +1197,7 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
     assert "level_reward_50" in alice["achievements"]
     assert "level_reward_75" in alice["achievements"]
     assert idlerpg._format_top_lines(room, limit=2)[0] == "IdleRPG Top 2 Players:"
+    assert "⚫ offline" in "\n".join(idlerpg._format_top_lines(room, limit=2, room_jid="room@conf"))
     assert "#1" in idlerpg._topic_text(room)
     assert idlerpg._topic_text(room, custom_text="CustomText").startswith("CustomText #1")
 

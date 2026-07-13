@@ -140,15 +140,23 @@ def _display_character(player: dict[str, Any]) -> str:
     return f"{name}, {title}" if title else name
 
 
-def _format_top_lines(room: dict[str, Any], *, limit: int | None = None) -> list[str]:
+def _player_presence_label(room_jid: str | None, jid: str, player: dict[str, Any]) -> str:
+    """Return a compact online/offline marker for top lists."""
+    if room_jid and _is_player_online(room_jid, jid, player):
+        return "🟢 online"
+    return "⚫ offline"
+
+
+def _format_top_lines(room: dict[str, Any], *, limit: int | None = None, room_jid: str | None = None) -> list[str]:
     limit = max(1, int(limit or ANNOUNCE_TOP_LIMIT or 5))
     ranked = _ranked_players(room)[:limit]
     if not ranked:
         return ["No IdleRPG players yet."]
     lines = [f"IdleRPG Top {limit} Players:"]
-    for rank, (_jid, player) in enumerate(ranked, start=1):
+    for rank, (jid, player) in enumerate(ranked, start=1):
+        presence = _player_presence_label(room_jid, jid, player)
         lines.append(
-            f"{_display_character(player)}, the level {player.get('level', 0)} "
+            f"{presence} · {_display_character(player)}, the level {player.get('level', 0)} "
             f"{player.get('class', 'idler')}, is #{rank}! Next level in {_duration_clock(player.get('next', 0))}."
         )
     return lines
@@ -198,7 +206,7 @@ def _maybe_periodic_announcements(bot, room_jid: str, room: dict[str, Any], mess
     if ANNOUNCE_TOP_INTERVAL > 0:
         next_at = int(room.get("next_top_announce_at", 0) or 0)
         if now >= next_at:
-            messages.append("\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT)))
+            messages.append("\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
             room["next_top_announce_at"] = now + ANNOUNCE_TOP_INTERVAL
     if UPDATE_ROOM_TOPIC and TOPIC_UPDATE_INTERVAL > 0:
         next_at = int(room.get("next_topic_update_at", 0) or 0)

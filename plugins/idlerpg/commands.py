@@ -390,10 +390,12 @@ async def _handle_top(bot, args: list[str], msg, is_room: bool) -> None:
         if isinstance(player, dict)
     ]
     players.sort(key=lambda item: (-int(item[1].get("level", 0)), int(item[1].get("next", 0)), item[1].get("name", "")))
-    lines = [
-        f"{idx}. {p['name']}, level {p['level']} {p['class']} — TTL {_duration(p['next'])}"
-        for idx, (_jid, p) in enumerate(players, start=1)
-    ]
+    lines = []
+    for idx, (jid, p) in enumerate(players, start=1):
+        presence = _player_presence_label(room_jid, jid, p)
+        lines.append(
+            f"{idx}. {presence} · {p['name']}, level {p['level']} {p['class']} — TTL {_duration(p['next'])}"
+        )
     page_request = parse_page_args(args[1:])
     out = format_page(
         "🏆 IdleRPG Top Players",
@@ -913,7 +915,7 @@ async def _handle_announce_top(bot, sender_jid: str, msg, is_room: bool) -> None
         return
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
-    _system_reply(bot, room_jid, "\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT)))
+    _system_reply(bot, room_jid, "\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
     room["next_top_announce_at"] = _now() + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0
     await _set_data(bot, data)
     _reply(bot, msg, "✅ IdleRPG top players announced.")

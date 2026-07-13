@@ -13,6 +13,35 @@ from utils.logging_helpers import kv
 
 log = logging.getLogger(__name__)
 
+_DEFAULT_RESTART_NOTIFICATION_FILE = "data/envsbot_restart_notification.json"
+_LEGACY_RESTART_NOTIFICATION_FILE = "/tmp/envsbot_restart_notification.json"
+
+
+def _restart_notification_paths(config_obj: Any) -> list[str]:
+    """Return restart-notification state paths in priority order.
+
+    Older configurations used ``/tmp``.  That breaks with systemd
+    ``PrivateTmp=true`` because the next process may not see the same temp
+    namespace.  Always include the repo-local data path as a persistent fallback
+    so ``bot restart`` can notify after restart even before operators update an
+    existing config.py.
+    """
+    getter = getattr(config_obj, "get", None)
+    if callable(getter):
+        configured = getter("restart_notification_file", _DEFAULT_RESTART_NOTIFICATION_FILE)
+    else:
+        configured = _DEFAULT_RESTART_NOTIFICATION_FILE
+    candidates = [
+        str(configured or _DEFAULT_RESTART_NOTIFICATION_FILE),
+        _DEFAULT_RESTART_NOTIFICATION_FILE,
+        _LEGACY_RESTART_NOTIFICATION_FILE,
+    ]
+    result: list[str] = []
+    for path in candidates:
+        if path and path not in result:
+            result.append(path)
+    return result
+
 
 def _database_shutdown_timeout(config_obj: Any) -> float:
     """Return the database shutdown timeout in seconds.
@@ -51,20 +80,19 @@ class LifecycleMixin:
 
     async def _send_restart_notification(self) -> None:
         """Send restart completion notification if one was queued."""
-        restart_file = str(
-            self.config.get(
-                "restart_notification_file",
-                "/tmp/envsbot_restart_notification.json",
-            )
-            or "/tmp/envsbot_restart_notification.json"
-        )
-        if not os.path.exists(restart_file):
+        restart_files = _restart_notification_paths(getattr(self, "config", {}))
+        restart_file = next((path for path in restart_files if os.path.exists(path)), "")
+        if not restart_file:
             return
 
         try:
             with open(restart_file, "r") as handle:
                 notif = json.load(handle)
-            os.remove(restart_file)
+            for path in restart_files:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    continue
 
             log.info("[ADMIN] event=restart_notification status=processing data=%s", notif)
             if notif.get("is_room") and notif.get("room"):

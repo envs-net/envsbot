@@ -252,12 +252,6 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         "utils.formatting": {
             "DEFAULT_PAGINATION": cfg.get("default_pagination", "all"),
         },
-        "core_plugins._admin": {
-            "RESTART_NOTIFICATION_FILE": _to_str(
-                cfg.get("restart_notification_file")
-                or "/tmp/envsbot_restart_notification.json"
-            ),
-        },
         "core_plugins.users": {
             "MAX_ROOM_NICKS": _cfg_group(cfg, "users").get("max_room_nicks", 5),
         },
@@ -316,6 +310,10 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         "plugins.xmpp": {
             "XMPP_QUERY_TIMEOUT_SECONDS": _to_float(cfg.get("xmpp_query_timeout_seconds") or 8, 8),
             "XMPP_HTTP_TIMEOUT_SECONDS": _to_float(cfg.get("http_timeout_seconds") or 8, 8),
+            "XMPP_COMPLIANCE_MAX_READ_BYTES": max(
+                8192,
+                _to_int(cfg.get("xmpp_compliance_max_read_bytes") or 262144, 262144),
+            ),
         },
         "plugins.birthday_notify": {
             "BDAY_CACHE_TTL_SECONDS": _to_int(cfg.get("birthday_cache_ttl_seconds") or 43200, 43200),

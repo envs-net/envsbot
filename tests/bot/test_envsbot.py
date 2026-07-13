@@ -5,6 +5,7 @@ import types
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import envsbot
+import bot.lifecycle as lifecycle
 
 
 def noop(self):
@@ -306,10 +307,16 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
                                                           tmp_path):
     import json
     notif_path = str(tmp_path / "restart_notification.json")
+    fallback_path = str(tmp_path / "data" / "envsbot_restart_notification.json")
     monkeypatch.setitem(
         envsbot.config,
         "restart_notification_file",
         notif_path,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_restart_notification_paths",
+        lambda config_obj: [notif_path, fallback_path],
     )
     notif = {
         "room": "room@conf",
@@ -319,11 +326,6 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
     }
     with open(notif_path, "w") as f:
         json.dump(notif, f)
-    monkeypatch.setattr(envsbot.os.path, "exists", lambda fn: fn == notif_path)
-    monkeypatch.setattr(envsbot.os, "remove", lambda fn: None)
-    open_real = open
-    monkeypatch.setattr("builtins.open", lambda fn,
-                        mode="r": open_real(notif_path, mode))
     sent = []
 
     async def fake_send(msg):
@@ -331,6 +333,7 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
     bot._safe_send_message = fake_send
     await bot._send_restart_notification()
     assert sent, "Should send a message"
+    assert not (tmp_path / "restart_notification.json").exists()
 
     notif2 = dict(notif)
     notif2["is_room"] = False
@@ -339,6 +342,14 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
     sent.clear()
     await bot._send_restart_notification()
     assert sent, "Should send a private message"
+
+
+def test_restart_notification_paths_include_persistent_fallback(tmp_path):
+    configured = str(tmp_path / "custom.json")
+    paths = lifecycle._restart_notification_paths({"restart_notification_file": configured})
+    assert paths[0] == configured
+    assert "data/envsbot_restart_notification.json" in paths
+    assert "/tmp/envsbot_restart_notification.json" in paths
 
 
 def test_get_latest_git_tag(monkeypatch):

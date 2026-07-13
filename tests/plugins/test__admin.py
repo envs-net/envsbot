@@ -1,6 +1,7 @@
 import pytest
 import types
 import os
+import json
 from datetime import datetime, timedelta
 
 import core_plugins._admin as _admin
@@ -311,6 +312,34 @@ async def test_bot_shutdown_handles_errors(monkeypatch, fake_bot):
                                               warning=lambda *a, **k: None))
     msg = DummyMsg()
     await _admin.bot_shutdown(fake_bot, Sender(), "nick", [], msg, False)
+
+
+@pytest.mark.asyncio
+async def test_bot_restart_saves_notification_to_persistent_paths(monkeypatch, fake_bot, tmp_path):
+    paths = [
+        tmp_path / "configured" / "restart.json",
+        tmp_path / "data" / "envsbot_restart_notification.json",
+    ]
+
+    async def immediate_sleep(*args, **kwargs):
+        return None
+
+    async def immediate_wait_for(awaitable, timeout):
+        return True
+
+    monkeypatch.setattr(_admin, "_restart_notification_paths", lambda config_obj: [str(path) for path in paths])
+    monkeypatch.setattr(_admin.asyncio, "sleep", immediate_sleep)
+    monkeypatch.setattr(_admin.asyncio, "wait_for", immediate_wait_for)
+
+    await _admin.bot_restart(fake_bot, Sender(), "creme", [], DummyMsg(groupchat=True), True)
+
+    assert getattr(fake_bot, "disco", False) is True
+    for path in paths:
+        assert path.exists()
+        data = json.loads(path.read_text())
+        assert data["nick"] == "creme"
+        assert data["room"] == "room@conf"
+        assert data["is_room"] is True
 
 
 @pytest.mark.asyncio

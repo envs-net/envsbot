@@ -39,6 +39,10 @@ CONNECT_DIRECT_TLS = False
 # XMPP query timeout used by diagnostic/info commands.
 XMPP_QUERY_TIMEOUT_SECONDS = 8
 
+# Maximum bytes read from compliance.conversations.im for ,xmpp compliance.
+# The command only needs a small HTML preview containing the score marker.
+XMPP_COMPLIANCE_MAX_READ_BYTES = 262144
+
 
 # ================= BOT RUNTIME =================
 
@@ -55,7 +59,8 @@ TIMEZONE = "Europe/Berlin"
 DB_FILE = "bot.db"
 
 # File used to remember who requested a bot restart across process restarts.
-RESTART_NOTIFICATION_FILE = "/tmp/envsbot_restart_notification.json"
+# Keep this outside /tmp when systemd PrivateTmp=true is enabled.
+RESTART_NOTIFICATION_FILE = "data/envsbot_restart_notification.json"
 
 # Command used by ,bot shutdown. Keep this as a list of arguments.
 STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]

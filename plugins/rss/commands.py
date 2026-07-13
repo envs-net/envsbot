@@ -536,9 +536,16 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
         last_error = str(feed.get("last_error") or "none")
         if len(last_error) > 120:
             last_error = last_error[:117] + "..."
+        status_display = {
+            "ok": "✅ ok",
+            "degraded": "🟡 degraded",
+            "backoff": "🟡 backoff",
+            "paused": "⏸️ paused",
+            "paused for all rooms": "⏸️ paused for all rooms",
+        }.get(status, status)
         rows.append(
             " • "
-            f"{status}: {feed.get('title') or url} — {url}\n"
+            f"{status_display}: {feed.get('title') or url} — {url}\n"
             f"   rooms: {len(active_rooms)}/{total_rooms} active"
             f"{f' · paused: {len(paused_rooms)}' if paused_rooms else ''}; "
             f"errors: {error_count}; last success: {_format_rss_timestamp(feed.get('last_success'))}; "

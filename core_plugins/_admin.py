@@ -25,6 +25,7 @@ from pathlib import Path
 
 import psutil
 
+from bot.lifecycle import _restart_notification_paths
 from core_plugins._core import JOINED_ROOMS
 from utils.command import COMMANDS, Role, command
 from utils.config import config
@@ -42,9 +43,6 @@ PLUGIN_META = {
     "category": "core",
     "requires": ["_core"],
 }
-
-# Use a temp file to store restart notification data
-RESTART_NOTIFICATION_FILE = str(config.get("restart_notification_file", "/tmp/envsbot_restart_notification.json") or "/tmp/envsbot_restart_notification.json")
 
 # Track bot start time
 BOT_START_TIME = None
@@ -511,15 +509,21 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
         "is_room": is_room,
     }
 
-    try:
-        with open(RESTART_NOTIFICATION_FILE, "w") as f:
-            json.dump(notification_data, f)
-        log.info(
-            "[ADMIN] Restart notification saved to %s",
-            RESTART_NOTIFICATION_FILE
-        )
-    except Exception as e:
-        log.error("[ADMIN] Failed to save restart notification: %s", e)
+    saved_paths: list[str] = []
+    for path in _restart_notification_paths(config):
+        try:
+            notification_path = Path(path)
+            if notification_path.parent != Path(""):
+                notification_path.parent.mkdir(parents=True, exist_ok=True)
+            with notification_path.open("w") as f:
+                json.dump(notification_data, f)
+            saved_paths.append(str(notification_path))
+        except Exception as e:
+            log.warning("[ADMIN] Failed to save restart notification to %s: %s", path, e)
+    if saved_paths:
+        log.info("[ADMIN] Restart notification saved to %s", ", ".join(saved_paths))
+    else:
+        log.error("[ADMIN] Failed to save restart notification to any configured path")
 
     # Wait for disconnect with timeout
     try:
