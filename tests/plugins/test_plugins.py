@@ -183,6 +183,30 @@ def test_plugin_command_names_returns_registered_commands_and_handles_errors(mon
 
 
 @pytest.mark.asyncio
+async def test_plugin_health_alias_strips_health_before_paging(bot, msg):
+    bot.bot_plugins.list_detailed = AsyncMock(return_value={
+        "core": {"loaded": [f"core{i:02d}" for i in range(16)], "available": []},
+        "plugins": {"loaded": [], "available": []},
+    })
+    bot.bot_plugins.plugin_doctor = AsyncMock(return_value=["✅ ok"])
+
+    await plugins_module.plugin_list(
+        bot, "adminjid", "AdminNick", ["health", "all"], msg, False
+    )
+    out = bot.reply.call_args[0][1]
+    joined = out if isinstance(out, str) else "\n".join(out)
+
+    assert "📦 Plugin status (page" not in joined
+    assert "[loaded] core00" in joined
+    assert "[loaded] core15" in joined
+
+
+def test_plugin_list_has_health_aliases():
+    assert "plugins health" in plugins_module.plugin_list._command_names
+    assert "plugin health" in plugins_module.plugin_list._command_names
+
+
+@pytest.mark.asyncio
 async def test_plugin_list(bot, msg):
     await plugins_module.plugin_list(bot, "adminjid", "AdminNick", [],
                                      msg, False)

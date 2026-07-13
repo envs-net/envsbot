@@ -102,12 +102,12 @@ def _plugin_command_names(name: str) -> list[str]:
 @command(
     "plugin list",
     role=Role.ADMIN,
-    aliases=["plugins", "plugins list"],
+    aliases=["plugins", "plugins list", "plugins health", "plugin health"],
     short="List loaded and available core/optional plugins.",
     usage="{prefix}plugin list [all|page|last]",
     examples=[
         "{prefix}plugins",
-        "{prefix}plugins all",
+        "{prefix}plugins health all",
         "{prefix}plugins list",
     ],
     category="core",
@@ -116,7 +116,10 @@ def _plugin_command_names(name: str) -> list[str]:
 async def plugin_list(bot, sender, nick, args, msg, is_room):
     """List all plugins grouped by category and health."""
     categories = await bot.bot_plugins.list_detailed()
-    page = parse_page_args(args)
+    paging_args = list(args)
+    if paging_args and str(paging_args[0]).lower() == "health":
+        paging_args = paging_args[1:]
+    page = parse_page_args(paging_args)
 
     labels = {"core": "Core plugins", "plugins": "Optional plugins"}
     order = ["core", "plugins"] + sorted(k for k in categories if k not in {"core", "plugins"})

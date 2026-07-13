@@ -52,12 +52,12 @@ Context: `private chat / MUC PM`<br>
 Category: `core`<br>
 Usage: `,plugin list [all|page|last]`
 
-Aliases: `,plugins`, `,plugins list`
+Aliases: `,plugin health`, `,plugins`, `,plugins health`, `,plugins list`
 
 Examples:
 
 - `,plugins`
-- `,plugins all`
+- `,plugins health all`
 - `,plugins list`
 
 ### `,plugin load`
