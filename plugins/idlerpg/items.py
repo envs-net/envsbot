@@ -31,6 +31,13 @@ def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
     return bonuses
 
 
+def _unique_item_slots(player: dict[str, Any]) -> set[str]:
+    unique_items = player.get("unique_items")
+    if not isinstance(unique_items, dict):
+        return set()
+    return {str(slot) for slot, name in unique_items.items() if str(name or "").strip()}
+
+
 def _unique_bonus_percent(player: dict[str, Any], bonus: str) -> int:
     total = sum(
         int(item.get("bonus_percent", 0) or 0)
@@ -111,7 +118,13 @@ def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
     level = int(player.get("level", 0) or 0)
     if level < UNIQUE_ITEM_MIN_LEVEL or random.random() >= UNIQUE_ITEM_CHANCE:
         return None
-    eligible = [item for item in UNIQUE_ITEMS if level >= int(item.get("min_level", 0) or 0)]
+    occupied_unique_slots = _unique_item_slots(player)
+    eligible = [
+        item
+        for item in UNIQUE_ITEMS
+        if level >= int(item.get("min_level", 0) or 0)
+        and str(item.get("slot") or "") not in occupied_unique_slots
+    ]
     if not eligible:
         return None
     item = random.choice(eligible)
@@ -131,6 +144,13 @@ def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None
     if unique:
         slot = str(unique["slot"])
         level = int(unique["level"])
+        existing_unique = str(unique_items.get(slot) or "")
+        if existing_unique:
+            _check_level_achievements(player, room)
+            return (
+                f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}, "
+                f"near {_player_region(player)}, but keeps {existing_unique}."
+            )
         items[slot] = max(int(items.get(slot, 0) or 0), level)
         unique_items[slot] = str(unique["name"])
         _award(player, "unique_item")
@@ -140,9 +160,15 @@ def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None
         return f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}, near {_player_region(player)}{bonus_part}!"
     item = random.choice(ITEMS)
     gain = _roll_weighted_item_level(int(player.get("level", 0) or 0))
+    existing_unique = str(unique_items.get(item) or "")
+    if existing_unique:
+        _check_level_achievements(player, room)
+        return (
+            f"✨ {_display_player(player)} found {item} level {gain} near {_player_region(player)}, "
+            f"but keeps {existing_unique}."
+        )
     if gain >= int(items.get(item, 0) or 0):
         items[item] = gain
-        unique_items.pop(item, None)
     _check_level_achievements(player, room)
     return f"✨ {_display_player(player)} found {item} level {gain} near {_player_region(player)}."
 
@@ -184,8 +210,12 @@ def _maybe_battle_item_drop(
         return
     winner_items = winner.setdefault("items", {})
     loser_items = loser.setdefault("items", {})
+    winner_unique_slots = _unique_item_slots(winner)
+    loser_unique_slots = _unique_item_slots(loser)
     candidates: list[tuple[str, int, int]] = []
     for item in ITEMS:
+        if item in winner_unique_slots or item in loser_unique_slots:
+            continue
         try:
             winner_level = int(winner_items.get(item, 0) or 0)
             loser_level = int(loser_items.get(item, 0) or 0)
@@ -252,7 +282,10 @@ def _run_item_damage(
     candidates: list[tuple[dict[str, Any], str, int]] = []
     for _jid, player in players:
         items = player.setdefault("items", {})
+        unique_slots = _unique_item_slots(player)
         for item in ITEMS:
+            if item in unique_slots:
+                continue
             try:
                 level = int(items.get(item, 0) or 0)
             except (TypeError, ValueError):
@@ -287,8 +320,12 @@ def _run_item_swap(
     (_winner_jid, winner), (_loser_jid, loser) = pair
     winner_items = winner.setdefault("items", {})
     loser_items = loser.setdefault("items", {})
+    winner_unique_slots = _unique_item_slots(winner)
+    loser_unique_slots = _unique_item_slots(loser)
     candidates: list[tuple[str, int, int]] = []
     for item in ITEMS:
+        if item in winner_unique_slots or item in loser_unique_slots:
+            continue
         try:
             winner_level = int(winner_items.get(item, 0) or 0)
             loser_level = int(loser_items.get(item, 0) or 0)
@@ -296,7 +333,8 @@ def _run_item_swap(
             continue
         # Fairness guard: swap only when the target item is better and the winner gives
         # their old item back. This mirrors classic IdleRPG steal/swap events without
-        # deleting progress from either player.
+        # deleting progress from either player. Unique item slots are protected and
+        # never transferred or replaced by random events.
         if loser_level > winner_level:
             candidates.append((item, loser_level, winner_level))
     if not candidates:
