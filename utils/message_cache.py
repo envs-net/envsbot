@@ -225,7 +225,7 @@ class MessageCache:
         await self._queue.put(_STOP)
         task = self._writer_task
         if task is not None:
-            await task
+            await asyncio.gather(task)
         self._writer_task = None
         self._started = False
         log.info(
@@ -347,8 +347,10 @@ class MessageCache:
                 batch.append(item)
 
             await self._persist_with_retry(batch)
-            for _item in batch:
+            pending_items = len(batch)
+            while pending_items > 0:
                 self._queue.task_done()
+                pending_items -= 1
             if stop_after_batch:
                 return
 

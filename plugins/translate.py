@@ -232,11 +232,13 @@ def _is_own_room_message(bot, msg) -> bool:
         return False
     try:
         room = str(msg["from"].bare)
-        joined_nick = getattr(bot.presence, "joined_rooms", {}).get(room)
+        presence = getattr(bot, "presence", None)
+        joined_rooms = getattr(presence, "joined_rooms", {})
+        joined_nick = joined_rooms.get(room)
         if joined_nick and str(joined_nick) == nick:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("[TRANSLATE] Could not resolve joined room nick: %s", exc)
     return nick == str(getattr(bot, "nick", "") or "")
 
 
