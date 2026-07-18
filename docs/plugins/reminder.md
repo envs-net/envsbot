@@ -11,6 +11,18 @@ Category: `utility`
 
 Schedule and manage reminders
 
+## Reminders from replies
+
+Reply to an existing message and provide only the reminder time. The replied-to message becomes the reminder text:
+
+```text
+,remind 1h
+,remind 2026-07-10 13:23
+,remind 2026-07-10 13:23 Europe/Berlin
+```
+
+The shared persistent message cache is used to resolve the XMPP reply target. A client-provided XEP-0461 plain-text fallback quote is used when the original message is no longer available in the cache.
+
 ## Timezone-aware reminders
 
 Relative reminders do not need a timezone:
@@ -62,14 +74,16 @@ Create a reminder.
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,remind <when> <text>`
+Usage: `,remind <when> [text or reply]`
 
 Aliases: `,rem`, `,reminder`
 
 Examples:
 
 - `,remind 10m check logs`
+- `Reply to a message with ,remind 1h`
 - `,remind 2026-05-01 14:30 Take a break`
+- `Reply to a message with ,remind 2026-05-01 14:30`
 - `,remind 2026-05-01 14:30 CEST Take a break`
 - `,remind 2026-05-01 14:30 Europe/Berlin Take a break`
 - `,remind 2026-05-01 14:30 +02:00 Take a break`

@@ -138,6 +138,18 @@ def _collect():
 
 def _reminder_notes() -> list[str]:
     return [
+        "## Reminders from replies",
+        "",
+        "Reply to an existing message and provide only the reminder time. The replied-to message becomes the reminder text:",
+        "",
+        "```text",
+        f"{PREFIX}remind 1h",
+        f"{PREFIX}remind 2026-07-10 13:23",
+        f"{PREFIX}remind 2026-07-10 13:23 Europe/Berlin",
+        "```",
+        "",
+        "The shared persistent message cache is used to resolve the XMPP reply target. A client-provided XEP-0461 plain-text fallback quote is used when the original message is no longer available in the cache.",
+        "",
         "## Timezone-aware reminders",
         "",
         "Relative reminders do not need a timezone:",

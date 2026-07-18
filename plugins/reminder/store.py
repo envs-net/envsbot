@@ -3,9 +3,19 @@
 import asyncio
 import datetime
 import logging
+from functools import partial
+
 from utils.command import command, Role
 from utils.config import config
-from core_plugins._core import handle_room_toggle_command
+from utils import message_cache
+from core_plugins._core import (
+    JOINED_ROOMS,
+    extract_reply_quote,
+    get_reply_target,
+    get_stanza_id,
+    handle_room_toggle_command,
+    remember_stanza,
+)
 from .parsing import explain_invalid_reminder_time, get_reminder_tzinfo
 
 
@@ -14,7 +24,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "reminder",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "Schedule and manage reminders",
     "category": "utility",
     "requires": ["_core", "rooms"],
@@ -31,6 +41,118 @@ REMINDER_KEY = "REMINDER"
 
 
 REMINDER_DB_READY = False
+
+
+REMINDER_REPLY_FALLBACK_NAMESPACE = "reminder-reply-fallback"
+
+
+def _body_without_reply_quote(body: str) -> str:
+    """Remove a leading XEP-0461 plain-text fallback quote."""
+    lines = str(body or "").splitlines()
+    index = 0
+
+    while index < len(lines) and lines[index].startswith(">"):
+        index += 1
+
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+
+    return "\n".join(lines[index:]).strip()
+
+
+def _is_remind_command_body(body: str) -> bool:
+    """Return whether a body contains a reminder command or alias."""
+    prefix = str(config.get("prefix", ",") or ",")
+    stripped = str(body or "").strip().lower()
+    commands = ("remind", "rem", "reminder")
+    return any(
+        stripped == f"{prefix}{name}"
+        or stripped.startswith(f"{prefix}{name} ")
+        for name in commands
+    )
+
+
+def _is_own_room_message(bot, msg) -> bool:
+    """Return True when a room stanza was sent by the bot itself."""
+    try:
+        room = str(msg["from"].bare)
+        sender_nick = str(msg.get("mucnick") or msg["from"].resource or "")
+        joined_rooms = getattr(
+            getattr(bot, "presence", None),
+            "joined_rooms",
+            {},
+        )
+        bot_nick = str(
+            joined_rooms.get(room) or getattr(bot, "nick", "") or ""
+        )
+        return bool(sender_nick and bot_nick and sender_nick == bot_nick)
+    except Exception:
+        return False
+
+
+def _reply_message_text(bot, msg, is_room: bool) -> str | None:
+    """Resolve the replied-to message from the shared cache or fallback quote."""
+    reply_id = get_reply_target(msg)
+    if reply_id:
+        conversation = message_cache.conversation_key(
+            msg,
+            is_room=is_room,
+            joined_rooms=JOINED_ROOMS,
+        )
+        cache = getattr(bot, "message_cache", None)
+        get_by_id = getattr(cache, "get_by_id", None)
+        if conversation and callable(get_by_id):
+            cached = get_by_id(conversation, reply_id)
+            if cached:
+                text = str(cached.get("body") or "").strip()
+                if text:
+                    return text
+
+    return extract_reply_quote(str(msg.get("body", "") or ""))
+
+
+async def _redispatch_reply_fallback(bot, msg, *, is_room: bool) -> None:
+    """Redispatch a quoted XEP-0461 reminder command through normal routing."""
+    try:
+        msg_type = str(msg.get("type") or "")
+        if is_room:
+            if msg_type != "groupchat" or _is_own_room_message(bot, msg):
+                return
+        elif msg_type not in {"chat", "normal"}:
+            return
+
+        body = str(msg.get("body", "") or "").strip()
+        if not body or not extract_reply_quote(body):
+            return
+
+        command_body = _body_without_reply_quote(body)
+        if not _is_remind_command_body(command_body):
+            return
+
+        stanza_id = get_stanza_id(msg)
+        if not remember_stanza(REMINDER_REPLY_FALLBACK_NAMESPACE, stanza_id):
+            return
+
+        nick = None
+        if is_room:
+            nick = msg.get("mucnick") or getattr(msg["from"], "resource", None)
+        await bot.handle_command(
+            command_body,
+            msg["from"],
+            nick,
+            msg,
+            is_room,
+        )
+    except Exception:
+        log.exception("[REMINDER] Error handling reply fallback command")
+
+
+async def _on_groupchat_message(bot, msg) -> None:
+    await _redispatch_reply_fallback(bot, msg, is_room=True)
+
+
+async def _on_private_message(bot, msg) -> None:
+    await _redispatch_reply_fallback(bot, msg, is_room=False)
 
 
 async def get_reminder_store(bot):
@@ -439,10 +561,12 @@ async def _restore_pending_reminders(bot) -> int:
     role=Role.USER,
     aliases=["rem", "reminder"],
     short="Create a reminder.",
-    usage="{prefix}remind <when> <text>",
+    usage="{prefix}remind <when> [text or reply]",
     examples=[
         "{prefix}remind 10m check logs",
+        "Reply to a message with {prefix}remind 1h",
         "{prefix}remind 2026-05-01 14:30 Take a break",
+        "Reply to a message with {prefix}remind 2026-05-01 14:30",
         "{prefix}remind 2026-05-01 14:30 CEST Take a break",
         "{prefix}remind 2026-05-01 14:30 Europe/Berlin Take a break",
         "{prefix}remind 2026-05-01 14:30 +02:00 Take a break",
@@ -475,30 +599,62 @@ async def remind_command(bot, sender_jid, nick, args, msg, is_room):
         )
         return
 
-    if len(args) < 2:
-        bot.reply(
-            msg,
-            f"ℹ️ Usage: {prefix}remind <duration|date time> <message>\n"
-            f"Example: {prefix}remind 30m Take a break\n"
-            f"Example: {prefix}remind 2026-05-01 14:30 Take a break\n"
-            f"Example: {prefix}remind 2026-05-01 14:30 CEST Take a break\n"
-            f"Example: {prefix}remind 01.05.2026 14:30 Take a break\n"
-            "Formats: 10s, 5m, 1h, 2d, 1h30m, "
-            "YYYY-MM-DD HH:MM, DD.MM.YYYY HH:MM, optional TZ "
-            f"(max {config.get('reminder_max_age_days', 365)} days)",
-        )
-        return
-
     try:
         ctx = _reminder_context(bot, sender_jid, nick, msg, is_room)
         user_tz = await get_reminder_tzinfo(bot, ctx.get("timezone_jid"))
 
-        seconds, message, display_when = parse_reminder_when(args, user_tz)
+        parse_args = list(args or [])
+        reply_target_id = get_reply_target(msg)
+        reply_text = None
+        seconds, message, display_when = parse_reminder_when(
+            parse_args,
+            user_tz,
+        )
+
+        if seconds is None or not message:
+            reply_text = _reply_message_text(bot, msg, is_room)
+            if reply_text:
+                parse_args = [*parse_args, reply_text]
+                seconds, message, display_when = parse_reminder_when(
+                    parse_args,
+                    user_tz,
+                )
 
         if seconds is None or seconds < 1 or not message:
-            detail = explain_invalid_reminder_time(args, user_tz)
-            if detail:
+            detail = explain_invalid_reminder_time(parse_args, user_tz)
+            probe_seconds, probe_message, _probe_when = parse_reminder_when(
+                [*list(args or []), "__reply_message__"],
+                user_tz,
+            )
+            valid_reply_time = bool(probe_seconds and probe_message)
+
+            if reply_target_id and not reply_text and valid_reply_time:
+                bot.reply(
+                    msg,
+                    "❌ Could not resolve the replied-to message. It may no "
+                    "longer be available in the shared message cache. Add "
+                    "the reminder text explicitly.",
+                )
+            elif detail:
                 bot.reply(msg, detail)
+            elif len(args or []) < 2:
+                bot.reply(
+                    msg,
+                    f"ℹ️ Usage: {prefix}remind <duration|date time> <message>\n"
+                    "Or reply to a message with: "
+                    f"{prefix}remind <duration|date time>\n"
+                    f"Example: {prefix}remind 30m Take a break\n"
+                    f"Reply example: {prefix}remind 1h\n"
+                    "Example: "
+                    f"{prefix}remind 2026-05-01 14:30 Take a break\n"
+                    "Example: "
+                    f"{prefix}remind 2026-05-01 14:30 CEST Take a break\n"
+                    "Example: "
+                    f"{prefix}remind 01.05.2026 14:30 Take a break\n"
+                    "Formats: 10s, 5m, 1h, 2d, 1h30m, "
+                    "YYYY-MM-DD HH:MM, DD.MM.YYYY HH:MM, optional TZ "
+                    f"(max {config.get('reminder_max_age_days', 365)} days)",
+                )
             else:
                 bot.reply(
                     msg,
@@ -682,6 +838,20 @@ async def on_ready(bot):
 
     except Exception as exc:
         log.exception("[REMINDER] Error during reminder restoration: %s", exc)
+
+
+async def on_load(bot):
+    """Register XEP-0461 fallback handlers for room and private replies."""
+    bot.bot_plugins.register_event(
+        "reminder",
+        "groupchat_message",
+        partial(_on_groupchat_message, bot),
+    )
+    bot.bot_plugins.register_event(
+        "reminder",
+        "message",
+        partial(_on_private_message, bot),
+    )
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:

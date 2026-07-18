@@ -1,3 +1,8 @@
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+from utils import message_cache
+
 from .helpers import (
     AsyncMock,
     datetime,
@@ -23,7 +28,9 @@ async def test_remind_command_and_status_controls(dummy_bot, dummy_msg):
     await reminder.remind_command(dummy_bot, "a@b", "TestNick", [],
                                   dummy_msg, False)
     text = "ℹ️ Usage: ,remind <duration|date time> <message>\n"
+    text += "Or reply to a message with: ,remind <duration|date time>\n"
     text += "Example: ,remind 30m Take a break\n"
+    text += "Reply example: ,remind 1h\n"
     text += "Example: ,remind 2026-05-01 14:30 Take a break\n"
     text += "Example: ,remind 2026-05-01 14:30 CEST Take a break\n"
     text += "Example: ,remind 01.05.2026 14:30 Take a break\n"
@@ -168,6 +175,184 @@ async def test_remind_control_commands_delegate_to_base_command(dummy_bot, dummy
     )
 
     assert [call[2] for call in calls] == [["status"], ["on"], ["off"]]
+
+
+class _ReplyFrom:
+    def __init__(self, bare: str, resource: str | None = None):
+        self.bare = bare
+        self.resource = resource
+
+    def __str__(self):
+        if self.resource:
+            return f"{self.bare}/{self.resource}"
+        return self.bare
+
+
+@pytest.mark.asyncio
+async def test_remind_command_uses_replied_message_from_shared_cache(
+    dummy_bot,
+    monkeypatch,
+):
+    room = "room@conference.example.org"
+    msg = {
+        "body": ",remind 1h",
+        "type": "groupchat",
+        "from": _ReplyFrom(room, "alice"),
+        "mucnick": "alice",
+        "id": "reminder-command",
+        "reply": {"id": "source-message"},
+    }
+    dummy_bot.message_cache = message_cache.MessageCache(max_messages=20)
+    await dummy_bot.message_cache.add_entry({
+        "conversation": room,
+        "stanza_id": "source-message",
+        "nick": "bob",
+        "body": "xxx",
+    })
+    monkeypatch.setattr(
+        reminder,
+        "_is_reminder_enabled_for_context",
+        AsyncMock(return_value=True),
+    )
+    create = AsyncMock(return_value=42)
+    schedule = Mock()
+    monkeypatch.setattr(reminder, "_create_reminder", create)
+    monkeypatch.setattr(reminder, "_schedule_task", schedule)
+
+    await reminder.remind_command(
+        dummy_bot,
+        "alice@example.org",
+        "alice",
+        ["1h"],
+        msg,
+        True,
+    )
+
+    assert create.await_args.kwargs["message"] == "xxx"
+    assert schedule.call_args.args[4] == "xxx"
+    assert schedule.call_args.args[5] == 3600
+    dummy_bot.reply.assert_called_once_with(
+        msg,
+        "✅ Reminder set! I'll remind you in 1h",
+    )
+
+
+@pytest.mark.asyncio
+async def test_remind_command_uses_reply_quote_when_cache_entry_is_missing(
+    dummy_bot,
+    monkeypatch,
+):
+    room = "room@conference.example.org"
+    msg = {
+        "body": "> quoted reminder text\n,remind 1h",
+        "type": "groupchat",
+        "from": _ReplyFrom(room, "alice"),
+        "mucnick": "alice",
+        "id": "reminder-command",
+        "reply": {"id": "missing-source"},
+    }
+    dummy_bot.message_cache = message_cache.MessageCache(max_messages=20)
+    monkeypatch.setattr(
+        reminder,
+        "_is_reminder_enabled_for_context",
+        AsyncMock(return_value=True),
+    )
+    create = AsyncMock(return_value=43)
+    monkeypatch.setattr(reminder, "_create_reminder", create)
+    monkeypatch.setattr(reminder, "_schedule_task", Mock())
+
+    await reminder.remind_command(
+        dummy_bot,
+        "alice@example.org",
+        "alice",
+        ["1h"],
+        msg,
+        True,
+    )
+
+    assert create.await_args.kwargs["message"] == "quoted reminder text"
+
+
+@pytest.mark.asyncio
+async def test_remind_command_reports_evicted_reply_target(
+    dummy_bot,
+    monkeypatch,
+):
+    room = "room@conference.example.org"
+    msg = {
+        "body": ",remind 1h",
+        "type": "groupchat",
+        "from": _ReplyFrom(room, "alice"),
+        "mucnick": "alice",
+        "id": "reminder-command",
+        "reply": {"id": "evicted-source"},
+    }
+    dummy_bot.message_cache = message_cache.MessageCache(max_messages=20)
+    monkeypatch.setattr(
+        reminder,
+        "_is_reminder_enabled_for_context",
+        AsyncMock(return_value=True),
+    )
+
+    await reminder.remind_command(
+        dummy_bot,
+        "alice@example.org",
+        "alice",
+        ["1h"],
+        msg,
+        True,
+    )
+
+    output = dummy_bot.reply.call_args.args[1]
+    assert "Could not resolve the replied-to message" in output
+    assert "shared message cache" in output
+
+
+@pytest.mark.asyncio
+async def test_reminder_reply_fallback_handler_redispatches_normal_command():
+    room = "room@conference.example.org"
+    msg = {
+        "body": "> xxx\n,remind 1h",
+        "type": "groupchat",
+        "from": _ReplyFrom(room, "alice"),
+        "mucnick": "alice",
+        "id": "quoted-reminder-command",
+    }
+    bot = SimpleNamespace(
+        nick="EnvBot",
+        presence=SimpleNamespace(joined_rooms={room: "EnvBot"}),
+        handle_command=AsyncMock(),
+    )
+
+    await reminder._on_groupchat_message(bot, msg)
+
+    bot.handle_command.assert_awaited_once_with(
+        ",remind 1h",
+        msg["from"],
+        "alice",
+        msg,
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reminder_on_load_registers_reply_fallback_handlers():
+    register_event = Mock()
+    bot = SimpleNamespace(
+        bot_plugins=SimpleNamespace(register_event=register_event),
+    )
+
+    await reminder.on_load(bot)
+
+    assert register_event.call_count == 2
+    assert register_event.call_args_list[0].args[:2] == (
+        "reminder",
+        "groupchat_message",
+    )
+    assert register_event.call_args_list[1].args[:2] == (
+        "reminder",
+        "message",
+    )
 
 
 
