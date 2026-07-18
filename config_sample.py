@@ -193,6 +193,7 @@ ROOM_PLUGIN_DEFAULTS = {
     "sed": True,
     "tell": True,
     "tools": True,
+    "translate": True,
     "urlcheck": True,
     "vcard": True,
     "weather": True,
@@ -307,6 +308,19 @@ POLL_DEFAULT_MULTI_MAX_CHOICES = 3
 
 PIN_PAGE_SIZE = 10
 PIN_RECENT_CACHE_SIZE = 80
+
+
+# ================= TRANSLATE =================
+
+# Translate uses the same public Google Translate endpoint as maubot/translate.
+# No API key is required, but the endpoint is unofficial and may change.
+TRANSLATE_TIMEOUT_SECONDS = HTTP_TIMEOUT_SECONDS
+TRANSLATE_MAX_INPUT_LENGTH = 2000
+TRANSLATE_MAX_OUTPUT_LENGTH = 6000
+TRANSLATE_MAX_RESPONSE_BYTES = 262144
+
+# Number of recent room messages retained in memory for XEP-0461 reply lookup.
+TRANSLATE_RECENT_CACHE_SIZE = 100
 
 
 # ================= KARMA / TELL =================

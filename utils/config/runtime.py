@@ -295,6 +295,30 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             "PAGE_SIZE": _to_int(cfg.get("pin_page_size") or 10, 10),
             "PIN_RECENT_CACHE_SIZE": _to_int(cfg.get("pin_recent_cache_size") or 80, 80),
         },
+        "plugins.translate": {
+            "TRANSLATE_TIMEOUT_SECONDS": max(
+                1.0,
+                _to_float(
+                    cfg.get("translate_timeout_seconds")
+                    or cfg.get("http_timeout_seconds")
+                    or 8,
+                    8,
+                ),
+            ),
+            "TRANSLATE_MAX_INPUT_LENGTH": max(
+                1, _to_int(cfg.get("translate_max_input_length") or 2000, 2000)
+            ),
+            "TRANSLATE_MAX_OUTPUT_LENGTH": max(
+                1, _to_int(cfg.get("translate_max_output_length") or 6000, 6000)
+            ),
+            "TRANSLATE_MAX_RESPONSE_BYTES": max(
+                4096,
+                _to_int(cfg.get("translate_max_response_bytes") or 262144, 262144),
+            ),
+            "TRANSLATE_RECENT_CACHE_SIZE": max(
+                10, _to_int(cfg.get("translate_recent_cache_size") or 100, 100)
+            ),
+        },
         "plugins.karma": {
             "KARMA_DELAY_SECONDS": _to_int(cfg.get("karma_delay_seconds") or 60, 60),
         },

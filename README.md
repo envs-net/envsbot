@@ -24,7 +24,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
 * RSS/Atom feed watcher for room announcements
 * URL metadata checks for links, files and YouTube videos
-* Weather, vCard lookup, XMPP diagnostics, reminders, polls, pins, tell messages and utility commands
+* Weather, translation, vCard lookup, XMPP diagnostics, reminders, polls, pins, tell messages and utility commands
 * Community/fun plugins such as IdleRPG, ducks, dice, karma, sed corrections and XKCD
 * Pytest-based test suite and Drone CI support
 
@@ -297,6 +297,7 @@ Optional plugins:
 * `sed` - sed-style message corrections
 * `tell` - offline messages delivered when users rejoin
 * `tools` - ping, echo, time/date, seen and timestamp helpers
+* `translate` - translate text or replied-to room messages with auto-detection
 * `urlcheck` - URL title, metadata, file and YouTube lookup
 * `vcard` - public vCard lookup helpers
 * `weather` - weather lookup from configured location data or city/ZIP input

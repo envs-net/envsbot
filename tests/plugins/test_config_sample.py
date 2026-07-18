@@ -25,6 +25,11 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.PIN_PAGE_SIZE > 0
     assert sample.IDLERPG["tick_seconds"] > 0
     assert sample.IDLERPG["rp_base"] > 0
+    assert sample.TRANSLATE_TIMEOUT_SECONDS > 0
+    assert sample.TRANSLATE_MAX_INPUT_LENGTH > 0
+    assert sample.TRANSLATE_MAX_OUTPUT_LENGTH > 0
+    assert sample.TRANSLATE_MAX_RESPONSE_BYTES > 0
+    assert sample.TRANSLATE_RECENT_CACHE_SIZE > 0
     assert sample.XKCD_CHECK_INTERVAL > 0
     assert sample.ROOM_PLUGIN_DEFAULTS == {
         "birthday_notify": False,
@@ -41,6 +46,7 @@ def test_config_sample_imports_and_exposes_safe_defaults():
         "sed": True,
         "tell": True,
         "tools": True,
+        "translate": True,
         "urlcheck": True,
         "vcard": True,
         "weather": True,
