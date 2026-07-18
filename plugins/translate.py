@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": (
         "Translate text or replied-to room messages with optional "
         "source-language auto-detection."
@@ -447,7 +447,8 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🔴 Translation failed due to an internal error.", mention=False)
         return
 
-    bot.reply(msg, result.text, mention=False)
+    response = f"> {text}\n\n{result.text}" if is_room else result.text
+    bot.reply(msg, response, mention=False)
 
 
 async def _on_groupchat_message(bot, msg) -> None:

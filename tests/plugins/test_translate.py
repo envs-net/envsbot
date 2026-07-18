@@ -178,6 +178,35 @@ async def test_translate_command_translates_direct_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_translate_command_quotes_original_text_in_room(monkeypatch):
+    bot = _bot_with_cache()
+    msg = make_message(",tr de hello world")
+    monkeypatch.setattr(
+        _core, "handle_room_toggle_command", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    worker = AsyncMock(return_value=translate.TranslationResult("Hallo Welt", "en"))
+    monkeypatch.setattr(translate, "translate_text", worker)
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        "alice",
+        ["de", "hello", "world"],
+        msg,
+        True,
+    )
+
+    bot.reply.assert_called_once_with(
+        msg,
+        "> hello world\n\nHallo Welt",
+        mention=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_translate_command_uses_cached_reply_target(monkeypatch):
     room = "room@conference.example.org"
     bot = _bot_with_cache(room=room)
@@ -208,7 +237,11 @@ async def test_translate_command_uses_cached_reply_target(monkeypatch):
         target_language="uk",
         source_language="auto",
     )
-    bot.reply.assert_called_once_with(msg, "Привіт із кешу", mention=False)
+    bot.reply.assert_called_once_with(
+        msg,
+        "> Hello from the cache\n\nПривіт із кешу",
+        mention=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -234,6 +267,11 @@ async def test_translate_command_uses_xep0461_quote_fallback(monkeypatch):
         "Hello from fallback",
         target_language="de",
         source_language="auto",
+    )
+    bot.reply.assert_called_once_with(
+        msg,
+        "> Hello from fallback\n\nHallo aus dem Fallback",
+        mention=False,
     )
 
 
