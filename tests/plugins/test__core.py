@@ -94,8 +94,17 @@ def test_paginate_items_and_clamp():
     assert page == [5, 6, 7, 8, 9]
     assert 1 <= pageno <= total_pages
     assert total_pages == 3
+    assert total == 15
     page, pageno, *_ = _core.paginate_items(items, 0, 5)
     assert pageno == 1
+
+
+def test_paginate_items_clamps_out_of_range_pages():
+    items = [1, 2, 3, 4, 5]
+    assert _core.paginate_items(items, 1, 2) == ([1, 2], 1, 3, 5)
+    assert _core.paginate_items(items, 99, 2) == ([5], 3, 3, 5)
+    assert _core.paginate_items(items, -1, 2) == ([1, 2], 1, 3, 5)
+    assert _core.paginate_items([], 5, 10) == ([], 1, 1, 0)
 
 
 def test_reply_target_and_extract_quote():

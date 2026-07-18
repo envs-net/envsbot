@@ -22,11 +22,10 @@ from utils import message_cache as _message_cache
 from core_plugins.rooms import JOINED_ROOMS
 
 # Compatibility exports for existing plugins. New code should import these
-# helpers directly from utils.message_cache.
+# XMPP reply helpers directly from utils.message_cache.
 extract_reply_quote = _message_cache.extract_reply_quote
 get_reply_target = _message_cache.get_reply_target
 get_stanza_id = _message_cache.get_stanza_id
-paginate_items = _message_cache.paginate_items
 remember_stanza = _message_cache.remember_stanza
 
 PLUGIN_META = {
@@ -392,10 +391,20 @@ async def _check_user_exists(bot, sender_jid, msg):
 
 
 # ------------------------------------------------------------------------
-# Shared paging and XMPP reply helpers are imported from utils.message_cache.
-# The actual recent-message data is owned by bot.message_cache so every plugin
-# reads one central, persistent cache instead of maintaining a private copy.
+# Shared paging helper
 # ------------------------------------------------------------------------
+def paginate_items(
+    items: list[Any],
+    page: int,
+    page_size: int,
+) -> tuple[list[Any], int, int, int]:
+    """Paginate a list and clamp the page number to the valid range."""
+    total = len(items)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * page_size
+    end = start + page_size
+    return items[start:end], page, total_pages, total
 
 
 # ------------------------------------------------------------------------

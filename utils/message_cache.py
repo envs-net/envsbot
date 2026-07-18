@@ -24,16 +24,6 @@ _PROCESSED_STANZA_ORDER: dict[str, deque[str]] = defaultdict(
 )
 
 
-def paginate_items(items: list[Any], page: int, page_size: int):
-    """Paginate a list and clamp page into a valid range."""
-    total = len(items)
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    page = max(1, min(page, total_pages))
-    start = (page - 1) * page_size
-    end = start + page_size
-    return items[start:end], page, total_pages, total
-
-
 def get_stanza_id(msg) -> str | None:
     """Extract a stable message ID from an XMPP stanza."""
     try:

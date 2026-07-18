@@ -59,14 +59,6 @@ def clear_message_cache_state():
     message_cache._PROCESSED_STANZA_ORDER.clear()
 
 
-def test_paginate_items_clamps_pages():
-    items = [1, 2, 3, 4, 5]
-    assert message_cache.paginate_items(items, 1, 2) == ([1, 2], 1, 3, 5)
-    assert message_cache.paginate_items(items, 99, 2) == ([5], 3, 3, 5)
-    assert message_cache.paginate_items(items, -1, 2) == ([1, 2], 1, 3, 5)
-    assert message_cache.paginate_items([], 5, 10) == ([], 1, 1, 0)
-
-
 def test_get_stanza_id_prefers_stanza_id_then_message_id():
     assert message_cache.get_stanza_id(
         {"stanza_id": {"id": "stable"}, "id": "msg"}
