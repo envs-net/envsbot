@@ -263,6 +263,34 @@ result = await fetch_json(
 )
 ```
 
+
+## Shared message history
+
+Do not create a plugin-local deque or message event handler only to remember
+recent messages. The core routes each accepted message through
+`bot.message_cache` once and restores the retained entries from SQLite during
+startup.
+
+Resolve the conversation key and query the common cache:
+
+```python
+from utils.message_cache import conversation_key, get_reply_target
+
+conversation = conversation_key(
+    msg,
+    is_room=is_room,
+    joined_rooms=bot.presence.joined_rooms,
+)
+reply_id = get_reply_target(msg)
+entry = bot.message_cache.get_by_id(conversation, reply_id) if reply_id else None
+recent = bot.message_cache.get_messages(conversation, limit=10)
+```
+
+Plugins may apply their own read filters, such as ignoring command messages,
+but must not maintain a second physical history or change the shared retention
+limit. `MESSAGE_CACHE_SIZE` is startup-only and applies per conversation to all
+plugins.
+
 ## Command/docs CI checks
 
 After changing commands or command metadata, run:
@@ -282,7 +310,7 @@ New code should prefer the small shared utility modules over importing broad
 compatibility helpers from `core_plugins._core`:
 
 - `utils.xmpp_identity` for JID, MUC PM and room-permission helpers
-- `utils.message_cache` for stanza/message cache helpers
+- `utils.message_cache` for the shared persistent cache and XMPP reply helpers
 - `utils.room_toggles` for room-scoped `on|off|status` command handling
 - `utils.command_context.CommandContext` for resolved command invocation state
 

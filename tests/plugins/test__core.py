@@ -5,6 +5,7 @@ from collections import deque
 from types import SimpleNamespace
 from uuid import uuid4
 from core_plugins import _core
+from utils import message_cache
 
 
 @pytest.fixture
@@ -97,17 +98,6 @@ def test_paginate_items_and_clamp():
     assert pageno == 1
 
 
-def test_cache_and_fetch_message():
-    ns, room = "coretest", "room@c"
-    _core.cache_message(ns, room, "nick", "body", "id")
-    msgs = _core.get_cached_messages(ns, room)
-    assert any(m["body"] == "body" for m in msgs)
-    assert _core.get_last_cached_message(ns, room)["body"] == "body"
-    assert _core.get_cached_message_by_id(ns, room, "id")["body"] == "body"
-    _core.cache_message(ns, room, "nick", "next", "id2", maxlen=1)
-    assert len(_core.get_cached_messages(ns, room)) == 1
-
-
 def test_reply_target_and_extract_quote():
     msg1 = {"reply": {"id": "abc123"}}
     msg2 = {}
@@ -123,8 +113,8 @@ Not quoted"""
 def test_remember_stanza_and_eviction():
     ns = f"test-remember-{uuid4()}"
 
-    _core._SHARED_PROCESSED_STANZAS.pop(ns, None)
-    _core._SHARED_PROCESSED_STANZA_ORDER[ns] = deque(maxlen=2)
+    message_cache._PROCESSED_STANZAS.pop(ns, None)
+    message_cache._PROCESSED_STANZA_ORDER[ns] = deque(maxlen=2)
 
     try:
         assert _core.remember_stanza(ns, "msgid")
@@ -136,8 +126,8 @@ def test_remember_stanza_and_eviction():
         # msgid was evicted when msgid-3 was remembered.
         assert _core.remember_stanza(ns, "msgid")
     finally:
-        _core._SHARED_PROCESSED_STANZAS.pop(ns, None)
-        _core._SHARED_PROCESSED_STANZA_ORDER.pop(ns, None)
+        message_cache._PROCESSED_STANZAS.pop(ns, None)
+        message_cache._PROCESSED_STANZA_ORDER.pop(ns, None)
 
 
 def test_format_status_helpers():

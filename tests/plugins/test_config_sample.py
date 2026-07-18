@@ -29,7 +29,7 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.TRANSLATE_MAX_INPUT_LENGTH > 0
     assert sample.TRANSLATE_MAX_OUTPUT_LENGTH > 0
     assert sample.TRANSLATE_MAX_RESPONSE_BYTES > 0
-    assert sample.TRANSLATE_RECENT_CACHE_SIZE > 0
+    assert sample.MESSAGE_CACHE_SIZE > 0
     assert sample.XKCD_CHECK_INTERVAL > 0
     assert sample.ROOM_PLUGIN_DEFAULTS == {
         "birthday_notify": False,

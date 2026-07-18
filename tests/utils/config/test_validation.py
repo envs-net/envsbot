@@ -445,9 +445,8 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
         "urlcheck_max_redirects": 0,
         "rss_max_entries_per_poll": 0,
         "rss_similarity_threshold": 1.5,
-        "sed_cache_size": 0,
+        "message_cache_size": 0,
         "poll_max_options": 0,
-        "pin_recent_cache_size": 0,
         "karma_delay_seconds": 0,
         "tell_delivery_delay_seconds": 0,
         "xkcd_index_request_delay_seconds": 0,
@@ -463,9 +462,8 @@ def test_validate_config_rejects_invalid_plugin_tuning_values():
     assert "urlcheck_max_redirects: must be greater than 0" in msg
     assert "rss_max_entries_per_poll: must be greater than 0" in msg
     assert "rss_similarity_threshold: must be greater than 0 and at most 1" in msg
-    assert "sed_cache_size: must be greater than 0" in msg
+    assert "message_cache_size: must be greater than 0" in msg
     assert "poll_max_options: must be greater than 0" in msg
-    assert "pin_recent_cache_size: must be greater than 0" in msg
     assert "karma_delay_seconds: must be greater than 0" in msg
     assert "tell_delivery_delay_seconds: must be greater than 0" in msg
     assert "xkcd_index_request_delay_seconds: must be greater than 0" in msg

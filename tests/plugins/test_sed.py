@@ -1,7 +1,9 @@
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import plugins.sed as sed
+from utils.message_cache import MessageCache
 
 
 @pytest.mark.parametrize("text,expect", [
@@ -154,21 +156,29 @@ def test_multiprocessing_context_prefers_forkserver(monkeypatch):
     assert calls == ["forkserver"]
 
 
-def test_get_last_message_and_get_message_by_id_cache(monkeypatch):
-    # monkeypatch get_last_cached_message/get_cached_message_by_id
+def test_get_last_message_and_get_message_by_id_cache():
+    cache = MessageCache(max_messages=5)
+    bot = SimpleNamespace(message_cache=cache)
     room = "room1"
-    with patch.object(sed._core, "get_last_cached_message",
-                      return_value={"body": "hello"}):
-        assert sed.get_last_message(room) == "hello"
-    with patch.object(sed._core, "get_last_cached_message",
-                      return_value=None):
-        assert sed.get_last_message(room) is None
-    with patch.object(sed._core, "get_cached_message_by_id",
-                      return_value={"body": "foo"}):
-        assert sed.get_message_by_id(room, "id123") == "foo"
-    with patch.object(sed._core, "get_cached_message_by_id",
-                      return_value=None):
-        assert sed.get_message_by_id(room, "id123") is None
+
+    import asyncio
+    asyncio.run(cache.add_entry({
+        "conversation": room,
+        "body": "hello",
+        "stanza_id": "id123",
+        "nick": "alice",
+    }))
+    asyncio.run(cache.add_entry({
+        "conversation": room,
+        "body": "s/hello/hi/",
+        "stanza_id": "sed-command",
+        "nick": "bob",
+    }))
+
+    assert sed.get_last_message(bot, room) == "hello"
+    assert sed.get_message_by_id(bot, room, "id123") == "hello"
+    assert sed.get_message_by_id(bot, room, "missing") is None
+    assert sed.get_last_message(bot, "missing") is None
 
 
 @pytest.mark.asyncio
@@ -183,9 +193,11 @@ async def test_process_sed_correction_reply_and_edge(monkeypatch):
         sed, "get_message_by_id", return_value="Hello foo foo")
     patch_last_message = patch.object(
         sed, "get_last_message", return_value="Hello foo foo")
+    patch_room_key = patch.object(
+        sed, "_room_key_from_msg", return_value="room@conf")
 
     # normal flow with quote
-    with patch_core, patch_msg_by_id, patch_last_message:
+    with patch_core, patch_msg_by_id, patch_last_message, patch_room_key:
         await sed.process_sed_correction(bot, nick, msg, is_room,
                                          "foo", "bar", "g")
         assert bot.reply.called
@@ -195,6 +207,7 @@ async def test_process_sed_correction_reply_and_edge(monkeypatch):
 
     # pattern not found: should display the correct error message
     with patch.object(sed._core, "extract_reply_quote", return_value=None), \
+            patch.object(sed, "_room_key_from_msg", return_value="room@conf"), \
             patch.object(sed, "get_message_by_id", return_value=None), \
             patch.object(sed, "get_last_message",
                          return_value="no match here"):
@@ -204,14 +217,16 @@ async def test_process_sed_correction_reply_and_edge(monkeypatch):
         assert "Pattern 'foo' not found in last message" in called_args[1]
 
     # regex error
-    with patch.object(sed, "apply_sed", return_value=(None, 0)):
+    with patch.object(sed, "_room_key_from_msg", return_value="room@conf"), \
+            patch.object(sed, "apply_sed", return_value=(None, 0)):
         await sed.process_sed_correction(bot, nick, msg, is_room,
                                          "(", "b", "")
         called_args = bot.reply.call_args[0]
         assert "Regex error" in called_args[1]
 
     # regex timeout
-    with patch.object(sed, "apply_sed", return_value=(None, -1)):
+    with patch.object(sed, "_room_key_from_msg", return_value="room@conf"), \
+            patch.object(sed, "apply_sed", return_value=(None, -1)):
         await sed.process_sed_correction(bot, nick, msg, is_room,
                                          "foo", "bar", "")
         called_args = bot.reply.call_args[0]
@@ -254,6 +269,7 @@ async def test_cmd_sed_handler_toggle_and_usage(monkeypatch):
 async def test_on_message_async(monkeypatch):
     bot = MagicMock()
     bot.boundjid = "botjid@muc"
+    bot.presence = SimpleNamespace(joined_rooms={"room1": "botnick"})
     msg = {
         "body": "s/foo/bar/",
         "from": MagicMock(),
@@ -276,10 +292,7 @@ async def test_on_message_async(monkeypatch):
             patch.object(sed, "process_sed_correction",
                          AsyncMock()) as process_correction_mock, \
             patch.object(sed, "parse_any_sed_command",
-                         return_value=("foo", "bar", "")), \
-            patch.object(sed._core, "cache_message"), \
-            patch.object(sed._core, "JOINED_ROOMS",
-                         {room_name: {"nick": "botnick"}}):
+                         return_value=("foo", "bar", "")):
 
         msg_room = dict(msg)
         setattr(msg_room["from"], "bare", room_name)

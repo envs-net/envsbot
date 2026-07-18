@@ -12,6 +12,7 @@ XMPP stanza
    ▼
 bot.routing
    │  public MUC messages and private/MUC-PM messages
+   ├──► bot.message_cache (RAM + SQLite persistence)
    ▼
 bot.dispatch
    │  prefix parsing, command lookup, CommandContext, permissions, rate limit
@@ -63,6 +64,7 @@ to command dispatch.
 Main responsibilities:
 
 - ignore the bot's own MUC messages
+- store each accepted incoming message once in the shared message cache
 - route public groupchat messages
 - route direct private messages
 - route MUC private messages through the same private-message handler
@@ -133,7 +135,8 @@ Main responsibilities:
 - accepting-command shutdown gate
 - supervised task cancellation
 - plugin unload timeout
-- database flush and close
+- shared message-cache flush before database close
+- idempotent database flush and close
 
 ### `bot.audit`
 
@@ -201,7 +204,42 @@ Important state paths:
 - `database.users.UserManager` stores user and per-plugin JSON state
 - `database.rooms.RoomManager` stores known rooms and room feature state
 - `database.audit.AuditLog` stores operational audit events
+- `database.message_cache.MessageCacheStore` persists recent message bodies
+- `utils.message_cache.MessageCache` serves shared recent history from RAM
 - `utils.task_supervisor.TaskSupervisor` tracks long-running async tasks
+
+
+## Shared recent-message cache
+
+`envsbot.Bot` owns one `bot.message_cache` instance for every plugin. Incoming
+public MUC, direct-chat and MUC-PM messages are inserted once by `bot.routing`.
+Plugins should only query the shared cache instead of registering their own
+message-history stores.
+
+`MESSAGE_CACHE_SIZE` is the maximum number of retained entries **per
+conversation**. The same limit applies to every plugin. Reads are served from
+RAM, while writes are batched into the SQLite `message_cache` table. The cache
+is loaded before plugins start and flushed before the database closes, so reply
+lookups keep working after a normal restart. Reducing the configured size also
+prunes older persisted rows on the next start.
+
+Conversation keys deliberately keep scopes separate:
+
+- public MUC history is keyed by bare room JID
+- direct chats are keyed by the sender's bare JID
+- MUC private messages are keyed by room and occupant nick
+
+Useful read methods are:
+
+```python
+entries = bot.message_cache.get_messages(conversation, limit=20)
+entry = bot.message_cache.get_by_id(conversation, stanza_id)
+entry = bot.message_cache.get_last(conversation, predicate=filter_entry)
+```
+
+Message bodies are persisted as plain text in the bot database and are included
+in normal database backups. Operators should choose `MESSAGE_CACHE_SIZE` with
+that retention and privacy implication in mind.
 
 ## Diagnostics and preflight
 

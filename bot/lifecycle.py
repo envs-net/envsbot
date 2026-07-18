@@ -153,6 +153,7 @@ class LifecycleMixin:
         self.presence.broadcast()
         await self.get_roster()
         await self.db.connect()
+        await self.message_cache.start(self.db.message_cache)
 
         await self.bot_plugins.load_all()
         await self.bot_plugins.call_on_ready()
@@ -174,7 +175,22 @@ class LifecycleMixin:
         log.info("[BOT] ✅ Bot started, all rooms joined")
 
     async def shutdown_runtime(self) -> None:
-        """Best-effort ordered shutdown of tasks, plugins and database."""
+        """Run the ordered shutdown once, even when callers race."""
+        lock = getattr(self, "_shutdown_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._shutdown_lock = lock
+
+        async with lock:
+            if getattr(self, "_shutdown_complete", False):
+                return
+            try:
+                await self._shutdown_runtime_once()
+            finally:
+                self._shutdown_complete = True
+
+    async def _shutdown_runtime_once(self) -> None:
+        """Best-effort ordered shutdown of tasks, cache and database."""
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self.accepting_commands = False
 
@@ -208,6 +224,24 @@ class LifecycleMixin:
         else:
             log.info("[LIFECYCLE] event=shutdown phase=tasks %s", kv(status=task_status, cancelled=cancelled))
 
+        cache_status = "skipped"
+        try:
+            message_cache = getattr(self, "message_cache", None)
+            close_cache = getattr(message_cache, "close", None)
+            if callable(close_cache):
+                await asyncio.wait_for(close_cache(), timeout=10.0)
+                cache_status = "ok"
+        except Exception:
+            cache_status = "failed"
+            log.exception(
+                "[LIFECYCLE] event=shutdown phase=message_cache status=failed"
+            )
+        else:
+            log.info(
+                "[LIFECYCLE] event=shutdown phase=message_cache %s",
+                kv(status=cache_status),
+            )
+
         db_status = "ok"
         db_timeout = _database_shutdown_timeout(getattr(self, "config", {}))
         try:
@@ -223,4 +257,4 @@ class LifecycleMixin:
             log.exception("[LIFECYCLE] event=shutdown phase=db status=failed error=%s", exc)
         else:
             log.info("[LIFECYCLE] event=shutdown phase=db status=closed")
-        log.info("[LIFECYCLE] event=shutdown phase=done %s", kv(status="ok" if db_status == "ok" else "partial", plugins=plugin_status, tasks=task_status, db=db_status))
+        log.info("[LIFECYCLE] event=shutdown phase=done %s", kv(status="ok" if db_status == "ok" else "partial", plugins=plugin_status, tasks=task_status, message_cache=cache_status, db=db_status))

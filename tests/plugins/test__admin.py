@@ -330,10 +330,17 @@ async def test_bot_restart_saves_notification_to_persistent_paths(monkeypatch, f
     monkeypatch.setattr(_admin, "_restart_notification_paths", lambda config_obj: [str(path) for path in paths])
     monkeypatch.setattr(_admin.asyncio, "sleep", immediate_sleep)
     monkeypatch.setattr(_admin.asyncio, "wait_for", immediate_wait_for)
+    shutdown_calls = []
+
+    async def shutdown_runtime():
+        shutdown_calls.append("shutdown")
+
+    fake_bot.shutdown_runtime = shutdown_runtime
 
     await _admin.bot_restart(fake_bot, Sender(), "creme", [], DummyMsg(groupchat=True), True)
 
     assert getattr(fake_bot, "disco", False) is True
+    assert shutdown_calls == ["shutdown"]
     for path in paths:
         assert path.exists()
         data = json.loads(path.read_text())

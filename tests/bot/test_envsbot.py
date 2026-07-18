@@ -640,6 +640,13 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
     await bot.on_private_message({"type": "headline", "get": lambda key, default=None: default})
     bot.handle_command.assert_not_called()
 
+    bot.handle_command.reset_mock()
+    bot.message_cache.add_message = AsyncMock(side_effect=RuntimeError("cache failed"))
+    await bot.on_private_message(private_msg)
+    bot.handle_command.assert_awaited_with(
+        ",status", private_msg["from"], None, private_msg, False
+    )
+
 
 @pytest.mark.asyncio
 async def test_room_role_from_presence_elevates_only_room_admins(monkeypatch, bot):
@@ -898,7 +905,16 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     monkeypatch.setattr(envsbot.Bot, "__getitem__", lambda self, key: types.SimpleNamespace(add_feature=lambda feature: features.append((key, feature))), raising=False)
     bot.presence = types.SimpleNamespace(broadcast=lambda: broadcasts.append("broadcast"))
     bot.get_roster = AsyncMock(side_effect=lambda: calls.append("roster"))
-    bot.db = types.SimpleNamespace(connect=AsyncMock(side_effect=lambda: calls.append("db")))
+    cache_store = object()
+    bot.db = types.SimpleNamespace(
+        connect=AsyncMock(side_effect=lambda: calls.append("db")),
+        message_cache=cache_store,
+    )
+    bot.message_cache = types.SimpleNamespace(
+        start=AsyncMock(side_effect=lambda store: calls.append(
+            "cache" if store is cache_store else "wrong-cache-store"
+        )),
+    )
     bot.bot_plugins = types.SimpleNamespace(
         load_all=AsyncMock(side_effect=lambda: calls.append("load_all")),
         call_on_ready=AsyncMock(side_effect=lambda: calls.append("ready")),
@@ -912,7 +928,7 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     assert bot.connection_start_time is not None
     assert features == [("xep_0030", "http://jabber.org/protocol/muc#user")]
     assert broadcasts == ["broadcast", "broadcast"]
-    assert calls == ["roster", "db", "load_all", "ready", "backup", "restart"]
+    assert calls == ["roster", "db", "cache", "load_all", "ready", "backup", "restart"]
     assert bot.roster.auto_subscribe is True
 
 

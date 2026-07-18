@@ -33,6 +33,11 @@ async def _audit_log(db) -> None:
     await db.audit.init()
 
 
+async def _message_cache(db) -> None:
+    """Create the persistent shared recent-message cache."""
+    await db.message_cache.init()
+
+
 async def _room_invites(db) -> None:
     """Create the pending room invite table and indexes."""
     await db.conn.execute(
@@ -68,6 +73,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0003_room_invites",
         "Create room_invites table and index",
         _room_invites,
+    ),
+    Migration(
+        "0004_message_cache",
+        "Create persistent shared recent-message cache",
+        _message_cache,
     ),
 )
 

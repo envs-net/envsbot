@@ -56,11 +56,24 @@ def test_can_manage_room_role_threshold():
 
 
 class DummyLifecycle(lifecycle.LifecycleMixin):
-    def __init__(self, *, unload=None, cancel_all=None, close=None, config=None):
+    def __init__(
+        self,
+        *,
+        unload=None,
+        cancel_all=None,
+        close_cache=None,
+        close=None,
+        config=None,
+    ):
         self.accepting_commands = True
         self.config = config or {}
         self.bot_plugins = SimpleNamespace(unload_all=unload) if unload is not None else SimpleNamespace()
         self.tasks = SimpleNamespace(cancel_all=cancel_all) if cancel_all is not None else SimpleNamespace()
+        self.message_cache = (
+            SimpleNamespace(close=close_cache)
+            if close_cache is not None
+            else SimpleNamespace()
+        )
         self.db = SimpleNamespace(close=close or AsyncMock())
 
 
@@ -75,15 +88,24 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
         events.append(f"tasks:{timeout}")
         return 3
 
+    async def close_cache():
+        events.append("cache")
+
     async def close():
         events.append("db")
 
-    bot = DummyLifecycle(unload=unload_all, cancel_all=cancel_all, close=close)
+    bot = DummyLifecycle(
+        unload=unload_all,
+        cancel_all=cancel_all,
+        close_cache=close_cache,
+        close=close,
+    )
 
+    await bot.shutdown_runtime()
     await bot.shutdown_runtime()
 
     assert bot.accepting_commands is False
-    assert events == ["plugins", "tasks:10.0", "db"]
+    assert events == ["plugins", "tasks:10.0", "cache", "db"]
 
 
 @pytest.mark.asyncio

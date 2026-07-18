@@ -16,6 +16,7 @@ import plugins.rss.store as rss_store
 import plugins.tell as tell
 import plugins.urlcheck as urlcheck
 import plugins.weather as weather
+from utils.message_cache import MessageCache
 
 
 class FakeTask:
@@ -381,6 +382,7 @@ async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
     bot = SimpleNamespace(
         db=FakeDB(stores=stores),
         plugin={"xep_0054": object()},
+        message_cache=MessageCache(max_messages=100),
     )
 
     main_csv = tmp_path / "chat_slang.csv"
@@ -393,8 +395,12 @@ async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
     monkeypatch.setattr(info, "SLANG_ADDITIONS_CSV", str(additions_csv))
     monkeypatch.setattr(info, "SLANG_REMOVALS_CSV", str(removals_csv))
 
-    sed._core._SHARED_MESSAGE_CACHES[sed.CACHE_NAMESPACE].clear()
-    sed._core.cache_message(sed.CACHE_NAMESPACE, "room@conf", "alice", "hello", "stanza-1")
+    await bot.message_cache.add_entry({
+        "conversation": "room@conf",
+        "nick": "alice",
+        "body": "hello",
+        "stanza_id": "stanza-1",
+    })
 
     joined = {"room@conf": {"nicks": {"alice": {"jid": "alice@example.org"}}}}
     monkeypatch.setattr(tools, "JOINED_ROOMS", joined)
@@ -425,11 +431,11 @@ async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
     assert sed_state["enabled_rooms"] == 1
     assert sed_state["cached_rooms"] == 1
     assert sed_state["cached_messages"] == 1
-    assert sed_state["cache_size"] == sed.SED_CACHE_SIZE
+    assert sed_state["cache_size"] == 100
     assert sed_state["regex_timeout"] == sed.REGEX_TIMEOUT
     assert await sed.doctor(bot, room_jid="room@conf") == [
         f"✅ Sed for room@conf: enabled_rooms=1, cached_rooms=1, "
-        f"cached_messages=1, cache_size={sed.SED_CACHE_SIZE}, regex_timeout={sed.REGEX_TIMEOUT:g}s"
+        f"cached_messages=1, cache_size=100, regex_timeout={sed.REGEX_TIMEOUT:g}s"
     ]
 
     tools_state = await tools.get_runtime_state(bot, room_jid="room@conf")

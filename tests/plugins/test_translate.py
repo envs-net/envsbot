@@ -10,6 +10,7 @@ import pytest
 
 import plugins.translate as translate
 from core_plugins import _core
+from utils import message_cache
 
 
 class DummyFrom:
@@ -42,16 +43,19 @@ def make_message(
 
 @pytest.fixture(autouse=True)
 def clear_translate_caches(monkeypatch):
-    monkeypatch.setattr(translate, "CACHE_NAMESPACE", "translate-test")
-    for namespace in ("translate-test", "translate-test-fallback-command"):
-        _core._SHARED_MESSAGE_CACHES[namespace].clear()
-        _core._SHARED_PROCESSED_STANZAS[namespace].clear()
-        _core._SHARED_PROCESSED_STANZA_ORDER[namespace].clear()
-    yield
-    for namespace in ("translate-test", "translate-test-fallback-command"):
-        _core._SHARED_MESSAGE_CACHES[namespace].clear()
-        _core._SHARED_PROCESSED_STANZAS[namespace].clear()
-        _core._SHARED_PROCESSED_STANZA_ORDER[namespace].clear()
+    monkeypatch.setattr(translate, "FALLBACK_NAMESPACE", "translate-test-fallback")
+    message_cache._PROCESSED_STANZAS.clear()
+    message_cache._PROCESSED_STANZA_ORDER.clear()
+
+
+def _bot_with_cache(*, room: str = "room@conference.example.org"):
+    return SimpleNamespace(
+        reply=Mock(),
+        nick="EnvsBot",
+        presence=SimpleNamespace(joined_rooms={room: "EnvsBot"}),
+        message_cache=message_cache.MessageCache(max_messages=20),
+        handle_command=AsyncMock(),
+    )
 
 
 def test_parse_translation_args_explicit_languages():
@@ -176,15 +180,15 @@ async def test_translate_command_translates_direct_text(monkeypatch):
 @pytest.mark.asyncio
 async def test_translate_command_uses_cached_reply_target(monkeypatch):
     room = "room@conference.example.org"
-    bot = SimpleNamespace(reply=Mock())
+    bot = _bot_with_cache(room=room)
     msg = make_message(",tr uk", room=room, reply_id="original")
-    _core.cache_message(
-        translate.CACHE_NAMESPACE,
-        room,
-        "bob",
-        "Hello from the cache",
-        "original",
-        maxlen=20,
+    await bot.message_cache.add_entry(
+        {
+            "conversation": room,
+            "nick": "bob",
+            "body": "Hello from the cache",
+            "stanza_id": "original",
+        }
     )
     monkeypatch.setattr(
         _core, "handle_room_toggle_command", AsyncMock(return_value=False)
@@ -209,7 +213,7 @@ async def test_translate_command_uses_cached_reply_target(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_translate_command_uses_xep0461_quote_fallback(monkeypatch):
-    bot = SimpleNamespace(reply=Mock())
+    bot = _bot_with_cache()
     msg = make_message("> Hello from fallback\n,tr de", reply_id="not-cached")
     monkeypatch.setattr(
         _core, "handle_room_toggle_command", AsyncMock(return_value=False)
@@ -235,7 +239,7 @@ async def test_translate_command_uses_xep0461_quote_fallback(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_translate_command_reports_missing_reply_text(monkeypatch):
-    bot = SimpleNamespace(reply=Mock())
+    bot = _bot_with_cache()
     msg = make_message(",tr de")
     monkeypatch.setattr(
         _core, "handle_room_toggle_command", AsyncMock(return_value=False)
@@ -348,39 +352,21 @@ async def test_translate_command_handles_unexpected_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_groupchat_handler_caches_regular_messages(monkeypatch):
+async def test_groupchat_handler_ignores_regular_messages():
     room = "room@conference.example.org"
-    bot = SimpleNamespace(
-        nick="EnvsBot",
-        presence=SimpleNamespace(joined_rooms={room: "EnvsBot"}),
-        handle_command=AsyncMock(),
-    )
-    monkeypatch.setattr(_core, "JOINED_ROOMS", {room: {"nicks": {"alice": {}}}})
-    monkeypatch.setattr(_core, "_is_enabled_for_room", AsyncMock(return_value=True))
+    bot = _bot_with_cache(room=room)
     msg = make_message("A message to translate later", room=room, stanza_id="source-1")
 
     await translate._on_groupchat_message(bot, msg)
 
-    cached = _core.get_cached_message_by_id(
-        translate.CACHE_NAMESPACE,
-        room,
-        "source-1",
-    )
-    assert cached["body"] == "A message to translate later"
-    assert cached["nick"] == "alice"
     bot.handle_command.assert_not_awaited()
+    assert bot.message_cache.get_messages(room) == []
 
 
 @pytest.mark.asyncio
 async def test_groupchat_handler_redispatches_quote_fallback_command(monkeypatch):
     room = "room@conference.example.org"
-    bot = SimpleNamespace(
-        nick="EnvsBot",
-        presence=SimpleNamespace(joined_rooms={room: "EnvsBot"}),
-        handle_command=AsyncMock(),
-    )
-    monkeypatch.setattr(_core, "JOINED_ROOMS", {room: {"nicks": {"alice": {}}}})
-    monkeypatch.setattr(_core, "_is_enabled_for_room", AsyncMock(return_value=True))
+    bot = _bot_with_cache(room=room)
     msg = make_message("> Original text\n,tr uk", room=room, stanza_id="reply-command")
 
     await translate._on_groupchat_message(bot, msg)
@@ -392,27 +378,13 @@ async def test_groupchat_handler_redispatches_quote_fallback_command(monkeypatch
         msg,
         True,
     )
-    assert (
-        _core.get_cached_message_by_id(
-            translate.CACHE_NAMESPACE,
-            room,
-            "reply-command",
-        )
-        is None
-    )
+    assert bot.message_cache.get_messages(room) == []
 
 
 @pytest.mark.asyncio
-async def test_groupchat_handler_skips_own_and_disabled_messages(monkeypatch):
+async def test_groupchat_handler_skips_own_and_non_commands():
     room = "room@conference.example.org"
-    bot = SimpleNamespace(
-        nick="EnvsBot",
-        presence=SimpleNamespace(joined_rooms={room: "EnvsBot"}),
-        handle_command=AsyncMock(),
-    )
-    monkeypatch.setattr(_core, "JOINED_ROOMS", {room: {}})
-    enabled = AsyncMock(return_value=False)
-    monkeypatch.setattr(_core, "_is_enabled_for_room", enabled)
+    bot = _bot_with_cache(room=room)
 
     await translate._on_groupchat_message(
         bot,
@@ -420,17 +392,10 @@ async def test_groupchat_handler_skips_own_and_disabled_messages(monkeypatch):
     )
     await translate._on_groupchat_message(
         bot,
-        make_message("user output", room=room, nick="alice", stanza_id="disabled"),
+        make_message("user output", room=room, nick="alice", stanza_id="regular"),
     )
 
-    enabled.assert_awaited_once()
-    assert (
-        _core.get_cached_message_by_id(translate.CACHE_NAMESPACE, room, "own") is None
-    )
-    assert (
-        _core.get_cached_message_by_id(translate.CACHE_NAMESPACE, room, "disabled")
-        is None
-    )
+    bot.handle_command.assert_not_awaited()
 
 
 @pytest.mark.asyncio

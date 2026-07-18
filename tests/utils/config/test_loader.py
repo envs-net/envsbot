@@ -163,9 +163,8 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'RSS_MAX_ENTRIES_PER_POLL = 3',
             'RSS_SIMILARITY_THRESHOLD = 0.75',
             'BIRTHDAY_CACHE_TTL_SECONDS = 3600',
-            'SED_CACHE_SIZE = 25',
+            'MESSAGE_CACHE_SIZE = 40',
             'POLL_MAX_OPTIONS = 7',
-            'PIN_RECENT_CACHE_SIZE = 40',
             'KARMA_DELAY_SECONDS = 10',
             'TELL_DELIVERY_DELAY_SECONDS = 2',
             'XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.2',
@@ -185,9 +184,8 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["rss_max_entries_per_poll"] == 3
     assert result["rss_similarity_threshold"] == 0.75
     assert result["birthday_cache_ttl_seconds"] == 3600
-    assert result["sed_cache_size"] == 25
+    assert result["message_cache_size"] == 40
     assert result["poll_max_options"] == 7
-    assert result["pin_recent_cache_size"] == 40
     assert result["karma_delay_seconds"] == 10
     assert result["tell_delivery_delay_seconds"] == 2
     assert result["xkcd_index_request_delay_seconds"] == 0.2

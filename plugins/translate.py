@@ -36,6 +36,7 @@ from core_plugins import _core
 from utils.command import Role, command
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
+from utils import message_cache
 from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL
 
 log = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ PLUGIN_META = {
 }
 
 TRANSLATE_KEY = "TRANSLATE"
-CACHE_NAMESPACE = "translate"
+FALLBACK_NAMESPACE = "translate-fallback-command"
 GOOGLE_TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 
 TRANSLATE_TIMEOUT_SECONDS = max(
@@ -75,11 +76,6 @@ TRANSLATE_MAX_RESPONSE_BYTES = max(
     4096,
     int(config.get("translate_max_response_bytes", 262144) or 262144),
 )
-TRANSLATE_RECENT_CACHE_SIZE = max(
-    10,
-    int(config.get("translate_recent_cache_size", 100) or 100),
-)
-
 # Google Cloud's NMT language-code list is intentionally kept as codes rather
 # than display names. Regional/script variants are normalized case-insensitively.
 # ``auto`` is valid only for the source language.
@@ -336,14 +332,10 @@ async def translate_text(
     )
 
 
-def _reply_text_from_cache_or_quote(msg, room: str | None) -> str | None:
+def _reply_text_from_cache_or_quote(bot, msg, conversation: str | None) -> str | None:
     reply_id = _core.get_reply_target(msg)
-    if reply_id and room:
-        cached = _core.get_cached_message_by_id(
-            CACHE_NAMESPACE,
-            room,
-            reply_id,
-        )
+    if reply_id and conversation:
+        cached = bot.message_cache.get_by_id(conversation, reply_id)
         if cached:
             body = str(cached.get("body") or "").strip()
             if body:
@@ -409,8 +401,18 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         request = _parse_translation_args(args)
-        room = _room_from_message(msg, is_room)
-        text = request.text or _reply_text_from_cache_or_quote(msg, room)
+        text = request.text
+        if not text:
+            conversation = message_cache.conversation_key(
+                msg,
+                is_room=is_room,
+                joined_rooms=bot.presence.joined_rooms,
+            )
+            text = _reply_text_from_cache_or_quote(
+                bot,
+                msg,
+                conversation,
+            )
         if not text:
             raise TranslationUsageError(
                 "No text was provided and the replied-to message could not be resolved."
@@ -447,14 +449,7 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
 
 
 async def _on_groupchat_message(bot, msg) -> None:
-    """Cache room messages and dispatch quote-fallback reply commands.
-
-    XEP-0461-capable clients may include a plain-text ``>`` fallback before the
-    actual command. The normal command parser intentionally expects the prefix
-    at the start of the body, so this handler redispatches only that fallback
-    form through the regular command dispatcher. The command itself remains
-    the normal ``{prefix}tr`` command.
-    """
+    """Redispatch a quoted XEP-0461 fallback while keeping `,tr` unchanged."""
     try:
         if msg.get("type") != "groupchat":
             return
@@ -462,52 +457,26 @@ async def _on_groupchat_message(bot, msg) -> None:
         if not body or _is_own_room_message(bot, msg):
             return
 
-        room = str(msg["from"].bare)
-        if room not in _core.JOINED_ROOMS:
-            return
-        if not await _core._is_enabled_for_room(
-            bot,
-            TRANSLATE_KEY,
-            "translate",
-            room,
-        ):
+        quote = _core.extract_reply_quote(body)
+        if not quote:
             return
 
-        quote = _core.extract_reply_quote(body)
-        if quote:
-            command_body = _body_without_reply_quote(body)
-            if _is_translate_command_body(command_body):
-                stanza_id = _core.get_stanza_id(msg)
-                if not _core.remember_stanza(
-                    f"{CACHE_NAMESPACE}-fallback-command",
-                    stanza_id,
-                ):
-                    return
-                await bot.handle_command(
-                    command_body,
-                    msg["from"],
-                    _safe_room_nick(msg),
-                    msg,
-                    True,
-                )
-                return
+        command_body = _body_without_reply_quote(body)
+        if not _is_translate_command_body(command_body):
+            return
 
         stanza_id = _core.get_stanza_id(msg)
-        if not _core.remember_stanza(CACHE_NAMESPACE, stanza_id):
+        if not _core.remember_stanza(FALLBACK_NAMESPACE, stanza_id):
             return
-        if _is_translate_command_body(body):
-            return
-
-        _core.cache_message(
-            CACHE_NAMESPACE,
-            room,
+        await bot.handle_command(
+            command_body,
+            msg["from"],
             _safe_room_nick(msg),
-            body,
-            stanza_id,
-            maxlen=TRANSLATE_RECENT_CACHE_SIZE,
+            msg,
+            True,
         )
     except Exception:
-        log.exception("[TRANSLATE] Error handling room message cache")
+        log.exception("[TRANSLATE] Error handling reply fallback command")
 
 
 async def doctor(bot, room_jid: str | None = None) -> list[str]:

@@ -532,11 +532,27 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
         log.warning(
             "[ADMIN] Disconnect timeout - proceeding with restart anyway")
 
-    # Close database
-    try:
-        await bot.db.close()
-    except Exception as e:
-        log.error("[ADMIN] Error closing database: %s", e)
+    # Flush plugin tasks and the persistent message cache before SQLite is
+    # closed. Lifecycle shutdown is idempotent because the main coroutine may
+    # reach its own finally block at the same time.
+    shutdown_runtime = getattr(bot, "shutdown_runtime", None)
+    if callable(shutdown_runtime):
+        try:
+            await shutdown_runtime()
+        except Exception as e:
+            log.error("[ADMIN] Error during graceful shutdown: %s", e)
+    else:
+        message_cache = getattr(bot, "message_cache", None)
+        close_cache = getattr(message_cache, "close", None)
+        if callable(close_cache):
+            try:
+                await close_cache()
+            except Exception as e:
+                log.error("[ADMIN] Error flushing message cache: %s", e)
+        try:
+            await bot.db.close()
+        except Exception as e:
+            log.error("[ADMIN] Error closing database: %s", e)
 
 
 @command(

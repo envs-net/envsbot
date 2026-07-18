@@ -42,13 +42,8 @@ from core_plugins._core import (
     is_room_moderator_or_admin,
     get_real_jid,
     _is_enabled_for_room,
-    get_cached_messages,
     extract_reply_quote,
     get_reply_target,
-    get_cached_message_by_id,
-    get_stanza_id,
-    remember_stanza,
-    cache_message,
     handle_room_toggle_command,
     paginate_items,
 )
@@ -68,8 +63,6 @@ PIN_DATA_KEY = "PIN_DATA"
 
 PINS_FIELD = "pins"
 PAGE_SIZE = int(config.get("pin_page_size", 10) or 10)
-PIN_RECENT_CACHE_SIZE = int(config.get("pin_recent_cache_size", 80) or 80)
-CACHE_NAMESPACE = "pin"
 
 
 async def get_pin_store(bot):
@@ -418,15 +411,15 @@ def _is_pin_add_command_body(body: str) -> bool:
     return stripped == f"{prefix}pin add"
 
 
-def _recent_cache_entries(room: str) -> list[dict[str, Any]]:
-    return get_cached_messages(CACHE_NAMESPACE, room)
+def _recent_cache_entries(bot, room: str) -> list[dict[str, Any]]:
+    return bot.message_cache.get_messages(room)
 
 
-def _get_recent_target(room: str, offset: int = 1) -> dict[str, Any] | None:
+def _get_recent_target(bot, room: str, offset: int = 1) -> dict[str, Any] | None:
     if offset < 1:
         return None
 
-    entries = _recent_cache_entries(room)
+    entries = _recent_cache_entries(bot, room)
     if not entries:
         return None
 
@@ -435,7 +428,7 @@ def _get_recent_target(room: str, offset: int = 1) -> dict[str, Any] | None:
         body = entry.get("body") or ""
         if not body.strip():
             continue
-        if _is_pin_command_message(body):
+        if _is_pin_command_message(_body_without_quote(body)):
             continue
         if _is_pin_generated_text(body):
             continue
@@ -566,8 +559,7 @@ async def _handle_reply_pin_add(bot, msg):
         source = "quote"
 
         if reply_id:
-            cached_entry = get_cached_message_by_id(CACHE_NAMESPACE,
-                                                    room, reply_id)
+            cached_entry = bot.message_cache.get_by_id(room, reply_id)
             if cached_entry:
                 target_text = cached_entry.get("body")
                 target_nick = cached_entry.get("nick") or "unknown"
@@ -600,41 +592,11 @@ async def _handle_reply_pin_add(bot, msg):
 
 
 async def _on_groupchat_message(bot, msg):
+    """Handle clients that place a plain-text reply quote before `,pin add`."""
     try:
-        if await _handle_reply_pin_add(bot, msg):
-            return
-
-        body = msg.get("body", "").strip()
-        if not body:
-            return
-
-        if msg.get("type") != "groupchat":
-            return
-
-        room = str(msg["from"].bare)
-        if room not in JOINED_ROOMS:
-            return
-
-        stanza_id = get_stanza_id(msg)
-        if not remember_stanza(CACHE_NAMESPACE, stanza_id):
-            return
-
-        if _is_pin_command_message(body):
-            return
-
-        actor_nick = msg.get("mucnick") or msg["from"].resource or "unknown"
-        cache_message(
-            CACHE_NAMESPACE,
-            room,
-            actor_nick,
-            body,
-            stanza_id,
-            maxlen=PIN_RECENT_CACHE_SIZE,
-            extra={"ts": int(time.time())},
-        )
-
+        await _handle_reply_pin_add(bot, msg)
     except Exception:
-        log.exception("[PIN] Error in groupchat message cache handler")
+        log.exception("[PIN] Error in reply fallback handler")
 
 
 @command(
@@ -1133,7 +1095,7 @@ async def _pin_command_add_last(bot, sender_jid, nick, msg, room, args):
             bot.reply(msg, f"❌ Usage: {_prefix()}pin add last [n]")
             return
 
-    recent_entry = _get_recent_target(room, offset=offset)
+    recent_entry = _get_recent_target(bot, room, offset=offset)
     if not recent_entry:
         if offset == 1:
             bot.reply(msg, f"❌ No suitable cached message found for"

@@ -46,6 +46,7 @@ from utils.config import (
     setup_logging,
     validate_startup_config,
 )
+from utils.message_cache import MessageCache
 from utils.plugin_manager import PluginManager
 from utils.presence_manager import PresenceManager
 from utils.rate_limiter import TokenBucketRateLimiter
@@ -170,7 +171,12 @@ class Bot(
         self.connection_start_time = None
         self.tasks = TaskSupervisor()
         self.command_executor = CommandExecutor(self)
+        self.message_cache = MessageCache(
+            max_messages=int(config.get("message_cache_size", 100) or 100),
+        )
         self._startup_backup_done = False
+        self._shutdown_lock = asyncio.Lock()
+        self._shutdown_complete = False
         self.accepting_commands = True
 
         self.rate_limiter = TokenBucketRateLimiter(

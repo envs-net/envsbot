@@ -4,6 +4,7 @@ import types
 
 import plugins.pin as pin
 from utils import formatting
+from utils.message_cache import MessageCache
 
 
 @pytest.fixture
@@ -35,6 +36,7 @@ class DummyBot:
         self.db = types.SimpleNamespace(users=Mock())
         self.presence = types.SimpleNamespace()
         self.presence.joined_rooms = {}
+        self.message_cache = MessageCache(max_messages=20)
 
 
 @pytest.fixture
@@ -45,9 +47,7 @@ def bot():
 
 @pytest.fixture(autouse=True)
 def clean_caches():
-    pin.CACHE_NAMESPACE = "pin-test"  # Avoid interfering with main
     yield
-    # Assume that plugins.pin has only in-memory state for test (no real files)
 
 
 @pytest.mark.asyncio
@@ -77,9 +77,9 @@ async def test_pin_command_add_as_reply(monkeypatch, bot, make_msg, room_jid):
                         lambda body: "hello world" if ">" in body else None)
     monkeypatch.setattr(pin, "_body_without_quote", lambda body: "pin add")
     monkeypatch.setattr(pin, "get_reply_target", lambda msg: "replyid123")
-    monkeypatch.setattr(pin, "get_cached_message_by_id", lambda ns, room, rid:
-                        {"body": "Cached body", "nick": "bob",
-                         "stanza_id": rid})
+    bot.message_cache.get_by_id = Mock(
+        return_value={"body": "Cached body", "nick": "bob", "stanza_id": "replyid123"}
+    )
     monkeypatch.setattr(pin, "_create_pin_entry", AsyncMock(return_value=True))
     # ---- CRITICALLY PATCH _is_pin_add_command_body to return True ----
     monkeypatch.setattr(pin, "_is_pin_add_command_body", lambda body: True)
@@ -181,8 +181,11 @@ async def test_pin_command_add_manual_last(bot, make_msg,
                         AsyncMock(return_value=True))
     # patch _get_recent_target
     pin_obj = {"body": "saved", "nick": "bob", "stanza_id": "stan"}
-    monkeypatch.setattr(pin, "_get_recent_target",
-                        lambda room, offset=1: pin_obj)
+    monkeypatch.setattr(
+        pin,
+        "_get_recent_target",
+        lambda bot_arg, room, offset=1: pin_obj,
+    )
     monkeypatch.setattr(pin, "_create_pin_entry", AsyncMock())
     await pin.pin_command(bot, "alice@example.com", "Alice",
                           ["add", "last"], msg, True)
@@ -318,39 +321,26 @@ async def test_create_pin_entry_persists_full_entry(bot, make_msg, monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_on_groupchat_message_caches_only_suitable_room_messages(bot, make_msg, monkeypatch, room_jid):
-    cached = []
-    monkeypatch.setattr(pin, "_handle_reply_pin_add", AsyncMock(return_value=False))
-    monkeypatch.setattr(pin, "get_stanza_id", lambda msg: "stanza-1")
-    monkeypatch.setattr(pin, "remember_stanza", lambda namespace, stanza_id: True)
-    monkeypatch.setattr(pin, "cache_message", lambda *args, **kwargs: cached.append((args, kwargs)))
-    monkeypatch.setitem(pin.JOINED_ROOMS, room_jid, {"nicks": {"alice": {}}})
+async def test_on_groupchat_message_only_handles_reply_fallback(bot, make_msg, monkeypatch):
+    handler = AsyncMock(return_value=False)
+    monkeypatch.setattr(pin, "_handle_reply_pin_add", handler)
+    msg = make_msg(body="hello", resource="alice")
 
-    try:
-        await pin._on_groupchat_message(bot, make_msg(body="hello", resource="alice"))
-        assert cached
-        args, kwargs = cached[0]
-        assert args[:5] == (pin.CACHE_NAMESPACE, room_jid, "alice", "hello", "stanza-1")
-        assert kwargs["maxlen"] == pin.PIN_RECENT_CACHE_SIZE
+    await pin._on_groupchat_message(bot, msg)
 
-        cached.clear()
-        await pin._on_groupchat_message(bot, make_msg(body=",pin list", resource="alice"))
-        assert cached == []
-
-        monkeypatch.setattr(pin, "remember_stanza", lambda namespace, stanza_id: False)
-        await pin._on_groupchat_message(bot, make_msg(body="new text", resource="alice"))
-        assert cached == []
-    finally:
-        pin.JOINED_ROOMS.pop(room_jid, None)
+    handler.assert_awaited_once_with(bot, msg)
+    assert bot.message_cache.get_messages(str(msg["from"].bare)) == []
 
 
 @pytest.mark.asyncio
-async def test_on_groupchat_message_stops_after_reply_pin_add(bot, make_msg, monkeypatch):
-    cache = Mock()
-    monkeypatch.setattr(pin, "_handle_reply_pin_add", AsyncMock(return_value=True))
-    monkeypatch.setattr(pin, "cache_message", cache)
-    await pin._on_groupchat_message(bot, make_msg(body=">old\n,pin add"))
-    cache.assert_not_called()
+async def test_on_groupchat_message_accepts_handled_reply_pin(bot, make_msg, monkeypatch):
+    handler = AsyncMock(return_value=True)
+    monkeypatch.setattr(pin, "_handle_reply_pin_add", handler)
+    msg = make_msg(body=">old\n,pin add")
+
+    await pin._on_groupchat_message(bot, msg)
+
+    handler.assert_awaited_once_with(bot, msg)
 
 
 @pytest.mark.asyncio
@@ -387,15 +377,16 @@ def test_pin_store_and_recent_target_helpers(monkeypatch):
         {"body": "first", "nick": "alice"},
         {"body": "second", "nick": "bob"},
     ]
-    monkeypatch.setattr(pin, "_recent_cache_entries", lambda room: list(entries))
+    monkeypatch.setattr(pin, "_recent_cache_entries", lambda bot, room: list(entries))
 
-    assert pin._get_recent_target("room", offset=0) is None
-    assert pin._get_recent_target("room", offset=1)["body"] == "second"
-    assert pin._get_recent_target("room", offset=2)["body"] == "first"
-    assert pin._get_recent_target("room", offset=3) is None
+    fake_bot = object()
+    assert pin._get_recent_target(fake_bot, "room", offset=0) is None
+    assert pin._get_recent_target(fake_bot, "room", offset=1)["body"] == "second"
+    assert pin._get_recent_target(fake_bot, "room", offset=2)["body"] == "first"
+    assert pin._get_recent_target(fake_bot, "room", offset=3) is None
 
-    monkeypatch.setattr(pin, "_recent_cache_entries", lambda room: [])
-    assert pin._get_recent_target("room") is None
+    monkeypatch.setattr(pin, "_recent_cache_entries", lambda bot, room: [])
+    assert pin._get_recent_target(fake_bot, "room") is None
 
 
 def test_pin_load_save_helpers(monkeypatch):
@@ -439,8 +430,10 @@ async def test_pin_permission_and_recent_cache_direct_helpers(monkeypatch, make_
     assert checks == [(room_jid, "alice"), (room_jid, "bob")]
 
     entries = [{"body": "hello"}]
-    monkeypatch.setattr(pin, "get_cached_messages", lambda namespace, room: [(namespace, room), *entries])
-    assert pin._recent_cache_entries(room_jid) == [(pin.CACHE_NAMESPACE, room_jid), *entries]
+    bot.message_cache = MagicMock()
+    bot.message_cache.get_messages.return_value = entries
+    assert pin._recent_cache_entries(bot, room_jid) == entries
+    bot.message_cache.get_messages.assert_called_once_with(room_jid)
 
 @pytest.mark.asyncio
 async def test_pin_management_allows_plugin_grant_fallback(monkeypatch, bot, make_msg, room_jid):

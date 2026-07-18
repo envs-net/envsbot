@@ -8,6 +8,7 @@ from utils.logging_helpers import kv
 from .users import UserManager
 from .rooms import Rooms
 from .audit import AuditLog
+from .message_cache import MessageCacheStore
 from .migrations import available_migrations
 
 # logger for this module
@@ -33,6 +34,7 @@ class DatabaseManager:
         self.users = None
         self.rooms = None
         self.audit = None
+        self.message_cache = None
 
         self.flush_interval = flush_interval
 
@@ -65,6 +67,7 @@ class DatabaseManager:
         self.users = UserManager(self.conn)
         self.rooms = Rooms(self.conn)
         self.audit = AuditLog(self.conn)
+        self.message_cache = MessageCacheStore(self)
 
         await self._init_schema_migrations()
         await self.run_migrations()

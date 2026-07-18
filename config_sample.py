@@ -78,6 +78,12 @@ DATABASE_WAL_ENABLED = False
 # internal flush wait so the SQLite connection can close cleanly.
 DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
 
+# Number of recent messages retained per room or private conversation. The
+# cache is shared by all plugins, stored in SQLite and restored on restart.
+# Message bodies are therefore persisted in the bot database and included in
+# normal database backups. Lower this value if less retained history is wanted.
+MESSAGE_CACHE_SIZE = 100
+
 # Default paging behavior for commands supporting [page|last|all].
 # "all" shows the full list by default. A positive integer, e.g. 20,
 # shows page 1 with that many entries unless the user explicitly asks for
@@ -292,7 +298,6 @@ SED_MAX_PATTERN_LENGTH = 256
 SED_MAX_REPLACEMENT_LENGTH = 1000
 SED_MAX_INPUT_LENGTH = 5000
 SED_MAX_OUTPUT_LENGTH = 8000
-SED_CACHE_SIZE = 10
 
 
 # ================= POLLS =================
@@ -307,7 +312,6 @@ POLL_DEFAULT_MULTI_MAX_CHOICES = 3
 # ================= PINS =================
 
 PIN_PAGE_SIZE = 10
-PIN_RECENT_CACHE_SIZE = 80
 
 
 # ================= TRANSLATE =================
@@ -318,9 +322,6 @@ TRANSLATE_TIMEOUT_SECONDS = HTTP_TIMEOUT_SECONDS
 TRANSLATE_MAX_INPUT_LENGTH = 2000
 TRANSLATE_MAX_OUTPUT_LENGTH = 6000
 TRANSLATE_MAX_RESPONSE_BYTES = 262144
-
-# Number of recent room messages retained in memory for XEP-0461 reply lookup.
-TRANSLATE_RECENT_CACHE_SIZE = 100
 
 
 # ================= KARMA / TELL =================

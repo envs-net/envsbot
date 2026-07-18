@@ -20,6 +20,7 @@ STARTUP_ONLY_KEYS = {
     "port",
     "direct_tls",
     "db",
+    "message_cache_size",
 }
 
 _RATE_LIMIT_KEYS = {
@@ -278,7 +279,6 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             "INFO_HTTP_USER_AGENT": _to_str(cfg.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"),
         },
         "plugins.sed": {
-            "SED_CACHE_SIZE": _to_int(cfg.get("sed_cache_size") or 10, 10),
             "REGEX_TIMEOUT": _to_float(cfg.get("sed_regex_timeout") or 1.0, 1.0),
             "MAX_PATTERN_LENGTH": _to_int(cfg.get("sed_max_pattern_length") or 256, 256),
             "MAX_REPLACEMENT_LENGTH": _to_int(cfg.get("sed_max_replacement_length") or 1000, 1000),
@@ -293,7 +293,6 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         },
         "plugins.pin": {
             "PAGE_SIZE": _to_int(cfg.get("pin_page_size") or 10, 10),
-            "PIN_RECENT_CACHE_SIZE": _to_int(cfg.get("pin_recent_cache_size") or 80, 80),
         },
         "plugins.translate": {
             "TRANSLATE_TIMEOUT_SECONDS": max(
@@ -314,9 +313,6 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             "TRANSLATE_MAX_RESPONSE_BYTES": max(
                 4096,
                 _to_int(cfg.get("translate_max_response_bytes") or 262144, 262144),
-            ),
-            "TRANSLATE_RECENT_CACHE_SIZE": max(
-                10, _to_int(cfg.get("translate_recent_cache_size") or 100, 100)
             ),
         },
         "plugins.karma": {

@@ -29,6 +29,7 @@ from functools import partial
 
 from utils.command import command, Role
 from utils.config import config
+from utils import message_cache
 from core_plugins import _core
 
 log = logging.getLogger(__name__)
@@ -42,8 +43,7 @@ PLUGIN_META = {
 }
 
 SED_KEY = "SED"
-CACHE_NAMESPACE = "sed"
-SED_CACHE_SIZE = int(config.get("sed_cache_size", 10) or 10)
+HANDLER_NAMESPACE = "sed-handler"
 
 # Hard timeout for regex substitution.
 REGEX_TIMEOUT = float(config.get("sed_regex_timeout", 1.0) or 1.0)
@@ -55,28 +55,43 @@ MAX_INPUT_LENGTH = int(config.get("sed_max_input_length", 5000) or 5000)
 MAX_OUTPUT_LENGTH = int(config.get("sed_max_output_length", 8000) or 8000)
 
 
-def get_last_message(room: str):
-    """Get the last message from cache."""
-    entry = _core.get_last_cached_message(CACHE_NAMESPACE, room)
+def _is_sed_command_entry(entry: dict) -> bool:
+    body = str(entry.get("body") or "").strip()
+    pattern, _replacement, _flags = parse_any_sed_command(body)
+    return pattern is not None
+
+
+def get_last_message(
+    bot,
+    conversation: str,
+    *,
+    exclude_stanza_id: str | None = None,
+):
+    """Get the latest non-sed message from the central cache."""
+    entry = bot.message_cache.get_last(
+        conversation,
+        predicate=lambda cached: not _is_sed_command_entry(cached),
+        exclude_stanza_id=exclude_stanza_id,
+    )
     if not entry:
         return None
     return entry.get("body")
 
 
-def get_message_by_id(room: str, msg_id: str):
-    """Get a message by stanza_id from cache."""
-    entry = _core.get_cached_message_by_id(CACHE_NAMESPACE, room, msg_id)
+def get_message_by_id(bot, conversation: str, msg_id: str):
+    """Get a message by stanza ID from the central cache."""
+    entry = bot.message_cache.get_by_id(conversation, msg_id)
     if not entry:
         return None
     return entry.get("body")
 
 
-def _room_key_from_msg(msg, is_room: bool) -> str:
-    if is_room:
-        return msg["from"].bare
-
-    room_full = str(msg["from"])
-    return room_full.split("/", 1)[0] if "/" in room_full else room_full
+def _room_key_from_msg(bot, msg, is_room: bool) -> str | None:
+    return message_cache.conversation_key(
+        msg,
+        is_room=is_room,
+        joined_rooms=bot.presence.joined_rooms,
+    )
 
 
 # ============================================================================
@@ -465,7 +480,7 @@ async def process_sed_correction(
     flags_str: str,
 ):
     """Process a sed correction."""
-    room = _room_key_from_msg(msg, is_room)
+    room = _room_key_from_msg(bot, msg, is_room)
     body = msg.get("body", "").strip()
     last_msg = None
 
@@ -479,10 +494,14 @@ async def process_sed_correction(
         reply_target_id = _core.get_reply_target(msg)
 
         if reply_target_id:
-            last_msg = get_message_by_id(room, reply_target_id)
+            last_msg = get_message_by_id(bot, room, reply_target_id)
 
-    if not last_msg:
-        last_msg = get_last_message(room)
+    if not last_msg and room:
+        last_msg = get_last_message(
+            bot,
+            room,
+            exclude_stanza_id=_core.get_stanza_id(msg),
+        )
 
     if not last_msg:
         _sed_reply(bot, msg,
@@ -584,7 +603,7 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
 
 
 async def on_message(bot, msg):
-    """Handle sed commands and cache normal messages."""
+    """Handle sed commands; the core owns message caching."""
     try:
         body = msg.get("body", "").strip()
 
@@ -596,12 +615,12 @@ async def on_message(bot, msg):
 
         stanza_id = _core.get_stanza_id(msg)
 
-        if not _core.remember_stanza(CACHE_NAMESPACE, stanza_id):
+        if not _core.remember_stanza(HANDLER_NAMESPACE, stanza_id):
             return
 
         is_room = msg.get("type") == "groupchat"
         nick = msg.get("mucnick") if is_room else None
-        room = _room_key_from_msg(msg, is_room)
+        room = _room_key_from_msg(bot, msg, is_room)
 
         if is_room:
             store = await get_sed_store(bot)
@@ -632,15 +651,6 @@ async def on_message(bot, msg):
             )
             return
 
-        _core.cache_message(
-            CACHE_NAMESPACE,
-            room,
-            nick,
-            body,
-            stanza_id,
-            maxlen=SED_CACHE_SIZE,
-        )
-
     except Exception as exc:
         log.exception("[SED] Error in on_message: %s", exc)
 
@@ -669,30 +679,20 @@ def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> 
     )
 
 
-def _sed_cache_counts(room_jid: str | None = None) -> tuple[int, int]:
-    caches = getattr(_core, "_SHARED_MESSAGE_CACHES", {})
-    room_cache = caches.get(CACHE_NAMESPACE, {}) if hasattr(caches, "get") else {}
-    if not isinstance(room_cache, dict):
-        return 0, 0
-    if room_jid:
-        target = str(room_jid).split('/', 1)[0].strip().lower()
-        matching = [
-            entries for room, entries in room_cache.items()
-            if str(room).split('/', 1)[0].strip().lower() == target
-        ]
-        return len(matching), sum(len(entries) for entries in matching)
-    return len(room_cache), sum(len(entries) for entries in room_cache.values())
+def _sed_cache_counts(bot, room_jid: str | None = None) -> tuple[int, int]:
+    stats = bot.message_cache.stats(room_jid)
+    return int(stats["conversations"]), int(stats["messages"])
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
     """Return small sed counters for diagnostics."""
     enabled_rooms = await _core._get_enabled_rooms(bot, SED_KEY, "sed")
-    cached_rooms, cached_messages = _sed_cache_counts(room_jid)
+    cached_rooms, cached_messages = _sed_cache_counts(bot, room_jid)
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
         "cached_rooms": cached_rooms,
         "cached_messages": cached_messages,
-        "cache_size": SED_CACHE_SIZE,
+        "cache_size": bot.message_cache.max_messages,
         "regex_timeout": REGEX_TIMEOUT,
     }
 
