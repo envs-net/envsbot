@@ -5,7 +5,7 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms"],

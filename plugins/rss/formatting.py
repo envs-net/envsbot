@@ -124,8 +124,23 @@ def _build_rss_template_context(
 
 
 def _render_rss_template(template: str, context: dict[str, str]) -> str:
-    """Render a validated RSS template with entry context."""
-    return Template(template).substitute(context).strip()
+    """Render a validated RSS template while preserving useful spacing.
+
+    Leading and ordinary trailing whitespace is still normalized, but an
+    explicitly configured trailing line break is retained. More than two
+    trailing line breaks are capped at two so a template can create one blank
+    separator line without producing an excessive vertical gap.
+    """
+    rendered = Template(template).substitute(context)
+    trailing = rendered[len(rendered.rstrip("\r\n")) :]
+    body = rendered.strip()
+    if not body or not trailing:
+        return body
+
+    line_breaks = trailing.count("\n") + trailing.count("\r")
+    if "\r\n" in trailing:
+        line_breaks -= trailing.count("\r\n")
+    return body + "\n" * min(2, max(1, line_breaks))
 
 
 def _build_rss_message_from_context(

@@ -191,6 +191,15 @@ def test_rss_template_validation_and_input_normalization(monkeypatch):
     assert rss._normalize_rss_template_input(" $title\\n$link ") == "$title\n$link"
 
 
+def test_rss_template_rendering_preserves_one_trailing_separator_line():
+    context = dict(rss._SAMPLE_TEMPLATE_CONTEXT)
+
+    assert rss._render_rss_template("$title", context) == "Example entry"
+    assert rss._render_rss_template("$title\n", context) == "Example entry\n"
+    assert rss._render_rss_template("$title\n\n", context) == "Example entry\n\n"
+    assert rss._render_rss_template("$title\n\n\n\n", context) == "Example entry\n\n"
+
+
 @pytest.mark.asyncio
 async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
     bot = make_bot()
