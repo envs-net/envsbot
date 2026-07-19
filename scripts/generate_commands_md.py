@@ -274,11 +274,60 @@ def _rss_notes() -> list[str]:
     ]
 
 
+def _translate_notes() -> list[str]:
+    return [
+        "## Translation forms and message contexts",
+        "",
+        "Translate text with an explicit source language, automatic source-language detection, or the short target-only form:",
+        "",
+        "```text",
+        f"{PREFIX}tr en uk Hello, world!",
+        f"{PREFIX}tr auto pl Guten Morgen",
+        f"{PREFIX}tr de Hello, world!",
+        "```",
+        "",
+        "Language arguments use supported ISO or BCP-47 codes such as `de`, `en`, `pl`, `uk`, `pt-BR` or `zh-CN`. `auto` is valid only as the source language.",
+        "",
+        "The command works in public rooms, MUC private messages and normal direct chats. Reply to an existing message and omit the text to translate the replied-to message:",
+        "",
+        "```text",
+        f"{PREFIX}tr de",
+        f"{PREFIX}tr en uk",
+        "```",
+        "",
+        "Reply targets are resolved through the shared persistent message cache. Native XEP-0461 replies and client-provided visible fallback quotes are supported in all three message contexts.",
+        "",
+        "## Room setting",
+        "",
+        "Public-room and MUC-PM use is controlled per room. Inside the room or a MUC PM, use:",
+        "",
+        "```text",
+        f"{PREFIX}translate status",
+        f"{PREFIX}translate on",
+        f"{PREFIX}translate off",
+        f"{PREFIX}rooms enable translate",
+        f"{PREFIX}rooms disable translate",
+        "```",
+        "",
+        "From a normal direct chat, pass the target room JID to the `rooms` command:",
+        "",
+        "```text",
+        f"{PREFIX}rooms enable room@conference.example.org translate",
+        f"{PREFIX}rooms disable room@conference.example.org translate",
+        "```",
+        "",
+        "Direct translation in a normal private chat does not depend on a room toggle.",
+        "",
+    ]
+
+
 def _plugin_extra_notes(name: str) -> list[str]:
     if name == "reminder":
         return _reminder_notes()
     if name == "rss":
         return _rss_notes()
+    if name == "translate":
+        return _translate_notes()
     return []
 
 

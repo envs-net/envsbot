@@ -178,6 +178,46 @@ async def test_translate_command_translates_direct_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_translate_command_translates_direct_text_in_muc_pm(monkeypatch):
+    room = "room@conference.example.org"
+    bot = _bot_with_cache(room=room)
+    msg = make_message(
+        ",tr de Hello from a MUC PM",
+        room=room,
+        msg_type="chat",
+    )
+    monkeypatch.setattr(_core, "_is_muc_pm", lambda _msg: True)
+    monkeypatch.setattr(
+        _core, "handle_room_toggle_command", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    worker = AsyncMock(return_value=translate.TranslationResult("Hallo aus einer MUC-PM", "en"))
+    monkeypatch.setattr(translate, "translate_text", worker)
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["de", "Hello", "from", "a", "MUC", "PM"],
+        msg,
+        False,
+    )
+
+    worker.assert_awaited_once_with(
+        "Hello from a MUC PM",
+        target_language="de",
+        source_language="auto",
+    )
+    bot.reply.assert_called_once_with(
+        msg,
+        "Hallo aus einer MUC-PM",
+        mention=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_translate_command_quotes_original_text_in_room(monkeypatch):
     bot = _bot_with_cache()
     msg = make_message(",tr de hello world")
@@ -242,6 +282,71 @@ async def test_translate_command_uses_cached_reply_target(monkeypatch):
         "> Hello from the cache\n\nПривіт із кешу",
         mention=False,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sender", "joined_room", "conversation"),
+    [
+        ("alice@example.org", "room@conference.example.org", "alice@example.org"),
+        (
+            "room@conference.example.org",
+            "room@conference.example.org",
+            "mucpm:room@conference.example.org/alice",
+        ),
+    ],
+    ids=["direct-message", "muc-pm"],
+)
+async def test_translate_command_uses_cached_reply_in_private_contexts(
+    monkeypatch,
+    sender,
+    joined_room,
+    conversation,
+):
+    bot = _bot_with_cache(room=joined_room)
+    msg = make_message(
+        ",tr de",
+        room=sender,
+        msg_type="chat",
+        reply_id="private-original",
+    )
+    await bot.message_cache.add_entry(
+        {
+            "conversation": conversation,
+            "nick": "alice",
+            "body": "Hello from a private reply",
+            "stanza_id": "private-original",
+        }
+    )
+    monkeypatch.setattr(
+        _core,
+        "_is_muc_pm",
+        lambda _msg: sender == "room@conference.example.org",
+    )
+    monkeypatch.setattr(
+        _core, "handle_room_toggle_command", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    worker = AsyncMock(return_value=translate.TranslationResult("Hallo privat", "en"))
+    monkeypatch.setattr(translate, "translate_text", worker)
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["de"],
+        msg,
+        False,
+    )
+
+    worker.assert_awaited_once_with(
+        "Hello from a private reply",
+        target_language="de",
+        source_language="auto",
+    )
+    bot.reply.assert_called_once_with(msg, "Hallo privat", mention=False)
 
 
 @pytest.mark.asyncio
@@ -437,12 +542,66 @@ async def test_groupchat_handler_skips_own_and_non_commands():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "room",
+    ["alice@example.org", "room@conference.example.org"],
+    ids=["direct-message", "muc-pm"],
+)
+async def test_private_handler_redispatches_quote_fallback_command(room):
+    bot = _bot_with_cache(room="room@conference.example.org")
+    msg = make_message(
+        "> Original private text\n,tr de",
+        room=room,
+        msg_type="chat",
+        stanza_id=f"private-reply-{room}",
+    )
+
+    await translate._on_private_message(bot, msg)
+
+    bot.handle_command.assert_awaited_once_with(
+        ",tr de",
+        msg["from"],
+        None,
+        msg,
+        False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_private_handler_ignores_non_private_messages_and_non_commands():
+    bot = _bot_with_cache()
+
+    await translate._on_private_message(
+        bot,
+        make_message(
+            "> Original\n,tr de",
+            msg_type="groupchat",
+            stanza_id="not-private",
+        ),
+    )
+    await translate._on_private_message(
+        bot,
+        make_message(
+            "> Original\nregular text",
+            room="alice@example.org",
+            msg_type="chat",
+            stanza_id="not-command",
+        ),
+    )
+
+    bot.handle_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_doctor_and_on_load(monkeypatch):
     register_event = Mock()
     bot = SimpleNamespace(bot_plugins=SimpleNamespace(register_event=register_event))
 
     await translate.on_load(bot)
-    assert register_event.call_args.args[:2] == ("translate", "groupchat_message")
+    assert [call.args[:2] for call in register_event.call_args_list] == [
+        ("translate", "groupchat_message"),
+        ("translate", "message"),
+    ]
 
     global_lines = await translate.doctor(bot)
     assert global_lines[0].startswith("✅ Translate:")

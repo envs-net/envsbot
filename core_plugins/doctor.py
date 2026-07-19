@@ -24,7 +24,7 @@ from utils.version import display_version
 
 PLUGIN_META = {
     "name": "doctor",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Operator health checks and runtime diagnostics.",
     "category": "core",
 }
@@ -35,6 +35,7 @@ _PLUGIN_HEALTH_PLUGINS = (
     "reminder",
     "pin",
     "weather",
+    "translate",
     "urlcheck",
     "birthday_notify",
     "ducks",
@@ -78,6 +79,8 @@ _SECTION_ALIASES = {
     "reminder": "plugin:reminder",
     "pin": "plugin:pin",
     "weather": "plugin:weather",
+    "translate": "plugin:translate",
+    "tr": "plugin:translate",
     "urlcheck": "plugin:urlcheck",
     "birthday": "plugin:birthday_notify",
     "birthday_notify": "plugin:birthday_notify",
@@ -700,13 +703,14 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
     "doctor",
     role=Role.ADMIN,
     aliases=["bot doctor", "healthcheck", "bot health"],
-    short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness.",
-    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all|full] [page|last|all]",
+    short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness.",
+    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]",
     examples=[
         "{prefix}doctor",
         "{prefix}doctor full",
         "{prefix}doctor all",
         "{prefix}doctor rss",
+        "{prefix}doctor translate",
         "{prefix}doctor tasks full",
         "{prefix}doctor release",
     ],

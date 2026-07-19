@@ -95,7 +95,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `sed` | `plugins` | `tools` | Message correction using sed-like syntax | [`docs/plugins/sed.md`](plugins/sed.md) |
 | `tell` | `plugins` | `utility` | Store and deliver messages for users when they join a room again. | [`docs/plugins/tell.md`](plugins/tell.md) |
 | `tools` | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion | [`docs/plugins/tools.md`](plugins/tools.md) |
-| `translate` | `plugins` | `utility` | Translate text or replied-to room messages with optional source-language auto-detection. | [`docs/plugins/translate.md`](plugins/translate.md) |
+| `translate` | `plugins` | `utility` | Translate text or replied-to messages with optional source-language auto-detection. | [`docs/plugins/translate.md`](plugins/translate.md) |
 | `urlcheck` | `plugins` | `info` | URL title and YouTube info fetcher for groupchats | [`docs/plugins/urlcheck.md`](plugins/urlcheck.md) |
 | `vcard` | `plugins` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only | [`docs/plugins/vcard.md`](plugins/vcard.md) |
 | `weather` | `plugins` | `info` | Gives weather according to users location or an explicit city/ZIP code | [`docs/plugins/weather.md`](plugins/weather.md) |
@@ -133,7 +133,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config show` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config unset` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Reset one runtime-writable config value to the config_sample.py default. |
 | `,config validate` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
-| `,doctor` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness. |
+| `,doctor` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness. |
 | `,doctor failed` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
 | `,doctor release` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata. |
 | `,doctor warnings` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |
@@ -258,7 +258,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,tell` | [`tell`](plugins/tell.md) | `user` | `any` | Leave a message for another user. |
 | `,time` | [`tools`](plugins/tools.md) | `user` | `any` | Show the current time from a stored profile timezone. |
 | `,tools` | [`tools`](plugins/tools.md) | `moderator` | `room or MUC PM` | Enable, disable or show room access to utility commands. |
-| `,translate` | [`translate`](plugins/translate.md) | `user` | `any` | Translate text or a replied-to room message. |
+| `,translate` | [`translate`](plugins/translate.md) | `user` | `any` | Translate text or a replied-to message. |
 | `,ts` | [`tools`](plugins/tools.md) | `user` | `any` | Convert a Unix timestamp to your configured timezone. |
 | `,urlcheck` | [`urlcheck`](plugins/urlcheck.md) | `user` | `room or MUC PM` | Enable, disable or show automatic URL checks in a room. |
 | `,utc` | [`tools`](plugins/tools.md) | `user` | `any` | Show current UTC time. |

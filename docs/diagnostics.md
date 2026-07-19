@@ -16,9 +16,9 @@ The doctor command checks:
 - loaded/available plugins and registered commands
 - supervised background task summary
 - backup directory and retention settings
-- plugin-provided health checks for RSS, IdleRPG, reminders, pins, weather, URLCheck, birthdays, ducks, tell and karma
+- plugin-provided health checks for RSS, IdleRPG, reminders, pins, weather, translate, URLCheck, birthdays, ducks, tell and karma
 
-Useful sections include `config`, `database`, `rooms`, `plugins`, `tasks`, `backups`, `network`, `plugin-health` and selected plugin names such as `rss`, `idlerpg`, `weather` or `urlcheck`.
+Useful sections include `config`, `database`, `rooms`, `plugins`, `tasks`, `backups`, `network`, `plugin-health` and selected plugin names such as `rss`, `idlerpg`, `weather`, `translate` or `urlcheck`.
 
 Examples:
 
@@ -30,6 +30,7 @@ Examples:
 ,doctor tasks
 ,doctor rss
 ,doctor idlerpg
+,doctor translate
 ```
 
 ## Room diagnostics

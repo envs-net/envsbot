@@ -11,7 +11,7 @@ Automatic source-language detection::
     {prefix}tr uk Hallo Welt!
     {prefix}tr auto uk Hallo Welt!
 
-Reply to a room message and omit the text::
+Reply to a message in a room, MUC PM or direct chat and omit the text::
 
     {prefix}tr en uk
     {prefix}tr uk
@@ -43,9 +43,9 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": (
-        "Translate text or replied-to room messages with optional "
+        "Translate text or replied-to messages with optional "
         "source-language auto-detection."
     ),
     "category": "utility",
@@ -365,13 +365,14 @@ async def _room_translation_enabled(bot, msg, is_room: bool) -> bool:
     "translate",
     role=Role.USER,
     aliases=["tr"],
-    short="Translate text or a replied-to room message.",
+    short="Translate text or a replied-to message.",
     usage="{prefix}tr [from] <to> [text or reply]",
     examples=[
         "{prefix}tr en uk Hello, world!",
         "{prefix}tr uk Hallo Welt!",
-        "Reply to a message with {prefix}tr en uk",
-        "Reply to a message with {prefix}tr uk",
+        "{prefix}tr auto pl Guten Morgen",
+        "Reply in a room, MUC PM or private chat with {prefix}tr en uk",
+        "Reply in a room, MUC PM or private chat with {prefix}tr uk",
         "{prefix}translate status",
         "{prefix}rooms enable translate",
     ],
@@ -379,7 +380,7 @@ async def _room_translation_enabled(bot, msg, is_room: bool) -> bool:
     context="any",
 )
 async def translate_command(bot, sender_jid, nick, args, msg, is_room):
-    """Translate text, or the replied-to room message when text is omitted."""
+    """Translate text, or the replied-to message when text is omitted."""
     del sender_jid, nick
 
     if is_room or _core._is_muc_pm(msg):
@@ -451,13 +452,18 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(msg, response, mention=False)
 
 
-async def _on_groupchat_message(bot, msg) -> None:
-    """Redispatch a quoted XEP-0461 fallback while keeping `,tr` unchanged."""
+async def _redispatch_reply_fallback(bot, msg, *, is_room: bool) -> None:
+    """Redispatch a quoted XEP-0461 command through normal command routing."""
     try:
-        if msg.get("type") != "groupchat":
+        msg_type = str(msg.get("type") or "")
+        if is_room:
+            if msg_type != "groupchat" or _is_own_room_message(bot, msg):
+                return
+        elif msg_type not in {"chat", "normal"}:
             return
+
         body = str(msg.get("body", "") or "").strip()
-        if not body or _is_own_room_message(bot, msg):
+        if not body:
             return
 
         quote = _core.extract_reply_quote(body)
@@ -474,12 +480,22 @@ async def _on_groupchat_message(bot, msg) -> None:
         await bot.handle_command(
             command_body,
             msg["from"],
-            _safe_room_nick(msg),
+            _safe_room_nick(msg) if is_room else None,
             msg,
-            True,
+            is_room,
         )
     except Exception:
         log.exception("[TRANSLATE] Error handling reply fallback command")
+
+
+async def _on_groupchat_message(bot, msg) -> None:
+    """Handle a visible XEP-0461 fallback in a public room."""
+    await _redispatch_reply_fallback(bot, msg, is_room=True)
+
+
+async def _on_private_message(bot, msg) -> None:
+    """Handle a visible XEP-0461 fallback in a MUC PM or direct chat."""
+    await _redispatch_reply_fallback(bot, msg, is_room=False)
 
 
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
@@ -503,8 +519,14 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
 
 
 async def on_load(bot) -> None:
+    """Register reply-fallback handlers for room and private messages."""
     bot.bot_plugins.register_event(
         "translate",
         "groupchat_message",
         partial(_on_groupchat_message, bot),
+    )
+    bot.bot_plugins.register_event(
+        "translate",
+        "message",
+        partial(_on_private_message, bot),
     )

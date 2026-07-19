@@ -54,7 +54,7 @@ HELP_KEY = "HELP"
 
 PLUGIN_META = {
     "name": "help",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
     "requires": ["_core"],
@@ -78,6 +78,7 @@ ROOM_FEATURE_HELP = {
     "sed": {"feature": "sed", "command": "sed"},
     "tell": {"feature": "tell", "command": "tell"},
     "tools": {"feature": "tools", "command": "tools"},
+    "translate": {"feature": "translate", "command": "translate"},
     "urlcheck": {"feature": "urlcheck", "command": "urlcheck"},
     "vcard": {"feature": "vcard", "command": "vcard"},
     "weather": {"feature": "weather", "command": "weather"},

@@ -15,12 +15,12 @@ Operator health checks and runtime diagnostics.
 
 ### `,doctor`
 
-Run operator health checks for config, DB, rooms, plugins, tasks, backups, network, RSS and release readiness.
+Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|rss|release|all|full] [page|last|all]`
+Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]`
 
 Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
 
@@ -30,6 +30,7 @@ Examples:
 - `,doctor full`
 - `,doctor all`
 - `,doctor rss`
+- `,doctor translate`
 - `,doctor tasks full`
 - `,doctor release`
 

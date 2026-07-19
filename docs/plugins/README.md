@@ -34,7 +34,7 @@ python scripts/generate_commands_md.py
 | [`sed`](sed.md) | `plugins` | `tools` | Message correction using sed-like syntax |
 | [`tell`](tell.md) | `plugins` | `utility` | Store and deliver messages for users when they join a room again. |
 | [`tools`](tools.md) | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, and Unix timestamp conversion |
-| [`translate`](translate.md) | `plugins` | `utility` | Translate text or replied-to room messages with optional source-language auto-detection. |
+| [`translate`](translate.md) | `plugins` | `utility` | Translate text or replied-to messages with optional source-language auto-detection. |
 | [`urlcheck`](urlcheck.md) | `plugins` | `info` | URL title and YouTube info fetcher for groupchats |
 | [`vcard`](vcard.md) | `plugins` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only |
 | [`weather`](weather.md) | `plugins` | `info` | Gives weather according to users location or an explicit city/ZIP code |

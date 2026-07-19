@@ -219,6 +219,34 @@ def test_parse_doctor_sections_supports_release_aliases():
     assert doctor._parse_doctor_sections(["preflight"])[1] == ("release",)
 
 
+def test_translate_is_in_full_plugin_health_and_has_focused_aliases():
+    assert "translate" in doctor._PLUGIN_HEALTH_PLUGINS
+    assert doctor._parse_doctor_sections(["translate"])[1] == (
+        "plugin:translate",
+    )
+    assert doctor._parse_doctor_sections(["tr"])[1] == (
+        "plugin:translate",
+    )
+
+
+@pytest.mark.asyncio
+async def test_full_plugin_health_calls_translate_doctor():
+    checked = []
+
+    async def plugin_doctor(name, room_jid=None):
+        checked.append((name, room_jid))
+        return [f"✅ {name}: healthy"]
+
+    bot = SimpleNamespace(
+        bot_plugins=SimpleNamespace(plugin_doctor=plugin_doctor),
+    )
+
+    lines = await doctor._section_lines(bot, "plugin-health", full=True)
+
+    assert ("translate", None) in checked
+    assert "✅ translate: healthy" in lines
+
+
 def test_parse_doctor_sections_full_selects_every_section():
     full, sections, page_args = doctor._parse_doctor_sections(["full"])
 

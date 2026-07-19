@@ -755,6 +755,69 @@ async def test_plugin_help_includes_room_feature_controls(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_translate_help_includes_complete_context_and_room_controls(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def translate_handler(*_args, **_kwargs):
+        """Translate command."""
+
+    translate_cmd = command_utils.Command(
+        name="translate",
+        handler=translate_handler,
+        role=command_utils.Role.USER,
+        aliases=["tr"],
+        short="Translate text or a replied-to message.",
+        usage="{prefix}tr [from] <to> [text or reply]",
+        examples=[
+            "{prefix}tr en uk Hello, world!",
+            "Reply in a room, MUC PM or private chat with {prefix}tr de",
+        ],
+        category="utility",
+        context="any",
+    )
+    registry.register("translate", translate_cmd, "translate")
+    registry.register("tr", translate_cmd, "translate")
+
+    plugins = {
+        "translate": SimpleNamespace(
+            __doc__="Translate plugin",
+            __name__="translate",
+            PLUGIN_META={
+                "name": "translate",
+                "version": "0.1.2",
+                "description": "Translate text or replied-to messages.",
+                "category": "utility",
+                "requires": ["rooms", "_core"],
+            },
+        )
+    }
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.USER)
+    msg = DummyMsg(body=",help translate")
+
+    await help_plugin.cmd_help(
+        bot,
+        "user@host",
+        "Nick",
+        ["translate"],
+        msg,
+        True,
+    )
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Plugin: translate" in reply
+    assert "Context: room, MUC PM or private chat" in reply
+    assert "Aliases: ,tr" in reply
+    assert "Reply in a room, MUC PM or private chat with ,tr de" in reply
+    assert "Room setting:" in reply
+    assert "Feature name: translate" in reply
+    assert ",rooms enable translate" in reply
+    assert ",rooms enable room@conference.example.org translate" in reply
+    assert ",translate on|off|status" in reply
+
+
+@pytest.mark.asyncio
 async def test_room_feature_help_page_lists_feature_names(monkeypatch):
     monkeypatch.setattr(
         help_plugin,
@@ -816,6 +879,10 @@ def test_room_feature_help_helpers():
     assert help_plugin._feature_alias_text({"aliases": ["info"]}) == " (alias: info)"
     assert help_plugin._feature_alias_text({}) == ""
     assert help_plugin._room_feature_entry("ducks")["feature"] == "ducks"
+    assert help_plugin._room_feature_entry("translate") == {
+        "feature": "translate",
+        "command": "translate",
+    }
     assert help_plugin._room_feature_entry("missing") is None
 
 
