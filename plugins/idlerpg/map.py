@@ -11,7 +11,7 @@ def _map_region_name(x: int | float, y: int | float) -> str:
         py = float(y)
     except (TypeError, ValueError):
         return "the wilderness"
-    for region in MAP_REGIONS:
+    for region in _dep_constants.MAP_REGIONS:
         if (
             float(region["x1"]) <= px <= float(region["x2"])
             and float(region["y1"]) <= py <= float(region["y2"])
@@ -42,7 +42,7 @@ def _quest_route_points(quest: dict[str, Any] | None) -> list[tuple[int, int]]:
     for point in route:
         if not isinstance(point, list | tuple) or len(point) < 2:
             continue
-        points.append((_clamp_grid_coord(point[0], MAP_X), _clamp_grid_coord(point[1], MAP_Y)))
+        points.append((_clamp_grid_coord(point[0], _dep_config.MAP_X), _clamp_grid_coord(point[1], _dep_config.MAP_Y)))
     return points
 
 
@@ -74,10 +74,10 @@ def _questers_at_target(
         player = players.get(jid)
         if not isinstance(player, dict):
             return False
-        if room_jid is not None and not _is_player_online(room_jid, jid, player):
+        if room_jid is not None and not _dep_state._is_player_online(room_jid, jid, player):
             return False
-        x = _clamp_grid_coord(player.get("x", 0), MAP_X)
-        y = _clamp_grid_coord(player.get("y", 0), MAP_Y)
+        x = _clamp_grid_coord(player.get("x", 0), _dep_config.MAP_X)
+        y = _clamp_grid_coord(player.get("y", 0), _dep_config.MAP_Y)
         if (x, y) != target:
             return False
     return True
@@ -94,17 +94,17 @@ def _step_toward(current: int, target: int, step_size: int) -> int:
 def _move_random_grid_step(player: dict[str, Any], step_size: int) -> None:
     player["x"] = _clamp_grid_coord(
         int(player.get("x", 0) or 0) + random.choice((-step_size, 0, step_size)),
-        MAP_X,
+        _dep_config.MAP_X,
     )
     player["y"] = _clamp_grid_coord(
         int(player.get("y", 0) or 0) + random.choice((-step_size, 0, step_size)),
-        MAP_Y,
+        _dep_config.MAP_Y,
     )
 
 
 def _move_toward_quest_target(player: dict[str, Any], target: tuple[int, int], step_size: int) -> None:
-    current_x = _clamp_grid_coord(player.get("x", 0), MAP_X)
-    current_y = _clamp_grid_coord(player.get("y", 0), MAP_Y)
+    current_x = _clamp_grid_coord(player.get("x", 0), _dep_config.MAP_X)
+    current_y = _clamp_grid_coord(player.get("y", 0), _dep_config.MAP_Y)
     player["x"] = _step_toward(current_x, target[0], step_size)
     player["y"] = _step_toward(current_y, target[1], step_size)
 
@@ -126,7 +126,7 @@ def _move_player(
     directed movement is intentionally slower than random walking, mirroring the
     original game's grid quest behaviour.
     """
-    step_size = max(0, int(MAP_STEP_PER_SECOND or 0))
+    step_size = max(0, int(_dep_config.MAP_STEP_PER_SECOND or 0))
     if step_size <= 0:
         return
     try:
@@ -140,12 +140,12 @@ def _move_player(
     target = _active_quest_target(quest)
     questers = {str(value) for value in quest.get("questers", [])} if isinstance(quest, dict) else set()
     if target is not None and jid is not None and str(jid) in questers:
-        directed_steps = elapsed // max(1, int(QUEST_GRID_STEP_SECONDS or 1))
+        directed_steps = elapsed // max(1, int(_dep_config.QUEST_GRID_STEP_SECONDS or 1))
         for _ in range(directed_steps):
             _move_toward_quest_target(player, target, step_size)
             if (
-                _clamp_grid_coord(player.get("x", 0), MAP_X),
-                _clamp_grid_coord(player.get("y", 0), MAP_Y),
+                _clamp_grid_coord(player.get("x", 0), _dep_config.MAP_X),
+                _clamp_grid_coord(player.get("y", 0), _dep_config.MAP_Y),
             ) == target:
                 break
         return
@@ -171,8 +171,8 @@ def _render_ascii_map(
 ) -> list[str]:
     width = max(8, min(40, int(width or 24)))
     height = max(4, min(16, int(height or 10)))
-    map_width = max(1, int(MAP_X) or 1)
-    map_height = max(1, int(MAP_Y) or 1)
+    map_width = max(1, int(_dep_config.MAP_X) or 1)
+    map_height = max(1, int(_dep_config.MAP_Y) or 1)
     grid = [["." for _ in range(width)] for _ in range(height)]
     legend: list[str] = []
 
@@ -196,12 +196,15 @@ def _render_ascii_map(
         col = max(0, min(width - 1, int((x / map_width) * (width - 1))))
         row = max(0, min(height - 1, int((y / map_height) * (height - 1))))
         grid[row][col] = marker if grid[row][col] == "." else "*"
-        status = "online" if _is_player_online(room_jid, jid, player) else "offline"
+        status = "online" if _dep_state._is_player_online(room_jid, jid, player) else "offline"
         legend.append(
-            f"{marker} {_display_player(player)} [{x},{y}] lv.{player.get('level', 0)} {status}"
+            f"{marker} {_dep_formatting._display_player(player)} [{x},{y}] lv.{player.get('level', 0)} {status}"
         )
 
-    lines = [f"🗺️ IdleRPG map for {room_jid}: {MAP_X}x{MAP_Y}"]
+    lines = [
+        f"🗺️ IdleRPG map for {room_jid}: "
+        f"{_dep_config.MAP_X}x{_dep_config.MAP_Y}"
+    ]
     lines.append("+" + "-" * width + "+")
     lines.extend("|" + "".join(row) + "|" for row in grid)
     lines.append("+" + "-" * width + "+")
@@ -215,3 +218,10 @@ def _render_ascii_map(
     if isinstance(quest, dict) and quest.get("active") and quest.get("route"):
         lines.append("Q = active quest route point")
     return lines
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import state as _dep_state  # noqa: E402

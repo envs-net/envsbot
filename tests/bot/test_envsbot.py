@@ -650,7 +650,7 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
 
 @pytest.mark.asyncio
 async def test_room_role_from_presence_elevates_only_room_admins(monkeypatch, bot):
-    import core_plugins.rooms as rooms_mod
+    import bot.room_state as rooms_mod
 
     monkeypatch.setattr(rooms_mod, "JOINED_ROOMS", {
         "room@conf": {
@@ -1198,4 +1198,3 @@ def test_configured_rate_limit_bypass_role_edges(monkeypatch):
 
     monkeypatch.setattr(envsbot, "config", {})
     assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.MODERATOR
-

@@ -19,7 +19,7 @@ from utils.config import BASE_DIR
 
 
 def _export_root() -> Path:
-    path = Path(EXPORT_PATH)
+    path = Path(_dep_config.EXPORT_PATH)
     if not path.is_absolute():
         path = BASE_DIR / path
     return path
@@ -27,34 +27,34 @@ def _export_root() -> Path:
 
 def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
     title_key = str(player.get("title") or "")
-    display_name = _display_player(player)
+    display_name = _dep_formatting._display_player(player)
     return {
         "rank": rank,
         "name": display_name,
         "character": display_name,
         "class": str(player.get("class") or "idler"),
-        "title": _achievement_title(title_key) if title_key else "",
+        "title": _dep_leveling._achievement_title(title_key) if title_key else "",
         "title_key": title_key,
         "level": int(player.get("level", 0) or 0),
         "ttl": int(player.get("next", 0) or 0),
         "time_to_level": int(player.get("next", 0) or 0),
-        "alignment": _alignment_name(player.get("alignment")),
+        "alignment": _dep_formatting._alignment_name(player.get("alignment")),
         "idled": int(player.get("idled", 0) or 0),
-        "played_for": max(0, _now() - _created_at(player)) if _created_at(player) > 0 else 0,
-        "item_sum": _item_sum(player),
+        "played_for": max(0, _dep_formatting._now() - _dep_formatting._created_at(player)) if _dep_formatting._created_at(player) > 0 else 0,
+        "item_sum": _dep_items._item_sum(player),
         "items": dict(player.get("items", {}) if isinstance(player.get("items"), dict) else {}),
         "unique_items": dict(player.get("unique_items", {}) if isinstance(player.get("unique_items"), dict) else {}),
-        "unique_item_bonuses": _unique_bonuses(player),
-        "stats": dict(_stats(player)),
+        "unique_item_bonuses": _dep_items._unique_bonuses(player),
+        "stats": dict(_dep_leveling._stats(player)),
         "achievements": [
-            {"key": key, "title": _achievement_title(key), "description": _achievement_description(key)}
+            {"key": key, "title": _dep_leveling._achievement_title(key), "description": _dep_leveling._achievement_description(key)}
             for key in player.get("achievements", [])
-            if key in ACHIEVEMENTS
+            if key in _dep_constants.ACHIEVEMENTS
         ],
         "x": int(player.get("x", 0) or 0),
         "y": int(player.get("y", 0) or 0),
-        "region": _player_region(player),
-        "online": _is_player_online(room_jid, str(jid), player),
+        "region": _dep_map._player_region(player),
+        "online": _dep_state._is_player_online(room_jid, str(jid), player),
         "logged_out": bool(player.get("logged_out", False)),
         "created_at": int(player.get("created_at", 0) or 0),
         "last_seen": int(player.get("last_seen", 0) or 0),
@@ -69,9 +69,9 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
 
 
 def _public_url(*parts: str) -> str:
-    if not EXPORT_PUBLIC_BASE_URL:
+    if not _dep_config.EXPORT_PUBLIC_BASE_URL:
         return ""
-    return "/".join([EXPORT_PUBLIC_BASE_URL, *[part.strip("/") for part in parts if part]])
+    return "/".join([_dep_config.EXPORT_PUBLIC_BASE_URL, *[part.strip("/") for part in parts if part]])
 
 
 def _safe_event_kind(kind: str) -> str:
@@ -122,7 +122,7 @@ def _prune_events(room: dict[str, Any]) -> None:
     if not isinstance(events, list):
         room["events"] = []
         return
-    cutoff = _now() - max(0, EVENT_RETENTION_DAYS) * 86400 if EVENT_RETENTION_DAYS > 0 else 0
+    cutoff = _dep_formatting._now() - max(0, _dep_config.EVENT_RETENTION_DAYS) * 86400 if _dep_config.EVENT_RETENTION_DAYS > 0 else 0
     pruned = []
     for event in events:
         if not isinstance(event, dict):
@@ -130,7 +130,7 @@ def _prune_events(room: dict[str, Any]) -> None:
         if cutoff and int(event.get("ts", 0) or 0) < cutoff:
             continue
         pruned.append(event)
-    room["events"] = pruned[-max(1, EVENT_LOG_LIMIT):]
+    room["events"] = pruned[-max(1, _dep_config.EVENT_LOG_LIMIT):]
 
 
 def _record_event(
@@ -147,7 +147,7 @@ def _record_event(
         room["events"] = events
     _prune_events(room)
     events = room["events"]
-    entry: dict[str, Any] = {"ts": _now(), "kind": _safe_event_kind(kind), "text": _sanitize_public_text(text)[:500]}
+    entry: dict[str, Any] = {"ts": _dep_formatting._now(), "kind": _safe_event_kind(kind), "text": _sanitize_public_text(text)[:500]}
     player_names = [_public_player_name(player) for player in (players or [])]
     player_names = [player for player in player_names if player]
     if player_names:
@@ -161,7 +161,7 @@ def _record_event(
 
 def _event_public_record(event: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(event, dict):
-        return {"ts": _now(), "kind": "event", "text": ""}
+        return {"ts": _dep_formatting._now(), "kind": "event", "text": ""}
     payload = {
         "ts": int(event.get("ts", 0) or 0),
         "kind": _safe_event_kind(str(event.get("kind") or "event")),
@@ -190,79 +190,79 @@ def _room_events(room: dict[str, Any], *, limit: int | None = None) -> list[dict
 
 
 def _profile_url(room_jid: str, player: dict[str, Any]) -> str:
-    return _public_url(_room_slug(room_jid), "profiles", f"{_slug(_display_player(player))}.json")
+    return _public_url(_dep_formatting._room_slug(room_jid), "profiles", f"{_dep_formatting._slug(_dep_formatting._display_player(player))}.json")
 
 
 def _public_rules() -> dict[str, Any]:
     return {
-        "tick_seconds": TICK_SECONDS,
-        "rp_base": RP_BASE,
-        "rp_step": RP_STEP,
-        "penalty_step": PENALTY_STEP,
-        "message_penalty": MESSAGE_PENALTY,
-        "logout_penalty": LOGOUT_PENALTY,
-        "logout_grace_seconds": LOGOUT_GRACE_SECONDS,
-        "max_penalty": MAX_PENALTY,
-        "map_x": MAP_X,
-        "map_y": MAP_Y,
-        "map_step_per_second": MAP_STEP_PER_SECOND,
-        "map_step_per_tick": MAP_STEP_PER_TICK,
-        "grid_battle_enabled": GRID_BATTLE_ENABLED,
-        "quest_grid_step_seconds": QUEST_GRID_STEP_SECONDS,
-        "quest_time_enabled": QUEST_TIME_ENABLED,
-        "quest_grid_enabled": QUEST_GRID_ENABLED,
-        "quest_time_weight": QUEST_TIME_WEIGHT,
-        "quest_grid_weight": QUEST_GRID_WEIGHT,
-        "quest_time_min_duration": QUEST_TIME_MIN_DURATION,
-        "quest_time_max_duration": QUEST_TIME_MAX_DURATION,
-        "event_chance": EVENT_CHANCE,
-        "item_chance": ITEM_CHANCE,
-        "battle_event_weight": BATTLE_EVENT_WEIGHT,
-        "team_battle_event_weight": TEAM_BATTLE_EVENT_WEIGHT,
-        "boss_event_weight": BOSS_EVENT_WEIGHT,
-        "item_event_weight": ITEM_EVENT_WEIGHT,
-        "item_damage_event_weight": ITEM_DAMAGE_EVENT_WEIGHT,
-        "item_steal_event_weight": ITEM_STEAL_EVENT_WEIGHT,
-        "alignment_event_weight": ALIGNMENT_EVENT_WEIGHT,
-        "critical_strike_chance": CRITICAL_STRIKE_CHANCE,
-        "critical_strike_chance_good": CRITICAL_STRIKE_CHANCE_GOOD,
-        "critical_strike_chance_evil": CRITICAL_STRIKE_CHANCE_EVIL,
-        "item_drop_chance": ITEM_DROP_CHANCE,
-        "level_battle_chance_below_25": LEVEL_BATTLE_CHANCE_BELOW_25,
-        "level_battle_chance_at_25": LEVEL_BATTLE_CHANCE_AT_25,
-        "boss_min_players": BOSS_MIN_PLAYERS,
-        "boss_max_players": BOSS_MAX_PLAYERS,
-        "boss_min_level": BOSS_MIN_LEVEL,
-        "boss_reward_percent": BOSS_REWARD_PERCENT,
-        "boss_loss_percent": BOSS_LOSS_PERCENT,
-        "boss_power_min_factor": BOSS_POWER_MIN_FACTOR,
-        "boss_power_max_factor": BOSS_POWER_MAX_FACTOR,
-        "manual_duel_max_distance": MANUAL_DUEL_MAX_DISTANCE,
-        "manual_duel_cooldown_seconds": MANUAL_DUEL_COOLDOWN_SECONDS,
-        "announce_login": ANNOUNCE_LOGIN,
-        "announce_top_interval": ANNOUNCE_TOP_INTERVAL,
-        "announce_top_limit": ANNOUNCE_TOP_LIMIT,
-        "update_room_topic": UPDATE_ROOM_TOPIC,
-        "topic_update_interval": TOPIC_UPDATE_INTERVAL,
-        "topic_custom_text": TOPIC_CUSTOM_TEXT,
-        "unique_items_enabled": UNIQUE_ITEMS_ENABLED,
-        "unique_item_min_level": UNIQUE_ITEM_MIN_LEVEL,
-        "unique_item_chance": UNIQUE_ITEM_CHANCE,
-        "level_reward_min_level": LEVEL_REWARD_MIN_LEVEL,
-        "quest_min_level": QUEST_MIN_LEVEL,
-        "quest_min_online_seconds": QUEST_MIN_ONLINE_SECONDS,
-        "quest_interval": QUEST_INTERVAL,
-        "quest_min_duration": QUEST_MIN_DURATION,
-        "quest_max_duration": QUEST_MAX_DURATION,
-        "season_enabled": SEASON_ENABLED,
-        "season_duration_days": SEASON_DURATION_DAYS,
-        "season_reset_on_rollover": SEASON_RESET_ON_ROLLOVER,
-        "season_hof_size": SEASON_HOF_SIZE,
-        "season_achievement_gates_enabled": SEASON_ACHIEVEMENT_GATES_ENABLED,
-        "event_log_limit": EVENT_LOG_LIMIT,
-        "event_retention_days": EVENT_RETENTION_DAYS,
-        "export_event_limit": EXPORT_EVENT_LIMIT,
-        "export_top_limit": EXPORT_TOP_LIMIT,
+        "tick_seconds": _dep_config.TICK_SECONDS,
+        "rp_base": _dep_config.RP_BASE,
+        "rp_step": _dep_config.RP_STEP,
+        "penalty_step": _dep_config.PENALTY_STEP,
+        "message_penalty": _dep_config.MESSAGE_PENALTY,
+        "logout_penalty": _dep_config.LOGOUT_PENALTY,
+        "logout_grace_seconds": _dep_config.LOGOUT_GRACE_SECONDS,
+        "max_penalty": _dep_config.MAX_PENALTY,
+        "map_x": _dep_config.MAP_X,
+        "map_y": _dep_config.MAP_Y,
+        "map_step_per_second": _dep_config.MAP_STEP_PER_SECOND,
+        "map_step_per_tick": _dep_config.MAP_STEP_PER_TICK,
+        "grid_battle_enabled": _dep_config.GRID_BATTLE_ENABLED,
+        "quest_grid_step_seconds": _dep_config.QUEST_GRID_STEP_SECONDS,
+        "quest_time_enabled": _dep_config.QUEST_TIME_ENABLED,
+        "quest_grid_enabled": _dep_config.QUEST_GRID_ENABLED,
+        "quest_time_weight": _dep_config.QUEST_TIME_WEIGHT,
+        "quest_grid_weight": _dep_config.QUEST_GRID_WEIGHT,
+        "quest_time_min_duration": _dep_config.QUEST_TIME_MIN_DURATION,
+        "quest_time_max_duration": _dep_config.QUEST_TIME_MAX_DURATION,
+        "event_chance": _dep_config.EVENT_CHANCE,
+        "item_chance": _dep_config.ITEM_CHANCE,
+        "battle_event_weight": _dep_config.BATTLE_EVENT_WEIGHT,
+        "team_battle_event_weight": _dep_config.TEAM_BATTLE_EVENT_WEIGHT,
+        "boss_event_weight": _dep_config.BOSS_EVENT_WEIGHT,
+        "item_event_weight": _dep_config.ITEM_EVENT_WEIGHT,
+        "item_damage_event_weight": _dep_config.ITEM_DAMAGE_EVENT_WEIGHT,
+        "item_steal_event_weight": _dep_config.ITEM_STEAL_EVENT_WEIGHT,
+        "alignment_event_weight": _dep_config.ALIGNMENT_EVENT_WEIGHT,
+        "critical_strike_chance": _dep_config.CRITICAL_STRIKE_CHANCE,
+        "critical_strike_chance_good": _dep_config.CRITICAL_STRIKE_CHANCE_GOOD,
+        "critical_strike_chance_evil": _dep_config.CRITICAL_STRIKE_CHANCE_EVIL,
+        "item_drop_chance": _dep_config.ITEM_DROP_CHANCE,
+        "level_battle_chance_below_25": _dep_config.LEVEL_BATTLE_CHANCE_BELOW_25,
+        "level_battle_chance_at_25": _dep_config.LEVEL_BATTLE_CHANCE_AT_25,
+        "boss_min_players": _dep_config.BOSS_MIN_PLAYERS,
+        "boss_max_players": _dep_config.BOSS_MAX_PLAYERS,
+        "boss_min_level": _dep_config.BOSS_MIN_LEVEL,
+        "boss_reward_percent": _dep_config.BOSS_REWARD_PERCENT,
+        "boss_loss_percent": _dep_config.BOSS_LOSS_PERCENT,
+        "boss_power_min_factor": _dep_config.BOSS_POWER_MIN_FACTOR,
+        "boss_power_max_factor": _dep_config.BOSS_POWER_MAX_FACTOR,
+        "manual_duel_max_distance": _dep_config.MANUAL_DUEL_MAX_DISTANCE,
+        "manual_duel_cooldown_seconds": _dep_config.MANUAL_DUEL_COOLDOWN_SECONDS,
+        "announce_login": _dep_config.ANNOUNCE_LOGIN,
+        "announce_top_interval": _dep_config.ANNOUNCE_TOP_INTERVAL,
+        "announce_top_limit": _dep_config.ANNOUNCE_TOP_LIMIT,
+        "update_room_topic": _dep_config.UPDATE_ROOM_TOPIC,
+        "topic_update_interval": _dep_config.TOPIC_UPDATE_INTERVAL,
+        "topic_custom_text": _dep_config.TOPIC_CUSTOM_TEXT,
+        "unique_items_enabled": _dep_config.UNIQUE_ITEMS_ENABLED,
+        "unique_item_min_level": _dep_config.UNIQUE_ITEM_MIN_LEVEL,
+        "unique_item_chance": _dep_config.UNIQUE_ITEM_CHANCE,
+        "level_reward_min_level": _dep_config.LEVEL_REWARD_MIN_LEVEL,
+        "quest_min_level": _dep_config.QUEST_MIN_LEVEL,
+        "quest_min_online_seconds": _dep_config.QUEST_MIN_ONLINE_SECONDS,
+        "quest_interval": _dep_config.QUEST_INTERVAL,
+        "quest_min_duration": _dep_config.QUEST_MIN_DURATION,
+        "quest_max_duration": _dep_config.QUEST_MAX_DURATION,
+        "season_enabled": _dep_config.SEASON_ENABLED,
+        "season_duration_days": _dep_config.SEASON_DURATION_DAYS,
+        "season_reset_on_rollover": _dep_config.SEASON_RESET_ON_ROLLOVER,
+        "season_hof_size": _dep_config.SEASON_HOF_SIZE,
+        "season_achievement_gates_enabled": _dep_config.SEASON_ACHIEVEMENT_GATES_ENABLED,
+        "event_log_limit": _dep_config.EVENT_LOG_LIMIT,
+        "event_retention_days": _dep_config.EVENT_RETENTION_DAYS,
+        "export_event_limit": _dep_config.EXPORT_EVENT_LIMIT,
+        "export_top_limit": _dep_config.EXPORT_TOP_LIMIT,
     }
 
 
@@ -272,12 +272,12 @@ def _export_room_state(
     room: dict[str, Any],
     generated_at: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    slug = _room_slug(room_jid)
+    slug = _dep_formatting._room_slug(room_jid)
     room_dir = root / slug
-    ranked = _ranked_players(room)
+    ranked = _dep_state._ranked_players(room)
     leaderboard = [
         _player_public_record(room_jid, jid, player, rank=rank)
-        for rank, (jid, player) in enumerate(ranked[:EXPORT_TOP_LIMIT], start=1)
+        for rank, (jid, player) in enumerate(ranked[:_dep_config.EXPORT_TOP_LIMIT], start=1)
     ]
     all_profiles = [
         _player_public_record(room_jid, jid, player, rank=rank)
@@ -286,9 +286,9 @@ def _export_room_state(
     quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
     active_quest = None
     if quest.get("active"):
-        current_target = _active_quest_target(quest)
+        current_target = _dep_map._active_quest_target(quest)
         active_quest = {
-            "type": _quest_type(quest),
+            "type": _dep_quests._quest_type(quest),
             "text": quest.get("text", "adventure"),
             "started_at": int(quest.get("started_at", 0) or 0),
             "complete_at": int(quest.get("complete_at", 0) or 0),
@@ -296,19 +296,19 @@ def _export_room_state(
             "route_index": int(quest.get("route_index", 0) or 0),
             "current_target": list(current_target) if current_target is not None else None,
             "questers": [
-                _display_player(player)
+                _dep_formatting._display_player(player)
                 for jid in quest.get("questers", [])
                 if isinstance((player := room.get("players", {}).get(jid)), dict)
             ],
         }
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
-    events = _room_events(room, limit=EXPORT_EVENT_LIMIT)
+    events = _room_events(room, limit=_dep_config.EXPORT_EVENT_LIMIT)
     hall_of_fame = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
     room_payload = {
         "generated_at": generated_at,
         "room": room_jid,
         "slug": slug,
-        "map": {"width": MAP_X, "height": MAP_Y},
+        "map": {"width": _dep_config.MAP_X, "height": _dep_config.MAP_Y},
         "season": season,
         "players_total": len(all_profiles),
         "players_online": sum(1 for player in all_profiles if player["online"]),
@@ -316,8 +316,8 @@ def _export_room_state(
         "players": all_profiles,
         "quest": active_quest,
         "events": events,
-        "hall_of_fame": hall_of_fame[-SEASON_HOF_SIZE:],
-        "achievement_catalog": _achievement_catalog(),
+        "hall_of_fame": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:],
+        "achievement_catalog": _dep_leveling._achievement_catalog(),
         "rules": _public_rules(),
     }
     _atomic_write_json(room_dir / "room.json", room_payload)
@@ -326,17 +326,17 @@ def _export_room_state(
     _atomic_write_json(room_dir / "map.json", {
         "generated_at": generated_at,
         "room": room_jid,
-        "width": MAP_X,
-        "height": MAP_Y,
+        "width": _dep_config.MAP_X,
+        "height": _dep_config.MAP_Y,
         "players": all_profiles,
         "quest": active_quest,
     })
-    _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-SEASON_HOF_SIZE:]})
+    _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:]})
     _atomic_write_json(room_dir / "events.json", {"generated_at": generated_at, "room": room_jid, "events": events})
-    _atomic_write_json(room_dir / "achievements.json", {"generated_at": generated_at, "room": room_jid, "achievements": _achievement_catalog()})
+    _atomic_write_json(room_dir / "achievements.json", {"generated_at": generated_at, "room": room_jid, "achievements": _dep_leveling._achievement_catalog()})
     profiles_dir = room_dir / "profiles"
     for profile in all_profiles:
-        _atomic_write_json(profiles_dir / f"{_slug(profile['name'])}.json", profile)
+        _atomic_write_json(profiles_dir / f"{_dep_formatting._slug(profile['name'])}.json", profile)
     summary = {
         "room": room_jid,
         "slug": slug,
@@ -349,11 +349,11 @@ def _export_room_state(
 
 
 def _export_public_state(data: dict[str, Any]) -> None:
-    if not EXPORT_ENABLED:
+    if not _dep_config.EXPORT_ENABLED:
         return
     try:
         root = _export_root()
-        generated_at = _now()
+        generated_at = _dep_formatting._now()
         rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
         if not isinstance(rooms, dict):
             rooms = {}
@@ -376,8 +376,8 @@ def _export_public_state(data: dict[str, Any]) -> None:
             _atomic_write_json(root / "map.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
-                "width": MAP_X,
-                "height": MAP_Y,
+                "width": _dep_config.MAP_X,
+                "height": _dep_config.MAP_Y,
                 "players": default_room_payload["players"],
                 "quest": default_room_payload["quest"],
             })
@@ -399,7 +399,18 @@ def _export_public_state(data: dict[str, Any]) -> None:
             _atomic_write_json(root / "achievements.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
-                "achievements": default_room_payload.get("achievement_catalog", _achievement_catalog()),
+                "achievements": default_room_payload.get("achievement_catalog", _dep_leveling._achievement_catalog()),
             })
     except Exception:
-        log.debug("[IDLERPG] Failed to export public state", exc_info=True)
+        _dep_config.log.debug("[IDLERPG] Failed to export public state", exc_info=True)
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import items as _dep_items  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import map as _dep_map  # noqa: E402
+from . import quests as _dep_quests  # noqa: E402
+from . import state as _dep_state  # noqa: E402

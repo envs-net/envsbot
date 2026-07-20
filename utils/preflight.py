@@ -107,7 +107,7 @@ def _check_command_registry() -> tuple[bool, str]:
 
 def _check_command_docs() -> tuple[bool, str]:
     try:
-        from scripts.check_command_docs import validate_command_docs
+        from utils.command_docs import validate_command_docs
 
         errors, command_count = validate_command_docs()
     except Exception as exc:

@@ -1,19 +1,13 @@
 """Split module for core_plugins/rooms.py: defaults."""
 
-from utils.command import command, Role
 from utils.config import config
-from utils.formatting import format_page, parse_page_args
-from utils.room_features import format_room_feature_line, list_room_features
+from utils.room_features import configure_room_features
 
 from .state import (
     _WARNED_ROOM_PLUGIN_DEFAULT_KEYS,
     _maybe_await_result,
-    _merge_plugin_cleanup_summary,
     log,
 )
-from .presence import _resolve_room_settings_target
-
-
 PLUGIN_META = {
     "name": "rooms",
     "version": "0.3.0",
@@ -147,6 +141,9 @@ def get_room_plugin_defaults() -> dict[str, bool]:
     return defaults
 
 
+configure_room_features(PLUGIN_STORE_CONFIG, get_room_plugin_defaults)
+
+
 async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
     """Remove persistent plugin state that targets a deleted room.
 
@@ -157,10 +154,6 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
     """
     summary = {
         "toggles": 0,
-        "data": 0,
-        "rss_subscriptions": 0,
-        "rss_feeds": 0,
-        "xkcd_legacy_rooms": 0,
         "plugin_hooks": {},
     }
     try:
@@ -174,7 +167,6 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
             plugin_summary = await _maybe_await_result(cleanup(room_jid))
             if isinstance(plugin_summary, dict):
                 summary["plugin_hooks"] = plugin_summary
-                _merge_plugin_cleanup_summary(summary, plugin_summary)
     except Exception:
         log.warning(
             "[ROOMS] Plugin cleanup failed for deleted room %s",
@@ -183,61 +175,6 @@ async def _cleanup_room_plugin_state(bot, room_jid: str) -> dict:
         )
     return summary
 
-
-@command(
-    "rooms plugins",
-    role=Role.USER,
-    aliases=[
-        "room plugins",
-        "rooms features",
-        "room features",
-        "rooms feature list",
-        "room feature list",
-        "rooms plugins list",
-        "room plugins list",
-        "rooms features list",
-        "room features list",
-    ],
-    short="Show room plugin toggles; requires room admin/owner or bot moderator.",
-    usage="{prefix}rooms plugins [<room_jid>] [all|page|last]",
-    examples=[
-        "{prefix}rooms plugins",
-        "{prefix}rooms plugins all",
-        "{prefix}rooms plugins room@conference.example.org all",
-        "{prefix}help room settings",
-        "{prefix}help rooms settings",
-    ],
-    category="rooms",
-    context="room / MUC PM / private chat with <room_jid>",
-)
-async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
-    """Show plugin setup for a room."""
-    usage = f"{bot.prefix}rooms plugins [<room_jid>] [all|page|last]"
-    resolved = await _resolve_room_settings_target(bot, msg, is_room, args, sender_jid, usage)
-    if resolved is None:
-        return
-    room_jid, remaining = resolved
-
-    # Keep the command forgiving for the common ``rooms plugins list all``
-    # form.  Without this, ``list`` is treated as an unknown page argument and
-    # the following ``all`` token is ignored, so the command incorrectly shows
-    # page 1 instead of the complete list.
-    if remaining and str(remaining[0]).strip().lower() in {"list", "ls"}:
-        remaining = remaining[1:]
-
-    page = parse_page_args(remaining)
-    states = await list_room_features(bot, room_jid)
-    feature_lines = [format_room_feature_line(state) for state in states]
-    lines = format_page(
-        f"📋 Plugin settings for room '{room_jid}'",
-        feature_lines,
-        page_request=page,
-        page_size=12,
-        command_hint=f"{bot.prefix}rooms plugins {room_jid}",
-    )
-
-    log.info("[ROOMS] displaying plugin settings for room %s", room_jid)
-    bot.reply(msg, lines)
 
 __all__ = [
     'PLUGIN_META',
@@ -249,5 +186,4 @@ __all__ = [
     '_coerce_room_plugin_default',
     'get_room_plugin_defaults',
     '_cleanup_room_plugin_state',
-    'cmd_room_plugins',
 ]

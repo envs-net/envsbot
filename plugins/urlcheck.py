@@ -39,7 +39,7 @@ from utils.config import config
 from utils.http_fetch import fetch_preview, fetch_json, passthrough_validator
 from utils.urlcheck_extraction import extract_urls_from_message_text
 from utils.url_safety import UnsafeFetchURL
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
 from core_plugins._core import handle_room_toggle_command
 
 log = logging.getLogger(__name__)

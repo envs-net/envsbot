@@ -11,6 +11,11 @@ from .helpers import (
     pytest,
     rss,
 )
+from plugins.rss import store as rss_store
+from plugins.rss import tasks as rss_tasks
+from plugins.rss import commands as rss_commands
+from plugins.rss import formatting as rss_formatting
+from plugins.rss import lifecycle as rss_lifecycle
 
 
 @pytest.mark.asyncio
@@ -34,7 +39,7 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
     }
 
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
-    monkeypatch.setattr(rss, "RSS_MAX_ENTRIES_PER_POLL", 2)
+    monkeypatch.setattr(rss_tasks, "RSS_MAX_ENTRIES_PER_POLL", 2)
 
     entries = [
         Entry(
@@ -74,8 +79,8 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
     async def fake_fetch_feed(_):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_tasks, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: 1000)
 
     async def fake_sleep(_secs):
         raise asyncio.CancelledError()
@@ -103,10 +108,10 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
 async def test_on_load_unload_calls(monkeypatch, make_bot):
     bot = make_bot()
 
-    monkeypatch.setattr(rss, "feedparser", type("Feedparser", (), {})())
+    monkeypatch.setattr(rss_tasks, "feedparser", type("Feedparser", (), {})())
 
     restart = AsyncMock()
-    monkeypatch.setattr(rss, "restart_all_tasks", restart)
+    monkeypatch.setattr(rss_tasks, "restart_all_tasks", restart)
 
     await rss.on_load(bot)
     restart.assert_awaited_once()
@@ -146,7 +151,7 @@ async def test_rss_task_and_flush_helpers(monkeypatch, make_bot):
         coro.close()
         return PendingTask(False)
 
-    monkeypatch.setattr(rss, "create_plugin_task", fake_create_plugin_task)
+    monkeypatch.setattr(rss_tasks, "create_plugin_task", fake_create_plugin_task)
     rss.CHECK_TASKS.clear()
     await rss.ensure_task(bot, store, "https://example.org/feed.xml", 123)
     assert created[0][1] == "rss-check-https://example.org/feed.xml"
@@ -198,7 +203,7 @@ async def test_reset_feed_retry_prunes_cancelled_supervised_task(monkeypatch, ma
     async def fake_ensure_task(bot_arg, store_arg, url_arg, period_arg):
         scheduled.append((bot_arg, store_arg, url_arg, period_arg))
 
-    monkeypatch.setattr(rss, "ensure_task", fake_ensure_task)
+    monkeypatch.setattr(rss_commands, "ensure_task", fake_ensure_task)
 
     await rss._reset_feed_retry(bot, {}, url, store)
 
@@ -224,9 +229,9 @@ async def test_reset_retry_state_updates_and_preserves_unchanged(make_bot):
 
 
 def test_retry_delay_uses_exponential_failure_backoff(monkeypatch):
-    monkeypatch.setattr(rss, "RSS_RETRY_INITIAL_DELAY", 300)
-    monkeypatch.setattr(rss, "RSS_RETRY_BACKOFF_MULTIPLIER", 2.0)
-    monkeypatch.setattr(rss, "MAX_BACKOFF_TIME", 3600)
+    monkeypatch.setattr(rss_store, "RSS_RETRY_INITIAL_DELAY", 300)
+    monkeypatch.setattr(rss_store, "RSS_RETRY_BACKOFF_MULTIPLIER", 2.0)
+    monkeypatch.setattr(rss_store, "MAX_BACKOFF_TIME", 3600)
 
     assert rss._retry_delay(1200, 1) == 300
     assert rss._retry_delay(1200, 2) == 600
@@ -278,7 +283,9 @@ async def test_rss_list_shows_retry_backoff(monkeypatch, make_bot):
     }
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
-    monkeypatch.setattr(rss, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_commands, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_formatting, "_now", lambda: 1000)
 
     await rss.rss_command(bot, "jid", "nick", ["list"], msg, True)
 
@@ -312,7 +319,7 @@ async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
     old_task = RunningTask()
     rss.CHECK_TASKS[url] = old_task
     ensure = AsyncMock()
-    monkeypatch.setattr(rss, "ensure_task", ensure)
+    monkeypatch.setattr(rss_commands, "ensure_task", ensure)
 
     await rss.rss_command(bot, "jid", "nick", ["retry", url], msg, False)
 
@@ -358,7 +365,7 @@ async def test_rss_reset_all_retry_states_restarts_all_tasks(monkeypatch, make_b
     old_tasks = {url: RunningTask() for url in feeds}
     rss.CHECK_TASKS.update(old_tasks)
     ensure = AsyncMock()
-    monkeypatch.setattr(rss, "ensure_task", ensure)
+    monkeypatch.setattr(rss_commands, "ensure_task", ensure)
 
     await rss.rss_command(bot, "jid", "nick", ["retry", "all"], msg, False)
 
@@ -447,8 +454,8 @@ async def test_rss_check_loop_empty_feed_resets_retry_state(monkeypatch, make_bo
     async def fake_sleep(secs):
         raise asyncio.CancelledError()
 
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "_now", lambda: 1001)
+    monkeypatch.setattr(rss_tasks, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: 1001)
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
     with pytest.raises(asyncio.CancelledError):
@@ -490,7 +497,7 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
         assert bot_arg is bot
         cancelled.append(url)
 
-    monkeypatch.setattr(rss, "_cancel_feed_task", fake_cancel)
+    monkeypatch.setattr(rss_lifecycle, "_cancel_feed_task", fake_cancel)
 
     summary = await rss.cleanup_room_state(bot, "room@conference.example.org")
 
@@ -508,7 +515,8 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
 @pytest.mark.asyncio
 async def test_rss_runtime_state_global_and_room(monkeypatch, make_bot):
     now = 1_000
-    monkeypatch.setattr(rss, "_now", lambda: now)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: now)
+    monkeypatch.setattr(rss_lifecycle, "_now", lambda: now)
     bot = make_bot()
     bot.plugin_store[rss.RSS_KEY] = {
         "https://one.example/feed": {"rooms": ["Room@Conf"], "next_retry": now + 60},
@@ -543,8 +551,8 @@ async def test_rss_restart_tasks_restarts_plugin_lifecycle(monkeypatch, make_bot
         assert bot_arg is bot
         calls.append("load")
 
-    monkeypatch.setattr(rss, "on_unload", fake_on_unload)
-    monkeypatch.setattr(rss, "on_load", fake_on_load)
+    monkeypatch.setattr(rss_tasks, "on_unload", fake_on_unload)
+    monkeypatch.setattr(rss_tasks, "on_load", fake_on_load)
 
     await rss.restart_tasks(bot)
 

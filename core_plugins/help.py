@@ -57,7 +57,7 @@ PLUGIN_META = {
     "version": "0.5.1",
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
-    "requires": ["_core"],
+    "requires": ["_core", "rooms"],
 }
 
 
@@ -471,7 +471,7 @@ def _joined_room_from_private_message(bot, msg) -> str | None:
         return room
 
     try:
-        from core_plugins.rooms import JOINED_ROOMS
+        from bot.room_state import JOINED_ROOMS
     except Exception:
         return None
 

@@ -5,12 +5,13 @@ from .helpers import (
     pytest,
     reminder,
 )
+from plugins.reminder import runtime as reminder_runtime
 
 
 @pytest.mark.asyncio
 async def test_schedule_and_cancel_task(dummy_bot, dummy_msg):
     # Setup
-    reminder.REMINDER_ENABLED = True
+    reminder_runtime.REMINDER_ENABLED = True
     called = []
 
     async def wait_for_delivery(reminder_id: int) -> bool:
@@ -27,7 +28,7 @@ async def test_schedule_and_cancel_task(dummy_bot, dummy_msg):
     async def fake_send(bot, mto, mbody, mtype):
         called.append((mto, mbody, mtype))
     # Patch sender for full coverage
-    with patch("plugins.reminder._send_reminder_message", new=fake_send):
+    with patch("plugins.reminder.tasks._send_reminder_message", new=fake_send):
         # Schedule an immediate reminder and wait until the task is done.
         _ = reminder._schedule_task(
             dummy_bot, 42, "a@b", "u", "msg", 0.0, dummy_msg)
@@ -45,11 +46,11 @@ async def test_schedule_and_cancel_task(dummy_bot, dummy_msg):
 @pytest.mark.asyncio
 async def test_reminder_lifecycle(dummy_bot):
     # Plugin startup loads DB and schedules
-    with patch("plugins.reminder._restore_pending_reminders",
+    with patch("plugins.reminder.lifecycle._restore_pending_reminders",
                new=AsyncMock(return_value=1)):
         await reminder.on_ready(dummy_bot)
     # Plugin unload cancels all active
-    with patch("plugins.reminder._cancel_all_active_tasks",
+    with patch("plugins.reminder.lifecycle._cancel_all_active_tasks",
                new=AsyncMock(return_value=2)):
         await reminder.on_unload(dummy_bot)
 

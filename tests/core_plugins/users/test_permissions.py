@@ -6,6 +6,8 @@ from .helpers import (
     pytest,
     users_mod,
 )
+from utils.config import config
+from core_plugins.users import formatting as formatting_module
 
 
 @pytest.mark.asyncio
@@ -25,7 +27,7 @@ async def test_users_role_permission_logic(mock_bot, mock_msg):
 
 @pytest.mark.asyncio
 async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
-    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    monkeypatch.setitem(config, "owner", "owner@example.org")
     assert users_mod._parse_user_jid("owner@example.org/resource") == "owner@example.org"
     assert users_mod._parse_user_jid("not-a-jid") is None
     assert users_mod._owner_jid() == "owner@example.org"
@@ -84,7 +86,7 @@ async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_permission_guard_branches(mock_bot, monkeypatch):
-    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    monkeypatch.setitem(config, "owner", "owner@example.org")
     mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
 
     denied_cases = (
@@ -107,7 +109,7 @@ async def test_delete_permission_guard_branches(mock_bot, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_users_roles_and_admins_output(mock_bot, mock_msg, monkeypatch):
-    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    monkeypatch.setitem(config, "owner", "owner@example.org")
     mock_bot.prefix = ","
 
     await users_mod.users_roles(mock_bot, "sender", "nick", [], mock_msg, False)
@@ -115,7 +117,7 @@ async def test_users_roles_and_admins_output(mock_bot, mock_msg, monkeypatch):
     assert "owner" in roles_text
     assert "superadmin" in roles_text
 
-    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org/resource")
+    monkeypatch.setitem(config, "owner", "owner@example.org/resource")
     mock_bot.db.users.list = AsyncMock(return_value=[
         {"jid": "admin@example.org", "role": users_mod.Role.ADMIN.value},
         {"jid": "user@example.org", "role": users_mod.Role.USER.value},
@@ -222,7 +224,7 @@ async def test_users_plugin_grants_multi_add_show_revoke(monkeypatch, mock_msg):
     bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
     bot.reply = MagicMock()
 
-    monkeypatch.setattr(users_mod, "audit_event", AsyncMock())
+    monkeypatch.setattr(formatting_module, "audit_event", AsyncMock())
 
     await users_mod.users_grant(
         bot,

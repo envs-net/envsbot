@@ -3,10 +3,52 @@
 from functools import partial
 from utils.config import config
 
-from .commands import autojoin_rooms
 from .invites import cleanup_expired_room_invites, load_pending_room_invites, on_room_invite, on_room_invite_message
 from .presence import on_muc_presence
-from .state import JOINED_ROOMS, log
+from .state import JOINED_ROOMS, _LEAVING_ROOMS, log
+
+
+async def autojoin_rooms(bot):
+    """Join all database rooms that are marked for automatic joining."""
+    muc = bot.plugin["xep_0045"]
+    rooms_db = bot.db.rooms
+    if muc is None or rooms_db is None:
+        log.warning(
+            "[ROOMS] 🟡️ missing dependencies: rooms_db=%s xep_0045=%s",
+            "OK" if rooms_db is not None else "missing",
+            "OK" if muc is not None else "missing",
+        )
+        return
+
+    rows = await rooms_db.list()
+    for room_jid, nick, autojoin, status in rows:
+        if not autojoin:
+            continue
+        _LEAVING_ROOMS.discard(room_jid)
+        log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
+        try:
+            await muc.join_muc(
+                room_jid,
+                nick,
+                pshow=bot.presence.status["show"],
+                pstatus=bot.presence.status["status"],
+            )
+            room_info = JOINED_ROOMS.get(room_jid)
+            if room_info:
+                room_info["autojoin"] = autojoin
+                room_info["status"] = status
+            else:
+                JOINED_ROOMS[room_jid] = {
+                    "nick": nick,
+                    "autojoin": autojoin,
+                    "status": status,
+                    "affiliation": "unknown",
+                    "role": "unknown",
+                    "nicks": {},
+                }
+                bot.presence.joined_rooms[room_jid] = nick
+        except Exception:
+            log.exception("[ROOMS] 🔴 Couldn't join room %s", room_jid)
 
 
 async def on_ready(bot):

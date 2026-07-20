@@ -3,11 +3,13 @@ from .helpers import (
     json,
     pytest,
 )
+from utils.config import loader as config_loader
+from utils.config import display as config_display
 
 
 def test_load_config_returns_defaults_when_missing_and_not_strict(tmp_path,
                                                                   monkeypatch):
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config()
 
@@ -15,7 +17,7 @@ def test_load_config_returns_defaults_when_missing_and_not_strict(tmp_path,
 
 
 def test_load_config_missing_file_strict_raises(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     with pytest.raises(config_mod.ConfigError) as exc:
         config_mod.load_config(require_required_keys=True)
@@ -37,7 +39,7 @@ def test_load_config_loads_python(tmp_path, monkeypatch):
         ])
     )
 
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config(require_required_keys=True)
 
@@ -55,7 +57,7 @@ def test_load_config_with_partial_override_when_not_strict(tmp_path,
                                                            monkeypatch):
     (tmp_path / "config.py").write_text('COMMAND_PREFIX = ";"\n')
 
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config()
 
@@ -67,7 +69,7 @@ def test_load_config_with_partial_override_when_not_strict(tmp_path,
 def test_load_config_bad_python_raises(tmp_path, monkeypatch):
     (tmp_path / "config.py").write_text("JID = \"broken\" +\n")
 
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     with pytest.raises(config_mod.ConfigError) as exc:
         config_mod.load_config()
@@ -81,7 +83,7 @@ def test_load_config_bad_python_raises(tmp_path, monkeypatch):
 def test_load_config_legacy_json_top_level_must_be_object(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps(["not", "an", "object"]))
 
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     with pytest.raises(config_mod.ConfigError) as exc:
         config_mod.load_config()
@@ -98,7 +100,7 @@ def test_load_config_legacy_json_fallback(tmp_path, monkeypatch):
         "prefix": ";",
     }
     (tmp_path / "config.json").write_text(json.dumps(data))
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config(require_required_keys=True)
 
@@ -110,7 +112,7 @@ def test_load_config_env_override_accepts_python_file(tmp_path, monkeypatch):
     custom_path = tmp_path / "custom_config.py"
     custom_path.write_text('COMMAND_PREFIX = "?"\n')
     monkeypatch.setenv("ENVSBOT_CONFIG", str(custom_path))
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config()
 
@@ -140,7 +142,7 @@ def test_load_config_maps_resource_and_direct_tls(tmp_path, monkeypatch):
             'CONNECT_DIRECT_TLS = True',
         ])
     )
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config(require_required_keys=True)
 
@@ -174,7 +176,7 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'BACKUP_ON_START = False',
         ])
     )
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config(require_required_keys=True)
 
@@ -203,7 +205,7 @@ def test_load_config_merges_partial_room_plugin_defaults(tmp_path, monkeypatch):
             'ROOM_PLUGIN_DEFAULTS = {"pin": False}',
         ])
     )
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     result = config_mod.load_config()
 
@@ -215,7 +217,8 @@ def test_load_config_merges_partial_room_plugin_defaults(tmp_path, monkeypatch):
 def test_sample_config_path_and_load_default_config_for_diff(tmp_path, monkeypatch):
     sample = tmp_path / "config_sample.py"
     sample.write_text('COMMAND_PREFIX = "!"\nURLCHECK_WAIT_SECONDS = 7\n')
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_display, "BASE_DIR", tmp_path)
 
     assert config_mod._sample_config_path() == sample
     defaults = config_mod.load_default_config_for_diff()
@@ -225,7 +228,7 @@ def test_sample_config_path_and_load_default_config_for_diff(tmp_path, monkeypat
 
 
 def test_load_default_config_for_diff_without_sample(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
 
     defaults = config_mod.load_default_config_for_diff()
 

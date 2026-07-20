@@ -50,7 +50,7 @@ PLUGIN_META = {
     "version": "1.1.1",
     "description": "Room polls with voting, history and auto-close",
     "category": "utility",
-    "requires": ["rooms", "_core"],
+    "requires": ["rooms", "_core", "users"],
 }
 
 POLL_ENABLED_KEY = "POLL"

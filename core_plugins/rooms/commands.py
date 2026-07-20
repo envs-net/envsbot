@@ -3,6 +3,7 @@
 from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
+from utils.room_features import format_room_feature_line, list_room_features
 
 from .defaults import _cleanup_room_plugin_state
 from .presence import (
@@ -23,55 +24,58 @@ from .state import (
 )
 
 
-async def autojoin_rooms(bot):
-    """
-    Join all rooms marked with autojoin in the database.
-    """
-    # get muc and rooms_db with guard
-    muc = bot.plugin["xep_0045"]
-    rooms_db = bot.db.rooms
-    if muc is None or rooms_db is None:
-        log.warning("[ROOMS] 🟡️ missing dependencies: "
-                    f"rooms_db={'OK' if rooms_db is not None else 'missing'} "
-                    f"xep_0045={'OK' if muc is not None else 'missing'}")
+@command(
+    "rooms plugins",
+    role=Role.USER,
+    aliases=[
+        "room plugins",
+        "rooms features",
+        "room features",
+        "rooms feature list",
+        "room feature list",
+        "rooms plugins list",
+        "room plugins list",
+        "rooms features list",
+        "room features list",
+    ],
+    short="Show room plugin toggles; requires room admin/owner or bot moderator.",
+    usage="{prefix}rooms plugins [<room_jid>] [all|page|last]",
+    examples=[
+        "{prefix}rooms plugins",
+        "{prefix}rooms plugins all",
+        "{prefix}rooms plugins room@conference.example.org all",
+        "{prefix}help room settings",
+        "{prefix}help rooms settings",
+    ],
+    category="rooms",
+    context="room / MUC PM / private chat with <room_jid>",
+)
+async def cmd_room_plugins(bot, sender_jid, nick, args, msg, is_room):
+    """Show plugin setup for a room."""
+    usage = f"{bot.prefix}rooms plugins [<room_jid>] [all|page|last]"
+    resolved = await _resolve_room_settings_target(
+        bot, msg, is_room, args, sender_jid, usage
+    )
+    if resolved is None:
         return
+    room_jid, remaining = resolved
 
-    rows = await rooms_db.list()
-    for room_jid, nick, autojoin, status in rows:
-        if not autojoin:
-            continue
-        _LEAVING_ROOMS.discard(room_jid)
-        log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
-        try:
-            await muc.join_muc(
-                room_jid,
-                nick,
-                pshow=bot.presence.status["show"],
-                pstatus=bot.presence.status["status"])
+    if remaining and str(remaining[0]).strip().lower() in {"list", "ls"}:
+        remaining = remaining[1:]
 
-            room_info = JOINED_ROOMS.get(room_jid)
+    page = parse_page_args(remaining)
+    states = await list_room_features(bot, room_jid)
+    feature_lines = [format_room_feature_line(state) for state in states]
+    lines = format_page(
+        f"📋 Plugin settings for room '{room_jid}'",
+        feature_lines,
+        page_request=page,
+        page_size=12,
+        command_hint=f"{bot.prefix}rooms plugins {room_jid}",
+    )
 
-            if room_info:
-                # ✅ partial update (DO NOT overwrite runtime data)
-                room_info["autojoin"] = autojoin
-                room_info["status"] = status
-
-                # optional: update nick if you trust DB more
-                # room_info["nick"] = nick
-
-            else:
-                # ✅ full create (first time)
-                JOINED_ROOMS[room_jid] = {
-                    "nick": nick,
-                    "autojoin": autojoin,
-                    "status": status,
-                    "affiliation": "unknown",
-                    "role": "unknown",
-                    "nicks": {}
-                }
-                bot.presence.joined_rooms[room_jid] = nick
-        except Exception:
-            log.exception(f"[ROOMS] 🔴 Couldn't join room '{room_jid}'")
+    log.info("[ROOMS] displaying plugin settings for room %s", room_jid)
+    bot.reply(msg, lines)
 
 
 @command(

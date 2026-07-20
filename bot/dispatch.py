@@ -27,7 +27,7 @@ class CommandDispatchMixin:
         except Exception:
             log.debug("[MUC] Could not inspect presence joined rooms", exc_info=True)
         try:
-            from core_plugins.rooms import JOINED_ROOMS
+            from bot.room_state import JOINED_ROOMS
 
             rooms.update(str(room) for room in JOINED_ROOMS)
         except Exception:
@@ -69,7 +69,7 @@ class CommandDispatchMixin:
                 log.debug("[BOT] Error getting JID from XEP-0045 state", exc_info=True)
 
         try:
-            from core_plugins.rooms import JOINED_ROOMS
+            from bot.room_state import JOINED_ROOMS
 
             room_data = JOINED_ROOMS.get(room, {}) or {}
             nick_data = (room_data.get("nicks", {}) or {}).get(nick, {}) or {}
@@ -121,9 +121,12 @@ class CommandDispatchMixin:
             return True
 
         try:
-            from core_plugins.rooms import room_invite_admin_rooms
+            from utils.permissions import configured_room_invite_admin_rooms
 
-            if getattr(cmd_obj, "name", "") == "rooms invite" and str(room or "").lower() in room_invite_admin_rooms():
+            if (
+                getattr(cmd_obj, "name", "") == "rooms invite"
+                and str(room or "").lower() in configured_room_invite_admin_rooms(self.config)
+            ):
                 return True
         except Exception:
             log.debug("[BOT] Could not inspect room invite admin rooms", exc_info=True)
@@ -194,12 +197,9 @@ class CommandDispatchMixin:
                     )
                 return
 
-        try:
-            from core_plugins.rooms import room_invite_admin_rooms
+        from utils.permissions import configured_room_invite_admin_rooms
 
-            invite_admin_rooms = room_invite_admin_rooms()
-        except Exception:
-            invite_admin_rooms = set()
+        invite_admin_rooms = configured_room_invite_admin_rooms(self.config)
 
         decision = can_execute_command(
             context,

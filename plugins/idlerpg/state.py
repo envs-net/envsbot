@@ -5,35 +5,35 @@ import inspect
 import random
 from typing import Any
 from utils.command import Role
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
 
 
 def _blank_room() -> dict[str, Any]:
-    now = _now()
+    now = _dep_formatting._now()
     return {
         "players": {},
         "name_index": {},
-        "quest": {"active": False, "next_at": now + QUEST_INTERVAL},
-        "season": _blank_season(now),
+        "quest": {"active": False, "next_at": now + _dep_config.QUEST_INTERVAL},
+        "season": _dep_seasons._blank_season(now),
         "hall_of_fame": [],
         "events": [],
         "last_tick": now,
-        "next_top_announce_at": now + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0,
-        "next_topic_update_at": now + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0,
+        "next_top_announce_at": now + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0,
+        "next_topic_update_at": now + _dep_config.TOPIC_UPDATE_INTERVAL if _dep_config.TOPIC_UPDATE_INTERVAL > 0 else 0,
         "created_at": now,
     }
 
 
 async def _get_data(bot) -> dict[str, Any]:
-    store = await get_idlerpg_store(bot)
-    data = await store.get_global(IDLERPG_DATA_KEY, default={})
+    store = await _dep_formatting.get_idlerpg_store(bot)
+    data = await store.get_global(_dep_constants.IDLERPG_DATA_KEY, default={})
     return data if isinstance(data, dict) else {}
 
 
 async def _set_data(bot, data: dict[str, Any]) -> None:
-    store = await get_idlerpg_store(bot)
-    await store.set_global(IDLERPG_DATA_KEY, data)
-    _export_public_state(data)
+    store = await _dep_formatting.get_idlerpg_store(bot)
+    await store.set_global(_dep_constants.IDLERPG_DATA_KEY, data)
+    _dep_export._export_public_state(data)
 
 
 async def _flush_idlerpg_store(bot) -> None:
@@ -70,7 +70,7 @@ async def _checkpoint_room_clock(bot, room_jid: str, *, flush: bool = False) -> 
     """
     data = await _get_data(bot)
     room = _room_bucket(data, room_jid)
-    now = _now()
+    now = _dep_formatting._now()
     try:
         previous = int(room.get("last_tick", now) or now)
     except (TypeError, ValueError):
@@ -94,14 +94,14 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
         rooms[room_jid] = room
     room.setdefault("players", {})
     room.setdefault("name_index", {})
-    room.setdefault("quest", {"active": False, "next_at": _now() + QUEST_INTERVAL})
-    room.setdefault("season", _blank_season(_now()))
+    room.setdefault("quest", {"active": False, "next_at": _dep_formatting._now() + _dep_config.QUEST_INTERVAL})
+    room.setdefault("season", _dep_seasons._blank_season(_dep_formatting._now()))
     room.setdefault("hall_of_fame", [])
     room.setdefault("events", [])
-    _prune_events(room)
-    room.setdefault("last_tick", _now())
-    room.setdefault("next_top_announce_at", _now() + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0)
-    room.setdefault("next_topic_update_at", _now() + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0)
+    _dep_export._prune_events(room)
+    room.setdefault("last_tick", _dep_formatting._now())
+    room.setdefault("next_top_announce_at", _dep_formatting._now() + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0)
+    room.setdefault("next_topic_update_at", _dep_formatting._now() + _dep_config.TOPIC_UPDATE_INTERVAL if _dep_config.TOPIC_UPDATE_INTERVAL > 0 else 0)
     return room
 
 
@@ -115,11 +115,11 @@ def _player_coordinate(player: dict[str, Any], key: str, max_value: int) -> int:
 
 
 def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
-    now = _now()
+    now = _dep_formatting._now()
     items = player.get("items")
     if not isinstance(items, dict):
         items = {}
-    for item in ITEMS:
+    for item in _dep_constants.ITEMS:
         try:
             items[item] = int(items.get(item, 0) or 0)
         except (TypeError, ValueError):
@@ -128,7 +128,7 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
     unique_items = player.get("unique_items")
     if not isinstance(unique_items, dict):
         unique_items = {}
-    unique_items = {str(k): str(v) for k, v in unique_items.items() if str(k) in ITEMS and str(v).strip()}
+    unique_items = {str(k): str(v) for k, v in unique_items.items() if str(k) in _dep_constants.ITEMS and str(v).strip()}
 
     penalties = player.get("penalties")
     if not isinstance(penalties, dict):
@@ -154,22 +154,22 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         level = 0
 
     try:
-        ttl = int(player.get("next", _ttl_for_level(level)) or 0)
+        ttl = int(player.get("next", _dep_leveling._ttl_for_level(level)) or 0)
     except (TypeError, ValueError):
-        ttl = _ttl_for_level(level)
+        ttl = _dep_leveling._ttl_for_level(level)
 
     achievements = player.get("achievements")
     if not isinstance(achievements, list):
         achievements = []
-    achievements = sorted({str(value) for value in achievements if str(value) in ACHIEVEMENTS})
+    achievements = sorted({str(value) for value in achievements if str(value) in _dep_constants.ACHIEVEMENTS})
     title = str(player.get("title") or "")
     if title not in achievements:
         title = ""
 
     player.update({
         "jid": str(player.get("jid") or jid),
-        "name": _safe_name(str(player.get("name") or jid.split("@", 1)[0])) or "player",
-        "class": _safe_class(str(player.get("class") or "idler")) or "idler",
+        "name": _dep_formatting._safe_name(str(player.get("name") or jid.split("@", 1)[0])) or "player",
+        "class": _dep_formatting._safe_class(str(player.get("class") or "idler")) or "idler",
         "level": max(0, level),
         "next": max(0, ttl),
         "idled": int(player.get("idled", 0) or 0),
@@ -185,14 +185,14 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         "logged_out_at": int(player.get("logged_out_at", 0) or 0),
         "achievements": achievements,
         "title": title,
-        "x": _player_coordinate(player, "x", MAP_X),
-        "y": _player_coordinate(player, "y", MAP_Y),
+        "x": _player_coordinate(player, "x", _dep_config.MAP_X),
+        "y": _player_coordinate(player, "y", _dep_config.MAP_Y),
         "logged_out": bool(player.get("logged_out", False)),
     })
     if player["alignment"] not in {"g", "n", "e"}:
         player["alignment"] = "n"
-    player["x"] %= max(1, MAP_X + 1)
-    player["y"] %= max(1, MAP_Y + 1)
+    player["x"] %= max(1, _dep_config.MAP_X + 1)
+    player["y"] %= max(1, _dep_config.MAP_Y + 1)
     return player
 
 
@@ -242,13 +242,13 @@ def _is_player_online(room_jid: str, jid: str, player: dict[str, Any]) -> bool:
 
 def _format_player_status(room_jid: str, jid: str, player: dict[str, Any]) -> str:
     online = "online" if _is_player_online(room_jid, jid, player) else "offline"
-    title = _display_title(player)
+    title = _dep_formatting._display_title(player)
     title_part = f" [{title}]" if title else ""
     return (
-        f"{_display_player(player)}{title_part}, the level {player.get('level', 0)} "
-        f"{player.get('class', 'idler')} ({_alignment_name(player.get('alignment'))}); "
-        f"Status: {online}; TTL: {_duration(player.get('next', 0))}; "
-        f"Playing: {_played_for(player)}; Idled: {_duration(player.get('idled', 0))}; "
+        f"{_dep_formatting._display_player(player)}{title_part}, the level {player.get('level', 0)} "
+        f"{player.get('class', 'idler')} ({_dep_formatting._alignment_name(player.get('alignment'))}); "
+        f"Status: {online}; TTL: {_dep_formatting._duration(player.get('next', 0))}; "
+        f"Playing: {_dep_formatting._played_for(player)}; Idled: {_dep_formatting._duration(player.get('idled', 0))}; "
         f"Map: [{player.get('x', 0)},{player.get('y', 0)}]; "
         f"Achievements: {len(player.get('achievements', []) if isinstance(player.get('achievements'), list) else [])}; "
         f"Item sum: {sum(int(v or 0) for v in player.get('items', {}).values())}"
@@ -306,13 +306,22 @@ async def _sender_can_manage_room(bot, sender_jid: str | None, room_jid: str | N
         # operations limited to room owners/admins, not normal moderators.
         return role <= Role.ADMIN
     except Exception:
-        log.debug("[IDLERPG] Could not resolve sender role", exc_info=True)
+        _dep_config.log.debug("[IDLERPG] Could not resolve sender role", exc_info=True)
         return False
 
 
 async def _enabled_rooms(bot) -> dict[str, bool]:
-    store = await get_idlerpg_store(bot)
-    state = await store.get_global(IDLERPG_ENABLED_KEY, default={})
+    store = await _dep_formatting.get_idlerpg_store(bot)
+    state = await store.get_global(_dep_constants.IDLERPG_ENABLED_KEY, default={})
     if not isinstance(state, dict):
         return {}
     return {str(room_jid): bool(enabled) for room_jid, enabled in state.items()}
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import export as _dep_export  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import seasons as _dep_seasons  # noqa: E402

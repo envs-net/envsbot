@@ -1,24 +1,33 @@
-"""Split module for plugins/rss.py: store."""
+"""RSS persistence and stored feed-state helpers."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
-from .config import RSS_FEED_TEMPLATES_KEY, RSS_TEMPLATES_KEY
-
+from .config import (
+    MAX_BACKOFF_TIME,
+    RSS_FEED_TEMPLATES_KEY,
+    RSS_KEY,
+    RSS_RETRY_BACKOFF_MULTIPLIER,
+    RSS_RETRY_INITIAL_DELAY,
+    RSS_TEMPLATES_KEY,
+)
 
 log = logging.getLogger(__name__)
 
+def _now() -> int:
+    return int(time.time())
 
+def _normalize_room_jid(room: str) -> str:
+    return str(room or "").strip().lower()
 def _normalize_template_room_jid(room: str) -> str:
     """Normalize a room JID used for RSS template storage."""
     return str(room or "").strip().lower()
-
-
 def _normalize_template_feed_url(url: str) -> str:
     """Normalize a feed URL used for RSS template storage."""
     return str(url or "").strip()
-
-
 async def _flush_user_store(bot):
     """
     Flush the user store when supported.
@@ -31,22 +40,9 @@ async def _flush_user_store(bot):
 
     if callable(flush_all):
         await flush_all()
-
-
 async def get_rss_store(bot):
     """Return the runtime store for RSS feed state."""
     return bot.db.users.plugin("rss")
-
-
-async def _set_retry_state(bot, store, url, error_count, next_retry):
-    return await _update_feed(
-        bot,
-        store,
-        url,
-        lambda feed: _apply_retry_state(feed, error_count, next_retry),
-    )
-
-
 async def get_room_templates(store) -> dict[str, str]:
     """Return custom RSS templates keyed by normalized room JID."""
     templates = await store.get_global(RSS_TEMPLATES_KEY, default={})
@@ -57,8 +53,6 @@ async def get_room_templates(store) -> dict[str, str]:
         for room, template in templates.items()
         if _normalize_template_room_jid(room) and isinstance(template, str)
     }
-
-
 async def save_room_templates(store, templates: dict[str, str]) -> None:
     """Persist custom RSS room templates."""
     normalized = {
@@ -67,10 +61,6 @@ async def save_room_templates(store, templates: dict[str, str]) -> None:
         if _normalize_template_room_jid(room) and isinstance(template, str)
     }
     await store.set_global(RSS_TEMPLATES_KEY, normalized)
-
-
-
-
 async def get_feed_templates(store) -> dict[str, dict[str, str]]:
     """Return custom RSS templates keyed by room JID and feed URL."""
     templates = await store.get_global(RSS_FEED_TEMPLATES_KEY, default={})
@@ -90,8 +80,6 @@ async def get_feed_templates(store) -> dict[str, dict[str, str]]:
         if feeds:
             normalized[room_key] = feeds
     return normalized
-
-
 async def save_feed_templates(
     store, templates: dict[str, dict[str, str]]
 ) -> None:
@@ -109,15 +97,11 @@ async def save_feed_templates(
         if feeds:
             normalized[room_key] = feeds
     await store.set_global(RSS_FEED_TEMPLATES_KEY, normalized)
-
-
 async def get_feed_template(store, room: str, url: str) -> str | None:
     """Return a custom RSS template for one room/feed pair."""
     templates = await get_feed_templates(store)
     room_templates = templates.get(_normalize_template_room_jid(room), {})
     return room_templates.get(_normalize_template_feed_url(url))
-
-
 async def set_feed_template(store, room: str, url: str, template: str) -> None:
     """Set a custom RSS template for one room/feed pair."""
     templates = await get_feed_templates(store)
@@ -127,8 +111,6 @@ async def set_feed_template(store, room: str, url: str, template: str) -> None:
         return
     templates.setdefault(room_key, {})[url_key] = template
     await save_feed_templates(store, templates)
-
-
 async def unset_feed_template(store, room: str, url: str) -> bool:
     """Remove a custom RSS template for one room/feed pair."""
     templates = await get_feed_templates(store)
@@ -142,8 +124,6 @@ async def unset_feed_template(store, room: str, url: str) -> bool:
     if removed:
         await save_feed_templates(store, templates)
     return removed
-
-
 async def unset_feed_templates_for_feed(store, url: str) -> int:
     """Remove custom RSS templates for a feed URL across all rooms."""
     templates = await get_feed_templates(store)
@@ -158,8 +138,6 @@ async def unset_feed_templates_for_feed(store, url: str) -> int:
     if removed:
         await save_feed_templates(store, templates)
     return removed
-
-
 async def unset_feed_templates_for_room(store, room: str) -> int:
     """Remove all feed-specific RSS templates for a room."""
     templates = await get_feed_templates(store)
@@ -168,29 +146,21 @@ async def unset_feed_templates_for_room(store, room: str) -> int:
     if templates.pop(room_key, None) is not None:
         await save_feed_templates(store, templates)
     return removed
-
-
 async def get_effective_template(store, room: str, url: str) -> str | None:
     """Return the room/feed template override, falling back to room template."""
     feed_template = await get_feed_template(store, room, url)
     if feed_template:
         return feed_template
     return await get_room_template(store, room)
-
-
 async def get_room_template(store, room: str) -> str | None:
     """Return the custom RSS template for a room, if one is configured."""
     templates = await get_room_templates(store)
     return templates.get(_normalize_template_room_jid(room))
-
-
 async def set_room_template(store, room: str, template: str) -> None:
     """Set a custom RSS template for one room."""
     templates = await get_room_templates(store)
     templates[_normalize_template_room_jid(room)] = template
     await save_room_templates(store, templates)
-
-
 async def unset_room_template(store, room: str) -> bool:
     """Remove a custom RSS template for one room."""
     templates = await get_room_templates(store)
@@ -198,8 +168,6 @@ async def unset_room_template(store, room: str) -> bool:
     if removed:
         await save_room_templates(store, templates)
     return removed
-
-
 def _apply_retry_state(feed, error_count, next_retry):
     changed = False
     if feed.get("error_count", 0) != error_count:
@@ -209,11 +177,8 @@ def _apply_retry_state(feed, error_count, next_retry):
         feed["next_retry"] = next_retry
         changed = True
     return changed
-
 def _normalize_subscription_room(room: str) -> str:
     return _normalize_template_room_jid(room)
-
-
 def _feed_paused_rooms(feed: dict) -> set[str]:
     rooms = feed.get("paused_rooms")
     if not isinstance(rooms, list):
@@ -223,8 +188,6 @@ def _feed_paused_rooms(feed: dict) -> set[str]:
         for room in rooms
         if _normalize_subscription_room(room)
     }
-
-
 def _feed_active_rooms(feed: dict) -> list[str]:
     """Return subscribed rooms that are not paused for this feed."""
     rooms = feed.get("rooms")
@@ -240,12 +203,8 @@ def _feed_active_rooms(feed: dict) -> list[str]:
         active.append(str(room))
         seen.add(key)
     return active
-
-
 def _feed_is_globally_paused(feed: dict) -> bool:
     return bool(feed.get("paused", False))
-
-
 def _format_rss_timestamp(ts) -> str:
     try:
         value = int(ts or 0)
@@ -255,8 +214,6 @@ def _format_rss_timestamp(ts) -> str:
         return "never"
     import time
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(value))
-
-
 def _feed_status_label(feed: dict, now: int | None = None) -> str:
     if _feed_is_globally_paused(feed):
         return "paused"
@@ -272,8 +229,6 @@ def _feed_status_label(feed: dict, now: int | None = None) -> str:
     if int(feed.get("error_count", 0) or 0) > 0:
         return "degraded"
     return "ok"
-
-
 def _record_feed_check(feed: dict, *, now: int, success: bool, error: str | None = None) -> bool:
     changed = False
     for key, value in {"last_checked": now}.items():
@@ -296,8 +251,6 @@ def _record_feed_check(feed: dict, *, now: int, success: bool, error: str | None
             feed[key] = value
             changed = True
     return changed
-
-
 def _record_feed_post(feed: dict, *, now: int, posted: int = 1) -> bool:
     changed = False
     try:
@@ -313,12 +266,15 @@ def _record_feed_post(feed: dict, *, now: int, posted: int = 1) -> bool:
             feed[key] = value
             changed = True
     return changed
-
-
+async def _set_retry_state(bot, store, url, error_count, next_retry):
+    return await _update_feed(
+        bot,
+        store,
+        url,
+        lambda feed: _apply_retry_state(feed, error_count, next_retry),
+    )
 async def _reset_retry_state(bot, store, url):
     return await _set_retry_state(bot, store, url, 0, 0)
-
-
 def _retry_delay(_period, error_count):
     """Return the retry delay for a failed feed fetch."""
     failure_count = max(1, int(error_count or 1))
@@ -326,179 +282,42 @@ def _retry_delay(_period, error_count):
         RSS_RETRY_BACKOFF_MULTIPLIER ** (failure_count - 1)
     )
     return min(int(delay), MAX_BACKOFF_TIME)
-
-
 async def _sleep_for_retry(_period, next_retry, now):
     if next_retry > now:
         await asyncio.sleep(next_retry - now)
         return True
     return False
-
-
-def _format_retry_status(feed, now=None) -> str:
-    """Return RSS list status lines for failed fetches and retry timing."""
-    error_count = int(feed.get("error_count", 0) or 0)
-    if error_count <= 0:
-        return ""
-
-    now = _now() if now is None else int(now)
-    next_retry = int(feed.get("next_retry", 0) or 0)
-    lines = [f"⚠️ Last {error_count} fetch(es) failed"]
-
-    if next_retry > now:
-        lines.append(f"Next retry in: {_format_duration(next_retry - now)}")
-    elif next_retry:
-        lines.append("Next retry: now")
-
-    return "\n".join(lines) + "\n"
-
-
-async def _reset_feed_retry(bot, msg, url, store):
-    """Clear a feed's retry state and restart its checker immediately."""
-    url = _normalize_url(url)
+async def get_feeds(store):
+    feeds = await store.get_global(RSS_KEY, default={})
+    return feeds if isinstance(feeds, dict) else {}
+async def save_feeds(store, feeds):
+    await store.set_global(RSS_KEY, feeds)
+async def _load_feed(store, url):
     feeds = await get_feeds(store)
-
-    if url not in feeds:
-        bot.reply(msg, "Feed not found.")
-        return
-
-    feed = feeds[url]
-    _apply_retry_state(feed, 0, 0)
-    await save_feeds(store, feeds)
-
-    await _cancel_feed_task(bot, url)
-    await ensure_task(
-        bot,
-        store,
-        url,
-        feed.get("period", DEFAULT_POLL_INTERVAL),
-    )
-
-    bot.reply(msg, f"🔁 Retry state reset and RSS check scheduled: {url}")
-
-
-async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
-    """Remove a deleted room from all RSS subscriptions."""
-    target = _normalize_template_room_jid(room_jid)
-    store = await get_rss_store(bot)
+    return feeds, feeds.get(url)
+async def _update_feed(bot, store, url, mutator):
+    """
+    Load feeds, mutate the feed at `url` in-place if it exists, then persist.
+    `mutator(feed)` should return True if it made a meaningful change.
+    """
     feeds = await get_feeds(store)
-    summary = {"subscriptions": 0, "feeds": 0, "templates": 0}
-    changed = False
-    removed_urls = []
+    feed = feeds.get(url)
+    if feed is None:
+        return False
 
-    for url, feed in tuple(feeds.items()):
-        if not isinstance(feed, dict):
-            continue
-        rooms = feed.get("rooms")
-        if not isinstance(rooms, list):
-            continue
-        remaining = [
-            room for room in rooms
-            if _normalize_template_room_jid(room) != target
-        ]
-        removed = len(rooms) - len(remaining)
-        if removed <= 0:
-            continue
-        summary["subscriptions"] += removed
-        changed = True
-        if remaining:
-            feed["rooms"] = remaining
-        else:
-            feeds.pop(url, None)
-            removed_urls.append(url)
-            summary["feeds"] += 1
-
+    changed = mutator(feed)
     if changed:
         await save_feeds(store, feeds)
-        for url in removed_urls:
-            await _cancel_feed_task(bot, url)
+        # await _flush_user_store(bot)
 
-    templates = await get_room_templates(store)
-    if templates.pop(target, None) is not None:
-        summary["templates"] += 1
-        await save_room_templates(store, templates)
+    return changed
+async def _set_feed_field(bot, store, url, field, value):
+    def mutator(feed):
+        if feed.get(field) == value:
+            return False
+        feed[field] = value
+        return True
 
-    summary["templates"] += await unset_feed_templates_for_room(store, target)
-
-    return summary
-
-
-async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
-    """Return small RSS runtime counters for diagnostics."""
-    store = await get_rss_store(bot)
-    feeds = await get_feeds(store)
-    room_target = _normalize_room_jid(room_jid) if room_jid else None
-    retrying = sum(
-        1 for feed in feeds.values()
-        if isinstance(feed, dict) and int(feed.get("next_retry") or 0) > _now()
-    )
-    if room_target:
-        room_feeds = _filter_feeds_for_room(feeds, room_target)
-        return {
-            "feeds": len(room_feeds),
-            "active_tasks": sum(
-                1
-                for url in room_feeds
-                if url in CHECK_TASKS and not CHECK_TASKS[url].done()
-            ),
-            "retry_backoff": sum(
-                1 for feed in room_feeds.values()
-                if isinstance(feed, dict)
-                and int(feed.get("next_retry") or 0) > _now()
-            ),
-        }
-    return {
-        "feeds": len(feeds),
-        "active_tasks": sum(1 for task in CHECK_TASKS.values() if not task.done()),
-        "retry_backoff": retrying,
-    }
-
-
-async def doctor(bot, room_jid: str | None = None) -> list[str]:
-    """Return RSS feed health diagnostics."""
-    state = await get_runtime_state(bot, room_jid=room_jid)
-    scope = f" for {room_jid}" if room_jid else ""
-    lines = [
-        f"✅ RSS{scope}: feeds={state.get('feeds', 0)}, active_tasks={state.get('active_tasks', 0)}, retry_backoff={state.get('retry_backoff', 0)}"
-    ]
-    if int(state.get('retry_backoff', 0) or 0) > 0:
-        lines.append("🟡️ RSS: one or more feeds are currently in retry/backoff")
-    return lines
-
-__all__ = [
-    'log',
-    '_flush_user_store',
-    'get_rss_store',
-    'get_room_templates',
-    'save_room_templates',
-    '_normalize_template_feed_url',
-    'get_feed_templates',
-    'save_feed_templates',
-    'get_feed_template',
-    'set_feed_template',
-    'unset_feed_template',
-    'unset_feed_templates_for_feed',
-    'unset_feed_templates_for_room',
-    'get_effective_template',
-    'get_room_template',
-    'set_room_template',
-    'unset_room_template',
-    '_set_retry_state',
-    '_apply_retry_state',
-    '_reset_retry_state',
-    '_retry_delay',
-    '_sleep_for_retry',
-    '_format_retry_status',
-    '_reset_feed_retry',
-    '_normalize_subscription_room',
-    '_feed_paused_rooms',
-    '_feed_active_rooms',
-    '_feed_is_globally_paused',
-    '_format_rss_timestamp',
-    '_feed_status_label',
-    '_record_feed_check',
-    '_record_feed_post',
-    'cleanup_room_state',
-    'get_runtime_state',
-    'doctor',
-]
+    return await _update_feed(bot, store, url, mutator)
+async def _update_feed_link(bot, store, url, feed_link):
+    return await _set_feed_field(bot, store, url, "link", feed_link)

@@ -2,6 +2,7 @@ from .helpers import (
     config_mod,
     pytest,
 )
+from utils.config import validation as config_validation
 
 
 def test_validate_startup_config_requires_runtime_keys():
@@ -385,7 +386,7 @@ def test_validate_config_rejects_non_positive_rss_max_entries_per_poll():
 
 
 def test_collect_config_warnings_for_missing_avatar(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_validation, "BASE_DIR", tmp_path)
 
     cfg = {
         "avatar": "missing.png",
@@ -413,7 +414,7 @@ def test_collect_config_warnings_for_avatar_extension_mismatch():
 
 def test_validate_startup_config_prints_avatar_warnings(tmp_path, monkeypatch,
                                                         capsys):
-    monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_validation, "BASE_DIR", tmp_path)
 
     cfg = {
         "jid": "bot@example.org",

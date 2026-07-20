@@ -1,38 +1,25 @@
-"""Split module for plugins/rss.py: commands."""
+"""RSS administration and subscription commands."""
 
-import time
+from __future__ import annotations
+
 from utils.command import command, Role
 from utils.config import config
-from utils.url_safety import FetchURLTooLarge
-from core_plugins.rooms import JOINED_ROOMS
-from core_plugins._core import paginate_items
-from utils.formatting import page_size_for, parse_page_args
-from core_plugins.users import user_has_room_plugin_grant
 from utils.audit import audit_event
-from .config import (
-    DEFAULT_POLL_INTERVAL,
-    RSS_BROKEN_ERROR_THRESHOLD,
-    RSS_MAX_ENTRIES_PER_POLL,
-    RSS_MAX_READ_BYTES,
-)
+from bot.room_state import JOINED_ROOMS
+from core_plugins._core import paginate_items
+from core_plugins.users import user_has_room_plugin_grant
+
+from .config import DEFAULT_POLL_INTERVAL, RSS_BROKEN_ERROR_THRESHOLD
 from .fetch import (
-    _cancel_feed_task,
-    _entry_is_new,
     _extract_entry_link,
-    _filter_feeds_for_room,
     _format_feed_fetch_error,
-    _format_feed_list,
     _get_entry_id,
-    _get_latest_entry_id,
     _log_feed_fetch_error,
     _normalize_url,
     _resolve_relative_url,
-    _set_feed_field,
     entry_get,
     fetch_feed,
-    get_feeds,
     html_to_text_with_links,
-    save_feeds,
 )
 from .formatting import (
     DEFAULT_RSS_TEMPLATE,
@@ -40,7 +27,10 @@ from .formatting import (
     _build_rss_message_from_context,
     _build_rss_template_context,
     _entry_date,
+    _filter_feeds_for_room,
+    _format_feed_list,
     _normalize_rss_template_input,
+    _rss_list_page,
     _rss_template_usage,
     _rss_template_variables_text,
     _validate_rss_template,
@@ -52,21 +42,26 @@ from .store import (
     _feed_paused_rooms,
     _feed_status_label,
     _format_rss_timestamp,
+    _normalize_room_jid,
     _normalize_subscription_room,
-    _reset_feed_retry,
+    _now,
+    _set_feed_field,
     get_effective_template,
     get_feed_template,
+    get_feeds,
     get_room_template,
     log,
+    save_feeds,
     set_feed_template,
     set_room_template,
     unset_feed_template,
     unset_feed_templates_for_feed,
     unset_room_template,
 )
-from .tasks import ensure_task
-
-
+from .tasks import (
+    _cancel_feed_task,
+    ensure_task,
+)
 def _command_prefix(bot=None) -> str:
     """Return the currently configured command prefix for usage replies."""
     return str(
@@ -74,8 +69,6 @@ def _command_prefix(bot=None) -> str:
         or config.get("prefix", ",")
         or ","
     )
-
-
 def _room_for_feed_command(msg, is_room: bool, explicit_room=None) -> str | None:
     """Return the target room for RSS commands.
 
@@ -100,8 +93,6 @@ def _room_for_feed_command(msg, is_room: bool, explicit_room=None) -> str | None
         return str(room_jid)
 
     return None
-
-
 async def _sender_is_global_rss_manager(bot, sender_jid: str) -> bool:
     """Return True when sender has global RSS management rights."""
     get_role = getattr(bot, "get_user_role", None)
@@ -112,138 +103,23 @@ async def _sender_is_global_rss_manager(bot, sender_jid: str) -> bool:
     except Exception:
         log.debug("[RSS] Could not resolve global sender role", exc_info=True)
         return False
-
-
 async def _sender_can_manage_rss_room(bot, sender_jid: str, room: str) -> bool:
     """Return True for global moderators or RSS grant plus room affiliation."""
     if await _sender_is_global_rss_manager(bot, sender_jid):
         return True
     return await user_has_room_plugin_grant(bot, sender_jid, "rss", room)
-
-
 async def _sender_can_manage_rss_globally(bot, sender_jid: str) -> bool:
     """Return True when sender can manage RSS state across all rooms."""
     return await _sender_is_global_rss_manager(bot, sender_jid)
-
-
 def _looks_like_room_arg(value) -> bool:
     """Best-effort test for explicit room JID arguments."""
     text = str(value or "").strip()
     return "@" in text and "://" not in text
-
-
-def _normalize_room_jid(room: str) -> str:
-    """Normalize a room JID used as an RSS subscription key."""
-    return str(room or "").strip().lower()
-
-
-def _now():
-    return int(time.time())
-
-
-async def _read_limited_response(resp) -> bytes:
-    """Read an aiohttp response without exceeding RSS_MAX_READ_BYTES."""
-    chunks = bytearray()
-    async for chunk in resp.content.iter_chunked(8192):
-        chunks.extend(chunk)
-        if len(chunks) > RSS_MAX_READ_BYTES:
-            raise FetchURLTooLarge(
-                f"feed response exceeds {RSS_MAX_READ_BYTES} bytes"
-            )
-    return bytes(chunks)
-
-
-def _mapping_value(mapping, key, default=None):
-    """Return a value from feed metadata mapping or attribute objects."""
-    if isinstance(mapping, dict):
-        return mapping.get(key, default)
-    return getattr(mapping, key, default)
-
-
-def _set_mapping_value(mapping, key, value) -> None:
-    """Set a value on feed metadata mapping or attribute objects."""
-    if isinstance(mapping, dict):
-        mapping[key] = value
-    else:
-        setattr(mapping, key, value)
-
-
-async def _initialize_last_id(bot, store, url, latest_id):
-    if not latest_id:
-        return False
-    return await _set_feed_field(bot, store, url, "last_id", latest_id)
-
-
 async def _save_last_id(bot, store, url, entry_id):
     return await _set_feed_field(bot, store, url, "last_id", entry_id)
-
-
 def _rss_list_usage(bot=None) -> str:
     """Return the usage string for paginated RSS list output."""
     return f"Usage: {_command_prefix(bot)}rss list [page|all|last]"
-
-
-def _rss_list_page(args, total: int, page_size: int):
-    """Parse RSS list paging arguments.
-
-    Returns ``(page, show_all, page_size)`` for valid input, or ``None`` for
-    invalid arguments. The ``args`` list includes the ``list``/``health``
-    subcommand itself.
-    """
-    if len(args) > 2:
-        return None
-
-    if len(args) == 1:
-        request = parse_page_args([])
-    else:
-        value = str(args[1]).strip().lower()
-        if value not in {"all", "last"}:
-            try:
-                if int(value) <= 0:
-                    return None
-            except ValueError:
-                return None
-        request = parse_page_args([args[1]])
-
-    effective_page_size = page_size_for(page_size, request)
-    if request.all:
-        return 1, True, effective_page_size
-
-    total_pages = max(1, (total + effective_page_size - 1) // effective_page_size)
-    page = total_pages if request.page == -1 else max(1, request.page)
-    return page, False, effective_page_size
-
-
-async def _initialize_missing_last_id(bot, store, url, last_id, parsed):
-    if not last_id:
-        latest_id = _get_latest_entry_id(parsed)
-        if latest_id:
-            await _initialize_last_id(bot, store, url, latest_id)
-            log.info(
-                "[RSS] Initialized last_id for %s without posting old entries",
-                url,
-            )
-        return True
-    return False
-
-
-def _collect_new_entries(parsed, last_id, max_entries=None):
-    """Return newest unseen entries, capped to avoid feed burst floods."""
-    limit = RSS_MAX_ENTRIES_PER_POLL if max_entries is None else max_entries
-    limit = max(1, int(limit or RSS_MAX_ENTRIES_PER_POLL))
-    new_entries = []
-    for entry in parsed.entries:
-        is_new, entry_id = _entry_is_new(last_id, entry)
-        if not entry_id:
-            continue
-        if not is_new:
-            break
-        new_entries.append((entry, entry_id))
-        if len(new_entries) >= limit:
-            break
-    return new_entries
-
-
 async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=""):
     """
     Burst the last N entries of the given feed to the room.
@@ -299,13 +175,9 @@ async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=
         last_id = entry_id
 
     return last_id
-
-
 def _looks_like_feed_arg(value) -> bool:
     """Best-effort test for feed URL arguments."""
     return "://" in str(value or "")
-
-
 def _split_template_scope_args(msg, is_room: bool, args: list[str]):
     """Return ``(room, feed_url, rest)`` for RSS template subcommands.
 
@@ -326,8 +198,6 @@ def _split_template_scope_args(msg, is_room: bool, args: list[str]):
         feed_url = _normalize_url(rest.pop(0))
 
     return room, feed_url, rest
-
-
 async def _template_feed_for_room(store, room: str, feed_url: str):
     """Return feed metadata when the feed is subscribed in the room."""
     feeds = await get_feeds(store)
@@ -341,8 +211,6 @@ async def _template_feed_for_room(store, room: str, feed_url: str):
     if not any(_normalize_room_jid(item) == target for item in rooms):
         return None
     return feed
-
-
 def _sample_template_context_for_feed(feed, feed_url: str) -> dict[str, str]:
     """Return sample template context enriched with feed metadata."""
     context = dict(_SAMPLE_TEMPLATE_CONTEXT)
@@ -351,8 +219,6 @@ def _sample_template_context_for_feed(feed, feed_url: str) -> dict[str, str]:
         context["feed_link"] = str(feed.get("link") or context["feed_link"])
     context["feed_url"] = str(feed_url or context["feed_url"])
     return context
-
-
 def _sample_rss_template_preview(
     template: str,
     feed=None,
@@ -363,13 +229,9 @@ def _sample_rss_template_preview(
         _sample_template_context_for_feed(feed, feed_url),
         template,
     )
-
-
 def _join_template_args(parts: list[str]) -> str:
     """Build a template string from command arguments."""
     return _normalize_rss_template_input(" ".join(str(part) for part in parts))
-
-
 async def _sender_can_manage_template(
     bot, sender_jid: str, room: str | None
 ) -> bool:
@@ -377,8 +239,6 @@ async def _sender_can_manage_template(
     if not room:
         return False
     return await _sender_can_manage_rss_room(bot, sender_jid, room)
-
-
 async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
     """Handle room- and feed-scoped RSS template commands."""
     if not args:
@@ -516,8 +376,6 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         return
 
     bot.reply(msg, _rss_template_usage(bot))
-
-
 def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None = None) -> list[str]:
     """Return concise RSS health lines for all feeds."""
     now = _now() if now is None else int(now)
@@ -552,8 +410,6 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             f"last error: {last_error}"
         )
     return rows
-
-
 def _rss_health_summary(feeds: dict) -> str:
     total = sum(1 for feed in feeds.values() if isinstance(feed, dict))
     paused = sum(1 for feed in feeds.values() if isinstance(feed, dict) and _feed_is_globally_paused(feed))
@@ -566,8 +422,6 @@ def _rss_health_summary(feeds: dict) -> str:
         if isinstance(feed, dict) and int(feed.get("error_count", 0) or 0) > 0
     )
     return f"RSS health: {total} feeds · {paused} paused · {backoff} in backoff · {degraded} with errors"
-
-
 def _rss_normalize_room_list(feed: dict) -> list[str]:
     rooms = feed.setdefault("rooms", [])
     if not isinstance(rooms, list):
@@ -584,8 +438,6 @@ def _rss_normalize_room_list(feed: dict) -> list[str]:
     if deduped != rooms:
         feed["rooms"] = deduped
     return deduped
-
-
 async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool) -> None:
     url = _normalize_url(url)
     feeds = await get_feeds(store)
@@ -628,8 +480,6 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
 
     action = "Paused" if paused else "Resumed"
     bot.reply(msg, f"✅ {action} RSS feed {label}: {url}" if changed else f"ℹ️ RSS feed already {'paused' if paused else 'active'} {label}: {url}")
-
-
 @command(
     "rss",
     role=Role.USER,
@@ -979,8 +829,6 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             "Unknown subcommand. Use add, delete, remove, retry, "
             "reset, pause, resume, health, broken, list, or template.",
         )
-
-
 async def _add_feed(bot, msg, url, store, room):
     url = _normalize_url(url)
     feeds = await get_feeds(store)
@@ -1077,8 +925,6 @@ async def _add_feed(bot, msg, url, store, room):
             )
 
     return
-
-
 async def _delete_feed_everywhere(bot, msg, url, store, feeds):
     """Remove a feed and its task regardless of subscribed rooms."""
     rooms = list(feeds[url].get("rooms", []))
@@ -1088,8 +934,6 @@ async def _delete_feed_everywhere(bot, msg, url, store, feeds):
 
     room_text = ", ".join(rooms) if rooms else "no rooms"
     bot.reply(msg, f"🗑 Deleted feed: {url} ({room_text})")
-
-
 async def _delete_feed_room(bot, msg, url, store, feeds, room):
     """Remove one room subscription from an existing feed."""
     rooms = feeds[url].setdefault("rooms", [])
@@ -1131,8 +975,6 @@ async def _delete_feed_room(bot, msg, url, store, feeds, room):
         msg,
         f"🗑 Removed room {stored_room} from feed: {url}",
     )
-
-
 async def _reset_all_feed_retries(bot, msg, store):
     """Clear retry state for every configured RSS feed and restart checks."""
     feeds = await get_feeds(store)
@@ -1159,8 +1001,6 @@ async def _reset_all_feed_retries(bot, msg, store):
         msg,
         f"🔁 Retry state reset and RSS checks scheduled for all feeds ({len(feeds)}).",
     )
-
-
 async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     url = _normalize_url(url)
     feeds = await get_feeds(store)
@@ -1188,3 +1028,25 @@ async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
     await save_feeds(store, feeds)
     # await _flush_user_store(bot)
     return
+async def _reset_feed_retry(bot, msg, url, store):
+    """Clear a feed's retry state and restart its checker immediately."""
+    url = _normalize_url(url)
+    feeds = await get_feeds(store)
+
+    if url not in feeds:
+        bot.reply(msg, "Feed not found.")
+        return
+
+    feed = feeds[url]
+    _apply_retry_state(feed, 0, 0)
+    await save_feeds(store, feeds)
+
+    await _cancel_feed_task(bot, url)
+    await ensure_task(
+        bot,
+        store,
+        url,
+        feed.get("period", DEFAULT_POLL_INTERVAL),
+    )
+
+    bot.reply(msg, f"🔁 Retry state reset and RSS check scheduled: {url}")

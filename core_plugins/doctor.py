@@ -27,6 +27,7 @@ PLUGIN_META = {
     "version": "0.2.1",
     "description": "Operator health checks and runtime diagnostics.",
     "category": "core",
+    "requires": ["rooms"],
 }
 
 _PLUGIN_HEALTH_PLUGINS = (
@@ -210,7 +211,7 @@ async def _db_lines(bot: Any) -> list[str]:
 
 async def _room_lines(bot: Any, *, full: bool) -> list[str]:
     try:
-        from core_plugins.rooms import JOINED_ROOMS
+        from bot.room_state import JOINED_ROOMS
     except Exception:
         JOINED_ROOMS = {}
 

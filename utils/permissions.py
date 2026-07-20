@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Any
+from collections.abc import Mapping
 
 from utils.command import Role, check_permission
 from utils.command_context import CommandContext
@@ -16,6 +17,16 @@ class PermissionDecision:
 
     allowed: bool
     reason: str = ""
+
+
+def configured_room_invite_admin_rooms(config: Mapping[str, Any]) -> set[str]:
+    """Return configured bare room JIDs allowed to run ``rooms invite`` publicly."""
+    rooms: set[str] = set()
+    for key in ("room_invite_notify_jid", "version_check_notify_jid"):
+        target = str(config.get(key) or "").strip().lower()
+        if target and "@" in target and "/" not in target:
+            rooms.add(target)
+    return rooms
 
 
 def can_use_admin_command(

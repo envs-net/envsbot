@@ -8,7 +8,7 @@ PLUGIN_META = {
     "version": "0.2.4",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
-    "requires": ["rooms"],
+    "requires": ["rooms", "_core", "users"],
 }
 
 

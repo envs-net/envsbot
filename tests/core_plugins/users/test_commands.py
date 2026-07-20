@@ -7,6 +7,7 @@ from .helpers import (
     types,
     users_mod,
 )
+from utils.config import config
 
 
 @pytest.mark.asyncio
@@ -16,7 +17,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
         mock_bot.db.users.get = AsyncMock(
             return_value={"jid": "user1@example.com",
                           "nickname": "N", "role": 4})
-        with patch("core_plugins.users._send_user_info", new=AsyncMock()) as s_ui:
+        with patch("core_plugins.users.commands._send_user_info", new=AsyncMock()) as s_ui:
             await users_mod.users_info(mock_bot, "sender", "n",
                                        ["user1@example.com"], mock_msg, False)
             s_ui.assert_awaited()
@@ -24,16 +25,16 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
         mock_bot.db.users.get = AsyncMock(
             side_effect=[None, {"jid": "user2@example.com",
                                 "nickname": "M", "role": 4}])
-        with patch("core_plugins.users.find_users_by_nick_safe",
+        with patch("core_plugins.users.commands.find_users_by_nick_safe",
                    new=AsyncMock(return_value=["user2@example.com"])), \
-                patch("core_plugins.users._send_user_info",
+                patch("core_plugins.users.commands._send_user_info",
                       new=AsyncMock()) as s_ui:
             await users_mod.users_info(mock_bot, "sender", "n", ["M"],
                                        mock_msg, False)
             s_ui.assert_awaited_once()
             assert s_ui.await_args.args[2]["jid"] == "user2@example.com"
         # 3. Multiple users match by nick
-        with patch("core_plugins.users.find_users_by_nick_safe",
+        with patch("core_plugins.users.commands.find_users_by_nick_safe",
                    new=AsyncMock(return_value=["a@e", "b@e"])), \
                 patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n", ["foo"],
@@ -41,7 +42,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
             assert_reply_contains(bot_reply, "multiple users found")
         # 4. Edge: nick index points to a user that no longer exists
         mock_bot.db.users.get = AsyncMock(side_effect=[None, None])
-        with patch("core_plugins.users.find_users_by_nick_safe",
+        with patch("core_plugins.users.commands.find_users_by_nick_safe",
                    new=AsyncMock(return_value=["ghost@example.com"])), \
                 patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n", ["ghost"],
@@ -49,7 +50,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
             assert "not registered" in bot_reply.call_args.args[1].lower()
         # 5. Edge: user not found
         mock_bot.db.users.get = AsyncMock(return_value=None)
-        with patch("core_plugins.users.find_users_by_nick_safe",
+        with patch("core_plugins.users.commands.find_users_by_nick_safe",
                    new=AsyncMock(return_value=[])), \
                 patch.object(mock_bot, "reply") as bot_reply:
             await users_mod.users_info(mock_bot, "sender", "n",
@@ -194,7 +195,7 @@ async def test_users_list_error_branches(mock_bot, mock_msg):
 
 @pytest.mark.asyncio
 async def test_users_update_and_delete_command_edge_branches(mock_bot, mock_msg, monkeypatch):
-    monkeypatch.setitem(users_mod.config, "owner", "owner@example.org")
+    monkeypatch.setitem(config, "owner", "owner@example.org")
     mock_bot.reply_usage = MagicMock()
 
     await users_mod.users_update(mock_bot, "admin@example.org", "nick", [], mock_msg, False)

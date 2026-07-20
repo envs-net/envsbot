@@ -3,6 +3,10 @@ from .helpers import (
     idlerpg,
     itertools,
 )
+import random
+from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import events as idlerpg_events
+from plugins.idlerpg import items as idlerpg_items
 
 
 def test_original_alignment_battle_power_and_critical_chances(monkeypatch):
@@ -19,11 +23,11 @@ def test_original_alignment_battle_power_and_critical_chances(monkeypatch):
 
     loser = idlerpg._normalize_player("l@envs.net", {"name": "Loser", "next": 1000})
     messages: list[str] = []
-    monkeypatch.setattr(idlerpg.random, "random", lambda: idlerpg.CRITICAL_STRIKE_CHANCE_GOOD + 0.001)
+    monkeypatch.setattr(random, "random", lambda: idlerpg.CRITICAL_STRIKE_CHANCE_GOOD + 0.001)
     idlerpg._maybe_critical_strike(good, loser, messages)
     assert messages == []
-    monkeypatch.setattr(idlerpg.random, "random", lambda: idlerpg.CRITICAL_STRIKE_CHANCE_EVIL - 0.001)
-    monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: low)
+    monkeypatch.setattr(random, "random", lambda: idlerpg.CRITICAL_STRIKE_CHANCE_EVIL - 0.001)
+    monkeypatch.setattr(random, "randint", lambda low, high: low)
     idlerpg._maybe_critical_strike(evil, loser, messages)
     assert any("Critical Strike" in line for line in messages)
 
@@ -42,8 +46,8 @@ def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
     def choice(seq):
         return seq[0]
 
-    monkeypatch.setattr(idlerpg.random, "choice", choice)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "choice", choice)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
     # Values are consumed in order by successive random.randint calls in
     # _run_pvp_battle: attacker_roll, defender_roll, critical_strike_amount,
     # dropped_item_level.
@@ -55,7 +59,7 @@ def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
         [attacker_roll, defender_roll, critical_strike_amount, dropped_item_level]
     )
     monkeypatch.setattr(
-        idlerpg.random,
+        random,
         "randint",
         lambda _start, _stop: next(battle_randint_values),
     )
@@ -83,9 +87,9 @@ def test_team_battle_changes_clocks_and_awards(monkeypatch):
         )
         players.append((jid, player))
 
-    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: seq[:count])
+    monkeypatch.setattr(random, "sample", lambda seq, count: seq[:count])
     randint_values = itertools.cycle([9999, 0])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(randint_values))
 
     messages = []
     idlerpg._run_team_battle(players, messages)
@@ -102,16 +106,16 @@ def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypa
         "alice@envs.net",
         {"name": "Alice", "class": "sysadmin", "online": True},
     )
-    monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 1.0)
+    monkeypatch.setattr(idlerpg_config, "EVENT_CHANCE", 1.0)
     random_values = itertools.cycle([0.0, 0.70])
-    monkeypatch.setattr(idlerpg.random, "random", lambda: next(random_values))
+    monkeypatch.setattr(random, "random", lambda: next(random_values))
     monkeypatch.setattr(
-        idlerpg,
+        idlerpg_items,
         "_run_item_blessing",
         lambda _players, _messages, _room=None: _messages.append("item"),
     )
     monkeypatch.setattr(
-        idlerpg,
+        idlerpg_events,
         "_run_godsend_or_calamity",
         lambda _players, _messages, _room=None: _messages.append("fate"),
     )
@@ -139,15 +143,15 @@ def test_original_style_grid_battle_only_when_players_meet(monkeypatch):
     players = [("alice@envs.net", alice), ("bob@envs.net", bob), ("away@envs.net", away)]
     messages: list[str] = []
 
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
-    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: list(seq)[:count])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: stop)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "sample", lambda seq, count: list(seq)[:count])
+    monkeypatch.setattr(random, "randint", lambda start, stop: stop)
 
     assert idlerpg._maybe_run_grid_battle(players, messages, room) is True
     assert any("has challenged" in message for message in messages)
 
     messages.clear()
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    monkeypatch.setattr(random, "random", lambda: 1.0)
     assert idlerpg._maybe_run_grid_battle(players, messages, room) is False
     assert messages == []
 
@@ -169,11 +173,11 @@ def test_boss_event_defeat_awards_and_records_event(monkeypatch):
         )
         players.append((jid, player))
 
-    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: list(seq)[:count])
-    monkeypatch.setattr(idlerpg.random, "uniform", lambda _start, _stop: 1.0)
+    monkeypatch.setattr(random, "sample", lambda seq, count: list(seq)[:count])
+    monkeypatch.setattr(random, "uniform", lambda _start, _stop: 1.0)
     randint_values = itertools.cycle([9999, 0])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(randint_values))
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(randint_values))
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
 
     messages = []
     assert idlerpg._run_boss_event(players, messages, room) is True

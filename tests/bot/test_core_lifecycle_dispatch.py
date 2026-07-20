@@ -30,8 +30,9 @@ class DispatchOnly(CommandDispatchMixin):
     pass
 
 
-def test_can_execute_command_in_room_edges(monkeypatch):
+def test_can_execute_command_in_room_edges():
     bot = DispatchOnly()
+    bot.config = {"room_invite_notify_jid": "admin@example.org"}
 
     public_cmd = SimpleNamespace(name="dice", role=Role.USER)
     admin_cmd = SimpleNamespace(name="users role", role=Role.ADMIN)
@@ -41,9 +42,6 @@ def test_can_execute_command_in_room_edges(monkeypatch):
     assert bot._can_execute_command_in_room(public_cmd, is_room=True, room="room@example.org") is True
     assert bot._can_execute_command_in_room(admin_cmd, is_room=True, room="room@example.org") is False
 
-    import core_plugins.rooms as rooms_plugin
-
-    monkeypatch.setattr(rooms_plugin, "room_invite_admin_rooms", lambda: {"admin@example.org"})
     assert bot._can_execute_command_in_room(invite_cmd, is_room=True, room="ADMIN@example.org") is True
     assert bot._can_execute_command_in_room(invite_cmd, is_room=True, room="other@example.org") is False
 

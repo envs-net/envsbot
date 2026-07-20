@@ -55,7 +55,7 @@ PLUGIN_META = {
     "version": "1.3.0",
     "description": "Pin room messages with paging, search, tags, important pins and non-reply fallback.",
     "category": "utility",
-    "requires": ["rooms", "_core"],
+    "requires": ["rooms", "_core", "users"],
 }
 
 PIN_ENABLED_KEY = "PIN"

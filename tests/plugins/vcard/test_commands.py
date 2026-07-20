@@ -3,6 +3,8 @@ from .helpers import (
     pytest,
     vcard,
 )
+from plugins.vcard import commands as vcard_commands
+from utils.command import Role
 
 
 @pytest.mark.asyncio
@@ -20,7 +22,7 @@ async def test_vcard_command_pm(fake_bot, args, is_room, expect):
 async def test_resolve_vcard_target_room_and_dm_edges(fake_bot, monkeypatch):
     room = "room@x"
     m = msg(from_jid=f"{room}/Alice", type_="groupchat")
-    vcard.JOINED_ROOMS[room] = {"nicks": {"Alice": {"jid": "alice@example.org"}, "NoJid": {}}}
+    vcard_commands.JOINED_ROOMS[room] = {"nicks": {"Alice": {"jid": "alice@example.org"}, "NoJid": {}}}
     try:
         assert await vcard._resolve_vcard_target(fake_bot, m, ["Alice"], True, {room: True}) == (
             "alice@example.org",
@@ -37,7 +39,7 @@ async def test_resolve_vcard_target_room_and_dm_edges(fake_bot, monkeypatch):
         assert await vcard._resolve_vcard_target(fake_bot, m, ["NoJid"], True, {room: True}) == (None, None, None)
 
         dm = msg(from_jid="alice@example.org/resource", type_="chat")
-        monkeypatch.setattr(vcard._core, "_is_muc_pm", lambda msg: False)
+        monkeypatch.setattr(vcard_commands._core, "_is_muc_pm", lambda msg: False)
         assert await vcard._resolve_vcard_target(fake_bot, dm, [], False, {}) == (
             "alice@example.org",
             "alice@example.org",
@@ -45,7 +47,7 @@ async def test_resolve_vcard_target_room_and_dm_edges(fake_bot, monkeypatch):
         )
         assert await vcard._resolve_vcard_target(fake_bot, dm, ["Bob"], False, {}) == (None, None, None)
     finally:
-        vcard.JOINED_ROOMS.pop(room, None)
+        vcard_commands.JOINED_ROOMS.pop(room, None)
 
 
 def test_vcard_split_commands_preserve_command_metadata():
@@ -64,5 +66,5 @@ def test_vcard_split_commands_preserve_command_metadata():
 
     for handler, (name, aliases) in expected.items():
         assert getattr(handler, "_command", None) == name
-        assert getattr(handler, "_required_role", None) == vcard.Role.USER
+        assert getattr(handler, "_required_role", None) == Role.USER
         assert getattr(handler, "_aliases", []) == aliases

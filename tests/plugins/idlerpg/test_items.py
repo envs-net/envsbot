@@ -4,6 +4,9 @@ from .helpers import (
     idlerpg,
     pytest,
 )
+import random
+from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import items as idlerpg_items
 
 
 @pytest.mark.asyncio
@@ -21,7 +24,7 @@ async def test_tick_levels_up_and_can_show_items(monkeypatch):
     player = room["players"]["alice@envs.net"]
     player["next"] = 1
     room["last_tick"] = idlerpg._now() - 2
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    monkeypatch.setattr(random, "random", lambda: 1.0)
 
     await idlerpg._tick_room(bot, "room@conf", announce=True)
 
@@ -40,9 +43,9 @@ def test_unique_item_level_gating_bonuses_and_grant(monkeypatch):
     assert idlerpg._roll_unique_item(player) is None
 
     player["level"] = 50
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: high)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "randint", lambda low, high: high)
 
     unique = idlerpg._roll_unique_item(player)
     assert unique is not None
@@ -50,7 +53,7 @@ def test_unique_item_level_gating_bonuses_and_grant(monkeypatch):
     assert unique["level"] == idlerpg.UNIQUE_ITEMS[0]["max_item_level"]
 
     monkeypatch.setattr(
-        idlerpg,
+        idlerpg_items,
         "_roll_unique_item",
         lambda _player: {
             "name": "The Great Hammer of /bin/sh",
@@ -101,10 +104,10 @@ def test_unique_items_are_bound_to_players_and_protected_from_random_item_events
 
     # Already-held unique slots are excluded from future unique rolls, so a newly
     # found unique item can never replace an existing unique in the same slot.
-    monkeypatch.setattr(idlerpg, "UNIQUE_ITEMS_ENABLED", True)
-    monkeypatch.setattr(idlerpg, "UNIQUE_ITEM_MIN_LEVEL", 25)
-    monkeypatch.setattr(idlerpg, "UNIQUE_ITEM_CHANCE", 1.0)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEMS_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEM_MIN_LEVEL", 25)
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEM_CHANCE", 1.0)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
     rolled_unique = idlerpg._roll_unique_item(player)
     assert rolled_unique is not None
     assert rolled_unique["slot"] != "weapon"
@@ -112,16 +115,16 @@ def test_unique_items_are_bound_to_players_and_protected_from_random_item_events
 
     # Ordinary loot in a unique slot is ignored instead of replacing/removing the
     # unique item marker.
-    monkeypatch.setattr(idlerpg, "_roll_unique_item", lambda _player: None)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: "weapon")
-    monkeypatch.setattr(idlerpg, "_roll_weighted_item_level", lambda _level: 999)
+    monkeypatch.setattr(idlerpg_items, "_roll_unique_item", lambda _player: None)
+    monkeypatch.setattr(random, "choice", lambda seq: "weapon")
+    monkeypatch.setattr(idlerpg_items, "_roll_weighted_item_level", lambda _level: 999)
     text = idlerpg._grant_level_item(player)
     assert "keeps The Great Hammer of /bin/sh" in text
     assert player["items"]["weapon"] == 180
     assert player["unique_items"]["weapon"] == "The Great Hammer of /bin/sh"
 
     # Damage events skip unique slots and can still affect ordinary gear.
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
     messages: list[str] = []
     idlerpg._run_item_damage([("alice@envs.net", player)], messages)
     assert player["items"]["weapon"] == 180
@@ -132,7 +135,7 @@ def test_unique_items_are_bound_to_players_and_protected_from_random_item_events
     # Battle drops and item swaps must not transfer or remove unique items from
     # either participant.
     messages.clear()
-    monkeypatch.setattr(idlerpg, "ITEM_DROP_CHANCE", 1.0)
+    monkeypatch.setattr(idlerpg_config, "ITEM_DROP_CHANCE", 1.0)
     idlerpg._maybe_battle_item_drop(player, other, messages)
     assert player["items"]["weapon"] == 180
     assert other["items"]["weapon"] == 300
@@ -152,7 +155,7 @@ def test_item_blessing_normalizes_bad_item_level_and_records(monkeypatch):
         "alice@envs.net",
         {"name": "Alice", "level": 21, "next": 1000, "items": {"ring": "bad"}, "x": 300, "y": 230},
     )
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
 
     messages: list[str] = []
     idlerpg._run_item_blessing([("alice@envs.net", player)], messages)

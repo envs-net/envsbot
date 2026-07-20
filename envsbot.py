@@ -34,6 +34,7 @@ from bot.permissions import (
     role_bypasses_rate_limit as _role_bypasses_rate_limit_impl,
 )
 from bot.routing import MessageRoutingMixin
+from bot.room_state import room_state
 from database.manager import DatabaseManager
 from utils.command import Role
 from utils.command import check_permission as _check_permission
@@ -174,6 +175,7 @@ class Bot(
         self.message_cache = MessageCache(
             max_messages=int(config.get("message_cache_size", 100) or 100),
         )
+        self.room_state = room_state
         self._startup_backup_done = False
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False

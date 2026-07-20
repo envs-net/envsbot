@@ -9,6 +9,10 @@ from .helpers import (
     rooms,
     types,
 )
+from core_plugins.rooms import commands as commands_module
+from core_plugins.rooms import settings as settings_module
+from core_plugins.rooms import state as state_module
+from utils.command import Role
 
 
 @pytest.mark.asyncio
@@ -27,8 +31,8 @@ async def test_room_status_helpers(fake_bot):
 async def test_rooms_add(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.db.rooms.add = AsyncMock()
-    with patch("core_plugins.rooms.set_room_control_defaults", AsyncMock()):
-        with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.set_room_control_defaults", AsyncMock()):
+        with patch("core_plugins.rooms.commands.is_valid_room_jid",
                    AsyncMock(return_value=True)):
             msg = dict(fake_msg)
             msg["from"].bare = "room@conference.domain"
@@ -40,7 +44,7 @@ async def test_rooms_add(fake_bot, fake_msg):
 @pytest.mark.asyncio
 async def test_rooms_add_already_exists(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=(1, 2, 3, 4))
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_add(fake_bot, "s", "s",
                               ["room@conference.domain", "BotNick"],
@@ -50,7 +54,7 @@ async def test_rooms_add_already_exists(fake_bot, fake_msg):
 @pytest.mark.asyncio
 async def test_rooms_update(fake_bot, fake_msg):
     fake_bot.db.rooms.update = AsyncMock()
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_update(fake_bot, "jid", "nick",
                                  ["room@conference.domain", "nick",
@@ -67,7 +71,7 @@ async def test_rooms_update(fake_bot, fake_msg):
 async def test_rooms_delete(fake_bot, fake_msg):
     fake_bot.db.rooms.get = AsyncMock(return_value=(1, 2, 3, 4))
     fake_bot.db.rooms.delete = AsyncMock()
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         # room joined
         room_jid = "room@conference.domain"
@@ -92,9 +96,9 @@ async def test_rooms_delete_reports_not_used_without_delete_log(fake_bot, fake_m
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.db.rooms.delete = AsyncMock()
 
-    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)), \
-            patch("core_plugins.rooms.audit_event", AsyncMock()) as audit, \
-            patch("core_plugins.rooms.log.info") as log_info:
+    with patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)), \
+            patch("core_plugins.rooms.commands.audit_event", AsyncMock()) as audit, \
+            patch("core_plugins.rooms.commands.log.info") as log_info:
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
 
     fake_bot.db.rooms.delete.assert_not_called()
@@ -148,7 +152,7 @@ async def test_on_load_missing_dependencies_and_normal_startup(fake_bot):
 
     fake_bot.db.rooms = MagicMock()
     fake_bot._reload_rooms = None
-    with patch("core_plugins.rooms.autojoin_rooms", AsyncMock()) as autojoin:
+    with patch("core_plugins.rooms.lifecycle.autojoin_rooms", AsyncMock()) as autojoin:
         await rooms.on_load(fake_bot)
         autojoin.assert_awaited_once_with(fake_bot)
 
@@ -171,23 +175,23 @@ async def test_room_feature_toggle_branches(fake_bot, fake_msg, monkeypatch):
     fake_msg["from"].bare = "room@conference.test"
     fake_msg["from"].resource = "Nick"
     rooms.JOINED_ROOMS[fake_msg["from"].bare] = {"nick": "BotNick", "nicks": {}}
-    monkeypatch.setattr(rooms, "get_room_feature", AsyncMock(side_effect=KeyError))
+    monkeypatch.setattr(settings_module, "get_room_feature", AsyncMock(side_effect=KeyError))
     await rooms._handle_room_feature_toggle(fake_bot, "admin@example.org", fake_msg, False, ["unknown"], enabled=True)
     assert "Unknown room plugin" in fake_bot.reply_warn.call_args.args[1]
 
     previous = types.SimpleNamespace(name="pin", enabled=True)
     state = types.SimpleNamespace(name="pin", enabled=True)
-    monkeypatch.setattr(rooms, "get_room_feature", AsyncMock(return_value=previous))
-    monkeypatch.setattr(rooms, "set_room_feature", AsyncMock(return_value=state))
-    monkeypatch.setattr(rooms, "format_room_feature_line", lambda state: "pin: enabled")
+    monkeypatch.setattr(settings_module, "get_room_feature", AsyncMock(return_value=previous))
+    monkeypatch.setattr(settings_module, "set_room_feature", AsyncMock(return_value=state))
+    monkeypatch.setattr(settings_module, "format_room_feature_line", lambda state: "pin: enabled")
     await rooms._handle_room_feature_toggle(fake_bot, "admin@example.org", fake_msg, False, ["pin"], enabled=True)
     assert "already enabled" in fake_bot.reply_info.call_args.args[1]
 
     state = types.SimpleNamespace(name="pin", enabled=False)
-    monkeypatch.setattr(rooms, "set_room_feature", AsyncMock(return_value=state))
-    monkeypatch.setattr(rooms, "audit_event", AsyncMock())
+    monkeypatch.setattr(settings_module, "set_room_feature", AsyncMock(return_value=state))
+    monkeypatch.setattr(settings_module, "audit_event", AsyncMock())
     await rooms._handle_room_feature_toggle(fake_bot, "admin@example.org", fake_msg, False, ["pin"], enabled=False)
-    rooms.audit_event.assert_awaited_once()
+    settings_module.audit_event.assert_awaited_once()
     assert "pin is now disabled" in fake_bot.reply_ok.call_args.args[1]
 
 
@@ -207,13 +211,13 @@ async def test_room_settings_explicit_dm_allows_visible_room_owner(fake_bot, fak
             }
         },
     }
-    fake_bot.get_user_role = AsyncMock(return_value=rooms.Role.NONE)
+    fake_bot.get_user_role = AsyncMock(return_value=Role.NONE)
     fake_bot.db.rooms.get = AsyncMock(return_value=(target_room, "BotNick", True, None))
     previous = types.SimpleNamespace(name="pin", enabled=True)
     state = types.SimpleNamespace(name="pin", enabled=False)
-    monkeypatch.setattr(rooms, "get_room_feature", AsyncMock(return_value=previous))
-    monkeypatch.setattr(rooms, "set_room_feature", AsyncMock(return_value=state))
-    monkeypatch.setattr(rooms, "audit_event", AsyncMock())
+    monkeypatch.setattr(settings_module, "get_room_feature", AsyncMock(return_value=previous))
+    monkeypatch.setattr(settings_module, "set_room_feature", AsyncMock(return_value=state))
+    monkeypatch.setattr(settings_module, "audit_event", AsyncMock())
 
     await rooms.cmd_room_disable(
         fake_bot,
@@ -224,7 +228,7 @@ async def test_room_settings_explicit_dm_allows_visible_room_owner(fake_bot, fak
         False,
     )
 
-    rooms.set_room_feature.assert_awaited_once_with(fake_bot, target_room, "pin", False)
+    settings_module.set_room_feature.assert_awaited_once_with(fake_bot, target_room, "pin", False)
     assert f"pin is now disabled for {target_room}" in fake_bot.reply_ok.call_args.args[1]
 
 
@@ -235,13 +239,13 @@ async def test_room_settings_explicit_admin_room_allows_bot_admin(fake_bot, fake
     fake_msg["from"].bare = "admins@conference.test"
     fake_msg["from"].resource = "AdminNick"
     target_room = "target@conference.test"
-    fake_bot.get_user_role = AsyncMock(return_value=rooms.Role.ADMIN)
+    fake_bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
     fake_bot.db.rooms.get = AsyncMock(return_value=(target_room, "BotNick", True, None))
     previous = types.SimpleNamespace(name="weather", enabled=False)
     state = types.SimpleNamespace(name="weather", enabled=True)
-    monkeypatch.setattr(rooms, "get_room_feature", AsyncMock(return_value=previous))
-    monkeypatch.setattr(rooms, "set_room_feature", AsyncMock(return_value=state))
-    monkeypatch.setattr(rooms, "audit_event", AsyncMock())
+    monkeypatch.setattr(settings_module, "get_room_feature", AsyncMock(return_value=previous))
+    monkeypatch.setattr(settings_module, "set_room_feature", AsyncMock(return_value=state))
+    monkeypatch.setattr(settings_module, "audit_event", AsyncMock())
 
     await rooms.cmd_room_enable(
         fake_bot,
@@ -252,7 +256,7 @@ async def test_room_settings_explicit_admin_room_allows_bot_admin(fake_bot, fake
         True,
     )
 
-    rooms.set_room_feature.assert_awaited_once_with(fake_bot, target_room, "weather", True)
+    settings_module.set_room_feature.assert_awaited_once_with(fake_bot, target_room, "weather", True)
     assert f"weather is now enabled for {target_room}" in fake_bot.reply_ok.call_args.args[1]
 
 
@@ -262,17 +266,17 @@ async def test_room_settings_public_room_without_target_uses_current_room(fake_b
     fake_msg["type"] = "groupchat"
     fake_msg["from"].bare = ROOM_JID
     rooms.JOINED_ROOMS[ROOM_JID] = {"nick": "BotNick", "nicks": {}}
-    fake_bot.get_user_role = AsyncMock(return_value=rooms.Role.MODERATOR)
+    fake_bot.get_user_role = AsyncMock(return_value=Role.MODERATOR)
     monkeypatch.setattr(
-        rooms,
+        commands_module,
         "list_room_features",
         AsyncMock(return_value=[types.SimpleNamespace(name="pin", enabled=True, default=True, modified=False)]),
     )
-    monkeypatch.setattr(rooms, "format_room_feature_line", lambda state: f"• {state.name}: on")
+    monkeypatch.setattr(commands_module, "format_room_feature_line", lambda state: f"• {state.name}: on")
 
     await rooms.cmd_room_plugins(fake_bot, "mod@example.org", "ModNick", ["all"], fake_msg, True)
 
-    rooms.list_room_features.assert_awaited_once_with(fake_bot, ROOM_JID)
+    commands_module.list_room_features.assert_awaited_once_with(fake_bot, ROOM_JID)
     assert f"Plugin settings for room '{ROOM_JID}'" in fake_bot.reply.call_args.args[1][0]
 
 
@@ -282,7 +286,7 @@ async def test_room_diagnose_lines_handles_missing_room_and_bad_row(fake_bot, mo
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.presence.joined_rooms = {}
     fake_bot.pending_room_invites = {}
-    monkeypatch.setattr(rooms, "list_room_features", AsyncMock(return_value=[]))
+    monkeypatch.setattr(state_module, "list_room_features", AsyncMock(return_value=[]))
 
     lines = await rooms._room_diagnose_lines(fake_bot, room_jid)
 

@@ -12,6 +12,11 @@ from .helpers import (
     types,
     xkcd_plugin,
 )
+from core_plugins.rooms import commands as commands_module
+from core_plugins.rooms import state as state_module
+from plugins.rss import lifecycle as rss_lifecycle
+from utils.command import Role
+from utils.config import config
 
 
 @pytest.mark.asyncio
@@ -45,7 +50,7 @@ async def test_set_room_control_defaults_uses_configured_defaults(fake_bot, monk
 
     fake_bot.db.users.plugin = plugin_store
     monkeypatch.setitem(
-        rooms.config,
+        config,
         "room_plugin_defaults",
         {"pin": False, "xkcd": True, "info": False, "missing": True},
     )
@@ -61,7 +66,7 @@ async def test_set_room_control_defaults_uses_configured_defaults(fake_bot, monk
 
 def test_get_room_plugin_defaults_merges_and_ignores_bad_keys(monkeypatch):
     monkeypatch.setitem(
-        rooms.config,
+        config,
         "room_plugin_defaults",
         {"xkcd": True, "INFO": False, "unknown": True},
     )
@@ -85,11 +90,11 @@ async def test_cmd_room_setdefaults(fake_bot, fake_msg):
     rooms.JOINED_ROOMS[room_jid] = {}
     fake_bot.db.rooms.get = AsyncMock(
         return_value=(room_jid, "BotNick", True, None))
-    with patch("core_plugins.rooms.set_room_control_defaults", AsyncMock()):
+    with patch("core_plugins.rooms.commands.set_room_control_defaults", AsyncMock()):
         await rooms.cmd_room_setdefaults(fake_bot, "jid", "nick", [],
                                          fake_msg, False)
         # Error case: trigger inside the try/except block!
-        with patch("core_plugins.rooms.set_room_control_defaults",
+        with patch("core_plugins.rooms.commands.set_room_control_defaults",
                    AsyncMock(side_effect=Exception("fail-setdefaults"))):
             await rooms.cmd_room_setdefaults(fake_bot, "jid", "nick", [],
                                              fake_msg, False)
@@ -127,10 +132,10 @@ async def test_cmd_room_plugins_accepts_list_all_page_args(
         for i in range(13)
     ]
     monkeypatch.setattr(
-        rooms, "list_room_features", AsyncMock(return_value=features)
+        commands_module, "list_room_features", AsyncMock(return_value=features)
     )
     monkeypatch.setattr(
-        rooms,
+        commands_module,
         "format_room_feature_line",
         lambda state: f"• {state.name}: enabled",
     )
@@ -192,7 +197,7 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg, monkeyp
         DummyPluginStore(),
     )
     cancel_feed_task = AsyncMock()
-    monkeypatch.setattr(rss_plugin, "_cancel_feed_task", cancel_feed_task)
+    monkeypatch.setattr(rss_lifecycle, "_cancel_feed_task", cancel_feed_task)
 
     async def cleanup_room_state(room_jid):
         return {
@@ -208,7 +213,7 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg, monkeyp
     fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))
     fake_bot.db.rooms.delete = AsyncMock()
 
-    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+    with patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)):
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
 
     assert stores["rss"]["RSS"] == {
@@ -253,9 +258,9 @@ async def test_rooms_delete_cleans_stale_plugin_state_without_db_room(fake_bot, 
         side_effect=cleanup_room_state
     )
 
-    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)), \
-            patch("core_plugins.rooms.audit_event", AsyncMock()) as audit, \
-            patch("core_plugins.rooms.log.info") as log_info:
+    with patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)), \
+            patch("core_plugins.rooms.commands.audit_event", AsyncMock()) as audit, \
+            patch("core_plugins.rooms.commands.log.info") as log_info:
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
 
     assert stores["xkcd"]["XKCD"] == {other_room: True}
@@ -282,11 +287,11 @@ async def test_room_setdefaults_explicit_target_from_dm(fake_bot, fake_msg, monk
     target_room = "target@conference.test"
     fake_msg["type"] = "chat"
     fake_msg["from"].bare = "admin@example.org"
-    fake_bot.get_user_role = AsyncMock(return_value=rooms.Role.ADMIN)
+    fake_bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
     fake_bot.db.rooms.get = AsyncMock(return_value=(target_room, "BotNick", True, None))
     defaults = AsyncMock()
-    monkeypatch.setattr(rooms, "set_room_control_defaults", defaults)
-    monkeypatch.setattr(rooms, "audit_event", AsyncMock())
+    monkeypatch.setattr(commands_module, "set_room_control_defaults", defaults)
+    monkeypatch.setattr(commands_module, "audit_event", AsyncMock())
 
     await rooms.cmd_room_setdefaults(
         fake_bot,
@@ -301,15 +306,7 @@ async def test_room_setdefaults_explicit_target_from_dm(fake_bot, fake_msg, monk
     assert f"Restored plugin defaults for room '{target_room}'" in fake_bot.reply_ok.call_args.args[1]
 
 
-def test_plugin_cleanup_summary_helpers_cover_plugin_hook_shapes():
-    summary = {
-        "toggles": 0,
-        "data": 0,
-        "rss_subscriptions": 0,
-        "rss_feeds": 0,
-        "xkcd_legacy_rooms": 0,
-        "plugin_hooks": {},
-    }
+def test_plugin_cleanup_summary_helpers_cover_generic_plugin_hook_shapes():
     plugin_summary = {
         "rss": {"subscriptions": "2", "feeds": 1},
         "xkcd": {"legacy_rooms": "3"},
@@ -319,12 +316,8 @@ def test_plugin_cleanup_summary_helpers_cover_plugin_hook_shapes():
         "plain": "ignored",
     }
 
-    rooms._merge_plugin_cleanup_summary(summary, plugin_summary)
+    summary = {"toggles": 0, "plugin_hooks": plugin_summary}
 
-    assert summary["rss_subscriptions"] == 2
-    assert summary["rss_feeds"] == 1
-    assert summary["xkcd_legacy_rooms"] == 3
-    assert summary["data"] == 7
     assert rooms._plugin_cleanup_changed(summary) is True
     assert rooms._plugin_hook_cleanup_changed({"pin": {"rooms": "1"}}) is True
     assert rooms._plugin_hook_cleanup_changed({"pin": {"rooms": "bad"}}) is False
@@ -347,7 +340,7 @@ async def test_room_diagnose_lines_include_runtime_and_plugin_state(fake_bot, mo
     }
     fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, "active"))
     monkeypatch.setattr(
-        rooms,
+        state_module,
         "list_room_features",
         AsyncMock(return_value=[
             types.SimpleNamespace(name="rss", enabled=True),

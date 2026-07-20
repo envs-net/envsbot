@@ -8,10 +8,11 @@ import plugins.rss as rss
 import core_plugins.rooms
 from utils.command import Role
 from utils.task_supervisor import TaskSupervisor
+from plugins.rss import commands as rss_commands
 
 
 def patch_config(monkeypatch):
-    monkeypatch.setattr(rss, "config", {"prefix": ","})
+    monkeypatch.setattr(rss_commands, "config", {"prefix": ","})
 
 
 def _reply_text(reply):

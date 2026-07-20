@@ -1,5 +1,6 @@
 from .helpers import JOINED_ROOMS, idlerpg
 from plugins.idlerpg import quests
+from plugins.idlerpg import config as idlerpg_config
 
 
 def _online_player(jid: str, name: str, *, level: int = 40, next_ttl: int = 1000, x: int = 0, y: int = 0):
@@ -193,10 +194,10 @@ def test_maybe_advance_grid_quest_fails_expired_unfinished_route():
 
 
 def test_quest_type_weights_and_selection(monkeypatch):
-    monkeypatch.setattr(quests, "QUEST_GRID_ENABLED", True)
-    monkeypatch.setattr(quests, "QUEST_TIME_ENABLED", True)
-    monkeypatch.setattr(quests, "QUEST_GRID_WEIGHT", 0.25)
-    monkeypatch.setattr(quests, "QUEST_TIME_WEIGHT", 0.75)
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "QUEST_TIME_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_WEIGHT", 0.25)
+    monkeypatch.setattr(idlerpg_config, "QUEST_TIME_WEIGHT", 0.75)
 
     assert quests._quest_type({"active": True, "type": "time"}) == "time"
     assert quests._quest_type({"active": True, "route": [[1, 2]]}) == "grid"
@@ -209,8 +210,8 @@ def test_quest_type_weights_and_selection(monkeypatch):
 
 
 def test_quest_type_weights_disable_all(monkeypatch):
-    monkeypatch.setattr(quests, "QUEST_GRID_ENABLED", False)
-    monkeypatch.setattr(quests, "QUEST_TIME_ENABLED", False)
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_ENABLED", False)
+    monkeypatch.setattr(idlerpg_config, "QUEST_TIME_ENABLED", False)
 
     assert quests._quest_type_weights() == []
     assert quests._choose_quest_type() is None

@@ -27,24 +27,24 @@ def _ttl_for_level(level: int) -> int:
     """
     level = max(0, int(level))
     if level <= 60:
-        return max(1, int(RP_BASE * (RP_STEP ** level)))
-    level_60_ttl = max(1, int(RP_BASE * (RP_STEP ** 60)))
+        return max(1, int(_dep_config.RP_BASE * (_dep_config.RP_STEP ** level)))
+    level_60_ttl = max(1, int(_dep_config.RP_BASE * (_dep_config.RP_STEP ** 60)))
     return level_60_ttl + ((level - 60) * 86400)
 
 
 def _penalty_for(level: int, base: int) -> int:
-    value = max(0, int(base * (PENALTY_STEP ** max(0, int(level)))))
-    if MAX_PENALTY and value > MAX_PENALTY:
-        return MAX_PENALTY
+    value = max(0, int(base * (_dep_config.PENALTY_STEP ** max(0, int(level)))))
+    if _dep_config.MAX_PENALTY and value > _dep_config.MAX_PENALTY:
+        return _dep_config.MAX_PENALTY
     return value
 
 
 def _penalty_amount_for(player: dict[str, Any], base: int, reason: str) -> int:
     amount = _penalty_for(int(player.get("level", 0)), base)
     if reason == "message":
-        amount = _adjust_percent_amount(amount, player, "message_penalty_reduction")
+        amount = _dep_items._adjust_percent_amount(amount, player, "message_penalty_reduction")
     elif reason == "logout":
-        amount = _adjust_percent_amount(amount, player, "logout_penalty_reduction")
+        amount = _dep_items._adjust_percent_amount(amount, player, "logout_penalty_reduction")
     return amount
 
 
@@ -77,41 +77,41 @@ def _inc_stat(
 def _achievement_catalog() -> list[dict[str, str]]:
     return [
         {"key": key, "title": title, "description": description}
-        for key, (title, description) in sorted(ACHIEVEMENTS.items())
+        for key, (title, description) in sorted(_dep_constants.ACHIEVEMENTS.items())
     ]
 
 
 def _season_gate_passed(room: dict[str, Any] | None, required_days: int) -> bool:
-    if room is None or not SEASON_ACHIEVEMENT_GATES_ENABLED or required_days <= 0:
+    if room is None or not _dep_config.SEASON_ACHIEVEMENT_GATES_ENABLED or required_days <= 0:
         return True
-    return _season_age_days(room) >= required_days
+    return _dep_seasons._season_age_days(room) >= required_days
 
 
 def _achievement_keys(player: dict[str, Any]) -> set[str]:
     achievements = player.get("achievements")
     if not isinstance(achievements, list):
         return set()
-    return {str(value) for value in achievements if str(value) in ACHIEVEMENTS}
+    return {str(value) for value in achievements if str(value) in _dep_constants.ACHIEVEMENTS}
 
 
 def _achievement_announcement(player: dict[str, Any], achievement: str) -> str:
     title = _achievement_title(achievement)
     description = _achievement_description(achievement)
     detail = f" — {description}" if description else ""
-    return f"🏅 {_display_player(player)} unlocked achievement: {title}{detail}."
+    return f"🏅 {_dep_formatting._display_player(player)} unlocked achievement: {title}{detail}."
 
 
 def _achievement_announcements(
     player: dict[str, Any],
     previous: set[str] | list[str] | tuple[str, ...],
 ) -> list[str]:
-    previous_keys = {str(value) for value in previous if str(value) in ACHIEVEMENTS}
+    previous_keys = {str(value) for value in previous if str(value) in _dep_constants.ACHIEVEMENTS}
     new_keys = sorted(_achievement_keys(player) - previous_keys)
     return [_achievement_announcement(player, key) for key in new_keys]
 
 
 def _award(player: dict[str, Any], achievement: str) -> bool:
-    if achievement not in ACHIEVEMENTS:
+    if achievement not in _dep_constants.ACHIEVEMENTS:
         return False
     current = player.setdefault("achievements", [])
     if not isinstance(current, list):
@@ -125,11 +125,11 @@ def _award(player: dict[str, Any], achievement: str) -> bool:
 
 
 def _achievement_title(achievement: str) -> str:
-    return ACHIEVEMENTS.get(achievement, (achievement, ""))[0]
+    return _dep_constants.ACHIEVEMENTS.get(achievement, (achievement, ""))[0]
 
 
 def _achievement_description(achievement: str) -> str:
-    return ACHIEVEMENTS.get(achievement, (achievement, ""))[1]
+    return _dep_constants.ACHIEVEMENTS.get(achievement, (achievement, ""))[1]
 
 
 def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | None = None) -> list[str]:
@@ -141,7 +141,7 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
         _award(player, "level_25")
     if level >= 50 and _season_gate_passed(room, 3):
         _award(player, "level_50")
-    if level >= LEVEL_REWARD_MIN_LEVEL and _season_gate_passed(room, 3):
+    if level >= _dep_config.LEVEL_REWARD_MIN_LEVEL and _season_gate_passed(room, 3):
         _award(player, "level_reward_50")
     if level >= 75 and _season_gate_passed(room, 7):
         _award(player, "level_75")
@@ -156,7 +156,7 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
     if idled >= 604800 and _season_gate_passed(room, 7):
         _award(player, "silent_week")
         _award(player, "season_week_1")
-    item_sum = _item_sum(player)
+    item_sum = _dep_items._item_sum(player)
     if item_sum >= 100:
         _award(player, "collector")
     if item_sum >= 500:
@@ -181,7 +181,7 @@ def _check_level_achievements(player: dict[str, Any], room: dict[str, Any] | Non
 
 
 def _apply_logout_penalty(player: dict[str, Any], room: dict[str, Any] | None = None) -> int:
-    changed = _add_time(player, _penalty_amount_for(player, LOGOUT_PENALTY, "logout"))
+    changed = _add_time(player, _penalty_amount_for(player, _dep_config.LOGOUT_PENALTY, "logout"))
     penalties = player.setdefault("penalties", {})
     penalties["logout"] = int(penalties.get("logout", 0) or 0) + changed
     player["pending_logout_penalty"] = {}
@@ -201,21 +201,21 @@ def _maybe_apply_pending_logout_penalty(
     if not isinstance(pending, dict) or not pending:
         return
     due_at = int(pending.get("due_at", 0) or 0)
-    if due_at > _now():
+    if due_at > _dep_formatting._now():
         return
     changed = _apply_logout_penalty(player, room)
-    name = _display_player(player)
+    name = _dep_formatting._display_player(player)
     messages.append(
         f"👋 {name} stayed logged out past the grace period. "
-        f"{_duration_clock(changed)} is added to {_possessive(name)} clock."
+        f"{_dep_formatting._duration_clock(changed)} is added to {_dep_formatting._possessive(name)} clock."
     )
-    messages.append(_next_level_line(player))
+    messages.append(_dep_formatting._next_level_line(player))
     if room is not None and room_jid and jid and changed:
-        _maybe_fail_time_quest_for_penalty(
+        _dep_quests._maybe_fail_time_quest_for_penalty(
             room,
             str(room_jid),
             str(jid),
-            _now(),
+            _dep_formatting._now(),
             messages,
             reason="logout",
         )
@@ -230,12 +230,12 @@ async def _penalize_player(
     *,
     announce: bool = False,
 ) -> int:
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _player_jid, player = _find_player(room, jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _player_jid, player = _dep_state._find_player(room, jid)
     if not player:
         return 0
-    player = _normalize_player(jid, player)
+    player = _dep_state._normalize_player(jid, player)
     penalty = _penalty_amount_for(player, amount, reason)
     changed = _add_time(player, penalty)
     penalties = player.setdefault("penalties", {})
@@ -244,24 +244,35 @@ async def _penalize_player(
         _inc_stat(player, "messages", 1, room)
     quest_messages: list[str] = []
     if changed:
-        _maybe_fail_time_quest_for_penalty(
+        _dep_quests._maybe_fail_time_quest_for_penalty(
             room,
             room_jid,
             str(_player_jid or jid),
-            _now(),
+            _dep_formatting._now(),
             quest_messages,
             reason=reason,
         )
         for text in quest_messages:
-            _record_event(room, "quest", text)
-    await _set_data(bot, data)
+            _dep_export._record_event(room, "quest", text)
+    await _dep_state._set_data(bot, data)
     if announce and changed:
-        _system_reply(
+        _dep_formatting._system_reply(
             bot,
             room_jid,
-            f"⏳ {_display_player(player)} is penalized {_duration_clock(changed)} for {reason}. "
-            + _next_level_line(player),
+            f"⏳ {_dep_formatting._display_player(player)} is penalized {_dep_formatting._duration_clock(changed)} for {reason}. "
+            + _dep_formatting._next_level_line(player),
         )
     for text in quest_messages:
-        _system_reply(bot, room_jid, text)
+        _dep_formatting._system_reply(bot, room_jid, text)
     return changed
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import export as _dep_export  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import items as _dep_items  # noqa: E402
+from . import quests as _dep_quests  # noqa: E402
+from . import seasons as _dep_seasons  # noqa: E402
+from . import state as _dep_state  # noqa: E402

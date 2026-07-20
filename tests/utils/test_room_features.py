@@ -9,9 +9,11 @@ from utils import room_features
 
 @pytest.fixture(autouse=True)
 def clear_room_feature_caches():
-    room_features.clear_room_feature_caches()
+    previous_store_config = room_features._FEATURE_STORE_CONFIG
+    previous_defaults_provider = room_features._FEATURE_DEFAULTS_PROVIDER
+    room_features.configure_room_features({}, lambda: {})
     yield
-    room_features.clear_room_feature_caches()
+    room_features.configure_room_features(previous_store_config, previous_defaults_provider)
 
 
 class DummyStore:
@@ -83,15 +85,13 @@ def _install_room_features_module(
     plugin_defaults=None,
     defaults_provider=None,
 ):
-    module = SimpleNamespace()
-    if store_config is not None:
-        module.PLUGIN_STORE_CONFIG = store_config
-    if plugin_defaults is not None:
-        module.PLUGIN_DEFAULTS = plugin_defaults
-    if defaults_provider is not None:
-        module.get_room_plugin_defaults = defaults_provider
-    monkeypatch.setattr(room_features, "_rooms_module", lambda: module)
-    return module
+    provider = defaults_provider or (lambda: plugin_defaults or {})
+    room_features.configure_room_features(store_config or {}, provider)
+    return SimpleNamespace(
+        PLUGIN_STORE_CONFIG=store_config or {},
+        PLUGIN_DEFAULTS=plugin_defaults or {},
+        get_room_plugin_defaults=provider,
+    )
 
 
 def _basic_store_config(plugin="pin", key="PIN"):
@@ -632,7 +632,7 @@ async def test_static_defaults_fallback_when_provider_invalid_or_fails(
             "pin",
         )
     assert state.default is False
-    assert "Ignoring PLUGIN_DEFAULTS with invalid type: list" in caplog.text
+    assert "Ignoring defaults provider result with invalid type: list" in caplog.text
 
     def broken_defaults():
         raise RuntimeError("boom")
@@ -649,4 +649,4 @@ async def test_static_defaults_fallback_when_provider_invalid_or_fails(
             "pin",
         )
     assert state.default is False
-    assert "get_room_plugin_defaults() failed" in caplog.text
+    assert "Defaults provider failed" in caplog.text

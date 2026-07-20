@@ -10,6 +10,7 @@ from utils.xmpp_notify import (
     ensure_notification_target_joined,
     notification_message_type,
 )
+from utils.permissions import configured_room_invite_admin_rooms
 
 from .settings import set_room_control_defaults
 from .state import (
@@ -46,12 +47,7 @@ def room_invite_notify_target() -> str | None:
 
 def room_invite_admin_rooms() -> set[str]:
     """Return configured rooms that may run invite commands publicly."""
-    rooms = set()
-    for key in ("room_invite_notify_jid", "version_check_notify_jid"):
-        target = str(config.get(key) or "").strip().lower()
-        if target and "@" in target and "/" not in target:
-            rooms.add(target)
-    return rooms
+    return configured_room_invite_admin_rooms(config)
 
 
 def _room_invite_max_age_days() -> int:

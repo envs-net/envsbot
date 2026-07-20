@@ -4,6 +4,7 @@ from .helpers import (
     pytest,
     rooms,
 )
+from utils.command import Role
 
 
 @pytest.mark.asyncio
@@ -25,7 +26,7 @@ async def test_room_settings_rejects_unprivileged_explicit_target(fake_bot, fake
         "nick": "BotNick",
         "nicks": {"UserNick": {"jid": "user@example.org", "affiliation": "member"}},
     }
-    fake_bot.get_user_role = AsyncMock(return_value=rooms.Role.USER)
+    fake_bot.get_user_role = AsyncMock(return_value=Role.USER)
     fake_bot.db.rooms.get = AsyncMock(return_value=(target_room, "BotNick", True, None))
 
     await rooms.cmd_room_enable(

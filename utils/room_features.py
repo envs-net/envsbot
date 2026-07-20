@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
-import types
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Mapping, Protocol, TypeAlias, TypedDict
@@ -66,44 +64,23 @@ class RoomFeatureState:
     modified: bool
 
 
-_ROOMS_MODULE: types.ModuleType | None = None
-_ROOMS_MODULE_LOCK = threading.Lock()
+_FEATURE_STORE_CONFIG: RawPluginStoreConfig | None = None
+_FEATURE_DEFAULTS_PROVIDER: Callable[[], Any] | None = None
 
 
-def _rooms_module() -> types.ModuleType:
-    """Lazily import and cache the rooms module for synchronous callers.
+def configure_room_features(
+    store_config: RawPluginStoreConfig,
+    defaults_provider: Callable[[], Any],
+) -> None:
+    """Register room-feature metadata without importing the rooms plugin.
 
-    Importing ``core_plugins.rooms`` only when room feature metadata is needed
-    avoids circular imports during plugin discovery and initialization, where
-    the rooms plugin imports room-feature helpers from this module. The
-    synchronous lock keeps the cache safe for CLI/docs helpers that call this
-    module outside an async task. Async room-feature operations use
-    ``_rooms_module_async()``, which delegates to the same thread-safe cache
-    without keeping event-loop-specific locks at module scope.
-
-    Call ``clear_room_feature_caches()`` when the rooms module is reloaded or
-    its feature metadata changes at runtime, for example during tests, hot
-    reloads, or config reloads.
+    The rooms plugin calls this after defining its metadata.  Keeping the
+    registry in this neutral utility module removes the old utils -> plugin
+    dependency and its lazy-import/cache machinery.
     """
-    global _ROOMS_MODULE
-    with _ROOMS_MODULE_LOCK:
-        if _ROOMS_MODULE is None:
-            from core_plugins import rooms
-
-            _ROOMS_MODULE = rooms
-        module = _ROOMS_MODULE
-    return module
-
-
-async def _rooms_module_async() -> types.ModuleType:
-    """Lazily import and cache the rooms module for async callers.
-
-    The cache is owned by ``_rooms_module()`` and guarded by a normal
-    ``threading.Lock``. Running that lookup via ``asyncio.to_thread()`` keeps
-    async callers from blocking the event loop without storing event-loop-bound
-    ``asyncio.Lock`` instances at module scope.
-    """
-    return await asyncio.to_thread(_rooms_module)
+    global _FEATURE_STORE_CONFIG, _FEATURE_DEFAULTS_PROVIDER
+    _FEATURE_STORE_CONFIG = store_config
+    _FEATURE_DEFAULTS_PROVIDER = defaults_provider
 
 
 def _normalize_plugin_name(name: str) -> str:
@@ -162,14 +139,8 @@ def _coerce_feature_flag(
 
 
 def _load_raw_plugin_store_config() -> RawPluginStoreConfig | None:
-    """Return raw room plugin storage config from the rooms module.
-
-    ``None`` is returned when the rooms module does not expose a mapping named
-    ``PLUGIN_STORE_CONFIG``. The returned value is intentionally still raw;
-    validation and normalization are handled by
-    ``_validated_plugin_store_config()``.
-    """
-    raw_config = getattr(_rooms_module(), "PLUGIN_STORE_CONFIG", None)
+    """Return raw room plugin storage config from the neutral registry."""
+    raw_config = _FEATURE_STORE_CONFIG
     if isinstance(raw_config, Mapping):
         return raw_config
     if raw_config is not None:
@@ -183,18 +154,7 @@ def _load_raw_plugin_store_config() -> RawPluginStoreConfig | None:
 
 async def _load_raw_plugin_store_config_async() -> RawPluginStoreConfig | None:
     """Return raw room plugin storage config for async callers."""
-    raw_config = getattr(
-        await _rooms_module_async(), "PLUGIN_STORE_CONFIG", None
-    )
-    if isinstance(raw_config, Mapping):
-        return raw_config
-    if raw_config is not None:
-        log.warning(
-            "[ROOM_FEATURES] Ignoring PLUGIN_STORE_CONFIG with invalid type: "
-            "%s",
-            type(raw_config).__name__,
-        )
-    return None
+    return _load_raw_plugin_store_config()
 
 
 def _validate_plugin_store_config(
@@ -319,53 +279,22 @@ def _validate_raw_plugin_defaults(
     return None
 
 
-def _plugin_defaults_provider(
-    rooms: types.ModuleType,
-) -> Callable[[], Any] | None:
-    """Return the dynamic room defaults provider when it is callable."""
-    defaults_provider = getattr(rooms, "get_room_plugin_defaults", None)
-    if callable(defaults_provider):
-        return defaults_provider
-    return None
-
-
-def _plugin_defaults_attribute(
-    rooms: types.ModuleType,
-) -> Mapping[str, FeatureFlagValue] | None:
-    """Return legacy static plugin defaults from the rooms module."""
-    return _validate_raw_plugin_defaults(
-        getattr(rooms, "PLUGIN_DEFAULTS", None),
-        "PLUGIN_DEFAULTS",
-    )
-
-
-async def _defaults_from_rooms_module_async(
-    rooms: types.ModuleType,
-) -> Mapping[str, FeatureFlagValue] | None:
-    """Return raw defaults without blocking async callers."""
-    defaults_provider = _plugin_defaults_provider(rooms)
-    if defaults_provider is not None:
-        try:
-            raw_defaults = await asyncio.to_thread(defaults_provider)
-        except Exception:
-            log.exception(
-                "[ROOM_FEATURES] get_room_plugin_defaults() failed while "
-                "resolving room plugin defaults"
-            )
-            return None
-        return _validate_raw_plugin_defaults(
-            raw_defaults,
-            "get_room_plugin_defaults() result",
-        )
-
-    return _plugin_defaults_attribute(rooms)
-
-
 async def _room_plugin_defaults_source_async() -> (
     Mapping[str, FeatureFlagValue] | None
 ):
-    """Return raw default mapping from the rooms module in async code."""
-    return await _defaults_from_rooms_module_async(await _rooms_module_async())
+    """Return raw defaults from the registered provider."""
+    provider = _FEATURE_DEFAULTS_PROVIDER
+    if not callable(provider):
+        return None
+    try:
+        raw_defaults = provider()
+    except Exception:
+        log.exception(
+            "[ROOM_FEATURES] Defaults provider failed while resolving room "
+            "plugin defaults"
+        )
+        return None
+    return _validate_raw_plugin_defaults(raw_defaults, "defaults provider result")
 
 
 def _validate_plugin_defaults(
@@ -406,18 +335,7 @@ async def _resolved_plugin_defaults_async() -> FeatureFlagState:
 
 
 def clear_room_feature_caches() -> None:
-    """Clear cached room feature module lookups.
-
-    This function is thread-safe: it acquires ``_ROOMS_MODULE_LOCK`` before
-    resetting cached module state. Call this when the rooms module or its
-    feature metadata may have changed at runtime, for example in tests, bot
-    reloads, or config reloads. Async callers share the same cached
-    reference through ``_rooms_module_async()``, so clearing this value is
-    enough for both sync and async lookups.
-    """
-    global _ROOMS_MODULE
-    with _ROOMS_MODULE_LOCK:
-        _ROOMS_MODULE = None
+    """Compatibility no-op; feature metadata is no longer import-cached."""
 
 
 def available_features() -> list[str]:

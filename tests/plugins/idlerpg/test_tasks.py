@@ -9,6 +9,12 @@ from .helpers import (
     idlerpg,
     pytest,
 )
+import random
+from core_plugins import _core
+from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import export as idlerpg_export
+from plugins.idlerpg import formatting as idlerpg_formatting
+from plugins.idlerpg import tasks as idlerpg_tasks
 from utils.task_supervisor import TaskSupervisor
 
 
@@ -32,8 +38,8 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
         cancelled.append(room_jid)
         idlerpg.ROOM_TASKS.pop(room_jid, None)
 
-    monkeypatch.setattr(idlerpg, "_ensure_game_task", fake_ensure)
-    monkeypatch.setattr(idlerpg, "_cancel_room_task", fake_cancel)
+    monkeypatch.setattr(idlerpg_tasks, "_ensure_game_task", fake_ensure)
+    monkeypatch.setattr(idlerpg_tasks, "_cancel_room_task", fake_cancel)
 
     assert await idlerpg._enabled_rooms(bot) == {"room@conf": True, "off@conf": False, "123": True}
     await idlerpg._start_enabled_room_tasks(bot)
@@ -106,7 +112,7 @@ async def test_ensure_game_task_serializes_concurrent_start(monkeypatch):
         await asyncio.sleep(0.01)
         return 0
 
-    monkeypatch.setattr(idlerpg, "_checkpoint_room_clock", slow_checkpoint)
+    monkeypatch.setattr(idlerpg_tasks, "_checkpoint_room_clock", slow_checkpoint)
 
     first, second = await asyncio.gather(
         idlerpg._ensure_game_task(bot, "room@conf"),
@@ -159,9 +165,9 @@ async def test_tick_room_serializes_concurrent_announcements(monkeypatch):
         }
     }
 
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
-    monkeypatch.setattr(idlerpg, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    monkeypatch.setattr(random, "random", lambda: 1.0)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
 
     await asyncio.gather(
         idlerpg._tick_room(bot, "room@conf", announce=True),
@@ -210,12 +216,12 @@ async def test_tick_announces_new_achievements(monkeypatch):
         }
     }
 
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
-    monkeypatch.setattr(idlerpg, "ITEM_CHANCE", 0.0)
-    monkeypatch.setattr(idlerpg, "GRID_BATTLE_ENABLED", False)
-    monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 0.0)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
-    monkeypatch.setattr(idlerpg, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_config, "ITEM_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg_config, "GRID_BATTLE_ENABLED", False)
+    monkeypatch.setattr(idlerpg_config, "EVENT_CHANCE", 0.0)
+    monkeypatch.setattr(random, "random", lambda: 1.0)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
 
     await idlerpg._tick_room(bot, "room@conf", announce=True)
 
@@ -251,16 +257,16 @@ async def test_level_up_triggers_original_level_battle(monkeypatch):
         }
     }
 
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
-    monkeypatch.setattr(idlerpg, "ITEM_CHANCE", 0.0)
-    monkeypatch.setattr(idlerpg, "GRID_BATTLE_ENABLED", False)
-    monkeypatch.setattr(idlerpg, "EVENT_CHANCE", 0.0)
-    monkeypatch.setattr(idlerpg, "LEVEL_BATTLE_CHANCE_AT_25", 1.0)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.99)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_config, "ITEM_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg_config, "GRID_BATTLE_ENABLED", False)
+    monkeypatch.setattr(idlerpg_config, "EVENT_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg_config, "LEVEL_BATTLE_CHANCE_AT_25", 1.0)
+    monkeypatch.setattr(random, "random", lambda: 0.99)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
     rolls = iter([9999, 0])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(rolls))
-    monkeypatch.setattr(idlerpg, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
 
     await idlerpg._tick_room(bot, "room@conf", announce=False)
 
@@ -290,8 +296,8 @@ async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
         cancelled.append(room_jid)
         idlerpg.ROOM_TASKS.pop(room_jid, None)
 
-    monkeypatch.setattr(idlerpg, "_start_enabled_room_tasks", fake_start)
-    monkeypatch.setattr(idlerpg, "_cancel_room_task", fake_cancel)
+    monkeypatch.setattr(idlerpg_tasks, "_start_enabled_room_tasks", fake_start)
+    monkeypatch.setattr(idlerpg_tasks, "_cancel_room_task", fake_cancel)
 
     await idlerpg.on_ready(bot)
     assert started == 1
@@ -321,8 +327,8 @@ async def test_on_muc_presence_starts_task_only_when_enabled(monkeypatch):
         ensured.append(room_jid)
         return DummyTask(name=room_jid)
 
-    monkeypatch.setattr(idlerpg._core, "_is_enabled_for_room", fake_enabled)
-    monkeypatch.setattr(idlerpg, "_ensure_game_task", fake_ensure)
+    monkeypatch.setattr(_core, "_is_enabled_for_room", fake_enabled)
+    monkeypatch.setattr(idlerpg_tasks, "_ensure_game_task", fake_ensure)
 
     await idlerpg.on_muc_presence(bot, pres)
     assert ensured == ["room@conf"]
@@ -333,7 +339,7 @@ async def test_on_muc_presence_starts_task_only_when_enabled(monkeypatch):
     async def raising_enabled(*_args):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(idlerpg._core, "_is_enabled_for_room", raising_enabled)
+    monkeypatch.setattr(_core, "_is_enabled_for_room", raising_enabled)
     await idlerpg.on_muc_presence(bot, pres)
     assert ensured == ["room@conf"]
 
@@ -355,9 +361,9 @@ async def test_task_start_checkpoints_room_clock_without_catchup(monkeypatch):
         }
     }
 
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     monkeypatch.setattr(
-        idlerpg,
+        idlerpg_tasks,
         "create_plugin_task",
         lambda _bot, _plugin, coro, name=None: DummyTask(coro, name),
     )
@@ -381,7 +387,7 @@ async def test_on_unload_checkpoints_active_room_and_flushes(monkeypatch):
         "rooms": {"room@conf": {"players": {}, "last_tick": now - 120}}
     }
     idlerpg.ROOM_TASKS["room@conf"] = DummyTask(name="room@conf")
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
 
     await idlerpg.on_unload(bot)
 

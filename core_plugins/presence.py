@@ -35,6 +35,7 @@ PLUGIN_META = {
     "version": "0.2.1",
     "description": "Bot presence and status management",
     "category": "info",
+    "requires": ["_core"],
 }
 
 

@@ -4,6 +4,7 @@ import types
 import pytest
 import plugins.idlerpg as idlerpg
 from core_plugins.rooms import JOINED_ROOMS
+from core_plugins import _core
 from utils.command import Role
 
 
@@ -100,7 +101,7 @@ def clear_idlerpg_state():
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
     JOINED_ROOMS.clear()
-    idlerpg._core.JOINED_ROOMS = JOINED_ROOMS
+    _core.JOINED_ROOMS = JOINED_ROOMS
     JOINED_ROOMS["room@conf"] = {
         "nicks": {
             "Alice": {"jid": "alice@envs.net", "affiliation": "member"},

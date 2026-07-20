@@ -7,6 +7,7 @@ from .helpers import (
     types,
     users_mod,
 )
+from core_plugins.users import tracking as tracking_module
 
 
 @pytest.mark.asyncio
@@ -17,8 +18,8 @@ async def test_on_muc_presence_adds_and_tracks_nick(mock_bot, mock_msg):
                 MagicMock(bare="john@foo.bar")},
         "from": MagicMock(),
     }
-    with patch("core_plugins.users.track_room_nick", new=AsyncMock()) as track, \
-            patch("core_plugins.users.update_last_seen",
+    with patch("core_plugins.users.tracking.track_room_nick", new=AsyncMock()) as track, \
+            patch("core_plugins.users.tracking.update_last_seen",
                   new=AsyncMock()) as last_seen:
         await users_mod.on_muc_presence(mock_bot, pres)
         track.assert_awaited()
@@ -34,7 +35,7 @@ async def test_on_groupchat_message_updates_last_seen(mock_bot, mock_msg):
     mock_msg['muc'] = {"room": "room-A", "nick": "Nick"}
     mock_bot.plugin = {"xep_0045": MagicMock(
         get_jid_property=lambda r, n, s: "realjid@x")}
-    with patch("core_plugins.users.update_last_seen",
+    with patch("core_plugins.users.tracking.update_last_seen",
                new=AsyncMock()) as update_last_seen:
         await users_mod.on_groupchat_message(mock_bot, mock_msg)
         update_last_seen.assert_awaited()
@@ -52,8 +53,8 @@ async def test_on_muc_presence_skips_own_presence(mock_bot):
         },
     }
 
-    with patch("core_plugins.users.track_room_nick", new=AsyncMock()) as track, \
-            patch("core_plugins.users.update_last_seen",
+    with patch("core_plugins.users.tracking.track_room_nick", new=AsyncMock()) as track, \
+            patch("core_plugins.users.tracking.update_last_seen",
                   new=AsyncMock()) as last_seen:
         await users_mod.on_muc_presence(mock_bot, pres)
 
@@ -73,7 +74,7 @@ async def test_on_groupchat_message_skips_own_message(mock_bot, mock_msg):
         ),
     }
 
-    with patch("core_plugins.users.update_last_seen",
+    with patch("core_plugins.users.tracking.update_last_seen",
                new=AsyncMock()) as last_seen:
         await users_mod.on_groupchat_message(mock_bot, mock_msg)
 
@@ -99,7 +100,7 @@ async def test_track_room_nick(build_mock_bot, monkeypatch):
     )
     bot.db.users = user_store
 
-    monkeypatch.setattr(users_mod, "MAX_ROOM_NICKS", 2)
+    monkeypatch.setattr(tracking_module, "MAX_ROOM_NICKS", 2)
 
     await users_mod.track_room_nick(bot, "jid@x", "roomY", "nickname")
 
@@ -157,7 +158,7 @@ async def test_presence_and_message_skip_branches(mock_bot, mock_msg):
             "jid": types.SimpleNamespace(bare="other@example.org"),
         },
     }
-    with patch("core_plugins.users.update_last_seen", new=AsyncMock()) as last_seen:
+    with patch("core_plugins.users.tracking.update_last_seen", new=AsyncMock()) as last_seen:
         await users_mod.on_muc_presence(mock_bot, leaving)
         last_seen.assert_awaited_once_with(mock_bot, "other@example.org")
 

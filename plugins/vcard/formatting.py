@@ -3,6 +3,43 @@
 import textwrap
 import urllib
 
+from .config import log
+
+def _get_all_field_values_by_tag(vcard, tag):
+    """
+    Extract all string values for the field 'tag' from vcard stanza children.
+    """
+    values = []
+    for child in vcard.xml:
+        # Check both namespace-tag form and plain tag
+        if child.tag.endswith(tag) and child.text:
+            values.append(child.text.strip())
+    return values
+
+def _get_nested_field_values_by_tag(vcard, parent_tag, child_tag):
+    """Get all child_tag values under parent_tag elements in vcard XML."""
+    values = []
+    for field in vcard.xml:
+        if field.tag.endswith(parent_tag):
+            for child in field:
+                if child.tag.endswith(child_tag) and child.text:
+                    values.append(child.text.strip())
+    return values
+
+def _extract_email_addresses(vcard):
+    """Extract USERID from all EMAIL fields in the vCard XML."""
+    emails = []
+    for child in vcard.xml:
+        if not child.tag.endswith("EMAIL"):
+            continue
+
+        # Find USERID child element within the EMAIL entry.
+        for email_child in child:
+            if email_child.tag.endswith("USERID") and email_child.text:
+                emails.append(email_child.text.strip())
+    return emails
+
+
 
 def _format_vcard_header(label, display_name, rooms=None):
     if rooms:

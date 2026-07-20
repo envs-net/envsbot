@@ -7,6 +7,8 @@ from .helpers import (
     pytz,
     reminder,
 )
+from plugins.reminder import parsing as reminder_parsing
+from core_plugins._core import parse_duration
 
 
 @pytest.mark.parametrize("s,seconds", [
@@ -22,7 +24,7 @@ from .helpers import (
     ("xx3d", None),
 ])
 def test_parse_duration(s, seconds):
-    assert reminder.parse_duration(s) == seconds
+    assert parse_duration(s) == seconds
 
 
 def test_parse_absolute_datetime():
@@ -75,7 +77,7 @@ async def test_parse_reminder_when_duration_and_datetime():
 
 def test_parse_reminder_when_explicit_timezone(monkeypatch):
     fixed_now = datetime.datetime(2026, 7, 10, 10, 0, tzinfo=datetime.timezone.utc)
-    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+    monkeypatch.setattr(reminder_parsing, "_utcnow", lambda: fixed_now)
 
     sec, msg, when = reminder.parse_reminder_when(
         ["2026-07-10", "13:23", "CEST", "TEST1"],
@@ -94,10 +96,10 @@ def test_timezone_from_token_and_default_config(monkeypatch):
     assert reminder._timezone_from_token("+02:30").utcoffset(None).total_seconds() == 9000
     assert reminder._timezone_from_token("Mars/Base") is None
 
-    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "Europe/Berlin")
+    monkeypatch.setattr(reminder_parsing, "REMINDER_DEFAULT_TIMEZONE", "Europe/Berlin")
     assert str(reminder._reminder_default_tzinfo()) == "Europe/Berlin"
 
-    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "Invalid/Zone")
+    monkeypatch.setattr(reminder_parsing, "REMINDER_DEFAULT_TIMEZONE", "Invalid/Zone")
     assert str(reminder._reminder_default_tzinfo()) == "UTC"
 
 
@@ -109,7 +111,7 @@ async def test_get_reminder_tzinfo_uses_user_timezone_or_config_default(monkeypa
     assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "UTC"
 
     store.get = AsyncMock(return_value=None)
-    monkeypatch.setattr(reminder, "REMINDER_DEFAULT_TIMEZONE", "Europe/Berlin")
+    monkeypatch.setattr(reminder_parsing, "REMINDER_DEFAULT_TIMEZONE", "Europe/Berlin")
     assert str(await reminder.get_reminder_tzinfo(dummy_bot, "u@example.org")) == "Europe/Berlin"
 
     store.get = AsyncMock(side_effect=RuntimeError("db"))
@@ -152,18 +154,18 @@ def test_timezone_lookup_jid_direct_muc_plugin_joined_and_fallback(dummy_bot, mo
     muc.get_jid_property.assert_called_once_with("room@conf", "Nick", "jid")
 
     muc.get_jid_property.side_effect = RuntimeError("lookup failed")
-    reminder.JOINED_ROOMS["room@conf"] = {
+    reminder_parsing.JOINED_ROOMS["room@conf"] = {
         "nicks": {"Nick": {"jid": "joined@example.org/resource"}}
     }
     try:
         assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, True) == "joined@example.org"
     finally:
-        reminder.JOINED_ROOMS.pop("room@conf", None)
+        reminder_parsing.JOINED_ROOMS.pop("room@conf", None)
 
     dummy_bot.plugin = {}
     assert reminder._timezone_lookup_jid(dummy_bot, "sender@example.org/res", msg, True) == "sender@example.org"
 
-    monkeypatch.setattr(reminder, "_is_muc_pm", lambda _msg: False)
+    monkeypatch.setattr(reminder_parsing, "_is_muc_pm", lambda _msg: False)
     msg.__getitem__.side_effect = KeyError("from")
     assert reminder._timezone_lookup_jid(dummy_bot, "fallback@example.org/res", msg, False) == "fallback@example.org"
 
@@ -171,7 +173,7 @@ def test_timezone_lookup_jid_direct_muc_plugin_joined_and_fallback(dummy_bot, mo
 def test_parse_reminder_when_allows_current_minute_grace(monkeypatch):
     fixed_now = datetime.datetime(
         2026, 7, 11, 7, 30, 45, tzinfo=datetime.timezone.utc)
-    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+    monkeypatch.setattr(reminder_parsing, "_utcnow", lambda: fixed_now)
 
     sec, msg, when = reminder.parse_reminder_when(
         ["2026-07-11", "09:30", "CEST", "Test"],
@@ -186,7 +188,7 @@ def test_parse_reminder_when_allows_current_minute_grace(monkeypatch):
 def test_explain_invalid_reminder_time_for_past_timezone(monkeypatch):
     fixed_now = datetime.datetime(
         2026, 7, 11, 7, 30, 0, tzinfo=datetime.timezone.utc)
-    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+    monkeypatch.setattr(reminder_parsing, "_utcnow", lambda: fixed_now)
 
     detail = reminder.explain_invalid_reminder_time(
         ["2026-07-11", "09:30", "+03:00", "Test"],

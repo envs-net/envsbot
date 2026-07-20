@@ -249,22 +249,69 @@ def _duck_values(cfg: Mapping[str, object]) -> dict[str, object]:
 def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
     """Refresh module-level constants that snapshot config.py at import time."""
     refreshed: list[str] = []
+    idlerpg_values = _idlerpg_values(cfg)
+    rss_values = _rss_values(cfg)
+    reminder_values = {
+        "REMINDER_ENABLED": _to_bool(cfg.get("reminder_enabled"), True),
+        "REMINDER_DEFAULT_TIMEZONE": _to_str(
+            cfg.get("reminder_default_timezone") or "UTC",
+            "UTC",
+        ),
+    }
+    max_room_nicks = _cfg_group(cfg, "users").get("max_room_nicks", 5)
     module_values: dict[str, dict[str, object]] = {
         "utils.formatting": {
             "DEFAULT_PAGINATION": cfg.get("default_pagination", "all"),
         },
         "core_plugins.users": {
-            "MAX_ROOM_NICKS": _cfg_group(cfg, "users").get("max_room_nicks", 5),
+            "MAX_ROOM_NICKS": max_room_nicks,
         },
+        "core_plugins.users.roles": {"MAX_ROOM_NICKS": max_room_nicks},
+        "core_plugins.users.tracking": {"MAX_ROOM_NICKS": max_room_nicks},
         "plugins.ducks": _duck_values(cfg),
-        "plugins.idlerpg": _idlerpg_values(cfg),
-        "plugins.rss": _rss_values(cfg),
-        "plugins.reminder": {
-            "REMINDER_ENABLED": _to_bool(cfg.get("reminder_enabled"), True),
-            "REMINDER_DEFAULT_TIMEZONE": _to_str(
-                cfg.get("reminder_default_timezone") or "UTC",
-                "UTC",
-            ),
+        "plugins.idlerpg": idlerpg_values,
+        "plugins.idlerpg.config": idlerpg_values,
+        "plugins.idlerpg.handlers": {
+            key: idlerpg_values[key]
+            for key in ("COUNT_COMMAND_MESSAGES", "MESSAGE_PENALTY")
+        },
+        "plugins.rss": rss_values,
+        "plugins.rss.config": rss_values,
+        "plugins.rss.tasks": {
+            key: rss_values[key]
+            for key in ("DEFAULT_POLL_INTERVAL", "RSS_MAX_ENTRIES_PER_POLL")
+        },
+        "plugins.rss.commands": {
+            "DEFAULT_POLL_INTERVAL": rss_values["DEFAULT_POLL_INTERVAL"],
+        },
+        "plugins.rss.store": {
+            key: rss_values[key]
+            for key in (
+                "RSS_RETRY_INITIAL_DELAY",
+                "RSS_RETRY_BACKOFF_MULTIPLIER",
+                "MAX_BACKOFF_TIME",
+            )
+        },
+        "plugins.rss.fetch": {
+            key: rss_values[key]
+            for key in (
+                "RSS_USER_AGENT",
+                "RSS_FETCH_TIMEOUT_SECONDS",
+                "RSS_MAX_REDIRECTS",
+                "RSS_MAX_READ_BYTES",
+                "ALLOW_PRIVATE_FETCH_URLS",
+                "SIMILARITY_THRESHOLD",
+            )
+        },
+        "plugins.rss.formatting": {
+            "RSS_LIST_PAGE_SIZE": rss_values["RSS_LIST_PAGE_SIZE"],
+        },
+        "plugins.reminder": reminder_values,
+        "plugins.reminder.runtime": {
+            "REMINDER_ENABLED": reminder_values["REMINDER_ENABLED"],
+        },
+        "plugins.reminder.parsing": {
+            "REMINDER_DEFAULT_TIMEZONE": reminder_values["REMINDER_DEFAULT_TIMEZONE"],
         },
         "plugins.urlcheck": {
             "URLCHECK_WAIT_SECONDS": _to_int(cfg.get("urlcheck_wait_seconds") or 120, 120),

@@ -6,7 +6,7 @@ from typing import Any
 
 
 def _unique_defs_by_name() -> dict[str, dict[str, Any]]:
-    return {str(item.get("name")): dict(item) for item in UNIQUE_ITEMS if item.get("name")}
+    return {str(item.get("name")): dict(item) for item in _dep_constants.UNIQUE_ITEMS if item.get("name")}
 
 
 def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
@@ -92,8 +92,8 @@ def _percent_amount(player: dict[str, Any], percent: int | float) -> int:
 def _battle_percent(opponent: dict[str, Any], outcome: str) -> float:
     level = max(0, int(opponent.get("level", 0) or 0))
     if outcome == "win":
-        return max(float(BATTLE_WIN_MIN_PERCENT), level / 4.0)
-    return max(float(BATTLE_LOSS_MIN_PERCENT), level / 7.0)
+        return max(float(_dep_config.BATTLE_WIN_MIN_PERCENT), level / 4.0)
+    return max(float(_dep_config.BATTLE_LOSS_MIN_PERCENT), level / 7.0)
 
 
 def _battle_clock_delta(player: dict[str, Any], opponent: dict[str, Any], outcome: str) -> int:
@@ -113,15 +113,15 @@ def _roll_weighted_item_level(player_level: int) -> int:
 
 
 def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
-    if not UNIQUE_ITEMS_ENABLED:
+    if not _dep_config.UNIQUE_ITEMS_ENABLED:
         return None
     level = int(player.get("level", 0) or 0)
-    if level < UNIQUE_ITEM_MIN_LEVEL or random.random() >= UNIQUE_ITEM_CHANCE:
+    if level < _dep_config.UNIQUE_ITEM_MIN_LEVEL or random.random() >= _dep_config.UNIQUE_ITEM_CHANCE:
         return None
     occupied_unique_slots = _unique_item_slots(player)
     eligible = [
         item
-        for item in UNIQUE_ITEMS
+        for item in _dep_constants.UNIQUE_ITEMS
         if level >= int(item.get("min_level", 0) or 0)
         and str(item.get("slot") or "") not in occupied_unique_slots
     ]
@@ -146,58 +146,58 @@ def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None
         level = int(unique["level"])
         existing_unique = str(unique_items.get(slot) or "")
         if existing_unique:
-            _check_level_achievements(player, room)
+            _dep_leveling._check_level_achievements(player, room)
             return (
-                f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}, "
-                f"near {_player_region(player)}, but keeps {existing_unique}."
+                f"🌌 {_dep_formatting._display_player(player)} found {unique['name']}, a level {level} {slot}, "
+                f"near {_dep_map._player_region(player)}, but keeps {existing_unique}."
             )
         items[slot] = max(int(items.get(slot, 0) or 0), level)
         unique_items[slot] = str(unique["name"])
-        _award(player, "unique_item")
-        _inc_stat(player, "unique_items_found", 1, room)
+        _dep_leveling._award(player, "unique_item")
+        _dep_leveling._inc_stat(player, "unique_items_found", 1, room)
         bonus = str(unique.get("bonus", "")).replace("_", " ")
         bonus_part = f" ({int(unique.get('bonus_percent', 0) or 0)}% {bonus})" if bonus else ""
-        return f"🌌 {_display_player(player)} found {unique['name']}, a level {level} {slot}, near {_player_region(player)}{bonus_part}!"
-    item = random.choice(ITEMS)
+        return f"🌌 {_dep_formatting._display_player(player)} found {unique['name']}, a level {level} {slot}, near {_dep_map._player_region(player)}{bonus_part}!"
+    item = random.choice(_dep_constants.ITEMS)
     gain = _roll_weighted_item_level(int(player.get("level", 0) or 0))
     existing_unique = str(unique_items.get(item) or "")
     if existing_unique:
-        _check_level_achievements(player, room)
+        _dep_leveling._check_level_achievements(player, room)
         return (
-            f"✨ {_display_player(player)} found {item} level {gain} near {_player_region(player)}, "
+            f"✨ {_dep_formatting._display_player(player)} found {item} level {gain} near {_dep_map._player_region(player)}, "
             f"but keeps {existing_unique}."
         )
     if gain >= int(items.get(item, 0) or 0):
         items[item] = gain
-    _check_level_achievements(player, room)
-    return f"✨ {_display_player(player)} found {item} level {gain} near {_player_region(player)}."
+    _dep_leveling._check_level_achievements(player, room)
+    return f"✨ {_dep_formatting._display_player(player)} found {item} level {gain} near {_dep_map._player_region(player)}."
 
 
 def _critical_strike_chance(player: dict[str, Any]) -> float:
     alignment = str(player.get("alignment") or "n")[:1].lower()
     if alignment == "g":
-        return max(0.0, float(CRITICAL_STRIKE_CHANCE_GOOD))
+        return max(0.0, float(_dep_config.CRITICAL_STRIKE_CHANCE_GOOD))
     if alignment == "e":
-        return max(0.0, float(CRITICAL_STRIKE_CHANCE_EVIL))
-    return max(0.0, float(CRITICAL_STRIKE_CHANCE))
+        return max(0.0, float(_dep_config.CRITICAL_STRIKE_CHANCE_EVIL))
+    return max(0.0, float(_dep_config.CRITICAL_STRIKE_CHANCE))
 
 
 def _maybe_critical_strike(winner: dict[str, Any], loser: dict[str, Any], messages: list[str]) -> None:
     if random.random() >= _critical_strike_chance(winner):
         return
-    _award(winner, "critical_striker")
-    winner_name = _display_player(winner)
-    loser_name = _display_player(loser)
-    amount = _random_percent_amount(loser, CRITICAL_MIN_PERCENT, CRITICAL_MAX_PERCENT)
-    changed = _add_time(loser, amount)
+    _dep_leveling._award(winner, "critical_striker")
+    winner_name = _dep_formatting._display_player(winner)
+    loser_name = _dep_formatting._display_player(loser)
+    amount = _random_percent_amount(loser, _dep_config.CRITICAL_MIN_PERCENT, _dep_config.CRITICAL_MAX_PERCENT)
+    changed = _dep_leveling._add_time(loser, amount)
     loser.setdefault("penalties", {})["critical"] = (
         int(loser.get("penalties", {}).get("critical", 0) or 0) + changed
     )
     messages.append(
         f"💢 {winner_name} has dealt {loser_name} a Critical Strike! "
-        f"{_duration_clock(changed)} is added to {_possessive(loser_name)} clock."
+        f"{_dep_formatting._duration_clock(changed)} is added to {_dep_formatting._possessive(loser_name)} clock."
     )
-    messages.append(_next_level_line(loser))
+    messages.append(_dep_formatting._next_level_line(loser))
 
 
 def _maybe_battle_item_drop(
@@ -206,14 +206,14 @@ def _maybe_battle_item_drop(
     messages: list[str],
     room: dict[str, Any] | None = None,
 ) -> None:
-    if random.random() >= ITEM_DROP_CHANCE:
+    if random.random() >= _dep_config.ITEM_DROP_CHANCE:
         return
     winner_items = winner.setdefault("items", {})
     loser_items = loser.setdefault("items", {})
     winner_unique_slots = _unique_item_slots(winner)
     loser_unique_slots = _unique_item_slots(loser)
     candidates: list[tuple[str, int, int]] = []
-    for item in ITEMS:
+    for item in _dep_constants.ITEMS:
         if item in winner_unique_slots or item in loser_unique_slots:
             continue
         try:
@@ -240,10 +240,10 @@ def _maybe_battle_item_drop(
         loser_unique[item] = winner_unique_name
     else:
         loser_unique.pop(item, None)
-    _check_level_achievements(winner, room)
-    _check_level_achievements(loser, room)
-    winner_name = _display_player(winner)
-    loser_name = _display_player(loser)
+    _dep_leveling._check_level_achievements(winner, room)
+    _dep_leveling._check_level_achievements(loser, room)
+    winner_name = _dep_formatting._display_player(winner)
+    loser_name = _dep_formatting._display_player(loser)
     messages.append(
         f"🎒 In the fierce battle, {loser_name} dropped their level {loser_level} {item}! "
         f"{winner_name} picks it up, tossing their old level {winner_level} {item} to {loser_name}."
@@ -256,7 +256,7 @@ def _run_item_blessing(
     room: dict[str, Any] | None = None,
 ) -> None:
     _jid, player = random.choice(players)
-    item = random.choice(ITEMS)
+    item = random.choice(_dep_constants.ITEMS)
     items = player.setdefault("items", {})
     try:
         old_level = int(items.get(item, 0) or 0)
@@ -265,12 +265,12 @@ def _run_item_blessing(
     level = max(0, int(player.get("level", 0) or 0))
     gain = max(1, old_level // 10, level // 10)
     items[item] = old_level + gain
-    name = _display_player(player)
-    _award(player, "item_blessed")
-    _inc_stat(player, "item_blessings", 1, room)
+    name = _dep_formatting._display_player(player)
+    _dep_leveling._award(player, "item_blessed")
+    _dep_leveling._inc_stat(player, "item_blessings", 1, room)
     messages.append(
-        f"✨ {name}'s {item} has been blessed by a wandering enchanter near {_player_region(player)}! "
-        f"{_possessive(name)} {item} gains {gain} level{'s' if gain != 1 else ''}."
+        f"✨ {name}'s {item} has been blessed by a wandering enchanter near {_dep_map._player_region(player)}! "
+        f"{_dep_formatting._possessive(name)} {item} gains {gain} level{'s' if gain != 1 else ''}."
     )
 
 
@@ -283,7 +283,7 @@ def _run_item_damage(
     for _jid, player in players:
         items = player.setdefault("items", {})
         unique_slots = _unique_item_slots(player)
-        for item in ITEMS:
+        for item in _dep_constants.ITEMS:
             if item in unique_slots:
                 continue
             try:
@@ -300,12 +300,12 @@ def _run_item_damage(
     player.setdefault("items", {})[item] = new_level
     if new_level <= 0:
         player.setdefault("unique_items", {}).pop(item, None)
-    _award(player, "item_damaged")
-    _inc_stat(player, "item_damage_events", 1, room)
-    name = _display_player(player)
+    _dep_leveling._award(player, "item_damaged")
+    _dep_leveling._inc_stat(player, "item_damage_events", 1, room)
+    name = _dep_formatting._display_player(player)
     messages.append(
-        f"🪨 {name} slipped and damaged their {item} near {_player_region(player)}! "
-        f"{_possessive(name)} {item} loses {loss} level{'s' if loss != 1 else ''}."
+        f"🪨 {name} slipped and damaged their {item} near {_dep_map._player_region(player)}! "
+        f"{_dep_formatting._possessive(name)} {item} loses {loss} level{'s' if loss != 1 else ''}."
     )
 
 
@@ -314,7 +314,7 @@ def _run_item_swap(
     messages: list[str],
     room: dict[str, Any] | None = None,
 ) -> None:
-    pair = _choose_two_players(players)
+    pair = _dep_state._choose_two_players(players)
     if pair is None:
         return
     (_winner_jid, winner), (_loser_jid, loser) = pair
@@ -323,7 +323,7 @@ def _run_item_swap(
     winner_unique_slots = _unique_item_slots(winner)
     loser_unique_slots = _unique_item_slots(loser)
     candidates: list[tuple[str, int, int]] = []
-    for item in ITEMS:
+    for item in _dep_constants.ITEMS:
         if item in winner_unique_slots or item in loser_unique_slots:
             continue
         try:
@@ -354,13 +354,22 @@ def _run_item_swap(
         loser_unique[item] = winner_unique_name
     else:
         loser_unique.pop(item, None)
-    _award(winner, "item_swapped")
-    _inc_stat(winner, "item_swaps_won", 1, room)
-    _check_level_achievements(winner, room)
-    _check_level_achievements(loser, room)
-    winner_name = _display_player(winner)
-    loser_name = _display_player(loser)
+    _dep_leveling._award(winner, "item_swapped")
+    _dep_leveling._inc_stat(winner, "item_swaps_won", 1, room)
+    _dep_leveling._check_level_achievements(winner, room)
+    _dep_leveling._check_level_achievements(loser, room)
+    winner_name = _dep_formatting._display_player(winner)
+    loser_name = _dep_formatting._display_player(loser)
     messages.append(
         f"🎒 {winner_name} found {loser_name}'s level {loser_level} {item} while they were distracted! "
         f"{winner_name} leaves their old level {winner_level} {item} behind, which {loser_name} then takes."
     )
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import map as _dep_map  # noqa: E402
+from . import state as _dep_state  # noqa: E402

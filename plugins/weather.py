@@ -21,7 +21,7 @@ from utils.command import command, Role
 # Intentionally exposed for tests and runtime settings.
 from utils.config import config
 from utils.http_fetch import fetch_text, passthrough_validator
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
 

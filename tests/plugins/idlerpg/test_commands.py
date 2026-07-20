@@ -6,6 +6,9 @@ from .helpers import (
     pytest,
     types,
 )
+import random
+from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import formatting as idlerpg_formatting
 from .helpers import _register_alice
 
 
@@ -244,7 +247,7 @@ async def test_idlerpg_on_load_registers_generic_and_groupchat_message_events():
 async def test_login_while_already_online_is_noop(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "ANNOUNCE_LOGIN", True)
+    monkeypatch.setattr(idlerpg_config, "ANNOUNCE_LOGIN", True)
     await idlerpg._handle_register(
         bot,
         "alice@envs.net",
@@ -323,7 +326,7 @@ async def test_quest_and_runtime_state(monkeypatch):
         )
         JOINED_ROOMS["room@conf"]["nicks"][f"U{idx}"] = {"jid": jid, "affiliation": "member"}
     bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = data
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
 
     messages = []
 
@@ -409,10 +412,10 @@ def test_godsend_calamity_and_alignment_bonus_messages(monkeypatch):
     )
     players = [("alice@envs.net", alice), ("bob@envs.net", bob)]
 
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
-    monkeypatch.setattr(idlerpg.random, "sample", lambda seq, count: seq[:count])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: start)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "sample", lambda seq, count: seq[:count])
+    monkeypatch.setattr(random, "randint", lambda start, stop: start)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
 
     calamity_messages = []
     idlerpg._run_godsend_or_calamity(players, calamity_messages)
@@ -456,13 +459,13 @@ async def test_title_command_sets_founder():
 async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
-    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
-    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
     await _register_alice(bot, msg)
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
     room["players"]["alice@envs.net"]["created_at"] = 1_000_000
-    monkeypatch.setattr(idlerpg, "_now", lambda: 1_090_061)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_090_061)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["profile"], msg, True)
 
@@ -478,9 +481,9 @@ async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
 async def test_map_command_includes_public_json(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
-    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
-    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
     await _register_alice(bot, msg)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["map"], msg, True)
@@ -493,8 +496,8 @@ async def test_map_command_includes_public_json(tmp_path, monkeypatch):
 async def test_export_command_writes_public_files(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
-    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
     await _register_alice(bot, msg)
 
     admin_msg = DummyMsg(resource="Admin")
@@ -589,10 +592,10 @@ def test_season_rollover_and_player_movement(monkeypatch):
     )
     room["players"]["alice@envs.net"] = player
     room["season"] = {"id": "old", "started_at": idlerpg._now() - 10, "ends_at": idlerpg._now() - 1}
-    monkeypatch.setattr(idlerpg, "SEASON_ENABLED", True)
-    monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 1)
-    monkeypatch.setattr(idlerpg, "MAP_STEP_PER_SECOND", 1)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[-1])
+    monkeypatch.setattr(idlerpg_config, "SEASON_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "SEASON_DURATION_DAYS", 1)
+    monkeypatch.setattr(idlerpg_config, "MAP_STEP_PER_SECOND", 1)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[-1])
 
     old_pos = (player["x"], player["y"])
     messages = []
@@ -608,8 +611,8 @@ def test_season_rollover_and_player_movement(monkeypatch):
 async def test_events_export_has_no_raw_jids_and_events_command(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
-    monkeypatch.setattr(idlerpg, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
 
     await idlerpg._handle_register(
         bot,
@@ -637,12 +640,12 @@ def test_unique_item_roll_grants_title_and_public_record(monkeypatch):
         "alice@envs.net",
         {"name": "Alice", "class": "sysadmin", "level": 52, "next": 10000},
     )
-    monkeypatch.setattr(idlerpg, "UNIQUE_ITEMS_ENABLED", True)
-    monkeypatch.setattr(idlerpg, "UNIQUE_ITEM_MIN_LEVEL", 25)
-    monkeypatch.setattr(idlerpg, "UNIQUE_ITEM_CHANCE", 1.0)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 0.0)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: start)
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEMS_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEM_MIN_LEVEL", 25)
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEM_CHANCE", 1.0)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "randint", lambda start, stop: start)
 
     message = idlerpg._grant_level_item(player)
 
@@ -658,7 +661,7 @@ def test_unique_item_roll_grants_title_and_public_record(monkeypatch):
 async def test_logout_grace_clears_pending_penalty(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "LOGOUT_GRACE_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_GRACE_SECONDS", 300)
     await idlerpg._handle_register(
         bot,
         "alice@envs.net",
@@ -685,9 +688,9 @@ async def test_logout_grace_clears_pending_penalty(monkeypatch):
 def test_event_retention_prunes_old_events(monkeypatch):
     room = idlerpg._blank_room()
     now = 1_700_000_000
-    monkeypatch.setattr(idlerpg, "EVENT_RETENTION_DAYS", 1)
-    monkeypatch.setattr(idlerpg, "EVENT_LOG_LIMIT", 10)
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 1)
+    monkeypatch.setattr(idlerpg_config, "EVENT_LOG_LIMIT", 10)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     room["events"] = [
         {"ts": now - 3 * 86400, "kind": "old", "text": "old"},
         {"ts": now - 60, "kind": "new", "text": "new"},
@@ -718,7 +721,7 @@ def test_unique_item_bonuses_and_achievement_catalog_export(tmp_path, monkeypatc
     assert public["region"] == "Velbragh"
     assert public["unique_item_bonuses"][0]["bonus"] == "battle_bonus"
 
-    monkeypatch.setattr(idlerpg, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
     room = idlerpg._blank_room()
     room["players"] = {"alice@envs.net": player}
     idlerpg._export_room_state(tmp_path, "room@conf", room, idlerpg._now())
@@ -752,9 +755,9 @@ def test_event_retention_sanitizes_and_limits(monkeypatch):
             {"ts": 1900, "kind": "keep", "text": "first"},
         ]
     }
-    monkeypatch.setattr(idlerpg, "_now", lambda: 2000)
-    monkeypatch.setattr(idlerpg, "EVENT_RETENTION_DAYS", 0)
-    monkeypatch.setattr(idlerpg, "EVENT_LOG_LIMIT", 2)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 2000)
+    monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 0)
+    monkeypatch.setattr(idlerpg_config, "EVENT_LOG_LIMIT", 2)
 
     idlerpg._record_event(
         room,
@@ -774,7 +777,7 @@ def test_event_retention_sanitizes_and_limits(monkeypatch):
     assert public[0]["data"]["note"] == "public"
     assert public[0]["data"]["items"] == ["a", 1]
 
-    monkeypatch.setattr(idlerpg, "EVENT_RETENTION_DAYS", 1)
+    monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 1)
     room["events"] = [
         {"ts": 2000 - 90000, "kind": "old", "text": "too old"},
         {"ts": 1999, "kind": "new", "text": "kept"},
@@ -839,12 +842,12 @@ async def test_quest_min_level_start_and_completion_with_bonus(monkeypatch):
             },
         )
     room["quest"] = {"active": False, "next_at": 0}
-    monkeypatch.setattr(idlerpg, "_now", lambda: 1000)
-    monkeypatch.setattr(idlerpg, "QUEST_TIME_ENABLED", False)
-    monkeypatch.setattr(idlerpg, "QUEST_GRID_ENABLED", True)
-    monkeypatch.setattr(idlerpg.random, "shuffle", lambda seq: None)
-    monkeypatch.setattr(idlerpg.random, "randint", lambda low, high: low)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1000)
+    monkeypatch.setattr(idlerpg_config, "QUEST_TIME_ENABLED", False)
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_ENABLED", True)
+    monkeypatch.setattr(random, "shuffle", lambda seq: None)
+    monkeypatch.setattr(random, "randint", lambda low, high: low)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
 
     messages: list[str] = []
     await idlerpg._maybe_run_quest(room, room_jid, messages)
@@ -891,7 +894,7 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
     }
     idlerpg._record_event(room, "level", "Alice reached level 25", players=["Alice"])
 
-    monkeypatch.setattr(idlerpg, "EXPORT_PUBLIC_BASE_URL", "https://example.org/idlerpg/data")
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://example.org/idlerpg/data")
     summary, room_payload = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
     assert summary["leaderboard_url"].endswith("/room_at_conf/leaderboard.json")
     assert "_room_payload" not in summary
@@ -927,8 +930,8 @@ async def test_stats_command_is_primary_and_balance_alias_still_works():
 
 
 def test_battle_amount_alignment_factors_and_logout_penalty(monkeypatch):
-    monkeypatch.setattr(idlerpg, "PENALTY_STEP", 1.0)
-    monkeypatch.setattr(idlerpg, "MAX_PENALTY", 0)
+    monkeypatch.setattr(idlerpg_config, "PENALTY_STEP", 1.0)
+    monkeypatch.setattr(idlerpg_config, "MAX_PENALTY", 0)
     evil = {"name": "Eve", "level": 5, "next": 1000, "alignment": "e", "stats": {}}
     good = {"name": "Grace", "level": 5, "next": 1000, "alignment": "g", "stats": {}}
     neutral = {"name": "Neo", "level": 5, "next": 1000, "alignment": "n", "stats": {}}
@@ -942,7 +945,7 @@ def test_battle_amount_alignment_factors_and_logout_penalty(monkeypatch):
     assert idlerpg._alignment_battle_factor(evil) == 0.90
     assert idlerpg._alignment_battle_factor(neutral) == 1.0
 
-    monkeypatch.setattr(idlerpg, "LOGOUT_PENALTY", 20)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_PENALTY", 20)
     changed = idlerpg._apply_logout_penalty(neutral)
     assert changed == 20
     assert neutral["next"] == 1020
@@ -956,16 +959,16 @@ def test_pending_logout_penalty_waits_then_applies(monkeypatch):
         "alice@envs.net",
         {"name": "Alice", "level": 1, "next": 1000, "pending_logout_penalty": {"due_at": 2000}},
     )
-    monkeypatch.setattr(idlerpg, "_now", lambda: 1000)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1000)
     messages: list[str] = []
     idlerpg._maybe_apply_pending_logout_penalty(player, messages)
     assert messages == []
     assert player["next"] == 1000
     assert player["pending_logout_penalty"] == {"due_at": 2000}
 
-    monkeypatch.setattr(idlerpg, "_now", lambda: 3000)
-    monkeypatch.setattr(idlerpg, "LOGOUT_PENALTY", 1)
-    monkeypatch.setattr(idlerpg, "PENALTY_STEP", 1.0)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 3000)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_PENALTY", 1)
+    monkeypatch.setattr(idlerpg_config, "PENALTY_STEP", 1.0)
     idlerpg._maybe_apply_pending_logout_penalty(player, messages)
     assert player["next"] == 1001
     assert player["pending_logout_penalty"] == {}
@@ -1130,7 +1133,7 @@ async def test_season_extend_uses_config_or_manual(monkeypatch):
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
     room["season"] = {"id": "config-season", "started_at": idlerpg._now(), "ends_at": 0}
 
-    monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 2)
+    monkeypatch.setattr(idlerpg_config, "SEASON_DURATION_DAYS", 2)
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend"], msg, True)
     assert "extended by 2d" in bot.replies[-1][0]
     assert int(room["season"]["ends_at"]) > idlerpg._now()
@@ -1138,7 +1141,7 @@ async def test_season_extend_uses_config_or_manual(monkeypatch):
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend", "manual"], msg, True)
     assert int(room["season"]["ends_at"]) == 0
 
-    monkeypatch.setattr(idlerpg, "SEASON_DURATION_DAYS", 0)
+    monkeypatch.setattr(idlerpg_config, "SEASON_DURATION_DAYS", 0)
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "extend"], msg, True)
     assert "manual/endless" in bot.replies[-1][0]
     assert int(room["season"]["ends_at"]) == 0
@@ -1167,7 +1170,7 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
     room = idlerpg._blank_room()
     now = 2_000_000_000
     room["season"] = {"id": "s", "started_at": now - 8 * 86400, "ends_at": 0}
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     alice = idlerpg._normalize_player(
         "alice@envs.net",
         {"name": "Alice", "class": "wizard", "level": 75, "next": 1000, "items": {"weapon": 10}},
@@ -1178,7 +1181,7 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
     )
     room["players"] = {"alice@envs.net": alice, "bob@envs.net": bob}
     players = [("alice@envs.net", alice), ("bob@envs.net", bob)]
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
 
     messages: list[str] = []
     idlerpg._run_item_damage(players, messages)
@@ -1204,7 +1207,7 @@ def test_item_damage_swap_top_topic_and_season_gated_rewards(monkeypatch):
 
 def test_normalize_player_does_not_bypass_season_achievement_gates(monkeypatch):
     now = 2_000_000_000
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     room = idlerpg._blank_room()
     room["season"] = {"id": "fresh", "started_at": now, "ends_at": 0}
     player = idlerpg._normalize_player(
@@ -1228,7 +1231,7 @@ def test_normalize_player_does_not_bypass_season_achievement_gates(monkeypatch):
 async def test_login_announcement_and_manual_top_command(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
-    monkeypatch.setattr(idlerpg, "ANNOUNCE_LOGIN", True)
+    monkeypatch.setattr(idlerpg_config, "ANNOUNCE_LOGIN", True)
     await idlerpg._handle_register(
         bot,
         "alice@envs.net",
@@ -1263,7 +1266,7 @@ async def test_login_announcement_and_manual_top_command(monkeypatch):
 
 def test_achievement_awards_respect_season_gate_on_stat_updates(monkeypatch):
     now = 2_000_000_000
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     room = idlerpg._blank_room()
     room["season"] = {"id": "fresh", "started_at": now, "ends_at": 0}
     player = idlerpg._normalize_player(
@@ -1295,8 +1298,8 @@ def test_achievement_awards_respect_season_gate_on_stat_updates(monkeypatch):
 @pytest.mark.asyncio
 async def test_level_reward_badges_do_not_bypass_season_gate_on_tick(monkeypatch):
     now = 2_000_000_000
-    monkeypatch.setattr(idlerpg, "_now", lambda: now)
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    monkeypatch.setattr(random, "random", lambda: 1.0)
     bot = DummyBot()
     room = idlerpg._blank_room()
     room["season"] = {"id": "fresh", "started_at": now, "ends_at": 0}
@@ -1343,11 +1346,11 @@ async def test_manual_duel_nearby_online_players_and_cooldown(monkeypatch):
     bob = room["players"]["bob@envs.net"]
     alice.update({"x": 10, "y": 10, "level": 10, "next": 1000})
     bob.update({"x": 16, "y": 18, "level": 10, "next": 1000})
-    monkeypatch.setattr(idlerpg, "MANUAL_DUEL_MAX_DISTANCE", 10)
-    monkeypatch.setattr(idlerpg, "MANUAL_DUEL_COOLDOWN_SECONDS", 3600)
+    monkeypatch.setattr(idlerpg_config, "MANUAL_DUEL_MAX_DISTANCE", 10)
+    monkeypatch.setattr(idlerpg_config, "MANUAL_DUEL_COOLDOWN_SECONDS", 3600)
     rolls = iter([999, 0])
-    monkeypatch.setattr(idlerpg.random, "randint", lambda _start, _stop: next(rolls))
-    monkeypatch.setattr(idlerpg.random, "random", lambda: 1.0)
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(random, "random", lambda: 1.0)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "@~Bob"], msg, True)
 
@@ -1381,7 +1384,7 @@ async def test_manual_duel_rejects_far_offline_and_self(monkeypatch):
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
     room["players"]["alice@envs.net"].update({"x": 0, "y": 0})
     room["players"]["bob@envs.net"].update({"x": 500, "y": 500})
-    monkeypatch.setattr(idlerpg, "MANUAL_DUEL_MAX_DISTANCE", 10)
+    monkeypatch.setattr(idlerpg_config, "MANUAL_DUEL_MAX_DISTANCE", 10)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Alice"], msg, True)
     assert "cannot duel yourself" in bot.replies[-1][0]

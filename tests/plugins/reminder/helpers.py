@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytz
 import re
 import plugins.reminder as reminder
+from plugins.reminder import runtime as reminder_runtime
+from utils.command import Role
 
 
 MY_TZ = pytz.timezone("Europe/Berlin")  # UTC+2 DST
@@ -13,23 +15,17 @@ MY_TZ = pytz.timezone("Europe/Berlin")  # UTC+2 DST
 @pytest.fixture(autouse=True)
 def _reset_reminder_module_state():
     """Reset reminder module globals so tests remain isolated."""
-    old_enabled = getattr(reminder, "REMINDER_ENABLED", None)
-    old_active = getattr(reminder, "ACTIVE_REMINDERS", None)
+    old_enabled = reminder_runtime.REMINDER_ENABLED
+    old_active = dict(reminder_runtime.ACTIVE_REMINDERS)
 
-    reminder.REMINDER_ENABLED = True
-    reminder.ACTIVE_REMINDERS = {}
+    reminder_runtime.REMINDER_ENABLED = True
+    reminder_runtime.ACTIVE_REMINDERS.clear()
     try:
         yield
     finally:
-        if old_enabled is None:
-            delattr(reminder, "REMINDER_ENABLED")
-        else:
-            reminder.REMINDER_ENABLED = old_enabled
-
-        if old_active is None:
-            delattr(reminder, "ACTIVE_REMINDERS")
-        else:
-            reminder.ACTIVE_REMINDERS = old_active
+        reminder_runtime.REMINDER_ENABLED = old_enabled
+        reminder_runtime.ACTIVE_REMINDERS.clear()
+        reminder_runtime.ACTIVE_REMINDERS.update(old_active)
 
 
 @pytest.fixture
@@ -45,7 +41,7 @@ def dummy_bot():
     bot.db.users.get = AsyncMock(return_value={})
     bot.db.users.create = AsyncMock(return_value=True)
     # Needed for some command helpers
-    bot.get_user_role = AsyncMock(return_value=reminder.Role.OWNER)
+    bot.get_user_role = AsyncMock(return_value=Role.OWNER)
     bot.boundjid = MagicMock()
     bot.boundjid.bare = "bot@xmpp.test"
     bot.make_message = MagicMock(return_value=MagicMock(send=AsyncMock()))

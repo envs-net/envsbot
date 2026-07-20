@@ -7,13 +7,17 @@ from .helpers import (
     MappingOnlyPlugin,
     PluginStanza,
     pytest,
-    rooms,
     types,
 )
+from core_plugins.rooms import invites as rooms
+from core_plugins.rooms import lifecycle as lifecycle_module
+from utils.config import config
+from xml.etree import ElementTree as ET
+import time
 
 
 def test_extract_direct_room_invite():
-    xml = rooms.ET.fromstring(
+    xml = ET.fromstring(
         "<message><x xmlns='jabber:x:conference' "
         "jid='NewRoom@conference.test' reason='join us'/></message>"
     )
@@ -30,7 +34,7 @@ def test_extract_direct_room_invite():
 
 @pytest.mark.asyncio
 async def test_handle_room_invite_stores_and_announces(fake_bot, monkeypatch):
-    xml = rooms.ET.fromstring(
+    xml = ET.fromstring(
         "<message><x xmlns='jabber:x:conference' "
         "jid='room2@conference.test'/></message>"
     )
@@ -40,8 +44,8 @@ async def test_handle_room_invite_stores_and_announces(fake_bot, monkeypatch):
     fake_bot.make_message = MagicMock(side_effect=lambda **kwargs: kwargs)
     fake_bot._safe_send_message = AsyncMock()
     fake_bot.audit = AsyncMock()
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
-    monkeypatch.setitem(rooms.config, "room_invite_notify_jid", "admins@conference.test")
+    monkeypatch.setitem(config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "room_invite_notify_jid", "admins@conference.test")
     monkeypatch.setattr(
         rooms,
         "ensure_notification_target_joined",
@@ -75,8 +79,8 @@ async def test_rooms_invite_accept_joins_and_removes_pending(fake_bot, fake_msg,
     join_invited = AsyncMock()
     monkeypatch.setattr(rooms, "_join_invited_room", join_invited)
     monkeypatch.setattr(rooms, "load_pending_room_invites", AsyncMock(return_value=fake_bot.pending_room_invites))
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
-    monkeypatch.setitem(rooms.config, "nick", "EnvsBot")
+    monkeypatch.setitem(config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "nick", "EnvsBot")
 
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["accept", "7"], fake_msg, False)
 
@@ -90,28 +94,28 @@ async def test_rooms_invite_accept_joins_and_removes_pending(fake_bot, fake_msg,
 
 @pytest.mark.asyncio
 async def test_room_invite_config_and_plugin_helpers(monkeypatch):
-    monkeypatch.setitem(rooms.config, "room_invite_notify_jid", " AdminRoom@Conference.Test ")
-    monkeypatch.setitem(rooms.config, "version_check_notify_jid", "updates@conference.test")
-    monkeypatch.setitem(rooms.config, "owner", "owner@example.org")
+    monkeypatch.setitem(config, "room_invite_notify_jid", " AdminRoom@Conference.Test ")
+    monkeypatch.setitem(config, "version_check_notify_jid", "updates@conference.test")
+    monkeypatch.setitem(config, "owner", "owner@example.org")
     assert rooms.room_invite_notify_target() == "AdminRoom@Conference.Test"
     assert rooms.room_invite_admin_rooms() == {
         "adminroom@conference.test",
         "updates@conference.test",
     }
 
-    monkeypatch.setitem(rooms.config, "room_invite_notify_jid", "")
+    monkeypatch.setitem(config, "room_invite_notify_jid", "")
     assert rooms.room_invite_notify_target() == "updates@conference.test"
-    monkeypatch.setitem(rooms.config, "version_check_notify_jid", "")
+    monkeypatch.setitem(config, "version_check_notify_jid", "")
     assert rooms.room_invite_notify_target() == "owner@example.org"
-    monkeypatch.setitem(rooms.config, "owner", "")
+    monkeypatch.setitem(config, "owner", "")
     assert rooms.room_invite_notify_target() is None
 
-    monkeypatch.setitem(rooms.config, "room_invite_max_age_days", "bad")
+    monkeypatch.setitem(config, "room_invite_max_age_days", "bad")
     assert rooms._room_invite_max_age_days() == 30
-    monkeypatch.setitem(rooms.config, "room_invite_max_age_days", -1)
+    monkeypatch.setitem(config, "room_invite_max_age_days", -1)
     assert rooms._room_invite_max_age_days() == 0
     assert rooms._room_invite_is_expired({"created_at": 1}, now=999999) is False
-    monkeypatch.setitem(rooms.config, "room_invite_max_age_days", 1)
+    monkeypatch.setitem(config, "room_invite_max_age_days", 1)
     assert rooms._room_invite_is_expired({"created_at": "bad"}, now=999999) is False
     assert rooms._room_invite_is_expired({"created_at": 0}, now=999999) is False
     assert rooms._room_invite_is_expired({"created_at": 100}, now=100 + 86400 + 1) is True
@@ -131,13 +135,13 @@ async def test_room_invite_config_and_plugin_helpers(monkeypatch):
     assert rooms._safe_plugin_value(MappingOnlyPlugin({"jid": "room@conf"}), "jid") == "room@conf"
     assert rooms._safe_plugin_value(ExplodingMappingPlugin(), "jid") == ""
 
-    invite_el = rooms.ET.fromstring(
+    invite_el = ET.fromstring(
         "<invite xmlns='http://jabber.org/protocol/muc#user'>"
         "<reason> hello </reason>"
         "</invite>"
     )
     assert rooms._room_invite_reason_from_invite(invite_el) == "hello"
-    assert rooms._room_invite_reason_from_invite(rooms.ET.fromstring("<invite />")) == ""
+    assert rooms._room_invite_reason_from_invite(ET.fromstring("<invite />")) == ""
 
 
 @pytest.mark.asyncio
@@ -176,12 +180,12 @@ async def test_extract_room_invite_from_stanza_plugins():
 async def test_room_invite_database_lifecycle(fake_bot, monkeypatch):
     import aiosqlite
 
-    monkeypatch.setitem(rooms.config, "room_invite_max_age_days", 1)
+    monkeypatch.setitem(config, "room_invite_max_age_days", 1)
     conn = await aiosqlite.connect(":memory:")
     fake_bot.db.conn = conn
     try:
         await rooms.setup_room_invites_db(fake_bot)
-        now = int(rooms.time.time())
+        now = int(time.time())
         await conn.execute(
             "INSERT INTO room_invites (room_jid, inviter, reason, created_at) VALUES (?, ?, ?, ?)",
             ("active@conference.test", "inviter@example.org", None, now),
@@ -245,21 +249,21 @@ async def test_room_invite_runtime_lifecycle_without_database(fake_bot, monkeypa
     fake_bot.pending_room_invite_index = "invalid"
     assert await rooms.load_pending_room_invites(fake_bot) == {}
 
-    monkeypatch.setitem(rooms.config, "room_invite_max_age_days", 1)
+    monkeypatch.setitem(config, "room_invite_max_age_days", 1)
     fresh = await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "hi")
     assert fresh["id"] == 1
     assert await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "hi") == fresh
 
-    fresh["created_at"] = int(rooms.time.time()) - 3 * 86400
+    fresh["created_at"] = int(time.time()) - 3 * 86400
     replacement = await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "new")
     assert replacement["id"] == 1
     assert replacement["reason"] == "new"
 
     old = await rooms._store_pending_room_invite(fake_bot, "old@conf", "old@example.org", "old")
-    old["created_at"] = int(rooms.time.time()) - 3 * 86400
+    old["created_at"] = int(time.time()) - 3 * 86400
     assert await rooms.cleanup_expired_room_invites(fake_bot) == 1
 
-    monkeypatch.setitem(rooms.config, "room_invite_max_age_days", 0)
+    monkeypatch.setitem(config, "room_invite_max_age_days", 0)
     assert await rooms.cleanup_expired_room_invites(fake_bot) == 0
     assert await rooms.cleanup_all_room_invites(fake_bot) == 1
 
@@ -270,42 +274,42 @@ async def test_room_invite_notification_and_handle_branches(fake_bot, monkeypatc
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.make_message = MagicMock(side_effect=lambda **kwargs: kwargs)
     fake_bot._safe_send_message = AsyncMock()
-    monkeypatch.setitem(rooms.config, "room_invite_notify_jid", "")
-    monkeypatch.setitem(rooms.config, "version_check_notify_jid", "")
-    monkeypatch.setitem(rooms.config, "owner", "")
+    monkeypatch.setitem(config, "room_invite_notify_jid", "")
+    monkeypatch.setitem(config, "version_check_notify_jid", "")
+    monkeypatch.setitem(config, "owner", "")
     await rooms._notify_room_invite(fake_bot, "no target")
     fake_bot._safe_send_message.assert_not_called()
 
-    monkeypatch.setitem(rooms.config, "room_invite_notify_jid", "admins@conference.test")
+    monkeypatch.setitem(config, "room_invite_notify_jid", "admins@conference.test")
     monkeypatch.setattr(rooms, "ensure_notification_target_joined", AsyncMock(return_value=True))
     monkeypatch.setattr(rooms, "notification_message_type", lambda bot, target: "groupchat")
     await rooms._notify_room_invite(fake_bot, "body")
     assert fake_bot._safe_send_message.await_args.args[0]["mtype"] == "groupchat"
 
-    empty_msg = InviteMessage("inviter@example.org", rooms.ET.fromstring("<message />"))
+    empty_msg = InviteMessage("inviter@example.org", ET.fromstring("<message />"))
     assert await rooms.handle_room_invite(fake_bot, empty_msg) is False
 
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", False)
+    monkeypatch.setitem(config, "room_invites_enabled", False)
     invalid_msg = InviteMessage(
         "inviter@example.org",
-        rooms.ET.fromstring("<message><x xmlns='jabber:x:conference' jid='bad/room'/></message>"),
+        ET.fromstring("<message><x xmlns='jabber:x:conference' jid='bad/room'/></message>"),
     )
     assert await rooms.handle_room_invite(fake_bot, invalid_msg) is True
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "room_invites_enabled", True)
 
     assert await rooms.handle_room_invite(fake_bot, invalid_msg) is True
     assert "Ignored invalid room invite" in fake_bot._safe_send_message.await_args.args[0]["mbody"]
 
     joined_msg = InviteMessage(
         "inviter@example.org",
-        rooms.ET.fromstring("<message><x xmlns='jabber:x:conference' jid='joined@conference.test'/></message>"),
+        ET.fromstring("<message><x xmlns='jabber:x:conference' jid='joined@conference.test'/></message>"),
     )
     rooms.JOINED_ROOMS["joined@conference.test"] = {"nick": "Bot"}
     assert await rooms.handle_room_invite(fake_bot, joined_msg) is True
 
     stored_msg = InviteMessage(
         "inviter@example.org",
-        rooms.ET.fromstring("<message><x xmlns='jabber:x:conference' jid='stored@conference.test'/></message>"),
+        ET.fromstring("<message><x xmlns='jabber:x:conference' jid='stored@conference.test'/></message>"),
     )
     fake_bot.db.rooms.get = AsyncMock(return_value=("stored@conference.test", "Bot", True, None))
     assert await rooms.handle_room_invite(fake_bot, stored_msg) is True
@@ -314,7 +318,7 @@ async def test_room_invite_notification_and_handle_branches(fake_bot, monkeypatc
     monkeypatch.setattr(rooms, "_store_pending_room_invite", AsyncMock(return_value=None))
     pending_msg = InviteMessage(
         "inviter@example.org",
-        rooms.ET.fromstring("<message><x xmlns='jabber:x:conference' jid='pending@conference.test'/></message>"),
+        ET.fromstring("<message><x xmlns='jabber:x:conference' jid='pending@conference.test'/></message>"),
     )
     assert await rooms.handle_room_invite(fake_bot, pending_msg) is True
 
@@ -373,10 +377,10 @@ async def test_join_invited_room_adds_or_updates_room(fake_bot, monkeypatch):
 async def test_on_ready_loads_and_cleans_invites(fake_bot, monkeypatch):
     load = AsyncMock(return_value={})
     cleanup = AsyncMock(return_value=0)
-    monkeypatch.setattr(rooms, "load_pending_room_invites", load)
-    monkeypatch.setattr(rooms, "cleanup_expired_room_invites", cleanup)
+    monkeypatch.setattr(lifecycle_module, "load_pending_room_invites", load)
+    monkeypatch.setattr(lifecycle_module, "cleanup_expired_room_invites", cleanup)
 
-    await rooms.on_ready(fake_bot)
+    await lifecycle_module.on_ready(fake_bot)
 
     load.assert_awaited_once_with(fake_bot)
     cleanup.assert_awaited_once_with(fake_bot)
@@ -384,7 +388,7 @@ async def test_on_ready_loads_and_cleans_invites(fake_bot, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_rooms_invite_list_empty_shows_none(fake_bot, fake_msg, monkeypatch):
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "room_invites_enabled", True)
     fake_bot.pending_room_invites = {}
     monkeypatch.setattr(
         rooms,
@@ -400,11 +404,11 @@ async def test_rooms_invite_list_empty_shows_none(fake_bot, fake_msg, monkeypatc
 
 @pytest.mark.asyncio
 async def test_rooms_invite_command_list_cleanup_and_errors(fake_bot, fake_msg, monkeypatch):
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", False)
+    monkeypatch.setitem(config, "room_invites_enabled", False)
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", ["list"], fake_msg, False)
     fake_bot.reply_error.assert_called()
 
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "room_invites_enabled", True)
     await rooms.rooms_invite(fake_bot, "admin@example.org", "admin", [], fake_msg, False)
     assert "rooms invite list" in fake_bot.reply.call_args.args[1]
 
@@ -449,8 +453,8 @@ async def test_rooms_invite_command_list_cleanup_and_errors(fake_bot, fake_msg, 
 
 @pytest.mark.asyncio
 async def test_rooms_invite_command_accept_and_decline_edges(fake_bot, fake_msg, monkeypatch):
-    monkeypatch.setitem(rooms.config, "room_invites_enabled", True)
-    monkeypatch.setitem(rooms.config, "nick", "")
+    monkeypatch.setitem(config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "nick", "")
     fake_bot.boundjid.resource = "ResourceNick"
     fake_bot.pending_room_invites = {
         5: {"id": 5, "room_jid": "room5@conf", "inviter": "user@example.org", "reason": ""}

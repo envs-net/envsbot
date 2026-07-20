@@ -54,7 +54,7 @@ PLUGIN_META = {
     "description":
         "Automatic birthday notifications in rooms (opt-in per room)",
     "category": "fun",
-    "requires": ["rooms", "_core"],
+    "requires": ["rooms", "_core", "vcard"],
 }
 
 # Track announcements in memory: {(room_jid, user_jid): "YYYY-MM-DD"}

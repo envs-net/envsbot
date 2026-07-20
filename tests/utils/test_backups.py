@@ -8,6 +8,7 @@ import pytest
 
 import utils.backups as backups
 import utils.config as config_mod
+import utils.config.loader as config_loader
 
 
 class FakeDB:
@@ -42,6 +43,7 @@ def backup_env(tmp_path, monkeypatch):
     db_path = _write_runtime_files(tmp_path)
     backup_dir = tmp_path / "data" / "backups"
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
     monkeypatch.setattr(backups, "BASE_DIR", tmp_path)
     monkeypatch.delenv("ENVSBOT_CONFIG", raising=False)
     monkeypatch.setitem(backups.config, "db", str(db_path))

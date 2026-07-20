@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from utils import room_toggles
-from utils import xmpp_identity
+from core_plugins import _core as xmpp_identity
+
+room_toggles = xmpp_identity
 
 
 class FakeJid:
@@ -22,7 +23,7 @@ class FakeMsg(dict):
 
 
 @pytest.mark.asyncio
-async def test_get_jids_from_nick_index_returns_single_jid_for_all_shapes():
+async def test_get_jids_from_nick_index_preserves_multi_jid_shapes():
     bot = SimpleNamespace(
         db=SimpleNamespace(
             users=SimpleNamespace(
@@ -41,20 +42,27 @@ async def test_get_jids_from_nick_index_returns_single_jid_for_all_shapes():
         "jid-a@example.test",
         "jid-b@example.test",
     }
-    assert await xmpp_identity.get_jids_from_nick_index(bot, "listnick") == "jid-c@example.test"
-    assert await xmpp_identity.get_jids_from_nick_index(bot, "tuplenick") == "jid-e@example.test"
+    assert await xmpp_identity.get_jids_from_nick_index(bot, "listnick") == [
+        "jid-c@example.test",
+        "jid-d@example.test",
+    ]
+    assert await xmpp_identity.get_jids_from_nick_index(bot, "tuplenick") == (
+        "jid-e@example.test",
+        "jid-f@example.test",
+    )
     assert await xmpp_identity.get_jids_from_nick_index(bot, "singlenick") == "jid-g@example.test"
-    assert await xmpp_identity.get_jids_from_nick_index(bot, "emptynick") is None
+    assert await xmpp_identity.get_jids_from_nick_index(bot, "emptynick") == []
     assert await xmpp_identity.get_jids_from_nick_index(bot, "missing") is None
 
 
-def test_room_toggle_disabled_message_uses_neutral_icon():
-    assert room_toggles._format_disabled("Feature") == "ℹ️ Feature disabled in this room."
+def test_room_toggle_disabled_message_confirms_the_change():
+    assert room_toggles._format_disabled("Feature") == "✅ Feature disabled in this room."
 
 
 @pytest.mark.asyncio
-async def test_muc_pm_manage_room_reports_missing_joined_room(monkeypatch):
+async def test_muc_pm_manage_room_rejects_unknown_room_context(monkeypatch):
     monkeypatch.setattr(xmpp_identity, "JOINED_ROOMS", {})
+    monkeypatch.setattr(xmpp_identity, "_is_muc_pm", lambda _msg: True)
 
     allowed, room_jid, reason = await xmpp_identity.muc_pm_sender_can_manage_room(
         SimpleNamespace(),
@@ -64,7 +72,7 @@ async def test_muc_pm_manage_room_reports_missing_joined_room(monkeypatch):
 
     assert allowed is False
     assert room_jid == "room@example.test"
-    assert reason == "⛔ Bot is not currently in that room."
+    assert reason == "ℹ️ This command can only be used in a MUC DM."
 
 class FakeStore:
     def __init__(self, state=None):
@@ -305,7 +313,7 @@ async def test_handle_room_toggle_command_full_lifecycle(monkeypatch):
 
     assert await room_toggles.handle_room_toggle_command(bot, msg, False, ["off"], store_getter=getter, key="rooms", label="Feature") is True
     assert store.state == {}
-    assert bot.replies[-1] == "ℹ️ Feature disabled in this room."
+    assert bot.replies[-1] == "✅ Feature disabled in this room."
 
     assert await room_toggles.handle_room_toggle_command(bot, msg, False, ["off"], store_getter=getter, key="rooms", label="Feature") is True
     assert bot.replies[-1] == "ℹ️ Feature already disabled."

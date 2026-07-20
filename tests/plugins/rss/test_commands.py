@@ -7,6 +7,10 @@ from .helpers import (
     pytest,
     rss,
 )
+from plugins.rss import commands as rss_commands
+from plugins.rss import fetch as rss_fetch
+from plugins.rss import formatting as rss_formatting
+import aiohttp
 
 
 @pytest.mark.asyncio
@@ -14,7 +18,7 @@ async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
-    monkeypatch.setattr(rss, "config", {"prefix": "!"})
+    monkeypatch.setattr(rss_commands, "config", {"prefix": "!"})
 
     await rss.rss_command(bot, "jid", "nick", ["add"], msg, True)
 
@@ -36,7 +40,7 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     }
 
     # Patch feedparser.parse (for plugin coverage)
-    monkeypatch.setattr(rss, "feedparser", type("Feedparser", (), {})())
+    monkeypatch.setattr(rss_fetch, "feedparser", type("Feedparser", (), {})())
 
     class DummyFeed:
         def __init__(self):
@@ -55,8 +59,8 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     async def fake_fetch_feed(url):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
 
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
@@ -236,16 +240,16 @@ async def test_rss_add_allows_joined_muc_pm(monkeypatch, make_bot):
     async def fake_fetch_feed(url):
         return DummyFeed()
 
-    monkeypatch.setitem(rss.JOINED_ROOMS, room, {"nicks": {"alice": {}}})
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setitem(rss_commands.JOINED_ROOMS, room, {"nicks": {"alice": {}}})
+    monkeypatch.setattr(rss_commands, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
 
     try:
         await rss.rss_command(
             bot, "jid1", "nick1", ["add", fake_feed_link], msg, False
         )
     finally:
-        rss.JOINED_ROOMS.pop(room, None)
+        rss_commands.JOINED_ROOMS.pop(room, None)
 
     assert fake_feed_link in bot.plugin_store.get(rss.RSS_KEY, {})
 
@@ -254,13 +258,13 @@ async def test_rss_add_allows_joined_muc_pm(monkeypatch, make_bot):
 async def test_rss_add_failures(monkeypatch, make_bot):
     bot = make_bot()
 
-    monkeypatch.setattr(rss, "feedparser", type("Feedparser", (), {})())
+    monkeypatch.setattr(rss_fetch, "feedparser", type("Feedparser", (), {})())
 
     async def raise_exc(url):
         raise Exception("bad feed")
 
-    monkeypatch.setattr(rss, "fetch_feed", raise_exc)
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "fetch_feed", raise_exc)
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
 
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
@@ -275,18 +279,18 @@ async def test_rss_add_expected_failures_log_without_traceback(
         monkeypatch, make_bot, caplog):
     bot = make_bot()
 
-    monkeypatch.setattr(rss, "feedparser", type("Feedparser", (), {})())
+    monkeypatch.setattr(rss_fetch, "feedparser", type("Feedparser", (), {})())
 
     async def raise_exc(url):
-        raise rss.aiohttp.ClientResponseError(
+        raise aiohttp.ClientResponseError(
             request_info=None,
             history=(),
             status=404,
             message="Not Found",
         )
 
-    monkeypatch.setattr(rss, "fetch_feed", raise_exc)
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "fetch_feed", raise_exc)
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
 
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
@@ -323,7 +327,7 @@ async def test_rss_list_uses_pagination(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
-    monkeypatch.setattr(rss, "RSS_LIST_PAGE_SIZE", 5)
+    monkeypatch.setattr(rss_formatting, "RSS_LIST_PAGE_SIZE", 5)
     bot.plugin_store[rss.RSS_KEY] = {
         f"https://example.org/feed-{idx}.xml": {
             "title": f"Feed {idx}",
@@ -362,7 +366,7 @@ async def test_rss_list_all_and_invalid_page(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
-    monkeypatch.setattr(rss, "RSS_LIST_PAGE_SIZE", 1)
+    monkeypatch.setattr(rss_formatting, "RSS_LIST_PAGE_SIZE", 1)
     bot.plugin_store[rss.RSS_KEY] = {
         "https://example.org/a.xml": {
             "title": "A",
@@ -419,10 +423,10 @@ async def test_rss_plugin_grant_allows_explicit_room_add(monkeypatch, make_bot):
         def __contains__(self, key):
             return key == "feed"
 
-    monkeypatch.setattr(rss, "fetch_feed", AsyncMock(return_value=DummyFeed()))
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock(return_value=DummyFeed()))
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
     monkeypatch.setattr(
-        rss,
+        rss_commands,
         "user_has_room_plugin_grant",
         AsyncMock(return_value=True),
     )
@@ -442,7 +446,7 @@ async def test_rss_plugin_grant_allows_explicit_room_add(monkeypatch, make_bot):
 
     assert url in bot.plugin_store[rss.RSS_KEY]
     assert bot.plugin_store[rss.RSS_KEY][url]["rooms"] == [room]
-    rss.user_has_room_plugin_grant.assert_awaited_once_with(
+    rss_commands.user_has_room_plugin_grant.assert_awaited_once_with(
         bot, "alice@example.org", "rss", room
     )
 
@@ -453,9 +457,9 @@ async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, ma
     bot.get_user_role = AsyncMock(return_value=Role.USER)
     room = "room@conference.example.org"
     url = "https://example.org/feed.rss"
-    monkeypatch.setattr(rss, "fetch_feed", AsyncMock())
+    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock())
     monkeypatch.setattr(
-        rss,
+        rss_commands,
         "user_has_room_plugin_grant",
         AsyncMock(return_value=False),
     )
@@ -474,7 +478,7 @@ async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, ma
     )
 
     assert rss.RSS_KEY not in bot.plugin_store
-    rss.fetch_feed.assert_not_awaited()
+    rss_commands.fetch_feed.assert_not_awaited()
     assert "RSS plugin grant" in bot.replies[-1][1]
 
 
@@ -639,7 +643,7 @@ async def test_rss_delete_cleans_feed_specific_templates(monkeypatch, make_bot):
         room: {url: "ROOM $title"},
         other: {url: "OTHER $title"},
     }
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
 
     await rss.rss_command(bot, "jid", "nick", ["delete", url], msg, True)
 
@@ -835,28 +839,9 @@ async def test_rss_feed_template_command_private_room_and_default_paths(make_bot
     assert "RSS feed template reset" in bot.replies[-1][1]
 
 @pytest.mark.asyncio
-async def test_limited_response_reader_and_save_last_id(monkeypatch):
-    class Content:
-        def __init__(self, chunks):
-            self.chunks = list(chunks)
-
-        async def iter_chunked(self, size):
-            assert size == 8192
-            for chunk in self.chunks:
-                yield chunk
-
-    class Response:
-        def __init__(self, chunks):
-            self.content = Content(chunks)
-
-    assert await rss._read_limited_response(Response([b"ab", b"cd"])) == b"abcd"
-
-    monkeypatch.setattr(rss, "RSS_MAX_READ_BYTES", 3)
-    with pytest.raises(rss.FetchURLTooLarge, match="exceeds 3 bytes"):
-        await rss._read_limited_response(Response([b"ab", b"cd"]))
-
+async def test_save_last_id(monkeypatch):
     set_field = AsyncMock(return_value=True)
-    monkeypatch.setattr(rss, "_set_feed_field", set_field)
+    monkeypatch.setattr(rss_commands, "_set_feed_field", set_field)
     bot = object()
     store = object()
     assert await rss._save_last_id(bot, store, "https://feed.example/rss", "entry-1") is True
@@ -891,7 +876,7 @@ def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
         "not-a-dict": "ignored",
     }
 
-    monkeypatch.setattr(rss, "_now", lambda: now)
+    monkeypatch.setattr(rss_commands, "_now", lambda: now)
 
     summary = rss._rss_health_summary(feeds)
     assert summary == "RSS health: 3 feeds · 1 paused · 1 in backoff · 1 with errors"
@@ -926,8 +911,8 @@ async def test_rss_pause_resume_state_room_and_global(monkeypatch, make_bot):
             "paused": False,
         }
     }
-    monkeypatch.setattr(rss, "_cancel_feed_task", AsyncMock())
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
     await rss._rss_set_pause_state(bot, msg, store, url, room, None, paused=True)
@@ -935,16 +920,16 @@ async def test_rss_pause_resume_state_room_and_global(monkeypatch, make_bot):
     assert feed["rooms"] == [room, "other@conference.example.org"]
     assert feed["paused_rooms"] == [room]
     assert "Paused RSS feed for" in _reply_text(bot.replies[-1])
-    rss._cancel_feed_task.assert_awaited_with(bot, url)
-    rss.ensure_task.assert_awaited_with(bot, store, url, 300)
-    rss.ensure_task.reset_mock()
+    rss_commands._cancel_feed_task.assert_awaited_with(bot, url)
+    rss_commands.ensure_task.assert_awaited_with(bot, store, url, 300)
+    rss_commands.ensure_task.reset_mock()
 
     await rss._rss_set_pause_state(bot, msg, store, url, room, None, paused=True)
     assert "already paused" in _reply_text(bot.replies[-1])
 
     await rss._rss_set_pause_state(bot, msg, store, url, room, None, paused=False)
     assert feed["paused_rooms"] == []
-    rss.ensure_task.assert_awaited_with(bot, store, url, 300)
+    rss_commands.ensure_task.assert_awaited_with(bot, store, url, 300)
     assert "Resumed RSS feed for" in _reply_text(bot.replies[-1])
 
     await rss._rss_set_pause_state(bot, msg, store, url, room, "all", paused=True)
@@ -994,8 +979,8 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
             "last_error": "boom",
         }
     }
-    monkeypatch.setattr(rss, "_cancel_feed_task", AsyncMock())
-    monkeypatch.setattr(rss, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
     await rss.rss_command(bot, "jid1", "nick1", ["health"], msg, True)

@@ -3,6 +3,10 @@ from .helpers import (
     idlerpg,
     types,
 )
+import random
+import time
+from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import formatting as idlerpg_formatting
 
 
 def test_duration_clock_and_next_level_line():
@@ -26,23 +30,23 @@ def test_idlerpg_small_helper_edges(monkeypatch):
     assert idlerpg._safe_name(" Alice !@#_-. 123 ") == "Alice_-.123"
     assert idlerpg._safe_class("sys\n\tadmin   ops") == "sysadmin ops"
     assert idlerpg._ttl_for_level(-10) == idlerpg._ttl_for_level(0)
-    monkeypatch.setattr(idlerpg, "MAX_PENALTY", 10)
+    monkeypatch.setattr(idlerpg_config, "MAX_PENALTY", 10)
     assert idlerpg._penalty_for(50, 100) == 10
 
 
 def test_playtime_formatting_helpers_handle_edges(monkeypatch):
-    assert idlerpg._created_at({"created_at": "123"}) == 123
-    assert idlerpg._created_at({"created_at": -5}) == 0
-    assert idlerpg._created_at({"created_at": "bad"}) == 0
-    assert idlerpg._created_at({"created_at": None}) == 0
-    assert idlerpg._created_at({}) == 0
+    assert idlerpg_formatting._created_at({"created_at": "123"}) == 123
+    assert idlerpg_formatting._created_at({"created_at": -5}) == 0
+    assert idlerpg_formatting._created_at({"created_at": "bad"}) == 0
+    assert idlerpg_formatting._created_at({"created_at": None}) == 0
+    assert idlerpg_formatting._created_at({}) == 0
 
-    monkeypatch.setattr(idlerpg, "_now", lambda: 200)
-    assert idlerpg._played_for({}) == "unknown"
-    assert idlerpg._played_for({"created_at": "bad"}) == "unknown"
-    assert idlerpg._played_for({"created_at": 1}) == "0 days, 00:03:19"
-    assert idlerpg._played_for({"created_at": 100}) == "0 days, 00:01:40"
-    assert idlerpg._played_for({"created_at": 200}) == "0 days, 00:00:00"
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 200)
+    assert idlerpg_formatting._played_for({}) == "unknown"
+    assert idlerpg_formatting._played_for({"created_at": "bad"}) == "unknown"
+    assert idlerpg_formatting._played_for({"created_at": 1}) == "0 days, 00:03:19"
+    assert idlerpg_formatting._played_for({"created_at": 100}) == "0 days, 00:01:40"
+    assert idlerpg_formatting._played_for({"created_at": 200}) == "0 days, 00:00:00"
 
 
 def test_playing_since_uses_expected_timestamp_format(monkeypatch):
@@ -60,15 +64,15 @@ def test_playing_since_uses_expected_timestamp_format(monkeypatch):
         calls.append(("strftime", fmt, value))
         return f"formatted-{fmt}-{id(value)}"
 
-    monkeypatch.setattr(idlerpg.time, "localtime", fake_localtime)
-    monkeypatch.setattr(idlerpg.time, "strftime", fake_strftime)
+    monkeypatch.setattr(time, "localtime", fake_localtime)
+    monkeypatch.setattr(time, "strftime", fake_strftime)
 
-    assert idlerpg._playing_since({}) == "unknown"
-    assert idlerpg._playing_since({"created_at": "bad"}) == "unknown"
-    assert idlerpg._playing_since({"created_at": 1}) == (
+    assert idlerpg_formatting._playing_since({}) == "unknown"
+    assert idlerpg_formatting._playing_since({"created_at": "bad"}) == "unknown"
+    assert idlerpg_formatting._playing_since({"created_at": 1}) == (
         f"formatted-%Y-%m-%d %H:%M:%S %Z-{id(sentinel_times[1])}"
     )
-    assert idlerpg._playing_since({"created_at": 123}) == (
+    assert idlerpg_formatting._playing_since({"created_at": 123}) == (
         f"formatted-%Y-%m-%d %H:%M:%S %Z-{id(sentinel_times[123])}"
     )
     assert calls == [
@@ -95,7 +99,7 @@ def test_original_weighted_item_roll_uses_one_point_five_level_cap(monkeypatch):
         captured["k"] = k
         return [captured["population"][-1]]
 
-    monkeypatch.setattr(idlerpg.random, "choices", fake_choices)
+    monkeypatch.setattr(random, "choices", fake_choices)
 
     assert idlerpg._roll_weighted_item_level(10) == 15
     assert captured["population"] == list(range(1, 16))
@@ -104,7 +108,7 @@ def test_original_weighted_item_roll_uses_one_point_five_level_cap(monkeypatch):
 
 
 def test_idlerpg_player_normalization_and_lookup_edges(monkeypatch):
-    monkeypatch.setattr(idlerpg.random, "randint", lambda start, stop: stop)
+    monkeypatch.setattr(random, "randint", lambda start, stop: stop)
     player = idlerpg._normalize_player(
         "alice@envs.net",
         {
@@ -151,7 +155,7 @@ def test_normalize_player_does_not_consume_rng_for_existing_coordinates(monkeypa
     def fail_randint(_start, _stop):
         raise AssertionError("coordinate RNG should not be used when coordinates already exist")
 
-    monkeypatch.setattr(idlerpg.random, "randint", fail_randint)
+    monkeypatch.setattr(random, "randint", fail_randint)
     player = idlerpg._normalize_player(
         "alice@envs.net",
         {"name": "Alice", "class": "sysadmin", "x": 12, "y": 34},
@@ -167,14 +171,14 @@ def test_original_style_grid_movement_and_quest_direction(monkeypatch):
         {"name": "Alice", "x": 10, "y": 10},
     )
     choices = iter([1, 0, -1, 1, 0, 1])
-    monkeypatch.setattr(idlerpg, "MAP_STEP_PER_SECOND", 1)
-    monkeypatch.setattr(idlerpg.random, "choice", lambda seq: next(choices))
+    monkeypatch.setattr(idlerpg_config, "MAP_STEP_PER_SECOND", 1)
+    monkeypatch.setattr(random, "choice", lambda seq: next(choices))
 
     idlerpg._move_player(player, 3)
     assert (player["x"], player["y"]) == (10, 12)
 
     quest = {"active": True, "questers": ["alice@envs.net"], "route": [[14, 16]], "route_index": 0}
-    monkeypatch.setattr(idlerpg, "QUEST_GRID_STEP_SECONDS", 2)
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_STEP_SECONDS", 2)
     idlerpg._move_player(player, 4, quest=quest, jid="alice@envs.net")
     assert (player["x"], player["y"]) == (12, 14)
 

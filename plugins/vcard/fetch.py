@@ -1,7 +1,55 @@
 """Split module for plugins/vcard.py: fetch."""
 
+from slixmpp.exceptions import IqError
+
 from core_plugins import _core
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
+from utils.config import config
+
+from .config import log
+from .formatting import _format_vcard_reply
+
+async def get_vcard(bot, msg, jid=None):
+    """
+    Helper function to fetch vCard for a given JID using the xep_0054 plugin.
+    """
+    if jid is None:
+        jid, _, _ = await _core.get_real_jid(bot, msg)
+    try:
+        vcard_plugin = bot.plugin.get("xep_0054", None)
+        if not vcard_plugin:
+            raise RuntimeError(
+                "vCard support (xep_0054) is not enabled in this bot.")
+        try:
+            result = await vcard_plugin.get_vcard(jid=str(jid), cached=False,
+                                                  timeout=float(config.get("vcard_fetch_timeout_seconds", 10) or 10))
+        except (IqError, Exception) as e:
+            log.info(
+                f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
+            result = None
+        else:
+            log.debug(f"[VCARD] vCard fetch for '{jid}' completed")
+        if not result:
+            log.debug(f"[VCARD] No vCard result for '{jid}'.")
+            return None
+        log.debug(f"[VCARD] vCard for '{jid}' received.")
+        return result["vcard_temp"]
+    except Exception as e:
+        log.error(f"[VCARD] Exception during vCard lookup for '{jid}': {e}")
+        raise
+
+async def get_info(bot, msg, jid=None):
+    try:
+        vcard = await get_user_vcard(bot, msg, jid)
+        if not vcard:
+            log.info(f"[VCARD] No vCard found for '{jid}'.")
+            return None
+
+    except Exception as e:
+        log.error(f"[VCARD] Exception during vCard lookup for '{jid}': {e}")
+        raise
+    return vcard
+
 
 
 async def get_user_vcard(bot, msg, jid=None):

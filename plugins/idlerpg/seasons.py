@@ -6,11 +6,11 @@ from typing import Any
 
 
 def _season_id(ts: int | None = None) -> str:
-    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(int(ts or _now())))
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(int(ts or _dep_formatting._now())))
 
 
 def _season_duration_seconds() -> int:
-    return max(0, int(SEASON_DURATION_DAYS) * 86400)
+    return max(0, int(_dep_config.SEASON_DURATION_DAYS) * 86400)
 
 
 def _season_age_days(room: dict[str, Any] | None) -> int:
@@ -19,12 +19,12 @@ def _season_age_days(room: dict[str, Any] | None) -> int:
     season = room.get("season")
     if not isinstance(season, dict):
         return 0
-    started_at = int(season.get("started_at", _now()) or _now())
-    return max(0, int((_now() - started_at) // 86400))
+    started_at = int(season.get("started_at", _dep_formatting._now()) or _dep_formatting._now())
+    return max(0, int((_dep_formatting._now() - started_at) // 86400))
 
 
 def _blank_season(now: int | None = None) -> dict[str, Any]:
-    now = int(now or _now())
+    now = int(now or _dep_formatting._now())
     duration = _season_duration_seconds()
     return {
         "id": _season_id(now),
@@ -34,17 +34,17 @@ def _blank_season(now: int | None = None) -> dict[str, Any]:
 
 
 def _season_snapshot(room_jid: str, room: dict[str, Any], ended_at: int | None = None) -> dict[str, Any]:
-    ended_at = int(ended_at or _now())
+    ended_at = int(ended_at or _dep_formatting._now())
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(ended_at)
-    ranked = _ranked_players(room)[:SEASON_HOF_SIZE]
+    ranked = _dep_state._ranked_players(room)[:_dep_config.SEASON_HOF_SIZE]
     return {
         "id": season.get("id") or _season_id(ended_at),
         "room": room_jid,
         "started_at": int(season.get("started_at", 0) or 0),
         "ended_at": ended_at,
-        "champion": _display_player(ranked[0][1]) if ranked else "",
+        "champion": _dep_formatting._display_player(ranked[0][1]) if ranked else "",
         "top": [
-            _player_public_record(room_jid, jid, player, rank=rank)
+            _dep_export._player_public_record(room_jid, jid, player, rank=rank)
             for rank, (jid, player) in enumerate(ranked, start=1)
         ],
     }
@@ -52,9 +52,9 @@ def _season_snapshot(room_jid: str, room: dict[str, Any], ended_at: int | None =
 
 def _reset_player_for_new_season(player: dict[str, Any]) -> None:
     player["level"] = 0
-    player["next"] = _ttl_for_level(0)
+    player["next"] = _dep_leveling._ttl_for_level(0)
     player["idled"] = 0
-    player["items"] = {item: 0 for item in ITEMS}
+    player["items"] = {item: 0 for item in _dep_constants.ITEMS}
     player["unique_items"] = {}
     player["penalties"] = {}
     player["achievements"] = []
@@ -62,21 +62,21 @@ def _reset_player_for_new_season(player: dict[str, Any]) -> None:
 
 
 def _end_season(room_jid: str, room: dict[str, Any], *, reset_players: bool | None = None) -> dict[str, Any]:
-    now = _now()
+    now = _dep_formatting._now()
     snapshot = _season_snapshot(room_jid, room, now)
     hof = room.setdefault("hall_of_fame", [])
     if not isinstance(hof, list):
         hof = []
         room["hall_of_fame"] = hof
     hof.append(snapshot)
-    del hof[:-max(1, SEASON_HOF_SIZE * 5)]
-    should_reset = reset_players if reset_players is not None else SEASON_RESET_ON_ROLLOVER
+    del hof[:-max(1, _dep_config.SEASON_HOF_SIZE * 5)]
+    should_reset = reset_players if reset_players is not None else _dep_config.SEASON_RESET_ON_ROLLOVER
     if should_reset:
         for jid, player in room.get("players", {}).items():
             if isinstance(player, dict):
-                _reset_player_for_new_season(_normalize_player(str(jid), player))
+                _reset_player_for_new_season(_dep_state._normalize_player(str(jid), player))
     room["season"] = _blank_season(now)
-    _record_event(
+    _dep_export._record_event(
         room,
         "season",
         f"Season {snapshot.get('id')} ended. Champion: {snapshot.get('champion') or 'no champion'}.",
@@ -87,14 +87,14 @@ def _end_season(room_jid: str, room: dict[str, Any], *, reset_players: bool | No
 
 
 def _maybe_rollover_season(room_jid: str, room: dict[str, Any], messages: list[str]) -> None:
-    if not SEASON_ENABLED or _season_duration_seconds() <= 0:
+    if not _dep_config.SEASON_ENABLED or _season_duration_seconds() <= 0:
         return
     season = room.get("season")
     if not isinstance(season, dict):
-        room["season"] = _blank_season(_now())
+        room["season"] = _blank_season(_dep_formatting._now())
         return
     ends_at = int(season.get("ends_at", 0) or 0)
-    if ends_at <= 0 or _now() < ends_at:
+    if ends_at <= 0 or _dep_formatting._now() < ends_at:
         return
     snapshot = _end_season(room_jid, room)
     champion = snapshot.get("champion") or "no champion"
@@ -106,4 +106,13 @@ def _maybe_rollover_season(room_jid: str, room: dict[str, Any], messages: list[s
 
 def _season_end_summary(season: dict[str, Any]) -> str:
     ends_at = int(season.get("ends_at", 0) or 0)
-    return _duration(ends_at - _now()) if ends_at else "manual"
+    return _dep_formatting._duration(ends_at - _dep_formatting._now()) if ends_at else "manual"
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import export as _dep_export  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import state as _dep_state  # noqa: E402

@@ -9,10 +9,14 @@ import plugins.birthday_notify as birthday
 import plugins.ducks as ducks
 import plugins.idlerpg.state as idlerpg_state
 import plugins.idlerpg.tasks as idlerpg_tasks
+import plugins.idlerpg.config as idlerpg_config
+import plugins.idlerpg.constants as idlerpg_constants
 import plugins.karma as karma
 import plugins.pin as pin
-import plugins.reminder.store as reminder_store
+import plugins.reminder.lifecycle as reminder_lifecycle
+import plugins.reminder.runtime as reminder_runtime
 import plugins.rss.store as rss_store
+import plugins.rss.lifecycle as rss_lifecycle
 import plugins.tell as tell
 import plugins.urlcheck as urlcheck
 import plugins.weather as weather
@@ -219,10 +223,10 @@ async def test_idlerpg_runtime_state_and_doctor_counts_rooms_players_tasks(monke
             "broken@conf": "not-a-dict",
         }
     }
-    store = FakePluginStore({idlerpg_tasks.IDLERPG_DATA_KEY: data})
+    store = FakePluginStore({idlerpg_constants.IDLERPG_DATA_KEY: data})
     bot = SimpleNamespace(db=FakeDB(stores={"idlerpg": store}))
     monkeypatch.setitem(idlerpg_state.JOINED_ROOMS, "room@conf", {"nicks": {"alice": {"jid": "alice@example.org/res"}}})
-    monkeypatch.setattr(idlerpg_tasks, "ROOM_TASKS", {
+    monkeypatch.setattr(idlerpg_config, "ROOM_TASKS", {
         "room@conf": FakeTask(done=False),
         "old@conf": FakeTask(done=True),
     })
@@ -245,7 +249,7 @@ async def test_idlerpg_runtime_state_and_doctor_counts_rooms_players_tasks(monke
         "✅ IdleRPG for room@conf: rooms=1, players=2, online=1, active_quests=1, tasks=1"
     ]
 
-    monkeypatch.setattr(idlerpg_tasks, "ROOM_TASKS", {})
+    monkeypatch.setattr(idlerpg_config, "ROOM_TASKS", {})
     assert await idlerpg_tasks.doctor(bot, room_jid="room@conf") == [
         "⚠️ IdleRPG for room@conf: rooms=1, players=2, online=1, active_quests=1, tasks=0"
     ]
@@ -258,30 +262,30 @@ async def test_reminder_runtime_state_and_doctor_counts_pending_and_active(monke
         {"id": 2, "room_jid": "room@conf"},
         {"id": 3, "room_jid": "other@conf"},
     ]
-    monkeypatch.setattr(reminder_store, "_init_reminder_db", AsyncMock())
-    monkeypatch.setattr(reminder_store, "_get_all_pending_reminders", AsyncMock(return_value=pending))
-    monkeypatch.setattr(reminder_store, "ACTIVE_REMINDERS", {
+    monkeypatch.setattr(reminder_lifecycle, "_init_reminder_db", AsyncMock())
+    monkeypatch.setattr(reminder_lifecycle, "_get_all_pending_reminders", AsyncMock(return_value=pending))
+    monkeypatch.setattr(reminder_runtime, "ACTIVE_REMINDERS", {
         1: FakeTask(done=False),
         2: FakeTask(done=True),
         3: FakeTask(done=False),
     })
-    monkeypatch.setattr(reminder_store, "REMINDER_ENABLED", True)
+    monkeypatch.setattr(reminder_runtime, "REMINDER_ENABLED", True)
 
-    assert await reminder_store.get_runtime_state(SimpleNamespace()) == {
+    assert await reminder_lifecycle.get_runtime_state(SimpleNamespace()) == {
         "pending_reminders": 3,
         "active_tasks": 2,
         "enabled": 1,
     }
-    assert await reminder_store.get_runtime_state(SimpleNamespace(), room_jid="room@conf") == {
+    assert await reminder_lifecycle.get_runtime_state(SimpleNamespace(), room_jid="room@conf") == {
         "pending_reminders": 2,
         "active_tasks": 1,
     }
-    assert await reminder_store.doctor(SimpleNamespace(), room_jid="room@conf") == [
+    assert await reminder_lifecycle.doctor(SimpleNamespace(), room_jid="room@conf") == [
         "✅ Reminder for room@conf: enabled, pending=2, active_tasks=1"
     ]
 
-    monkeypatch.setattr(reminder_store, "REMINDER_ENABLED", False)
-    assert await reminder_store.doctor(SimpleNamespace()) == [
+    monkeypatch.setattr(reminder_runtime, "REMINDER_ENABLED", False)
+    assert await reminder_lifecycle.doctor(SimpleNamespace()) == [
         "ℹ️ Reminder: disabled, pending=3, active_tasks=2"
     ]
 
@@ -322,24 +326,24 @@ async def test_rss_runtime_state_and_doctor_reports_backoff(monkeypatch):
     }
     store = FakePluginStore({rss_store.RSS_KEY: feeds})
     bot = SimpleNamespace(db=FakeDB(stores={"rss": store}))
-    monkeypatch.setattr(rss_store, "_now", lambda: 100)
-    monkeypatch.setattr(rss_store, "CHECK_TASKS", {
+    monkeypatch.setattr(rss_lifecycle, "_now", lambda: 100)
+    monkeypatch.setattr(rss_lifecycle, "CHECK_TASKS", {
         "https://one.example/feed": FakeTask(done=False),
         "https://two.example/feed": FakeTask(done=True),
         "https://three.example/feed": FakeTask(done=False),
     })
 
-    assert await rss_store.get_runtime_state(bot) == {
+    assert await rss_lifecycle.get_runtime_state(bot) == {
         "feeds": 4,
         "active_tasks": 2,
         "retry_backoff": 2,
     }
-    assert await rss_store.get_runtime_state(bot, room_jid="room@conf") == {
+    assert await rss_lifecycle.get_runtime_state(bot, room_jid="room@conf") == {
         "feeds": 2,
         "active_tasks": 1,
         "retry_backoff": 1,
     }
-    assert await rss_store.doctor(bot, room_jid="room@conf") == [
+    assert await rss_lifecycle.doctor(bot, room_jid="room@conf") == [
         "✅ RSS for room@conf: feeds=2, active_tasks=1, retry_backoff=1",
         "🟡️ RSS: one or more feeds are currently in retry/backoff",
     ]
@@ -369,6 +373,7 @@ async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
     import plugins.sed as sed
     import plugins.tools as tools
     import plugins.vcard as vcard
+    import plugins.vcard.commands as vcard_commands
     import plugins.xmpp as xmpp
 
     stores = {
@@ -404,7 +409,7 @@ async def test_simple_optional_plugin_diagnostic_hooks(monkeypatch, tmp_path):
 
     joined = {"room@conf": {"nicks": {"alice": {"jid": "alice@example.org"}}}}
     monkeypatch.setattr(tools, "JOINED_ROOMS", joined)
-    monkeypatch.setattr(vcard, "JOINED_ROOMS", joined)
+    monkeypatch.setattr(vcard_commands, "JOINED_ROOMS", joined)
     monkeypatch.setattr(xmpp, "JOINED_ROOMS", joined)
 
     dice_state = await dice.get_runtime_state(bot, room_jid="room@conf/nick")

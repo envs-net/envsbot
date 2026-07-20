@@ -38,7 +38,7 @@ def joined_room_nick(bot: Any, room_jid: str) -> str | None:
         log.debug("Could not inspect presence joined rooms", exc_info=True)
 
     try:
-        from core_plugins.rooms import JOINED_ROOMS
+        from bot.room_state import JOINED_ROOMS
 
         room = JOINED_ROOMS.get(room_jid) or {}
         nick = room.get("nick")
@@ -186,7 +186,7 @@ async def ensure_room_joined(bot: Any, room_jid: str, *, nick: str | None = None
         return False
 
     try:
-        from core_plugins.rooms import JOINED_ROOMS
+        from bot.room_state import JOINED_ROOMS
 
         JOINED_ROOMS.setdefault(
             room_jid,

@@ -24,7 +24,7 @@ from typing import Any
 import aiohttp
 
 from core_plugins import _core
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
 from utils.command import Role, command
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator

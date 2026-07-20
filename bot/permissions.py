@@ -61,7 +61,7 @@ class PermissionMixin:
         if not room:
             return db_role
         try:
-            from core_plugins.rooms import JOINED_ROOMS
+            from bot.room_state import JOINED_ROOMS
 
             room_info = JOINED_ROOMS.get(room)
             if not room_info:

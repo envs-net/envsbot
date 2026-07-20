@@ -8,6 +8,9 @@ from .helpers import (
     pytest,
     reminder,
 )
+from plugins.reminder import lifecycle as reminder_lifecycle
+from plugins.reminder import runtime as reminder_runtime
+from plugins.reminder import store as reminder_store
 
 
 @pytest.mark.asyncio
@@ -53,7 +56,7 @@ async def test_restore_pending_reminders(dummy_bot):
             "remind_at": (now+datetime.timedelta(hours=1)).isoformat()}
     ])
     # _get_room_reminder_state returns True for id==3, False for id==4
-    with patch("plugins.reminder._get_room_reminder_state",
+    with patch("plugins.reminder.tasks._get_room_reminder_state",
                side_effect=lambda bot, rjid: rjid != "rome@conf"):
         # Should skip id=3,4 due to room state
         restored = await reminder._restore_pending_reminders(dummy_bot)
@@ -72,14 +75,14 @@ async def test_room_reminder_state_and_send_message(monkeypatch):
             return self.state
 
     bot = MagicMock()
-    monkeypatch.setattr(reminder, "get_reminder_store", AsyncMock(return_value=Store({"room@conf": True})))
+    monkeypatch.setattr(reminder_store, "get_reminder_store", AsyncMock(return_value=Store({"room@conf": True})))
     assert await reminder._get_room_reminder_state(bot, "room@conf") is True
     assert await reminder._get_room_reminder_state(bot, "other@conf") is False
 
-    monkeypatch.setattr(reminder, "get_reminder_store", AsyncMock(return_value=Store(["bad"])))
+    monkeypatch.setattr(reminder_store, "get_reminder_store", AsyncMock(return_value=Store(["bad"])))
     assert await reminder._get_room_reminder_state(bot, "room@conf") is False
 
-    monkeypatch.setattr(reminder, "get_reminder_store", AsyncMock(side_effect=RuntimeError("db")))
+    monkeypatch.setattr(reminder_store, "get_reminder_store", AsyncMock(side_effect=RuntimeError("db")))
     assert await reminder._get_room_reminder_state(bot, "room@conf") is False
 
     sent = []
@@ -115,28 +118,28 @@ async def test_cleanup_room_state_deletes_room_reminders(monkeypatch, dummy_bot)
         {"id": 3, "room_jid": "other@conf"},
         {"id": 4, "room_jid": None},
     ]
-    monkeypatch.setattr(reminder, "_init_reminder_db", AsyncMock())
+    monkeypatch.setattr(reminder_lifecycle, "_init_reminder_db", AsyncMock())
     monkeypatch.setattr(
-        reminder,
+        reminder_lifecycle,
         "_get_all_pending_reminders",
         AsyncMock(return_value=pending),
     )
-    monkeypatch.setattr(reminder, "_cancel_active_tasks_for_room", AsyncMock(return_value=2))
-    monkeypatch.setattr(reminder, "_delete_reminder", AsyncMock())
+    monkeypatch.setattr(reminder_lifecycle, "_cancel_active_tasks_for_room", AsyncMock(return_value=2))
+    monkeypatch.setattr(reminder_lifecycle, "_delete_reminder", AsyncMock())
 
     summary = await reminder.cleanup_room_state(dummy_bot, "room@conf/nick")
 
     assert summary == {"reminders": 2, "tasks": 2}
-    reminder._delete_reminder.assert_any_await(dummy_bot, 1)
-    reminder._delete_reminder.assert_any_await(dummy_bot, 2)
-    assert reminder._delete_reminder.await_count == 2
+    reminder_lifecycle._delete_reminder.assert_any_await(dummy_bot, 1)
+    reminder_lifecycle._delete_reminder.assert_any_await(dummy_bot, 2)
+    assert reminder_lifecycle._delete_reminder.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_reminder_runtime_state_global_and_room(monkeypatch):
-    monkeypatch.setattr(reminder, "_init_reminder_db", AsyncMock())
+    monkeypatch.setattr(reminder_lifecycle, "_init_reminder_db", AsyncMock())
     monkeypatch.setattr(
-        reminder,
+        reminder_lifecycle,
         "_get_all_pending_reminders",
         AsyncMock(return_value=[
             {"id": 1, "room_jid": "Room@Conf"},
@@ -144,7 +147,7 @@ async def test_reminder_runtime_state_global_and_room(monkeypatch):
             {"id": 3, "room_jid": "other@conf"},
         ]),
     )
-    monkeypatch.setattr(reminder, "REMINDER_ENABLED", True)
+    monkeypatch.setattr(reminder_runtime, "REMINDER_ENABLED", True)
     reminder.ACTIVE_REMINDERS.clear()
     reminder.ACTIVE_REMINDERS[1] = _ReminderPendingTask()
     reminder.ACTIVE_REMINDERS[2] = _ReminderDoneTask()

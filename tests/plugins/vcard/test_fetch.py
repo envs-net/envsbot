@@ -6,6 +6,9 @@ from .helpers import (
     pytest,
     vcard,
 )
+from plugins.vcard import commands as vcard_commands
+from plugins.vcard import fetch as vcard_fetch
+from plugins.vcard import fields as vcard_fields
 
 
 @pytest.mark.asyncio
@@ -21,7 +24,7 @@ from .helpers import (
 ])
 async def test_field_cmds(fake_bot, monkeypatch, cmd, args, label, expect):
     async def _get_enabled_rooms(b, k, p): return {"room@x": True}
-    monkeypatch.setattr(vcard._core, "_get_enabled_rooms", _get_enabled_rooms)
+    monkeypatch.setattr(vcard_commands._core, "_get_enabled_rooms", _get_enabled_rooms)
     m = msg(from_jid="room@x/TestNick", resource="TestNick")
     m["type"] = "chat"
     # Patch plugin store so bot.db.users.plugin("vcard").get_global works even
@@ -46,8 +49,8 @@ async def test_vcard_field_direct_message_fetches_sender_field(fake_bot, monkeyp
         assert jid == "alice@example.org"
         return RichDummyVcard()
 
-    monkeypatch.setattr(vcard, "get_vcard", rich_get_vcard)
-    monkeypatch.setattr(vcard._core, "_is_muc_pm", lambda msg: False)
+    monkeypatch.setattr(vcard_fetch, "get_vcard", rich_get_vcard)
+    monkeypatch.setattr(vcard_fetch._core, "_is_muc_pm", lambda msg: False)
     m = msg(from_jid="alice@example.org/resource", type_="chat")
 
     assert await vcard.vcard_field(fake_bot, m, "ignored", "FN") == "Alice Example"
@@ -59,16 +62,16 @@ async def test_vcard_field_direct_message_fetches_sender_field(fake_bot, monkeyp
 async def test_vcard_room_lookup_fetches_replies_and_handles_missing(fake_bot, monkeypatch):
     room = "room@x"
     m = msg(from_jid=f"{room}/Alice", type_="groupchat")
-    vcard.JOINED_ROOMS[room] = {"nicks": {"Alice": {"jid": "alice@example.org"}}}
+    vcard_fetch.JOINED_ROOMS[room] = {"nicks": {"Alice": {"jid": "alice@example.org"}}}
     try:
-        monkeypatch.setattr(vcard, "_vcard_fetch_value", AsyncMock(return_value="Alice Example"))
+        monkeypatch.setattr(vcard_fields, "_vcard_fetch_value", AsyncMock(return_value="Alice Example"))
         await vcard._vcard_handle_room_lookup(
             fake_bot, "sender@example.org", m, "FN", "Full Name", "Alice", room
         )
         assert any(isinstance(reply[0], list) and "Alice Example" in "\n".join(reply[0]) for reply in fake_bot._replies)
 
         fake_bot._replies.clear()
-        vcard._vcard_fetch_value.return_value = None
+        vcard_fields._vcard_fetch_value.return_value = None
         await vcard._vcard_handle_room_lookup(
             fake_bot, "sender@example.org", m, "FN", "Full Name", "Alice", room
         )
@@ -80,7 +83,7 @@ async def test_vcard_room_lookup_fetches_replies_and_handles_missing(fake_bot, m
         )
         assert "Your Nick 'Missing' not found" in fake_bot._replies[-1][0]
     finally:
-        vcard.JOINED_ROOMS.pop(room, None)
+        vcard_fetch.JOINED_ROOMS.pop(room, None)
 
 
 @pytest.mark.asyncio
@@ -89,14 +92,14 @@ async def test_get_user_vcard_and_fetch_value_helpers(fake_bot, monkeypatch):
         assert jid == "alice@example.org"
         return RichDummyVcard()
 
-    monkeypatch.setattr(vcard, "get_vcard", rich_get_vcard)
+    monkeypatch.setattr(vcard_fetch, "get_vcard", rich_get_vcard)
     monkeypatch.setattr(
-        vcard._core,
+        vcard_fetch._core,
         "get_real_jid",
         AsyncMock(return_value=("alice@example.org", False, False)),
     )
     monkeypatch.setattr(
-        vcard._core,
+        vcard_fetch._core,
         "_get_user_timezone",
         AsyncMock(return_value="Europe/Berlin"),
     )

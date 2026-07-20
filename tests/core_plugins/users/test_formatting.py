@@ -5,6 +5,7 @@ from .helpers import (
     types,
     users_mod,
 )
+from core_plugins.users import formatting as formatting_module
 
 
 @pytest.mark.asyncio
@@ -27,7 +28,7 @@ async def test_user_audit_helper_is_best_effort(monkeypatch, mock_bot):
     async def broken_audit_event(*args, **kwargs):
         raise RuntimeError("audit unavailable")
 
-    monkeypatch.setattr(users_mod, "audit_event", broken_audit_event)
+    monkeypatch.setattr(formatting_module, "audit_event", broken_audit_event)
     await users_mod._write_user_audit(
         mock_bot,
         "user_role_change_denied",

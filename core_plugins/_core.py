@@ -19,7 +19,7 @@ from typing import Any, Awaitable, Callable, Optional
 from utils.command import Role
 from utils import message_cache as _message_cache
 
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
 
 # Compatibility exports for existing plugins. New code should import these
 # XMPP reply helpers directly from utils.message_cache.
@@ -33,7 +33,7 @@ PLUGIN_META = {
     "version": "0.4.0",
     "description": "Core utilities and shared helpers for other plugins.",
     "category": "internal",
-    "requires": ["rooms"],  # Ensure 'rooms' is loaded first
+    "requires": [],
     "hidden": True,         # Optional: Hide from user plugin listings
 }
 

@@ -32,6 +32,7 @@ PLUGIN_META = {
     "version": "0.2.0",
     "description": "Roll dice with optional modifiers and success conditions.",
     "category": "games",
+    "requires": ["_core"],
 }
 
 DICE_RE = re.compile(

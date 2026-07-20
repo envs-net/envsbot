@@ -22,39 +22,39 @@ def _alignment_battle_factor(player: dict[str, Any], outcome: str | None = None)
 
 
 def _battle_amount(player: dict[str, Any], base: int, outcome: str) -> int:
-    return max(1, _penalty_for(int(player.get("level", 0)), base))
+    return max(1, _dep_leveling._penalty_for(int(player.get("level", 0)), base))
 
 
 async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages: list[str]) -> None:
     players = [
-        (str(jid), _normalize_player(str(jid), player))
+        (str(jid), _dep_state._normalize_player(str(jid), player))
         for jid, player in room.get("players", {}).items()
-        if isinstance(player, dict) and _is_player_online(room_jid, str(jid), player)
+        if isinstance(player, dict) and _dep_state._is_player_online(room_jid, str(jid), player)
     ]
-    if not players or random.random() >= EVENT_CHANCE:
+    if not players or random.random() >= _dep_config.EVENT_CHANCE:
         return
 
     events: list[tuple[float, str]] = []
     if len(players) >= 2:
-        events.append((BATTLE_EVENT_WEIGHT, "battle"))
+        events.append((_dep_config.BATTLE_EVENT_WEIGHT, "battle"))
     if len(players) >= 6:
-        events.append((TEAM_BATTLE_EVENT_WEIGHT, "team_battle"))
-    if len(players) >= BOSS_MIN_PLAYERS:
-        events.append((BOSS_EVENT_WEIGHT, "boss"))
-    events.append((ITEM_EVENT_WEIGHT, "item"))
-    events.append((ITEM_DAMAGE_EVENT_WEIGHT, "item_damage"))
+        events.append((_dep_config.TEAM_BATTLE_EVENT_WEIGHT, "team_battle"))
+    if len(players) >= _dep_config.BOSS_MIN_PLAYERS:
+        events.append((_dep_config.BOSS_EVENT_WEIGHT, "boss"))
+    events.append((_dep_config.ITEM_EVENT_WEIGHT, "item"))
+    events.append((_dep_config.ITEM_DAMAGE_EVENT_WEIGHT, "item_damage"))
     if len(players) >= 2:
-        events.append((ITEM_STEAL_EVENT_WEIGHT, "item_steal"))
-        events.append((ALIGNMENT_EVENT_WEIGHT, "alignment"))
+        events.append((_dep_config.ITEM_STEAL_EVENT_WEIGHT, "item_steal"))
+        events.append((_dep_config.ALIGNMENT_EVENT_WEIGHT, "alignment"))
 
     configured_weight = (
-        BATTLE_EVENT_WEIGHT
-        + TEAM_BATTLE_EVENT_WEIGHT
-        + BOSS_EVENT_WEIGHT
-        + ITEM_EVENT_WEIGHT
-        + ITEM_DAMAGE_EVENT_WEIGHT
-        + ITEM_STEAL_EVENT_WEIGHT
-        + ALIGNMENT_EVENT_WEIGHT
+        _dep_config.BATTLE_EVENT_WEIGHT
+        + _dep_config.TEAM_BATTLE_EVENT_WEIGHT
+        + _dep_config.BOSS_EVENT_WEIGHT
+        + _dep_config.ITEM_EVENT_WEIGHT
+        + _dep_config.ITEM_DAMAGE_EVENT_WEIGHT
+        + _dep_config.ITEM_STEAL_EVENT_WEIGHT
+        + _dep_config.ALIGNMENT_EVENT_WEIGHT
     )
     events.append((max(0.0, 1.0 - configured_weight), "fate"))
     events = [(max(0.0, weight), event) for weight, event in events if weight > 0]
@@ -79,16 +79,16 @@ async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages:
     if selected == "boss" and _run_boss_event(players, messages, room):
         return
     if selected == "item":
-        _run_item_blessing(players, messages, room)
+        _dep_items._run_item_blessing(players, messages, room)
         return
     if selected == "item_damage":
         before = len(messages)
-        _run_item_damage(players, messages, room)
+        _dep_items._run_item_damage(players, messages, room)
         if len(messages) > before:
             return
     if selected == "item_steal":
         before = len(messages)
-        _run_item_swap(players, messages, room)
+        _dep_items._run_item_swap(players, messages, room)
         if len(messages) > before:
             return
     if selected == "alignment" and _run_alignment_bonus(players, messages, room):
@@ -109,7 +109,7 @@ def _duel_distance(attacker: dict[str, Any], defender: dict[str, Any]) -> float:
 
 
 def _grid_position(player: dict[str, Any]) -> tuple[int, int]:
-    return (_clamp_grid_coord(player.get("x", 0), MAP_X), _clamp_grid_coord(player.get("y", 0), MAP_Y))
+    return (_dep_map._clamp_grid_coord(player.get("x", 0), _dep_config.MAP_X), _dep_map._clamp_grid_coord(player.get("y", 0), _dep_config.MAP_Y))
 
 
 def _maybe_run_grid_battle(
@@ -123,7 +123,7 @@ def _maybe_run_grid_battle(
     become a normal battle when two players meet on the grid.  At most one grid
     battle is emitted per tick to keep room output manageable.
     """
-    if not GRID_BATTLE_ENABLED or len(players) < 2:
+    if not _dep_config.GRID_BATTLE_ENABLED or len(players) < 2:
         return False
 
     by_position: dict[tuple[int, int], list[tuple[str, dict[str, Any]]]] = {}
@@ -150,44 +150,44 @@ def _run_duel_between(
     manual: bool = False,
     distance: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    attacker_power = _battle_power(attacker)
-    defender_power = _battle_power(defender)
+    attacker_power = _dep_items._battle_power(attacker)
+    defender_power = _dep_items._battle_power(defender)
     attacker_roll = random.randint(0, attacker_power)
     defender_roll = random.randint(0, defender_power)
     attacker_won = attacker_roll >= defender_roll
-    attacker_name = _display_player(attacker)
-    defender_name = _display_player(defender)
+    attacker_name = _dep_formatting._display_player(attacker)
+    defender_name = _dep_formatting._display_player(defender)
     distance_part = f" at distance {distance:.1f}" if manual and distance is not None else ""
 
     if attacker_won:
-        amount = _battle_clock_delta(attacker, defender, "win")
-        changed = _remove_time(attacker, amount)
+        amount = _dep_items._battle_clock_delta(attacker, defender, "win")
+        changed = _dep_leveling._remove_time(attacker, amount)
         messages.append(
             f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
             f"{defender_name} [{defender_roll}/{defender_power}] "
             f"{'to a duel' if manual else 'in combat'}{distance_part} and won! "
-            f"{_duration_clock(changed)} is removed from {_possessive(attacker_name)} clock."
+            f"{_dep_formatting._duration_clock(changed)} is removed from {_dep_formatting._possessive(attacker_name)} clock."
         )
-        messages.append(_next_level_line(attacker))
+        messages.append(_dep_formatting._next_level_line(attacker))
         winner, loser = attacker, defender
-        _award(winner, "battle_winner")
-        _inc_stat(winner, "battles_won", 1, room)
+        _dep_leveling._award(winner, "battle_winner")
+        _dep_leveling._inc_stat(winner, "battles_won", 1, room)
     else:
-        amount = _battle_clock_delta(attacker, defender, "loss")
-        changed = _add_time(attacker, amount)
+        amount = _dep_items._battle_clock_delta(attacker, defender, "loss")
+        changed = _dep_leveling._add_time(attacker, amount)
         messages.append(
             f"⚔️ {attacker_name} [{attacker_roll}/{attacker_power}] has challenged "
             f"{defender_name} [{defender_roll}/{defender_power}] "
             f"{'to a duel' if manual else 'in combat'}{distance_part} and lost! "
-            f"{_duration_clock(changed)} is added to {_possessive(attacker_name)} clock."
+            f"{_dep_formatting._duration_clock(changed)} is added to {_dep_formatting._possessive(attacker_name)} clock."
         )
-        messages.append(_next_level_line(attacker))
+        messages.append(_dep_formatting._next_level_line(attacker))
         winner, loser = defender, attacker
-        _award(winner, "battle_winner")
-        _inc_stat(winner, "battles_won", 1, room)
+        _dep_leveling._award(winner, "battle_winner")
+        _dep_leveling._inc_stat(winner, "battles_won", 1, room)
 
-    _maybe_critical_strike(winner, loser, messages)
-    _maybe_battle_item_drop(winner, loser, messages, room)
+    _dep_items._maybe_critical_strike(winner, loser, messages)
+    _dep_items._maybe_battle_item_drop(winner, loser, messages, room)
     return winner, loser
 
 
@@ -207,7 +207,7 @@ def _run_pvp_battle(
     messages: list[str],
     room: dict[str, Any] | None = None,
 ) -> None:
-    pair = _choose_two_players(players)
+    pair = _dep_state._choose_two_players(players)
     if pair is None:
         return
     (_attacker_jid, attacker), (_defender_jid, defender) = pair
@@ -224,30 +224,30 @@ def _run_team_battle(
     selected = random.sample(players, 6)
     team_a = selected[:3]
     team_b = selected[3:]
-    names_a = [_display_player(player) for _jid, player in team_a]
-    names_b = [_display_player(player) for _jid, player in team_b]
-    power_a = sum(_battle_power(player) for _jid, player in team_a)
-    power_b = sum(_battle_power(player) for _jid, player in team_b)
+    names_a = [_dep_formatting._display_player(player) for _jid, player in team_a]
+    names_b = [_dep_formatting._display_player(player) for _jid, player in team_b]
+    power_a = sum(_dep_items._battle_power(player) for _jid, player in team_a)
+    power_b = sum(_dep_items._battle_power(player) for _jid, player in team_b)
     roll_a = random.randint(0, max(1, power_a))
     roll_b = random.randint(0, max(1, power_b))
     team_a_won = roll_a >= roll_b
     winners = team_a if team_a_won else team_b
     losers = team_b if team_a_won else team_a
     affected = min(max(1, int(player.get("next", 0) or 0)) for _jid, player in winners)
-    changed = max(1, int(affected * max(0, TEAM_BATTLE_PERCENT) / 100))
+    changed = max(1, int(affected * max(0, _dep_config.TEAM_BATTLE_PERCENT) / 100))
     for _jid, player in winners:
-        _remove_time(player, changed)
-        _award(player, "team_battle_winner")
-        _inc_stat(player, "team_battles_won", 1, room)
+        _dep_leveling._remove_time(player, changed)
+        _dep_leveling._award(player, "team_battle_winner")
+        _dep_leveling._inc_stat(player, "team_battles_won", 1, room)
     for _jid, player in losers:
-        _add_time(player, changed)
+        _dep_leveling._add_time(player, changed)
     messages.append(
         f"🛡️ {', '.join(names_a)} [{roll_a}/{power_a}] have team battled "
         f"{', '.join(names_b)} [{roll_b}/{power_b}] and {'won' if team_a_won else 'lost'}! "
-        f"{_duration_clock(changed)} is {'removed from their clocks' if team_a_won else 'added to their clocks'}."
+        f"{_dep_formatting._duration_clock(changed)} is {'removed from their clocks' if team_a_won else 'added to their clocks'}."
     )
     for _jid, player in winners + losers:
-        messages.append(_next_level_line(player))
+        messages.append(_dep_formatting._next_level_line(player))
 
 
 _BOSS_NAMES = (
@@ -267,20 +267,20 @@ def _run_boss_event(
     eligible = [
         (jid, player)
         for jid, player in players
-        if int(player.get("level", 0) or 0) >= BOSS_MIN_LEVEL
+        if int(player.get("level", 0) or 0) >= _dep_config.BOSS_MIN_LEVEL
     ]
-    min_players = max(1, int(BOSS_MIN_PLAYERS or 1))
-    max_players = max(min_players, int(BOSS_MAX_PLAYERS or min_players))
+    min_players = max(1, int(_dep_config.BOSS_MIN_PLAYERS or 1))
+    max_players = max(min_players, int(_dep_config.BOSS_MAX_PLAYERS or min_players))
     if len(eligible) < min_players:
         return False
 
     party_size = min(len(eligible), max_players)
     party = random.sample(eligible, party_size)
-    party_names = [_display_player(player) for _jid, player in party]
-    party_power = max(1, sum(_battle_power(player) for _jid, player in party))
+    party_names = [_dep_formatting._display_player(player) for _jid, player in party]
+    party_power = max(1, sum(_dep_items._battle_power(player) for _jid, player in party))
 
-    min_factor = float(BOSS_POWER_MIN_FACTOR or 1.0)
-    max_factor = float(BOSS_POWER_MAX_FACTOR or min_factor)
+    min_factor = float(_dep_config.BOSS_POWER_MIN_FACTOR or 1.0)
+    max_factor = float(_dep_config.BOSS_POWER_MAX_FACTOR or min_factor)
     if max_factor < min_factor:
         min_factor, max_factor = max_factor, min_factor
     boss_factor = random.uniform(min_factor, max_factor)
@@ -297,32 +297,32 @@ def _run_boss_event(
     if won:
         changed_values = []
         for _jid, player in party:
-            changed_values.append(_remove_time(player, _percent_amount(player, BOSS_REWARD_PERCENT)))
-            _award(player, "boss_slayer")
-            _inc_stat(player, "bosses_defeated", 1, room)
+            changed_values.append(_dep_leveling._remove_time(player, _dep_items._percent_amount(player, _dep_config.BOSS_REWARD_PERCENT)))
+            _dep_leveling._award(player, "boss_slayer")
+            _dep_leveling._inc_stat(player, "bosses_defeated", 1, room)
         messages.append(
             f"🐉 {', '.join(party_names)} [{party_roll}/{party_power}] faced {boss_name} "
             f"[{boss_roll}/{boss_power}] and defeated it! "
-            f"Up to {_duration_clock(max(changed_values or [0]))} is removed from their clocks."
+            f"Up to {_dep_formatting._duration_clock(max(changed_values or [0]))} is removed from their clocks."
         )
         result = "defeated"
     else:
         changed_values = []
         for _jid, player in party:
-            changed_values.append(_add_time(player, _percent_amount(player, BOSS_LOSS_PERCENT)))
+            changed_values.append(_dep_leveling._add_time(player, _dep_items._percent_amount(player, _dep_config.BOSS_LOSS_PERCENT)))
         messages.append(
             f"🐉 {', '.join(party_names)} [{party_roll}/{party_power}] faced {boss_name} "
             f"[{boss_roll}/{boss_power}] and failed! "
-            f"Up to {_duration_clock(max(changed_values or [0]))} is added to their clocks."
+            f"Up to {_dep_formatting._duration_clock(max(changed_values or [0]))} is added to their clocks."
         )
         result = "failed"
 
     for _jid, player in party:
-        messages.append(_next_level_line(player))
-        messages.extend(_achievement_announcements(player, before_achievements[id(player)]))
+        messages.append(_dep_formatting._next_level_line(player))
+        messages.extend(_dep_leveling._achievement_announcements(player, before_achievements[id(player)]))
 
     if room is not None:
-        _record_event(
+        _dep_export._record_event(
             room,
             "boss",
             f"{', '.join(party_names)} {result} {boss_name}",
@@ -353,9 +353,9 @@ def _run_alignment_bonus(
         return False
     chosen = random.choice(candidates)
     selected = random.sample(chosen, 2)
-    names = [_display_player(player) for player in selected]
-    alignment = _alignment_name(selected[0].get("alignment"))
-    bonus_percent = ALIGNMENT_BONUS_PERCENT + max(_unique_bonus_percent(player, "alignment_bonus") for player in selected)
+    names = [_dep_formatting._display_player(player) for player in selected]
+    alignment = _dep_formatting._alignment_name(selected[0].get("alignment"))
+    bonus_percent = _dep_config.ALIGNMENT_BONUS_PERCENT + max(_dep_items._unique_bonus_percent(player, "alignment_bonus") for player in selected)
     if alignment == "good":
         lead = f"{names[0]} and {names[1]} have not let the iniquities of evil men poison them."
     elif alignment == "evil":
@@ -366,11 +366,11 @@ def _run_alignment_bonus(
         f"⚖️ {lead} {bonus_percent}% of their time is removed from their clocks."
     )
     for player in selected:
-        amount = _percent_amount(player, bonus_percent)
-        _remove_time(player, amount)
-        _award(player, "alignment_blessed")
-        _inc_stat(player, "alignment_events", 1, room)
-        messages.append(_next_level_line(player))
+        amount = _dep_items._percent_amount(player, bonus_percent)
+        _dep_leveling._remove_time(player, amount)
+        _dep_leveling._award(player, "alignment_blessed")
+        _dep_leveling._inc_stat(player, "alignment_events", 1, room)
+        messages.append(_dep_formatting._next_level_line(player))
     return True
 
 
@@ -380,30 +380,41 @@ def _run_godsend_or_calamity(
     room: dict[str, Any] | None = None,
 ) -> None:
     _jid, player = random.choice(players)
-    name = _display_player(player)
+    name = _dep_formatting._display_player(player)
     level = int(player.get("level", 0) or 0)
     if random.random() < 0.5:
-        amount = _random_percent_amount(player, CALAMITY_MIN_PERCENT, CALAMITY_MAX_PERCENT)
-        amount = _adjust_percent_amount(amount, player, "calamity_reduction")
-        changed = _add_time(player, amount)
+        amount = _dep_items._random_percent_amount(player, _dep_config.CALAMITY_MIN_PERCENT, _dep_config.CALAMITY_MAX_PERCENT)
+        amount = _dep_items._adjust_percent_amount(amount, player, "calamity_reduction")
+        changed = _dep_leveling._add_time(player, amount)
         player.setdefault("penalties", {})["calamity"] = (
             int(player.get("penalties", {}).get("calamity", 0) or 0) + changed
         )
-        _award(player, "unlucky")
-        _inc_stat(player, "calamities", 1, room)
+        _dep_leveling._award(player, "unlucky")
+        _dep_leveling._inc_stat(player, "calamities", 1, room)
         messages.append(
-            f"💥 {name} {random.choice(CALAMITIES)} near {_player_region(player)}. This terrible calamity has slowed them "
-            f"{_duration_clock(changed)} from level {level + 1}."
+            f"💥 {name} {random.choice(_dep_constants.CALAMITIES)} near {_dep_map._player_region(player)}. This terrible calamity has slowed them "
+            f"{_dep_formatting._duration_clock(changed)} from level {level + 1}."
         )
-        messages.append(_next_level_line(player))
+        messages.append(_dep_formatting._next_level_line(player))
     else:
-        amount = _random_percent_amount(player, GODSEND_MIN_PERCENT, GODSEND_MAX_PERCENT)
-        amount = _adjust_percent_amount(amount, player, "godsend_bonus", increase=True)
-        changed = _remove_time(player, amount)
-        _award(player, "lucky")
-        _inc_stat(player, "godsends", 1, room)
+        amount = _dep_items._random_percent_amount(player, _dep_config.GODSEND_MIN_PERCENT, _dep_config.GODSEND_MAX_PERCENT)
+        amount = _dep_items._adjust_percent_amount(amount, player, "godsend_bonus", increase=True)
+        changed = _dep_leveling._remove_time(player, amount)
+        _dep_leveling._award(player, "lucky")
+        _dep_leveling._inc_stat(player, "godsends", 1, room)
         messages.append(
-            f"🌟 {name} {random.choice(GODSENDS)} near {_player_region(player)}. This wondrous godsend has accelerated them "
-            f"{_duration_clock(changed)} towards level {level + 1}."
+            f"🌟 {name} {random.choice(_dep_constants.GODSENDS)} near {_dep_map._player_region(player)}. This wondrous godsend has accelerated them "
+            f"{_dep_formatting._duration_clock(changed)} towards level {level + 1}."
         )
-        messages.append(_next_level_line(player))
+        messages.append(_dep_formatting._next_level_line(player))
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import export as _dep_export  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import items as _dep_items  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import map as _dep_map  # noqa: E402
+from . import state as _dep_state  # noqa: E402

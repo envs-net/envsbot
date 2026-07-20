@@ -10,12 +10,16 @@ from .helpers import (
     re,
     reminder,
 )
+from utils.command import Role
+from plugins.reminder import runtime as reminder_runtime
+from plugins.reminder import commands as reminder_commands
+from plugins.reminder import parsing as reminder_parsing
 
 
 @pytest.mark.asyncio
 async def test_remind_command_and_status_controls(dummy_bot, dummy_msg):
     # Room-enabled and plugin ON by default
-    reminder.REMINDER_ENABLED = True
+    reminder_runtime.REMINDER_ENABLED = True
     dummy_msg["from"].bare = "rome@conf"
     dummy_msg["from"].resource = "TestUser"
     # Accept normal DM
@@ -40,7 +44,7 @@ async def test_remind_command_and_status_controls(dummy_bot, dummy_msg):
         dummy_msg, text)
 
     # Plugin disbled
-    reminder.REMINDER_ENABLED = False
+    reminder_runtime.REMINDER_ENABLED = False
     await reminder.remind_command(dummy_bot, "a@b", "TestNick", ["10s", "msg"],
                                   dummy_msg, False)
     dummy_bot.reply.assert_any_call(
@@ -49,7 +53,7 @@ async def test_remind_command_and_status_controls(dummy_bot, dummy_msg):
 
     # Enable via command in DM
     dummy_bot.reply.reset_mock()
-    reminder.REMINDER_ENABLED = False
+    reminder_runtime.REMINDER_ENABLED = False
     await reminder.remind_command(dummy_bot, "a@b", "TestNick", ["on"],
                                   dummy_msg, False)
     dummy_bot.reply.assert_any_call(
@@ -152,7 +156,7 @@ def test_reminder_split_commands_preserve_command_metadata():
     for handler, (command_name, aliases) in expected.items():
         assert handler._command == command_name
         assert handler._aliases == aliases
-        assert handler._required_role is reminder.Role.USER
+        assert handler._required_role is Role.USER
 
 
 @pytest.mark.asyncio
@@ -162,7 +166,7 @@ async def test_remind_control_commands_delegate_to_base_command(dummy_bot, dummy
     async def fake_remind_command(bot, sender_jid, nick, args, msg, is_room):
         calls.append((sender_jid, nick, list(args), msg, is_room))
 
-    monkeypatch.setattr(reminder, "remind_command", fake_remind_command)
+    monkeypatch.setattr(reminder_commands, "remind_command", fake_remind_command)
 
     await reminder.remind_status_command(
         dummy_bot, "a@b", "TestNick", [], dummy_msg, False
@@ -210,14 +214,14 @@ async def test_remind_command_uses_replied_message_from_shared_cache(
         "body": "xxx",
     })
     monkeypatch.setattr(
-        reminder,
+            reminder_commands,
         "_is_reminder_enabled_for_context",
         AsyncMock(return_value=True),
     )
     create = AsyncMock(return_value=42)
     schedule = Mock()
-    monkeypatch.setattr(reminder, "_create_reminder", create)
-    monkeypatch.setattr(reminder, "_schedule_task", schedule)
+    monkeypatch.setattr(reminder_commands, "_create_reminder", create)
+    monkeypatch.setattr(reminder_commands, "_schedule_task", schedule)
 
     await reminder.remind_command(
         dummy_bot,
@@ -253,13 +257,13 @@ async def test_remind_command_uses_reply_quote_when_cache_entry_is_missing(
     }
     dummy_bot.message_cache = message_cache.MessageCache(max_messages=20)
     monkeypatch.setattr(
-        reminder,
+            reminder_commands,
         "_is_reminder_enabled_for_context",
         AsyncMock(return_value=True),
     )
     create = AsyncMock(return_value=43)
-    monkeypatch.setattr(reminder, "_create_reminder", create)
-    monkeypatch.setattr(reminder, "_schedule_task", Mock())
+    monkeypatch.setattr(reminder_commands, "_create_reminder", create)
+    monkeypatch.setattr(reminder_commands, "_schedule_task", Mock())
 
     await reminder.remind_command(
         dummy_bot,
@@ -289,7 +293,7 @@ async def test_remind_command_reports_evicted_reply_target(
     }
     dummy_bot.message_cache = message_cache.MessageCache(max_messages=20)
     monkeypatch.setattr(
-        reminder,
+        reminder_commands,
         "_is_reminder_enabled_for_context",
         AsyncMock(return_value=True),
     )
@@ -360,7 +364,8 @@ async def test_reminder_on_load_registers_reply_fallback_handlers():
 async def test_remind_command_reports_past_absolute_time(dummy_bot, dummy_msg, monkeypatch):
     fixed_now = datetime.datetime(
         2026, 7, 11, 7, 30, 0, tzinfo=datetime.timezone.utc)
-    monkeypatch.setattr(reminder, "_utcnow", lambda: fixed_now)
+    monkeypatch.setattr(reminder_commands, "_utcnow", lambda: fixed_now)
+    monkeypatch.setattr(reminder_parsing, "_utcnow", lambda: fixed_now)
 
     await reminder.remind_command(
         dummy_bot,

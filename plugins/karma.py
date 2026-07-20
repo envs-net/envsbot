@@ -40,7 +40,7 @@ PLUGIN_META = {
     "version": "1.2.0",
     "description": "Room-local karma tracking with nick++ / nick--",
     "category": "fun",
-    "requires": ["rooms", "_core"],
+    "requires": ["rooms", "_core", "sed"],
 }
 
 KARMA_ENABLED_KEY = "KARMA"

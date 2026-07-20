@@ -49,9 +49,11 @@ PLUGIN_META = {
     "version": "0.1.0",
     "description": "User management with caching, nick lookup and logging",
     "category": "core",
+    "requires": ["rooms"],
 }
 
 __all__ = [
+    'Role',
     'log',
     'prefix',
     '_command_prefix',

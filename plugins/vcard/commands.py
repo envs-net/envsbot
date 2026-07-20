@@ -1,188 +1,32 @@
 """Split module for plugins/vcard.py: commands."""
 
 import datetime
-from slixmpp.exceptions import IqError
 from core_plugins import _core
 from utils.command import command, Role
 from utils.config import config
-from core_plugins.rooms import JOINED_ROOMS
+from bot.room_state import JOINED_ROOMS
+from .config import VCARD_KEY, log
+from .fetch import get_info, get_vcard
+from .fields import _get_vcard_field
+from .formatting import _format_vcard_reply
+from .store import get_vcard_store
+from .timezone import _get_vcard_timezone
 
 
-async def _vcard_handle_room_lookup(bot, sender_jid, msg, field, label,
-                                    target_nick, room, own=False):
-    nick_info = _vcard_get_joined_nick_info(room, target_nick)
-    if not nick_info:
-        log.warning("[VCARD] 🔴  Nick '%s' not found in room '%s'",
-                    target_nick, room)
-        _vcard_handle_missing_nick(bot, msg, target_nick, room, own=own)
-        return
-
-    jid = nick_info.get("jid")
-    value = await _vcard_fetch_value(bot, msg, field, jid)
-    if field == "TIMEZONE":
-        if own:
-            log.info(f"[VCARD] TIMEZONE lookup for nick '{target_nick}'"
-                     f" with JID '{jid}' in room '{room}': {value}")
-        else:
-            log.info(f"[VCARD] TIMEZONE lookup for nick '{target_nick}'"
-                     f" with JID '{jid}' in room '{room}': {value}")
-
-    if _vcard_value_is_empty(value):
-        log.warning("[VCARD] 🔴  No vCard field '%s' for nick '%s'"
-                    " in room '%s'",
-                    label, target_nick, room)
-        _vcard_reply_missing_field(bot, msg, label, target_nick, room)
-        return
-
-    display_name = target_nick
-    if _vcard_value_is_empty(value):
-        log.warning("[VCARD] 🔴  No %s for requested user '%s'",
-                    field, target_nick)
-        _vcard_reply_empty_requested_user(bot, msg, label, target_nick)
-        return
-
-    await _vcard_reply_result(bot, msg, sender_jid, field, label, value,
-                              display_name, room)
 
 
-async def _get_vcard_field(bot, sender_jid, nick, args, msg, is_room,
-                           field, label):
-    """
-    Helper to fetch and display a profile field for a user nick.
-    """
-    is_muc_context = is_room or _core._is_muc_pm(msg)
-
-    if is_muc_context and args:
-        target_nick = " ".join(args).strip()
-        room = msg["from"].bare
-        await _vcard_handle_room_lookup(bot, sender_jid, msg, field, label,
-                                        target_nick, room, own=False)
-        return
-
-    if is_muc_context and not args:
-        target_nick = msg["from"].resource
-        room = msg["from"].bare
-        await _vcard_handle_room_lookup(bot, sender_jid, msg, field, label,
-                                        target_nick, room, own=True)
-        return
-
-    target_nick = msg["from"].bare
-    room = "Direct Message"
-
-    if args:
-        log.info("[VCARD] Direct message with args from "
-                 f"'{msg['from'].bare}'")
-        bot.reply(msg, "🔴  In direct messages, you can only look up "
-                       "your own vCard. Use the command without args.")
-        return
-
-    jid = msg["from"].bare
-    if field == "TIMEZONE":
-        value = await _core._get_user_timezone(bot, str(jid))
-    else:
-        vcard = await get_user_vcard(bot, msg, msg["from"].bare)
-        if vcard[field] is None:
-            log.warning("[VCARD] 🔴  No vCard field '%s' for nick '%s'"
-                        "in room '%s'",
-                        label, target_nick, room)
-            _vcard_reply_missing_field(bot, msg, label, target_nick, room)
-            return
-        value = vcard[field]
-
-    display_name = target_nick
-    if _vcard_value_is_empty(value):
-        log.warning("[VCARD] 🔴  No %s for requested user '%s'",
-                    field, target_nick)
-        _vcard_reply_empty_requested_user(bot, msg, label, target_nick)
-        return
-
-    await _vcard_reply_result(bot, msg, sender_jid, field, label, value,
-                              display_name, room)
-    return
 
 
-async def get_vcard(bot, msg, jid=None):
-    """
-    Helper function to fetch vCard for a given JID using the xep_0054 plugin.
-    """
-    if jid is None:
-        jid, _, _ = await _core.get_real_jid(bot, msg)
-    try:
-        vcard_plugin = bot.plugin.get("xep_0054", None)
-        if not vcard_plugin:
-            raise RuntimeError(
-                "vCard support (xep_0054) is not enabled in this bot.")
-        try:
-            result = await vcard_plugin.get_vcard(jid=str(jid), cached=False,
-                                                  timeout=float(config.get("vcard_fetch_timeout_seconds", 10) or 10))
-        except (IqError, Exception) as e:
-            log.info(
-                f"[VCARD] Exception while fetching vCard for '{jid}': {e}")
-            result = None
-        else:
-            log.debug(f"[VCARD] vCard fetch for '{jid}' completed")
-        if not result:
-            log.debug(f"[VCARD] No vCard result for '{jid}'.")
-            return None
-        log.debug(f"[VCARD] vCard for '{jid}' received.")
-        return result["vcard_temp"]
-    except Exception as e:
-        log.error(f"[VCARD] Exception during vCard lookup for '{jid}': {e}")
-        raise
 
 
-async def get_info(bot, msg, jid=None):
-    try:
-        vcard = await get_user_vcard(bot, msg, jid)
-        if not vcard:
-            log.info(f"[VCARD] No vCard found for '{jid}'.")
-            return None
-
-    except Exception as e:
-        log.error(f"[VCARD] Exception during vCard lookup for '{jid}': {e}")
-        raise
-    return vcard
 
 
-def _get_all_field_values_by_tag(vcard, tag):
-    """
-    Extract all string values for the field 'tag' from vcard stanza children.
-    """
-    values = []
-    for child in vcard.xml:
-        # Check both namespace-tag form and plain tag
-        if child.tag.endswith(tag) and child.text:
-            values.append(child.text.strip())
-    return values
 
 
-def _get_nested_field_values_by_tag(vcard, parent_tag, child_tag):
-    """Get all child_tag values under parent_tag elements in vcard XML."""
-    values = []
-    for field in vcard.xml:
-        if field.tag.endswith(parent_tag):
-            for child in field:
-                if child.tag.endswith(child_tag) and child.text:
-                    values.append(child.text.strip())
-    return values
 
 
-def _extract_email_addresses(vcard):
-    """Extract USERID from all EMAIL fields in the vCard XML."""
-    emails = []
-    for child in vcard.xml:
-        if not child.tag.endswith("EMAIL"):
-            continue
-
-        # Find USERID child element within the EMAIL entry.
-        for email_child in child:
-            if email_child.tag.endswith("USERID") and email_child.text:
-                emails.append(email_child.text.strip())
-    return emails
 
 
-async def get_vcard_store(bot):
-    return bot.db.users.plugin("vcard")
 
 
 async def _resolve_vcard_target(bot, msg, args, is_room, enabled_rooms):

@@ -5,6 +5,10 @@ from core_plugins import _core
 from utils.command import command, Role
 from utils.config import config
 
+from .config import VCARD_KEY, log
+from .fields import _get_vcard_field
+from .store import get_vcard_store
+
 
 @command(
     "timezone set",

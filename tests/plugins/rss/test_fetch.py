@@ -4,6 +4,8 @@ from .helpers import (
     pytest,
     rss,
 )
+from plugins.rss import fetch as rss_fetch
+from plugins.rss import store as rss_store
 
 
 @pytest.mark.asyncio
@@ -23,7 +25,7 @@ async def test_fetch_feed_handle_redirect_and_structure(monkeypatch):
 
     feedparser_mod = type(
         "Feedparser", (), {"parse": staticmethod(fake_parse)})()
-    monkeypatch.setattr(rss, "feedparser", feedparser_mod)
+    monkeypatch.setattr(rss_fetch, "feedparser", feedparser_mod)
 
     async def fake_to_thread(fn, *a, **kw):
         return fn(*a, **kw)
@@ -33,7 +35,7 @@ async def test_fetch_feed_handle_redirect_and_structure(monkeypatch):
         return b"feed-data", url, "application/rss+xml"
 
     monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
-    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_feed_bytes)
+    monkeypatch.setattr(rss_fetch, "_fetch_feed_bytes", fake_fetch_feed_bytes)
 
     result = await rss.fetch_feed("https://someurl.com/feed")
 
@@ -47,7 +49,7 @@ async def test_fetch_feed_rejects_unsafe_feed_url(monkeypatch):
     async def blocked(url, *, allow_private=False):
         assert url == "http://127.0.0.1/feed"
         assert allow_private is False
-        raise rss.UnsafeFetchURL("blocked")
+        raise rss_fetch.UnsafeFetchURL("blocked")
 
     class DummySession:
         async def __aenter__(self):
@@ -59,14 +61,14 @@ async def test_fetch_feed_rejects_unsafe_feed_url(monkeypatch):
         def get(self, *args, **kwargs):
             pytest.fail("unsafe RSS URL should not be fetched")
 
-    monkeypatch.setattr(rss, "validate_fetch_url_async", blocked)
+    monkeypatch.setattr(rss_fetch, "validate_fetch_url_async", blocked)
     monkeypatch.setattr(
-        rss.aiohttp,
+        rss_fetch.aiohttp,
         "ClientSession",
         lambda **kwargs: DummySession(),
     )
 
-    with pytest.raises(rss.UnsafeFetchURL):
+    with pytest.raises(rss_fetch.UnsafeFetchURL):
         await rss._fetch_feed_bytes("http://127.0.0.1/feed")
 
 
@@ -101,7 +103,7 @@ async def test_fetch_feed_bytes_redirect_and_size_limit(monkeypatch):
 
         def raise_for_status(self):
             if self.status >= 400:
-                raise rss.aiohttp.ClientResponseError(
+                raise rss_fetch.aiohttp.ClientResponseError(
                     None, (), status=self.status
                 )
 
@@ -128,8 +130,8 @@ async def test_fetch_feed_bytes_redirect_and_size_limit(monkeypatch):
                 [b"abc"],
             )
 
-    monkeypatch.setattr(rss, "validate_fetch_url_async", allow)
-    monkeypatch.setattr(rss.aiohttp, "ClientSession", DummySession)
+    monkeypatch.setattr(rss_fetch, "validate_fetch_url_async", allow)
+    monkeypatch.setattr(rss_fetch.aiohttp, "ClientSession", DummySession)
 
     body, final_url, content_type = await rss._fetch_feed_bytes(
         "https://example.org/feed"
@@ -143,15 +145,15 @@ async def test_fetch_feed_bytes_redirect_and_size_limit(monkeypatch):
         "https://example.org/real.xml",
     ]
 
-    monkeypatch.setattr(rss, "RSS_MAX_READ_BYTES", 4)
+    monkeypatch.setattr(rss_fetch, "RSS_MAX_READ_BYTES", 4)
 
     class BigSession(DummySession):
         def get(self, url, allow_redirects=False):
             return DummyResp(200, url, {}, [b"123", b"45"])
 
-    monkeypatch.setattr(rss.aiohttp, "ClientSession", BigSession)
+    monkeypatch.setattr(rss_fetch.aiohttp, "ClientSession", BigSession)
 
-    with pytest.raises(rss.FetchURLTooLarge):
+    with pytest.raises(rss_fetch.FetchURLTooLarge):
         await rss._fetch_feed_bytes("https://example.org/big.xml")
 
 
@@ -274,9 +276,9 @@ async def test_fetch_error_sleeps_retry_delay(monkeypatch, make_bot):
         sleep_calls.append(seconds)
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(rss, "RSS_RETRY_INITIAL_DELAY", 300)
-    monkeypatch.setattr(rss, "RSS_RETRY_BACKOFF_MULTIPLIER", 2.0)
-    monkeypatch.setattr(rss, "MAX_BACKOFF_TIME", 3600)
+    monkeypatch.setattr(rss_store, "RSS_RETRY_INITIAL_DELAY", 300)
+    monkeypatch.setattr(rss_store, "RSS_RETRY_BACKOFF_MULTIPLIER", 2.0)
+    monkeypatch.setattr(rss_store, "MAX_BACKOFF_TIME", 3600)
 
     await rss._handle_fetch_error(
         bot,
@@ -318,12 +320,12 @@ async def test_fetch_feed_validates_parsed_feed_shape(monkeypatch):
     async def fake_fetch_bytes(url):
         return b"<html>not a feed</html>", url, "text/html"
 
-    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_bytes)
+    monkeypatch.setattr(rss_fetch, "_fetch_feed_bytes", fake_fetch_bytes)
 
     def parse_empty(*args, **kwargs):
         return SimpleNamespace(feed={}, entries=[], bozo=False)
 
-    monkeypatch.setattr(rss, "feedparser", SimpleNamespace(parse=parse_empty))
+    monkeypatch.setattr(rss_fetch, "feedparser", SimpleNamespace(parse=parse_empty))
 
     with pytest.raises(ValueError, match="does not look like an RSS/Atom feed"):
         await rss.fetch_feed("https://example.org/not-a-feed")
@@ -336,9 +338,9 @@ async def test_fetch_feed_sets_fallback_feed_identifiers(monkeypatch):
 
     parsed = SimpleNamespace(feed={"title": "Fallback Feed"}, entries=[])
 
-    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_bytes)
+    monkeypatch.setattr(rss_fetch, "_fetch_feed_bytes", fake_fetch_bytes)
     monkeypatch.setattr(
-        rss,
+        rss_fetch,
         "feedparser",
         SimpleNamespace(parse=lambda *_args, **_kwargs: parsed),
     )
@@ -364,9 +366,9 @@ async def test_fetch_feed_overwrites_feed_identifiers_for_stable_storage(monkeyp
         entries=[],
     )
 
-    monkeypatch.setattr(rss, "_fetch_feed_bytes", fake_fetch_bytes)
+    monkeypatch.setattr(rss_fetch, "_fetch_feed_bytes", fake_fetch_bytes)
     monkeypatch.setattr(
-        rss,
+        rss_fetch,
         "feedparser",
         SimpleNamespace(parse=lambda *_args, **_kwargs: parsed),
     )

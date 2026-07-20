@@ -8,6 +8,7 @@ import plugins.pin as pin_plugin
 import plugins.poll as poll_plugin
 from tests.helpers import PresenceStub, make_presence_stub
 import logging
+from utils.command import Role
 
 
 logging.getLogger("core_plugins.rooms").setLevel(logging.CRITICAL)
@@ -84,7 +85,7 @@ def fake_bot():
     bot.db.rooms = MagicMock()
     bot.db.rooms.get = AsyncMock(return_value=(ROOM_JID, BOT_NICK, True, None))
     bot.db.users = MagicMock()
-    bot.get_user_role = AsyncMock(return_value=rooms.Role.MODERATOR)
+    bot.get_user_role = AsyncMock(return_value=Role.MODERATOR)
     bot.prefix = "!"
     bot.reply = MagicMock()
     patch_reply_methods(bot)

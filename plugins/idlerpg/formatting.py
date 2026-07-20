@@ -13,7 +13,7 @@ def _command_prefix(bot=None) -> str:
 
 
 async def get_idlerpg_store(bot):
-    return bot.db.users.plugin(PLUGIN_NAME)
+    return bot.db.users.plugin(_dep_constants.PLUGIN_NAME)
 
 
 def _reply(bot, msg, text: str):
@@ -114,7 +114,7 @@ def _display_player(player: dict[str, Any]) -> str:
 
 
 def _alignment_name(value: str | None) -> str:
-    return _ALIGNMENT_NAMES.get(str(value or "n")[:1].lower(), "neutral")
+    return _dep_constants._ALIGNMENT_NAMES.get(str(value or "n")[:1].lower(), "neutral")
 
 
 def _slug(value: str) -> str:
@@ -130,7 +130,7 @@ def _display_title(player: dict[str, Any]) -> str:
     title = str(player.get("title") or "").strip()
     achievements = player.get("achievements")
     if title and isinstance(achievements, list) and title in achievements:
-        return _achievement_title(title)
+        return _dep_leveling._achievement_title(title)
     return ""
 
 
@@ -142,14 +142,14 @@ def _display_character(player: dict[str, Any]) -> str:
 
 def _player_presence_label(room_jid: str | None, jid: str, player: dict[str, Any]) -> str:
     """Return a compact online/offline marker for top lists."""
-    if room_jid and _is_player_online(room_jid, jid, player):
+    if room_jid and _dep_state._is_player_online(room_jid, jid, player):
         return "🟢 online"
     return "⚫ offline"
 
 
 def _format_top_lines(room: dict[str, Any], *, limit: int | None = None, room_jid: str | None = None) -> list[str]:
-    limit = max(1, int(limit or ANNOUNCE_TOP_LIMIT or 5))
-    ranked = _ranked_players(room)[:limit]
+    limit = max(1, int(limit or _dep_config.ANNOUNCE_TOP_LIMIT or 5))
+    ranked = _dep_state._ranked_players(room)[:limit]
     if not ranked:
         return ["No IdleRPG players yet."]
     lines = [f"IdleRPG Top {limit} Players:"]
@@ -163,12 +163,12 @@ def _format_top_lines(room: dict[str, Any], *, limit: int | None = None, room_ji
 
 
 def _topic_text(room: dict[str, Any], custom_text: str | None = None) -> str:
-    ranked = _ranked_players(room)[:3]
+    ranked = _dep_state._ranked_players(room)[:3]
     top = "; ".join(
         f"#{rank}: {_display_character(player)}, lv. {player.get('level', 0)} {player.get('class', 'idler')}"
         for rank, (_jid, player) in enumerate(ranked, start=1)
     )
-    prefix = (custom_text if custom_text is not None else TOPIC_CUSTOM_TEXT).strip()
+    prefix = (custom_text if custom_text is not None else _dep_config.TOPIC_CUSTOM_TEXT).strip()
     if not prefix:
         prefix = "IdleRPG"
     return f"{prefix} {top}" if top else str(prefix)
@@ -182,7 +182,7 @@ def _maybe_set_room_topic(
     custom_text: str | None = None,
     force: bool = False,
 ) -> None:
-    if not UPDATE_ROOM_TOPIC and not force:
+    if not _dep_config.UPDATE_ROOM_TOPIC and not force:
         return
     topic = _topic_text(room, custom_text=custom_text)[:250]
     xep_muc = getattr(bot, "plugin", {}).get("xep_0045") if isinstance(getattr(bot, "plugin", {}), dict) else None
@@ -192,27 +192,27 @@ def _maybe_set_room_topic(
             result = setter(room_jid, topic)
             if hasattr(result, "__await__"):
                 # Fire-and-forget is intentional here: topic updates are best-effort only.
-                create_plugin_task(bot, PLUGIN_NAME, result, name=f"idlerpg-topic-{room_jid}")
+                create_plugin_task(bot, _dep_constants.PLUGIN_NAME, result, name=f"idlerpg-topic-{room_jid}")
             return
         sender = getattr(bot, "send_message", None)
         if callable(sender):
             sender(mto=room_jid, msubject=topic, mtype="groupchat")
     except Exception:
-        log.debug("[IDLERPG] Failed to update room topic for %s", room_jid, exc_info=True)
+        _dep_config.log.debug("[IDLERPG] Failed to update room topic for %s", room_jid, exc_info=True)
 
 
 def _maybe_periodic_announcements(bot, room_jid: str, room: dict[str, Any], messages: list[str]) -> None:
     now = _now()
-    if ANNOUNCE_TOP_INTERVAL > 0:
+    if _dep_config.ANNOUNCE_TOP_INTERVAL > 0:
         next_at = int(room.get("next_top_announce_at", 0) or 0)
         if now >= next_at:
-            messages.append("\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
-            room["next_top_announce_at"] = now + ANNOUNCE_TOP_INTERVAL
-    if UPDATE_ROOM_TOPIC and TOPIC_UPDATE_INTERVAL > 0:
+            messages.append("\n".join(_format_top_lines(room, limit=_dep_config.ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
+            room["next_top_announce_at"] = now + _dep_config.ANNOUNCE_TOP_INTERVAL
+    if _dep_config.UPDATE_ROOM_TOPIC and _dep_config.TOPIC_UPDATE_INTERVAL > 0:
         next_at = int(room.get("next_topic_update_at", 0) or 0)
         if now >= next_at:
             _maybe_set_room_topic(bot, room_jid, room)
-            room["next_topic_update_at"] = now + TOPIC_UPDATE_INTERVAL
+            room["next_topic_update_at"] = now + _dep_config.TOPIC_UPDATE_INTERVAL
 
 
 def _usage(bot) -> str:
@@ -242,3 +242,10 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg quest\n"
         f"{prefix}idlerpg login|logout|remove-me"
     )
+
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import state as _dep_state  # noqa: E402

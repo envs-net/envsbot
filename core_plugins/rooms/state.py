@@ -3,25 +3,21 @@
 import inspect
 import logging
 from slixmpp import JID
+from bot.room_state import (
+    JOINED_ROOMS,
+    LEAVING_ROOMS as _LEAVING_ROOMS,
+    WARNED_PLUGIN_DEFAULT_KEYS as _WARNED_ROOM_PLUGIN_DEFAULT_KEYS,
+)
 from utils.room_features import list_room_features
 
 
 log = logging.getLogger(__name__)
 
 
-JOINED_ROOMS = {}
-
-
-_LEAVING_ROOMS: set[str] = set()
-
-
 _DIRECT_INVITE_NS = "jabber:x:conference"
 
 
 _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
-
-
-_WARNED_ROOM_PLUGIN_DEFAULT_KEYS: set[str] = set()
 
 
 def _jid_bare(value) -> str:
@@ -112,27 +108,6 @@ async def _store_set_global(store, key: str, value) -> None:
 def _room_matches(left: object, right: str) -> bool:
     """Return True when two room JID values refer to the same bare room."""
     return _jid_bare(left) == right
-
-
-def _merge_plugin_cleanup_summary(summary: dict, plugin_summary: dict) -> None:
-    """Update legacy summary counters from plugin cleanup hook output."""
-    rss = plugin_summary.get("rss")
-    if isinstance(rss, dict):
-        summary["rss_subscriptions"] = int(rss.get("subscriptions") or 0)
-        summary["rss_feeds"] = int(rss.get("feeds") or 0)
-
-    xkcd = plugin_summary.get("xkcd")
-    if isinstance(xkcd, dict):
-        summary["xkcd_legacy_rooms"] = int(xkcd.get("legacy_rooms") or 0)
-
-    for plugin_name, values in plugin_summary.items():
-        if not isinstance(values, dict) or plugin_name in {"rss", "xkcd"}:
-            continue
-        for key in ("rooms", "data", "reminders"):
-            try:
-                summary["data"] += int(values.get(key) or 0)
-            except (TypeError, ValueError):
-                continue
 
 
 def _plugin_cleanup_changed(summary: dict) -> bool:
@@ -266,18 +241,24 @@ async def _room_diagnose_lines(bot, room_jid: str) -> list[str]:
     manager = getattr(bot, "bot_plugins", None)
     state_getter = getattr(manager, "plugin_state", None)
     if callable(state_getter):
-        interesting = ["rss", "pin", "poll", "reminder", "ducks", "xkcd"]
-        lines.append("Plugin room state:")
-        for plugin in interesting:
-            if plugin not in getattr(manager, "plugins", {}):
-                continue
+        plugin_lines: list[str] = []
+        for plugin in getattr(manager, "plugins", {}):
             state = await state_getter(plugin, room_jid=room_jid)
+            details = {
+                key: value
+                for key, value in state.items()
+                if key != "loaded"
+            }
+            if not details:
+                continue
             summary = ", ".join(
                 f"{key}={value}"
-                for key, value in sorted(state.items())
-                if key not in {"loaded"}
-            ) or "no room state"
-            lines.append(f"• {plugin}: {summary}")
+                for key, value in sorted(details.items())
+            )
+            plugin_lines.append(f"• {plugin}: {summary}")
+        if plugin_lines:
+            lines.append("Plugin room state:")
+            lines.extend(plugin_lines)
     return lines
 
 __all__ = [
@@ -294,7 +275,6 @@ __all__ = [
     '_store_get_global',
     '_store_set_global',
     '_room_matches',
-    '_merge_plugin_cleanup_summary',
     '_plugin_cleanup_changed',
     '_plugin_hook_cleanup_changed',
     '_room_in_runtime_state',

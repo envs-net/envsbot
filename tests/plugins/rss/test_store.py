@@ -4,6 +4,8 @@ from .helpers import (
     pytest,
     rss,
 )
+from plugins.rss import store as rss_store
+from plugins.rss import tasks as rss_tasks
 
 
 @pytest.mark.asyncio
@@ -28,8 +30,8 @@ async def test_rss_check_loop_backoff_flushes_state(monkeypatch, make_bot):
     async def fake_fetch_feed(_):
         raise Exception("fetch failed")
 
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_tasks, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: 1000)
 
     sleep_calls = []
 
@@ -47,7 +49,7 @@ async def test_rss_check_loop_backoff_flushes_state(monkeypatch, make_bot):
 
 
 def test_rss_now_is_integer_timestamp(monkeypatch):
-    monkeypatch.setattr(rss.time, "time", lambda: 1234.9)
+    monkeypatch.setattr(rss_store.time, "time", lambda: 1234.9)
     assert rss._now() == 1234
 
 

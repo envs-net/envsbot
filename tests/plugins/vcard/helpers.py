@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 from unittest.mock import AsyncMock
 from plugins import vcard
+from plugins.vcard import fetch as vcard_fetch
+from plugins.vcard import commands as vcard_commands
 
 
 ORIGINAL_GET_VCARD = vcard.get_vcard
@@ -62,7 +64,8 @@ def patch_get_vcard(monkeypatch):
 
     async def get_vcard(bot, msg, jid=None):
         return DummyVcard()
-    monkeypatch.setattr(vcard, "get_vcard", get_vcard)
+    monkeypatch.setattr(vcard_fetch, "get_vcard", get_vcard)
+    monkeypatch.setattr(vcard_commands, "get_vcard", get_vcard)
     return DummyVcard
 
 

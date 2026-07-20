@@ -1,5 +1,4 @@
 from .helpers import (
-    AsyncMock,
     Entry,
     SimpleNamespace,
     asyncio,
@@ -8,6 +7,8 @@ from .helpers import (
     pytest,
     rss,
 )
+from plugins.rss import formatting as rss_formatting
+from plugins.rss import tasks as rss_tasks
 
 
 @pytest.mark.asyncio
@@ -51,8 +52,8 @@ async def test_rss_check_loop_initializes_missing_last_id_without_posting(
     async def fake_fetch_feed(_):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_tasks, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: 1000)
 
     sleep_calls = []
 
@@ -122,8 +123,8 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
     async def fake_fetch_feed(_):
         return DummyFeed()
 
-    monkeypatch.setattr(rss, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss, "_now", lambda: 1000)
+    monkeypatch.setattr(rss_tasks, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_tasks, "_now", lambda: 1000)
 
     sleep_calls = []
 
@@ -183,7 +184,7 @@ def test_rss_default_and_custom_template_rendering():
 def test_rss_template_validation_and_input_normalization(monkeypatch):
     assert rss._validate_rss_template("$feed_title: $title") is None
 
-    monkeypatch.setattr(rss, "RSS_TEMPLATE_MAX_LENGTH", 12)
+    monkeypatch.setattr(rss_formatting, "RSS_TEMPLATE_MAX_LENGTH", 12)
     assert "Unknown template variable" in rss._validate_rss_template("$missing")
     assert "Invalid template syntax" in rss._validate_rss_template("${broken")
     assert "must not be empty" in rss._validate_rss_template("   ")
@@ -252,9 +253,9 @@ def test_rss_template_helpers_cover_prefix_variables_and_context(monkeypatch):
     bot = SimpleNamespace(prefix="!")
     assert rss._template_command_prefix(bot) == "!"
 
-    monkeypatch.setattr(rss, "config", {"prefix": "?"})
+    monkeypatch.setattr(rss_formatting, "config", {"prefix": "?"})
     assert rss._template_command_prefix(SimpleNamespace(prefix="")) == "?"
-    monkeypatch.setattr(rss, "config", {"prefix": ""})
+    monkeypatch.setattr(rss_formatting, "config", {"prefix": ""})
     assert rss._template_command_prefix(SimpleNamespace(prefix=None)) == ","
 
     usage = rss._rss_template_usage(SimpleNamespace(prefix="."))
@@ -345,7 +346,7 @@ async def test_post_rss_entry_to_rooms_reports_any_success(monkeypatch, make_bot
         calls.append((rooms, msg))
         return rooms == ["joined@conference.example.org"]
 
-    monkeypatch.setattr(rss, "_post_entry_to_rooms", fake_post)
+    monkeypatch.setattr(rss_formatting, "_post_entry_to_rooms", fake_post)
     store[rss.RSS_TEMPLATES_KEY] = {
         "silent@conference.example.org": "SILENT $title",
         "joined@conference.example.org": "JOINED $title",
@@ -381,8 +382,8 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
     async def fake_save(_bot, _store, _url, _entry_id):
         return False
 
-    monkeypatch.setattr(rss, "_post_rss_entry_to_rooms", fake_post)
-    monkeypatch.setattr(rss, "_save_last_id_for_template_post", fake_save)
+    monkeypatch.setattr(rss_formatting, "_post_rss_entry_to_rooms", fake_post)
+    monkeypatch.setattr(rss_formatting, "_update_feed_for_post", fake_save)
 
     await rss._post_new_entries(
         bot,
@@ -399,23 +400,16 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
 
 
 @pytest.mark.asyncio
-async def test_save_last_id_for_template_post_delegates_to_feed_field(monkeypatch):
-    set_field = AsyncMock(return_value=True)
-    monkeypatch.setattr(rss, "_set_feed_field", set_field)
+async def test_update_feed_for_post_updates_last_id(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/feed.xml"
+    store[rss.RSS_KEY] = {url: {"last_id": "entry-1"}}
 
-    bot = object()
-    store = object()
-    assert await rss._save_last_id_for_template_post(
+    assert await rss._update_feed_for_post(
         bot,
         store,
-        "https://example.org/feed.xml",
-        "entry-42",
+        url,
+        lambda feed: rss._set_last_id_in_feed(feed, "entry-42"),
     ) is True
-
-    set_field.assert_awaited_once_with(
-        bot,
-        store,
-        "https://example.org/feed.xml",
-        "last_id",
-        "entry-42",
-    )
+    assert store[rss.RSS_KEY][url]["last_id"] == "entry-42"

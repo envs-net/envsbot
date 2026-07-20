@@ -8,418 +8,276 @@ from utils.command import Role, command
 from utils.audit import audit_event
 from utils.formatting import format_page, parse_page_args
 from core_plugins import _core
+from .handlers import _message_actor_nick, _remember_player_nick
 
 
-_MESSAGE_PENALTY_DEDUPE_TTL = 30
-_MESSAGE_PENALTY_SEEN: dict[str, int] = {}
 
 
-def _message_penalty_dedupe_key(msg) -> str:
-    """Return a stable key for one inbound groupchat stanza.
-
-    The plugin registers both ``groupchat_message`` and the generic
-    ``message`` event so deployments where only one event fires still apply
-    penalties.  When both events fire for the same stanza, this key prevents a
-    double penalty.
-    """
-    try:
-        room = str(getattr(msg["from"], "bare", "") or "")
-        nick = str(msg.get("mucnick") or getattr(msg["from"], "resource", "") or "")
-        stanza_id = str(msg.get("id") or msg.get("stanza_id") or "")
-        if stanza_id:
-            return f"id:{room}|{nick}|{stanza_id}"
-    except Exception:
-        return f"obj:{id(msg)}"
-    return f"obj:{id(msg)}"
 
 
-def _message_penalty_seen(msg) -> bool:
-    now = _now()
-    cutoff = now - _MESSAGE_PENALTY_DEDUPE_TTL
-    for key, seen_at in list(_MESSAGE_PENALTY_SEEN.items()):
-        if seen_at < cutoff:
-            _MESSAGE_PENALTY_SEEN.pop(key, None)
-    key = _message_penalty_dedupe_key(msg)
-    if key in _MESSAGE_PENALTY_SEEN:
-        return True
-    _MESSAGE_PENALTY_SEEN[key] = now
-    return False
 
 
-def _safe_message_value(getter) -> Any:
-    try:
-        return getter()
-    except Exception:
-        return None
 
 
-def _message_actor_nick(msg) -> str:
-    """Return the MUC nickname for a public room message.
-
-    Different Slixmpp paths expose the nickname in slightly different ways.
-    Use all cheap sources before falling back to parsing the full JID string.
-    """
-    getter = getattr(msg, "get_mucnick", None)
-    raw_from = _safe_message_value(lambda: str(msg["from"]))
-    candidates: list[Any] = [
-        getter() if callable(getter) else None,
-        _safe_message_value(lambda: msg.get("mucnick")),
-        _safe_message_value(lambda: msg["mucnick"]),
-        _safe_message_value(lambda: getattr(msg["from"], "resource", None)),
-        str(raw_from).rsplit("/", 1)[1] if raw_from and "/" in str(raw_from) else None,
-    ]
-
-    for candidate in candidates:
-        value = str(candidate or "").strip()
-        if value:
-            return value
-    return ""
 
 
-def _remember_player_nick(player: dict[str, Any], msg) -> None:
-    nick = _message_actor_nick(msg)
-    if nick:
-        player["last_nick"] = nick[:128]
 
 
-def _real_bare_jid(value: Any, room_jid: str) -> str:
-    if not value:
-        return ""
-    try:
-        bare = getattr(value, "bare", None)
-        candidate = str(bare if bare else value).split("/", 1)[0].strip()
-    except Exception:
-        return ""
-    if not candidate or candidate == room_jid or "@" not in candidate:
-        return ""
-    return candidate
 
 
-def _identity_values_match(value: Any, needle: str) -> bool:
-    candidate = str(value or "").strip().lower()
-    return bool(candidate) and candidate == needle
 
 
-def _find_player_by_message_identity(
-    room: dict[str, Any],
-    *,
-    sender_jid: str = "",
-    actor_nick: str = "",
-) -> tuple[str, dict[str, Any]] | tuple[None, None]:
-    """Find a player from a live room message without trusting stale indexes.
 
-    Some real MUC deployments do not expose the occupant's real JID for every
-    message.  Existing players may also have been registered before we stored
-    ``last_nick``.  Therefore message penalties must do a direct player scan and
-    compare all stable identity fields instead of relying only on ``name_index``.
-    """
-    jid_needle = str(sender_jid or "").strip().lower()
-    nick_needle = str(actor_nick or "").strip().lower()
-    if not jid_needle and not nick_needle:
-        return None, None
-
-    players = room.get("players", {})
-    if not isinstance(players, dict):
-        return None, None
-
-    for jid, player in players.items():
-        if not isinstance(player, dict):
-            continue
-        if jid_needle and (
-            _identity_values_match(jid, jid_needle)
-            or _identity_values_match(player.get("jid"), jid_needle)
-        ):
-            return str(jid), player
-
-        if nick_needle:
-            seen_nicks = [
-                player.get("name"),
-                player.get("character"),
-                player.get("last_nick"),
-                player.get("nick"),
-                player.get("current_nick"),
-            ]
-            extra = player.get("nicks")
-            if isinstance(extra, (list, tuple, set)):
-                seen_nicks.extend(extra)
-            if any(_identity_values_match(value, nick_needle) for value in seen_nicks):
-                return str(jid), player
-    return None, None
-
-
-async def _message_penalty_target_jid(bot, msg, room_jid: str, actor_nick: str) -> str:
-    sender_jid, _, _ = await _core.get_real_jid(bot, msg)
-    sender_jid = _real_bare_jid(sender_jid, room_jid)
-
-    if not sender_jid:
-        lookup = getattr(bot, "_lookup_muc_occupant_jid", None)
-        if callable(lookup):
-            try:
-                sender_jid = _real_bare_jid(lookup(room_jid, actor_nick), room_jid)
-            except Exception:
-                sender_jid = ""
-
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    jid, player = _find_player_by_message_identity(
-        room,
-        sender_jid=sender_jid,
-        actor_nick=actor_nick,
-    )
-    if player and jid:
-        return str(jid)
-
-    return ""
 
 
 async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Register from the game room or a MUC private message.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Register from the game room or a MUC private message.")
         return
-    if not await _core._is_enabled_for_room(bot, IDLERPG_ENABLED_KEY, PLUGIN_NAME, room_jid):
-        _reply(bot, msg, "ℹ️ IdleRPG is not enabled in this room.")
+    if not await _core._is_enabled_for_room(bot, _dep_constants.IDLERPG_ENABLED_KEY, _dep_constants.PLUGIN_NAME, room_jid):
+        _dep_formatting._reply(bot, msg, "ℹ️ IdleRPG is not enabled in this room.")
         return
     if len(args) < 3:
-        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg register <character> <class>")
+        _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg register <character> <class>")
         return
-    name = _safe_name(args[1])
-    char_class = _safe_class(" ".join(args[2:]))
+    name = _dep_formatting._safe_name(args[1])
+    char_class = _dep_formatting._safe_class(" ".join(args[2:]))
     if not name:
-        _reply(bot, msg, "❌ Character names may only contain letters, numbers, dot, underscore and dash.")
+        _dep_formatting._reply(bot, msg, "❌ Character names may only contain letters, numbers, dot, underscore and dash.")
         return
     if not char_class:
-        _reply(bot, msg, "❌ Character class may not be empty.")
+        _dep_formatting._reply(bot, msg, "❌ Character class may not be empty.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     players = room.setdefault("players", {})
-    index = _rebuild_name_index(room)
+    index = _dep_state._rebuild_name_index(room)
     if sender_jid in players:
-        _reply(bot, msg, "ℹ️ You already have an IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "ℹ️ You already have an IdleRPG character in this room.")
         return
     if name.lower() in index:
-        _reply(bot, msg, f"❌ Character name {name} is already taken.")
+        _dep_formatting._reply(bot, msg, f"❌ Character name {name} is already taken.")
         return
-    now = _now()
-    player = _normalize_player(sender_jid, {
+    now = _dep_formatting._now()
+    player = _dep_state._normalize_player(sender_jid, {
         "jid": sender_jid,
         "name": name,
         "class": char_class,
         "level": 0,
-        "next": _ttl_for_level(0),
+        "next": _dep_leveling._ttl_for_level(0),
         "idled": 0,
         "created_at": now,
         "last_login": now,
         "last_seen": now,
         "alignment": "n",
-        "items": {item: 0 for item in ITEMS},
+        "items": {item: 0 for item in _dep_constants.ITEMS},
         "unique_items": {},
         "penalties": {},
         "achievements": ["founder"],
         "title": "",
         "last_nick": _message_actor_nick(msg),
-        "x": random.randint(0, MAP_X),
-        "y": random.randint(0, MAP_Y),
+        "x": random.randint(0, _dep_config.MAP_X),
+        "y": random.randint(0, _dep_config.MAP_Y),
         "logged_out": False,
     })
     players[sender_jid] = player
-    _rebuild_name_index(room)
-    _record_event(room, "register", f"Welcome {name}, the {char_class}!", players=[name])
-    await _set_data(bot, data)
-    await _ensure_game_task(bot, room_jid)
+    _dep_state._rebuild_name_index(room)
+    _dep_export._record_event(room, "register", f"Welcome {name}, the {char_class}!", players=[name])
+    await _dep_state._set_data(bot, data)
+    await _dep_tasks._ensure_game_task(bot, room_jid)
     await audit_event(bot, "idlerpg_register", actor=sender_jid, target=room_jid, details={"name": name})
-    _reply(
+    _dep_formatting._reply(
         bot,
         msg,
-        f"🎲 Welcome {name}, the {char_class}! Next level in {_duration(player['next'])}. "
+        f"🎲 Welcome {name}, the {char_class}! Next level in {_dep_formatting._duration(player['next'])}. "
         "The point of the game is to idle: normal room messages add time to your timer.",
     )
 
 
 async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Login from the game room or a MUC private message.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Login from the game room or a MUC private message.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _jid, player = _find_player(room, sender_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _jid, player = _dep_state._find_player(room, sender_jid)
     if not player:
-        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        _dep_formatting._reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
-    player = _normalize_player(sender_jid, player)
+    player = _dep_state._normalize_player(sender_jid, player)
     _remember_player_nick(player, msg)
     pending = player.get("pending_logout_penalty") if isinstance(player.get("pending_logout_penalty"), dict) else {}
-    if not pending and _is_player_online(room_jid, str(_jid or sender_jid), player):
-        await _set_data(bot, data)
-        _reply(
+    if not pending and _dep_state._is_player_online(room_jid, str(_jid or sender_jid), player):
+        await _dep_state._set_data(bot, data)
+        _dep_formatting._reply(
             bot,
             msg,
-            f"ℹ️ {_display_player(player)} is already online for IdleRPG. "
-            + _next_level_line(player),
+            f"ℹ️ {_dep_formatting._display_player(player)} is already online for IdleRPG. "
+            + _dep_formatting._next_level_line(player),
         )
         return
     reply_suffix = ""
     if pending:
         due_at = int(pending.get("due_at", 0) or 0)
-        if due_at > _now():
+        if due_at > _dep_formatting._now():
             player["pending_logout_penalty"] = {}
             reply_suffix = " Logout grace used; no logout penalty was applied."
         else:
-            changed = _apply_logout_penalty(player, room)
+            changed = _dep_leveling._apply_logout_penalty(player, room)
             quest_messages: list[str] = []
             if changed:
-                _maybe_fail_time_quest_for_penalty(
+                _dep_quests._maybe_fail_time_quest_for_penalty(
                     room,
                     room_jid,
                     sender_jid,
-                    _now(),
+                    _dep_formatting._now(),
                     quest_messages,
                     reason="logout",
                 )
                 for text in quest_messages:
-                    _record_event(room, "quest", text)
-            reply_suffix = f" Logout penalty applied: {_duration_clock(changed)}. " + _next_level_line(player)
+                    _dep_export._record_event(room, "quest", text)
+            reply_suffix = f" Logout penalty applied: {_dep_formatting._duration_clock(changed)}. " + _dep_formatting._next_level_line(player)
             for text in quest_messages:
-                _system_reply(bot, room_jid, text)
+                _dep_formatting._system_reply(bot, room_jid, text)
     player["logged_out"] = False
-    player["last_login"] = _now()
-    player["last_seen"] = _now()
+    player["last_login"] = _dep_formatting._now()
+    player["last_seen"] = _dep_formatting._now()
     login_text = (
-        f"👤 {_display_character(player)}, the level {player.get('level', 0)} {player.get('class', 'idler')}, "
-        f"is now online from nickname {getattr(msg['from'], 'resource', None) or _display_player(player)}. "
-        f"Next level in {_duration_clock(player.get('next', 0))}."
+        f"👤 {_dep_formatting._display_character(player)}, the level {player.get('level', 0)} {player.get('class', 'idler')}, "
+        f"is now online from nickname {getattr(msg['from'], 'resource', None) or _dep_formatting._display_player(player)}. "
+        f"Next level in {_dep_formatting._duration_clock(player.get('next', 0))}."
     )
-    _record_event(room, "login", login_text, players=[_display_player(player)])
-    await _set_data(bot, data)
-    await _ensure_game_task(bot, room_jid)
-    if ANNOUNCE_LOGIN:
-        _system_reply(bot, room_jid, login_text)
-    _reply(bot, msg, f"✅ {_display_player(player)} is now online for IdleRPG." + reply_suffix)
+    _dep_export._record_event(room, "login", login_text, players=[_dep_formatting._display_player(player)])
+    await _dep_state._set_data(bot, data)
+    await _dep_tasks._ensure_game_task(bot, room_jid)
+    if _dep_config.ANNOUNCE_LOGIN:
+        _dep_formatting._system_reply(bot, room_jid, login_text)
+    _dep_formatting._reply(bot, msg, f"✅ {_dep_formatting._display_player(player)} is now online for IdleRPG." + reply_suffix)
 
 
 async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Logout from the game room or a MUC private message.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Logout from the game room or a MUC private message.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _jid, player = _find_player(room, sender_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _jid, player = _dep_state._find_player(room, sender_jid)
     if not player:
-        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        _dep_formatting._reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
-    player = _normalize_player(sender_jid, player)
+    player = _dep_state._normalize_player(sender_jid, player)
     player["logged_out"] = True
-    player["logged_out_at"] = _now()
-    name = _display_player(player)
-    if LOGOUT_GRACE_SECONDS > 0:
+    player["logged_out_at"] = _dep_formatting._now()
+    name = _dep_formatting._display_player(player)
+    if _dep_config.LOGOUT_GRACE_SECONDS > 0:
         player["pending_logout_penalty"] = {
-            "created_at": _now(),
-            "due_at": _now() + LOGOUT_GRACE_SECONDS,
+            "created_at": _dep_formatting._now(),
+            "due_at": _dep_formatting._now() + _dep_config.LOGOUT_GRACE_SECONDS,
         }
-        _record_event(
+        _dep_export._record_event(
             room,
             "logout",
-            f"{name} logged out. Logout penalty is pending for {_duration_clock(LOGOUT_GRACE_SECONDS)}.",
+            f"{name} logged out. Logout penalty is pending for {_dep_formatting._duration_clock(_dep_config.LOGOUT_GRACE_SECONDS)}.",
             players=[name],
         )
-        await _set_data(bot, data)
-        _reply(
+        await _dep_state._set_data(bot, data)
+        _dep_formatting._reply(
             bot,
             msg,
-            f"👋 {name} logged out. Reconnect within {_duration_clock(LOGOUT_GRACE_SECONDS)} "
+            f"👋 {name} logged out. Reconnect within {_dep_formatting._duration_clock(_dep_config.LOGOUT_GRACE_SECONDS)} "
             "to avoid the logout penalty.",
         )
         return
-    changed = _apply_logout_penalty(player, room)
-    _record_event(room, "logout", f"{name} logged out. {_duration_clock(changed)} was added to their clock.", players=[name])
+    changed = _dep_leveling._apply_logout_penalty(player, room)
+    _dep_export._record_event(room, "logout", f"{name} logged out. {_dep_formatting._duration_clock(changed)} was added to their clock.", players=[name])
     quest_messages: list[str] = []
     if changed:
-        _maybe_fail_time_quest_for_penalty(
+        _dep_quests._maybe_fail_time_quest_for_penalty(
             room,
             room_jid,
             sender_jid,
-            _now(),
+            _dep_formatting._now(),
             quest_messages,
             reason="logout",
         )
         for text in quest_messages:
-            _record_event(room, "quest", text)
-    await _set_data(bot, data)
-    _reply(
+            _dep_export._record_event(room, "quest", text)
+    await _dep_state._set_data(bot, data)
+    _dep_formatting._reply(
         bot,
         msg,
-        f"👋 {name} logged out. {_duration_clock(changed)} is added to "
-        f"{_possessive(name)} clock. "
-        + _next_level_line(player),
+        f"👋 {name} logged out. {_dep_formatting._duration_clock(changed)} is added to "
+        f"{_dep_formatting._possessive(name)} clock. "
+        + _dep_formatting._next_level_line(player),
     )
     for text in quest_messages:
-        _system_reply(bot, room_jid, text)
+        _dep_formatting._system_reply(bot, room_jid, text)
 
 
 async def _handle_status(bot, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Status is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Status is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     target = args[1] if len(args) > 1 else None
     if not target:
         sender_jid, _, _ = await _core.get_real_jid(bot, msg)
         target = sender_jid
-    jid, player = _find_player(room, target)
+    jid, player = _dep_state._find_player(room, target)
     if not player:
-        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return
-    _reply(bot, msg, _format_player_status(room_jid, str(jid), _normalize_player(str(jid), player)))
+    _dep_formatting._reply(bot, msg, _dep_state._format_player_status(room_jid, str(jid), _dep_state._normalize_player(str(jid), player)))
 
 
 async def _handle_top(bot, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Top is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Top is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     players = [
-        (str(jid), _normalize_player(str(jid), player))
+        (str(jid), _dep_state._normalize_player(str(jid), player))
         for jid, player in room.get("players", {}).items()
         if isinstance(player, dict)
     ]
     players.sort(key=lambda item: (-int(item[1].get("level", 0)), int(item[1].get("next", 0)), item[1].get("name", "")))
     lines = []
     for idx, (jid, p) in enumerate(players, start=1):
-        presence = _player_presence_label(room_jid, jid, p)
+        presence = _dep_formatting._player_presence_label(room_jid, jid, p)
         lines.append(
-            f"{idx}. {presence} · {p['name']}, level {p['level']} {p['class']} — TTL {_duration(p['next'])}"
+            f"{idx}. {presence} · {p['name']}, level {p['level']} {p['class']} — TTL {_dep_formatting._duration(p['next'])}"
         )
     page_request = parse_page_args(args[1:])
     out = format_page(
         "🏆 IdleRPG Top Players",
         lines,
         page_request=page_request,
-        page_size=PAGE_SIZE,
-        command_hint=f"{_command_prefix(bot)}idlerpg top",
+        page_size=_dep_config.PAGE_SIZE,
+        command_hint=f"{_dep_formatting._command_prefix(bot)}idlerpg top",
     )
-    _reply(bot, msg, "\n".join(out))
+    _dep_formatting._reply(bot, msg, "\n".join(out))
 
 
 async def _handle_players(bot, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Players is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Players is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     entries = []
     for jid, player in room.get("players", {}).items():
         if not isinstance(player, dict):
             continue
-        player = _normalize_player(str(jid), player)
-        mark = "🟢" if _is_player_online(room_jid, str(jid), player) else "⚫"
+        player = _dep_state._normalize_player(str(jid), player)
+        mark = "🟢" if _dep_state._is_player_online(room_jid, str(jid), player) else "⚫"
         entries.append(f"{mark} {player['name']} — level {player['level']} {player['class']}")
     entries.sort(key=str.lower)
     page_request = parse_page_args(args[1:])
@@ -427,28 +285,28 @@ async def _handle_players(bot, args: list[str], msg, is_room: bool) -> None:
         "🎲 IdleRPG Players",
         entries,
         page_request=page_request,
-        page_size=PAGE_SIZE,
-        command_hint=f"{_command_prefix(bot)}idlerpg players",
+        page_size=_dep_config.PAGE_SIZE,
+        command_hint=f"{_dep_formatting._command_prefix(bot)}idlerpg players",
     )
-    _reply(bot, msg, "\n".join(out))
+    _dep_formatting._reply(bot, msg, "\n".join(out))
 
 
 async def _handle_items(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Items are room-scoped. Use this from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Items are room-scoped. Use this from a game room or MUC PM.")
         return
     target = args[1] if len(args) > 1 else sender_jid
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    jid, player = _find_player(room, target)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    jid, player = _dep_state._find_player(room, target)
     if not player:
-        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return
-    player = _normalize_player(str(jid), player)
+    player = _dep_state._normalize_player(str(jid), player)
     unique_items = player.get("unique_items", {}) if isinstance(player.get("unique_items"), dict) else {}
     lines = []
-    bonus_map = {item["name"]: item for item in _unique_bonuses(player)}
+    bonus_map = {item["name"]: item for item in _dep_items._unique_bonuses(player)}
     for name, level in sorted(player["items"].items()):
         unique = unique_items.get(name)
         bonus = bonus_map.get(unique or "")
@@ -458,7 +316,7 @@ async def _handle_items(bot, sender_jid: str, args: list[str], msg, is_room: boo
             if bonus:
                 suffix += f" ({bonus['bonus_percent']}% {str(bonus['bonus']).replace('_', ' ')})"
         lines.append(f"{name}: {level}{suffix}")
-    _reply(bot, msg, f"🎒 Items for {player['name']}\n" + "\n".join(lines))
+    _dep_formatting._reply(bot, msg, f"🎒 Items for {player['name']}\n" + "\n".join(lines))
 
 
 def _clean_duel_target(value: str) -> str:
@@ -469,7 +327,7 @@ def _clean_duel_target(value: str) -> str:
 
 
 def _manual_duel_cooldown_remaining(player: dict[str, Any], now: int) -> int:
-    cooldown = max(0, int(MANUAL_DUEL_COOLDOWN_SECONDS or 0))
+    cooldown = max(0, int(_dep_config.MANUAL_DUEL_COOLDOWN_SECONDS or 0))
     if cooldown <= 0:
         return 0
     try:
@@ -480,133 +338,133 @@ def _manual_duel_cooldown_remaining(player: dict[str, Any], now: int) -> int:
 
 
 async def _handle_duel(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Duels are room-scoped. Use them from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Duels are room-scoped. Use them from a game room or MUC PM.")
         return
     if len(args) < 2:
-        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg duel <character>")
+        _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg duel <character>")
         return
 
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    attacker_jid, attacker = _find_player(room, sender_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    attacker_jid, attacker = _dep_state._find_player(room, sender_jid)
     if not attacker or not attacker_jid:
-        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        _dep_formatting._reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
     target_name = _clean_duel_target(args[1])
-    defender_jid, defender = _find_player(room, target_name)
+    defender_jid, defender = _dep_state._find_player(room, target_name)
     if not defender or not defender_jid:
-        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return
     if str(defender_jid) == str(attacker_jid):
-        _reply(bot, msg, "❌ You cannot duel yourself.")
+        _dep_formatting._reply(bot, msg, "❌ You cannot duel yourself.")
         return
 
-    attacker = _normalize_player(str(attacker_jid), attacker)
-    defender = _normalize_player(str(defender_jid), defender)
-    if not _is_player_online(room_jid, str(attacker_jid), attacker):
-        _reply(bot, msg, "ℹ️ You need to be online in the game room to duel.")
+    attacker = _dep_state._normalize_player(str(attacker_jid), attacker)
+    defender = _dep_state._normalize_player(str(defender_jid), defender)
+    if not _dep_state._is_player_online(room_jid, str(attacker_jid), attacker):
+        _dep_formatting._reply(bot, msg, "ℹ️ You need to be online in the game room to duel.")
         return
-    if not _is_player_online(room_jid, str(defender_jid), defender):
-        _reply(bot, msg, f"ℹ️ {_display_player(defender)} is not online in the game room.")
+    if not _dep_state._is_player_online(room_jid, str(defender_jid), defender):
+        _dep_formatting._reply(bot, msg, f"ℹ️ {_dep_formatting._display_player(defender)} is not online in the game room.")
         return
 
-    max_distance = max(0, int(MANUAL_DUEL_MAX_DISTANCE or 0))
-    distance = _duel_distance(attacker, defender)
+    max_distance = max(0, int(_dep_config.MANUAL_DUEL_MAX_DISTANCE or 0))
+    distance = _dep_events._duel_distance(attacker, defender)
     if distance > max_distance:
-        _reply(
+        _dep_formatting._reply(
             bot,
             msg,
-            f"🗺️ {_display_player(defender)} is too far away for a duel "
-            f"(distance {distance:.1f}, max {max_distance}). Use `{_command_prefix(bot)}idlerpg map` to find nearby players.",
+            f"🗺️ {_dep_formatting._display_player(defender)} is too far away for a duel "
+            f"(distance {distance:.1f}, max {max_distance}). Use `{_dep_formatting._command_prefix(bot)}idlerpg map` to find nearby players.",
         )
         return
 
-    now = _now()
+    now = _dep_formatting._now()
     attacker_wait = _manual_duel_cooldown_remaining(attacker, now)
     if attacker_wait:
-        _reply(bot, msg, f"⏳ You can duel again in {_duration_clock(attacker_wait)}.")
+        _dep_formatting._reply(bot, msg, f"⏳ You can duel again in {_dep_formatting._duration_clock(attacker_wait)}.")
         return
     defender_wait = _manual_duel_cooldown_remaining(defender, now)
     if defender_wait:
-        _reply(bot, msg, f"⏳ {_display_player(defender)} can be dueled again in {_duration_clock(defender_wait)}.")
+        _dep_formatting._reply(bot, msg, f"⏳ {_dep_formatting._display_player(defender)} can be dueled again in {_dep_formatting._duration_clock(defender_wait)}.")
         return
 
     messages: list[str] = []
     achievement_snapshots = {
-        str(attacker_jid): _achievement_keys(attacker),
-        str(defender_jid): _achievement_keys(defender),
+        str(attacker_jid): _dep_leveling._achievement_keys(attacker),
+        str(defender_jid): _dep_leveling._achievement_keys(defender),
     }
-    _run_manual_duel(attacker, defender, messages, room, distance=distance)
+    _dep_events._run_manual_duel(attacker, defender, messages, room, distance=distance)
     attacker["last_manual_duel_at"] = now
     defender["last_manual_duel_at"] = now
-    _inc_stat(attacker, "manual_duels_started", 1, room)
-    _inc_stat(defender, "manual_duels_received", 1, room)
-    messages.extend(_achievement_announcements(attacker, achievement_snapshots.get(str(attacker_jid), set())))
-    messages.extend(_achievement_announcements(defender, achievement_snapshots.get(str(defender_jid), set())))
+    _dep_leveling._inc_stat(attacker, "manual_duels_started", 1, room)
+    _dep_leveling._inc_stat(defender, "manual_duels_received", 1, room)
+    messages.extend(_dep_leveling._achievement_announcements(attacker, achievement_snapshots.get(str(attacker_jid), set())))
+    messages.extend(_dep_leveling._achievement_announcements(defender, achievement_snapshots.get(str(defender_jid), set())))
     if messages:
-        _record_event(
+        _dep_export._record_event(
             room,
             "duel",
             messages[0],
-            players=[_display_player(attacker), _display_player(defender)],
+            players=[_dep_formatting._display_player(attacker), _dep_formatting._display_player(defender)],
             data={"distance": round(distance, 2)},
         )
-    await _set_data(bot, data)
+    await _dep_state._set_data(bot, data)
     await audit_event(
         bot,
         "idlerpg_duel",
         actor=sender_jid,
         target=room_jid,
-        details={"attacker": _display_player(attacker), "defender": _display_player(defender)},
+        details={"attacker": _dep_formatting._display_player(attacker), "defender": _dep_formatting._display_player(defender)},
     )
-    _reply(bot, msg, "\n".join(messages))
+    _dep_formatting._reply(bot, msg, "\n".join(messages))
 
 
 async def _handle_align(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Alignment is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Alignment is room-scoped. Use it from a game room or MUC PM.")
         return
     if len(args) < 2 or args[1].lower() not in {"good", "neutral", "evil"}:
-        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg align <good|neutral|evil>")
+        _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg align <good|neutral|evil>")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _jid, player = _find_player(room, sender_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _jid, player = _dep_state._find_player(room, sender_jid)
     if not player:
-        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        _dep_formatting._reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
     player["alignment"] = args[1].lower()[:1]
-    _record_event(room, "alignment", f"{player['name']} changed alignment to {args[1].lower()}.", players=[player['name']])
-    await _set_data(bot, data)
-    _reply(bot, msg, f"⚖️ {player['name']} is now {args[1].lower()}.")
+    _dep_export._record_event(room, "alignment", f"{player['name']} changed alignment to {args[1].lower()}.", players=[player['name']])
+    await _dep_state._set_data(bot, data)
+    _dep_formatting._reply(bot, msg, f"⚖️ {player['name']} is now {args[1].lower()}.")
 
 
 async def _handle_quest(bot, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Quest is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Quest is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     quest = room.get("quest", {})
     if not isinstance(quest, dict) or not quest.get("active"):
         next_at = int((quest or {}).get("next_at", 0) or 0) if isinstance(quest, dict) else 0
-        suffix = f" Next quest check in {_duration(next_at - _now())}." if next_at else ""
-        _reply(bot, msg, "🧭 There is no active IdleRPG quest." + suffix)
+        suffix = f" Next quest check in {_dep_formatting._duration(next_at - _dep_formatting._now())}." if next_at else ""
+        _dep_formatting._reply(bot, msg, "🧭 There is no active IdleRPG quest." + suffix)
         return
     players = room.get("players", {})
     names = [players[jid].get("name", jid) for jid in quest.get("questers", []) if jid in players]
-    quest_kind = _quest_type(quest)
-    remaining = _duration(int(quest.get("complete_at", 0) or 0) - _now())
+    quest_kind = _dep_quests._quest_type(quest)
+    remaining = _dep_formatting._duration(int(quest.get("complete_at", 0) or 0) - _dep_formatting._now())
     if quest_kind == "time":
         detail = "No quester may receive a penalty before the timer ends."
     else:
-        target = _active_quest_target(quest)
+        target = _dep_map._active_quest_target(quest)
         detail = f"Current target: [{target[0]},{target[1]}]." if target else "No active route target."
-    _reply(
+    _dep_formatting._reply(
         bot,
         msg,
         f"🧭 {', '.join(names)} are on a quest ({quest_kind}-based) to {quest.get('text', 'adventure')}. "
@@ -615,112 +473,112 @@ async def _handle_quest(bot, msg, is_room: bool) -> None:
 
 
 async def _handle_profile(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Profile is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Profile is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     target = args[1] if len(args) > 1 else sender_jid
-    jid, player = _find_player(room, target)
+    jid, player = _dep_state._find_player(room, target)
     if not player:
-        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return
-    player = _normalize_player(str(jid), player)
+    player = _dep_state._normalize_player(str(jid), player)
     achievements = player.get("achievements", [])
-    title = _display_title(player) or "none"
+    title = _dep_formatting._display_title(player) or "none"
     lines = [
-        f"🧙 Profile: {_display_player(player)}",
+        f"🧙 Profile: {_dep_formatting._display_player(player)}",
         f"Class: {player.get('class', 'idler')}",
         f"Title: {title}",
         f"Level: {player.get('level', 0)}",
-        f"TTL: {_duration_clock(player.get('next', 0))}",
-        f"Playing since: {_playing_since(player)}",
-        f"Playing for: {_played_for(player)}",
-        f"Idled online: {_duration_clock(player.get('idled', 0))}",
-        f"Alignment: {_alignment_name(player.get('alignment'))}",
-        f"Map: [{player.get('x', 0)},{player.get('y', 0)}] near {_player_region(player)}",
+        f"TTL: {_dep_formatting._duration_clock(player.get('next', 0))}",
+        f"Playing since: {_dep_formatting._playing_since(player)}",
+        f"Playing for: {_dep_formatting._played_for(player)}",
+        f"Idled online: {_dep_formatting._duration_clock(player.get('idled', 0))}",
+        f"Alignment: {_dep_formatting._alignment_name(player.get('alignment'))}",
+        f"Map: [{player.get('x', 0)},{player.get('y', 0)}] near {_dep_map._player_region(player)}",
         f"Achievements: {len(achievements)}",
         f"Unique items: {len(player.get('unique_items', {}) if isinstance(player.get('unique_items'), dict) else {})}",
     ]
-    url = _profile_url(room_jid, player)
+    url = _dep_export._profile_url(room_jid, player)
     if url:
         lines.append(f"Profile JSON: {url}")
-    _reply(bot, msg, "\n".join(lines))
+    _dep_formatting._reply(bot, msg, "\n".join(lines))
 
 
 async def _handle_achievements(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Achievements are room-scoped. Use this from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Achievements are room-scoped. Use this from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     if len(args) > 1 and args[1].lower() in {"list", "all", "catalog"}:
         target = args[2] if len(args) > 2 else sender_jid
-        _jid, player = _find_player(room, target)
+        _jid, player = _dep_state._find_player(room, target)
         unlocked = set(player.get("achievements", []) if isinstance(player, dict) else [])
         lines = [
             f"{'✅' if key in unlocked else '▫️'} {key}: {title} — {description}"
             for key, title, description in (
-                (item['key'], item['title'], item['description']) for item in _achievement_catalog()
+                (item['key'], item['title'], item['description']) for item in _dep_leveling._achievement_catalog()
             )
         ]
-        _reply(bot, msg, "🏅 IdleRPG achievement catalog\n" + "\n".join(lines))
+        _dep_formatting._reply(bot, msg, "🏅 IdleRPG achievement catalog\n" + "\n".join(lines))
         return
     target = args[1] if len(args) > 1 else sender_jid
-    jid, player = _find_player(room, target)
+    jid, player = _dep_state._find_player(room, target)
     if not player:
-        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return
-    player = _normalize_player(str(jid), player)
+    player = _dep_state._normalize_player(str(jid), player)
     lines = []
     for key in player.get("achievements", []):
-        lines.append(f"• {_achievement_title(key)} — {_achievement_description(key)}")
+        lines.append(f"• {_dep_leveling._achievement_title(key)} — {_dep_leveling._achievement_description(key)}")
     if not lines:
-        lines = ["No achievements yet. Use `" + _command_prefix(bot) + "idlerpg achievements list` to show all available achievements."]
-    _reply(bot, msg, f"🏅 Achievements for {_display_player(player)}\n" + "\n".join(lines))
+        lines = ["No achievements yet. Use `" + _dep_formatting._command_prefix(bot) + "idlerpg achievements list` to show all available achievements."]
+    _dep_formatting._reply(bot, msg, f"🏅 Achievements for {_dep_formatting._display_player(player)}\n" + "\n".join(lines))
 
 
 async def _handle_title(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Titles are room-scoped. Use this from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Titles are room-scoped. Use this from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _jid, player = _find_player(room, sender_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _jid, player = _dep_state._find_player(room, sender_jid)
     if not player:
-        _reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
+        _dep_formatting._reply(bot, msg, "❌ You do not have an IdleRPG character here yet.")
         return
-    player = _normalize_player(sender_jid, player)
+    player = _dep_state._normalize_player(sender_jid, player)
     achievements = set(player.get("achievements", []))
     if len(args) < 2 or args[1].lower() in {"list", "show"}:
-        lines = [f"{key}: {_achievement_title(key)}" for key in sorted(achievements)] or ["No unlocked titles yet."]
-        _reply(bot, msg, "🎖️ Available titles\n" + "\n".join(lines))
+        lines = [f"{key}: {_dep_leveling._achievement_title(key)}" for key in sorted(achievements)] or ["No unlocked titles yet."]
+        _dep_formatting._reply(bot, msg, "🎖️ Available titles\n" + "\n".join(lines))
         return
     requested = args[1].lower()
     if requested in {"none", "clear", "off"}:
         player["title"] = ""
-        await _set_data(bot, data)
-        _reply(bot, msg, f"✅ {_display_player(player)} cleared their title.")
+        await _dep_state._set_data(bot, data)
+        _dep_formatting._reply(bot, msg, f"✅ {_dep_formatting._display_player(player)} cleared their title.")
         return
     if requested not in achievements:
-        _reply(bot, msg, f"❌ You have not unlocked that achievement title. Use `{_command_prefix(bot)}idlerpg title list`.")
+        _dep_formatting._reply(bot, msg, f"❌ You have not unlocked that achievement title. Use `{_dep_formatting._command_prefix(bot)}idlerpg title list`.")
         return
     player["title"] = requested
-    await _set_data(bot, data)
-    _reply(bot, msg, f"✅ {_display_player(player)} now uses title: {_achievement_title(requested)}.")
+    await _dep_state._set_data(bot, data)
+    _dep_formatting._reply(bot, msg, f"✅ {_dep_formatting._display_player(player)} now uses title: {_dep_leveling._achievement_title(requested)}.")
 
 
 async def _handle_events(bot, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Events are room-scoped. Use this from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Events are room-scoped. Use this from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    events = list(reversed(_room_events(room)))
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    events = list(reversed(_dep_export._room_events(room)))
     lines = []
     for event in events:
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(int(event.get("ts", 0) or 0)))
@@ -732,25 +590,25 @@ async def _handle_events(bot, args: list[str], msg, is_room: bool) -> None:
         "📰 IdleRPG Recent Events",
         lines,
         page_request=page_request,
-        page_size=PAGE_SIZE,
-        command_hint=f"{_command_prefix(bot)}idlerpg events",
+        page_size=_dep_config.PAGE_SIZE,
+        command_hint=f"{_dep_formatting._command_prefix(bot)}idlerpg events",
     )
-    _reply(bot, msg, "\n".join(out))
+    _dep_formatting._reply(bot, msg, "\n".join(out))
 
 
 async def _handle_stats(bot, sender_jid: str, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ IdleRPG stats are room-scoped. Use this from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ IdleRPG stats are room-scoped. Use this from a game room or MUC PM.")
         return
-    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room owners/admins can inspect IdleRPG stats.")
+    if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+        _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can inspect IdleRPG stats.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    ranked = _ranked_players(room)
-    events = _room_events(room)
-    day_cutoff = _now() - 86400
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    ranked = _dep_state._ranked_players(room)
+    events = _dep_export._room_events(room)
+    day_cutoff = _dep_formatting._now() - 86400
     recent = [event for event in events if int(event.get("ts", 0) or 0) >= day_cutoff]
     kinds: dict[str, int] = {}
     for event in recent:
@@ -768,85 +626,85 @@ async def _handle_stats(bot, sender_jid: str, msg, is_room: bool) -> None:
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
     lines = [
         f"📊 IdleRPG stats for {room_jid}",
-        f"Players: {len(ranked)} ({sum(1 for jid, player in ranked if _is_player_online(room_jid, jid, player))} online)",
+        f"Players: {len(ranked)} ({sum(1 for jid, player in ranked if _dep_state._is_player_online(room_jid, jid, player))} online)",
         f"Average level: {avg_level:.1f}",
-        f"Average TTL: {_duration_clock(avg_ttl)}",
-        f"Events total/exported: {len(events)}/{min(len(events), EXPORT_EVENT_LIMIT)}",
+        f"Average TTL: {_dep_formatting._duration_clock(avg_ttl)}",
+        f"Events total/exported: {len(events)}/{min(len(events), _dep_config.EXPORT_EVENT_LIMIT)}",
         f"Events last 24h: {len(recent)} ({kind_line})",
         f"Unique items held: {unique_count}",
         f"Current season: {season.get('id', 'unknown')}",
-        f"Event retention: {EVENT_RETENTION_DAYS or 'limit-only'} days, max {EVENT_LOG_LIMIT}",
-        f"Logout grace: {_duration_clock(LOGOUT_GRACE_SECONDS)}",
-        f"Login announcements: {'on' if ANNOUNCE_LOGIN else 'off'}",
-        f"Top announcements: {_duration_clock(ANNOUNCE_TOP_INTERVAL) if ANNOUNCE_TOP_INTERVAL > 0 else 'off'}",
-        f"Topic updates: {'on' if UPDATE_ROOM_TOPIC else 'off'} ({TOPIC_CUSTOM_TEXT})",
+        f"Event retention: {_dep_config.EVENT_RETENTION_DAYS or 'limit-only'} days, max {_dep_config.EVENT_LOG_LIMIT}",
+        f"Logout grace: {_dep_formatting._duration_clock(_dep_config.LOGOUT_GRACE_SECONDS)}",
+        f"Login announcements: {'on' if _dep_config.ANNOUNCE_LOGIN else 'off'}",
+        f"Top announcements: {_dep_formatting._duration_clock(_dep_config.ANNOUNCE_TOP_INTERVAL) if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 'off'}",
+        f"Topic updates: {'on' if _dep_config.UPDATE_ROOM_TOPIC else 'off'} ({_dep_config.TOPIC_CUSTOM_TEXT})",
     ]
-    _reply(bot, msg, "\n".join(lines))
+    _dep_formatting._reply(bot, msg, "\n".join(lines))
 
 
 async def _handle_map(bot, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Map is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Map is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    players = _ranked_players(room)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    players = _dep_state._ranked_players(room)
     quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
-    lines = _render_ascii_map(room_jid, players, quest)
-    url = _public_url(_room_slug(room_jid), "map.json")
+    lines = _dep_map._render_ascii_map(room_jid, players, quest)
+    url = _dep_export._public_url(_dep_formatting._room_slug(room_jid), "map.json")
     if url:
         lines.append(f"Map JSON: {url}")
-    _reply(bot, msg, "\n".join(lines))
+    _dep_formatting._reply(bot, msg, "\n".join(lines))
 
 
 async def _handle_hof(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Hall of fame is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Hall of fame is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     subargs = [str(arg).lower() for arg in args[1:]]
     if subargs:
         if subargs == ["clear", "confirm"]:
-            if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-                _reply(bot, msg, "⛔ Only room owners/admins can clear the IdleRPG Hall of Fame.")
+            if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+                _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can clear the IdleRPG Hall of Fame.")
                 return
             removed = len(room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else [])
             room["hall_of_fame"] = []
-            await _set_data(bot, data)
+            await _dep_state._set_data(bot, data)
             await audit_event(bot, "idlerpg_hof_clear", actor=sender_jid, target=room_jid, details={"removed": removed})
-            _reply(bot, msg, f"✅ IdleRPG Hall of Fame cleared for {room_jid}. Removed {removed} entries.")
+            _dep_formatting._reply(bot, msg, f"✅ IdleRPG Hall of Fame cleared for {room_jid}. Removed {removed} entries.")
             return
-        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg hof [clear confirm]")
+        _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg hof [clear confirm]")
         return
     hof = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
     lines = []
-    for entry in reversed(hof[-SEASON_HOF_SIZE:]):
+    for entry in reversed(hof[-_dep_config.SEASON_HOF_SIZE:]):
         champion = entry.get("champion") or "no champion"
         lines.append(f"• Season {entry.get('id', '?')}: {champion}")
     if not lines:
         lines = ["No completed seasons yet."]
-    _reply(bot, msg, "🏛️ IdleRPG Hall of Fame\n" + "\n".join(lines))
+    _dep_formatting._reply(bot, msg, "🏛️ IdleRPG Hall of Fame\n" + "\n".join(lines))
 
 
 async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Seasons are room-scoped. Use this from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Seasons are room-scoped. Use this from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     subcmd = args[1].lower() if len(args) > 1 else "status"
     if subcmd in {"end", "finish", "reset"}:
-        if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-            _reply(bot, msg, "⛔ Only room owners/admins can end IdleRPG seasons.")
+        if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+            _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can end IdleRPG seasons.")
             return
         reset_players = subcmd == "reset"
-        snapshot = _end_season(room_jid, room, reset_players=reset_players)
-        await _set_data(bot, data)
-        _reply(
+        snapshot = _dep_seasons._end_season(room_jid, room, reset_players=reset_players)
+        await _dep_state._set_data(bot, data)
+        _dep_formatting._reply(
             bot,
             msg,
             f"🏁 Season {snapshot.get('id')} ended. Champion: {snapshot.get('champion') or 'no champion'}. "
@@ -854,50 +712,50 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
         )
         return
     if subcmd in {"extend", "clear-end"}:
-        if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-            _reply(bot, msg, "⛔ Only room owners/admins can change IdleRPG season timing.")
+        if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+            _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can change IdleRPG season timing.")
             return
-        season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(_now())
+        season = room.get("season", {}) if isinstance(room.get("season"), dict) else _dep_seasons._blank_season(_dep_formatting._now())
         room["season"] = season
         if subcmd == "clear-end":
             season["ends_at"] = 0
-            await _set_data(bot, data)
+            await _dep_state._set_data(bot, data)
             await audit_event(bot, "idlerpg_season_clear_end", actor=sender_jid, target=room_jid, details={"season_id": season.get("id")})
-            _reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
+            _dep_formatting._reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
             return
         duration_arg = args[2].lower() if len(args) > 2 else ""
         if duration_arg in {"", "config", "default"}:
-            amount = _season_duration_seconds()
+            amount = _dep_seasons._season_duration_seconds()
             if amount <= 0:
                 season["ends_at"] = 0
-                await _set_data(bot, data)
+                await _dep_state._set_data(bot, data)
                 await audit_event(bot, "idlerpg_season_extend", actor=sender_jid, target=room_jid, details={"season_id": season.get("id"), "duration": 0})
-                _reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
+                _dep_formatting._reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
                 return
         elif duration_arg in {"0", "manual", "endless", "forever", "clear", "none"}:
             amount = 0
         else:
             amount = _core.parse_duration(duration_arg)
             if amount is None:
-                _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg season extend [duration|manual]")
+                _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg season extend [duration|manual]")
                 return
         if amount <= 0:
             season["ends_at"] = 0
             action = "manual/endless"
         else:
-            base = max(int(season.get("ends_at", 0) or 0), _now())
+            base = max(int(season.get("ends_at", 0) or 0), _dep_formatting._now())
             season["ends_at"] = base + int(amount)
-            action = f"extended by {_duration(amount)}"
-        await _set_data(bot, data)
+            action = f"extended by {_dep_formatting._duration(amount)}"
+        await _dep_state._set_data(bot, data)
         await audit_event(bot, "idlerpg_season_extend", actor=sender_jid, target=room_jid, details={"season_id": season.get("id"), "duration": int(amount)})
-        _reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} {action}. Ends in {_season_end_summary(season)}.")
+        _dep_formatting._reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} {action}. Ends in {_dep_seasons._season_end_summary(season)}.")
         return
     if subcmd in {"hof", "hall", "hall-of-fame"}:
         await _handle_hof(bot, sender_jid, ["hof", *args[2:]], msg, is_room)
         return
-    season = room.get("season", {}) if isinstance(room.get("season"), dict) else _blank_season(_now())
-    remaining = _season_end_summary(season)
-    _reply(
+    season = room.get("season", {}) if isinstance(room.get("season"), dict) else _dep_seasons._blank_season(_dep_formatting._now())
+    remaining = _dep_seasons._season_end_summary(season)
+    _dep_formatting._reply(
         bot,
         msg,
         f"🏁 Current season: {season.get('id', 'unknown')} — ends in {remaining}. "
@@ -906,132 +764,132 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
 
 
 async def _handle_announce_top(bot, sender_jid: str, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Top announcements are room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Top announcements are room-scoped. Use it from a game room or MUC PM.")
         return
-    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room owners/admins can announce IdleRPG top players.")
+    if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+        _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can announce IdleRPG top players.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _system_reply(bot, room_jid, "\n".join(_format_top_lines(room, limit=ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
-    room["next_top_announce_at"] = _now() + ANNOUNCE_TOP_INTERVAL if ANNOUNCE_TOP_INTERVAL > 0 else 0
-    await _set_data(bot, data)
-    _reply(bot, msg, "✅ IdleRPG top players announced.")
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _dep_formatting._system_reply(bot, room_jid, "\n".join(_dep_formatting._format_top_lines(room, limit=_dep_config.ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
+    room["next_top_announce_at"] = _dep_formatting._now() + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0
+    await _dep_state._set_data(bot, data)
+    _dep_formatting._reply(bot, msg, "✅ IdleRPG top players announced.")
 
 
 async def _handle_topic_update(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Topic updates are room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Topic updates are room-scoped. Use it from a game room or MUC PM.")
         return
-    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room owners/admins can update the IdleRPG topic.")
+    if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+        _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can update the IdleRPG topic.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
     custom_text = " ".join(str(part) for part in args[2:]).strip() if len(args) > 2 else None
-    _maybe_set_room_topic(bot, room_jid, room, custom_text=custom_text, force=True)
-    room["next_topic_update_at"] = _now() + TOPIC_UPDATE_INTERVAL if TOPIC_UPDATE_INTERVAL > 0 else 0
-    await _set_data(bot, data)
-    preview = _topic_text(room, custom_text=custom_text)[:250]
-    _reply(bot, msg, f"✅ IdleRPG room topic update requested: {preview}")
+    _dep_formatting._maybe_set_room_topic(bot, room_jid, room, custom_text=custom_text, force=True)
+    room["next_topic_update_at"] = _dep_formatting._now() + _dep_config.TOPIC_UPDATE_INTERVAL if _dep_config.TOPIC_UPDATE_INTERVAL > 0 else 0
+    await _dep_state._set_data(bot, data)
+    preview = _dep_formatting._topic_text(room, custom_text=custom_text)[:250]
+    _dep_formatting._reply(bot, msg, f"✅ IdleRPG room topic update requested: {preview}")
 
 
 async def _handle_export(bot, sender_jid: str, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Export is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Export is room-scoped. Use it from a game room or MUC PM.")
         return
-    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room owners/admins can refresh IdleRPG exports.")
+    if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+        _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can refresh IdleRPG exports.")
         return
-    data = await _get_data(bot)
-    _export_public_state(data)
-    root = _export_root()
-    _reply(bot, msg, f"📤 IdleRPG export refreshed for {room_jid}: {root / _room_slug(room_jid)}")
+    data = await _dep_state._get_data(bot)
+    _dep_export._export_public_state(data)
+    root = _dep_export._export_root()
+    _dep_formatting._reply(bot, msg, f"📤 IdleRPG export refreshed for {room_jid}: {root / _dep_formatting._room_slug(room_jid)}")
 
 
 async def _handle_remove_me(bot, sender_jid: str, msg, is_room: bool) -> None:
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ remove-me is room-scoped. Use it from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ remove-me is room-scoped. Use it from a game room or MUC PM.")
         return
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    _jid, player = _find_player(room, sender_jid)
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    _jid, player = _dep_state._find_player(room, sender_jid)
     if not player:
-        _reply(bot, msg, "❌ You do not have an IdleRPG character here.")
+        _dep_formatting._reply(bot, msg, "❌ You do not have an IdleRPG character here.")
         return
-    name = _display_player(player)
+    name = _dep_formatting._display_player(player)
     room.get("players", {}).pop(sender_jid, None)
-    _rebuild_name_index(room)
-    await _set_data(bot, data)
+    _dep_state._rebuild_name_index(room)
+    await _dep_state._set_data(bot, data)
     await audit_event(bot, "idlerpg_remove_me", actor=sender_jid, target=room_jid, details={"name": name})
-    _reply(bot, msg, f"🗑️ IdleRPG character {name} removed.")
+    _dep_formatting._reply(bot, msg, f"🗑️ IdleRPG character {name} removed.")
 
 
 async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> bool:
     subcmd = args[0].lower() if args else ""
     if subcmd not in {"push", "setlevel", "reset", "delete", "remove"}:
         return False
-    room_jid = _room_from_context(msg, is_room)
+    room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
-        _reply(bot, msg, "ℹ️ Admin actions are room-scoped. Use them from a game room or MUC PM.")
+        _dep_formatting._reply(bot, msg, "ℹ️ Admin actions are room-scoped. Use them from a game room or MUC PM.")
         return True
-    if not await _sender_can_manage_room(bot, sender_jid, room_jid):
-        _reply(bot, msg, "⛔ Only room owners/admins can use this IdleRPG admin command.")
+    if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+        _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can use this IdleRPG admin command.")
         return True
     if len(args) < 2:
-        _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg {subcmd} <character> [...]")
+        _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg {subcmd} <character> [...]")
         return True
-    data = await _get_data(bot)
-    room = _room_bucket(data, room_jid)
-    jid, player = _find_player(room, args[1])
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    jid, player = _dep_state._find_player(room, args[1])
     if not player or not jid:
-        _reply(bot, msg, "❌ No such IdleRPG character in this room.")
+        _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return True
-    name = _display_player(player)
+    name = _dep_formatting._display_player(player)
     if subcmd == "push":
         if len(args) < 3:
-            _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg push <character> <duration>")
+            _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg push <character> <duration>")
             return True
         amount = _core.parse_duration(args[2])
         if amount is None:
-            _reply(bot, msg, "❌ Invalid duration. Example: 10m, 1h30m, 2d")
+            _dep_formatting._reply(bot, msg, "❌ Invalid duration. Example: 10m, 1h30m, 2d")
             return True
-        changed = _remove_time(player, amount)
+        changed = _dep_leveling._remove_time(player, amount)
         text = (
-            f"✅ Pushed {name} {_duration_clock(changed)} toward next level. "
-            + _next_level_line(player)
+            f"✅ Pushed {name} {_dep_formatting._duration_clock(changed)} toward next level. "
+            + _dep_formatting._next_level_line(player)
         )
     elif subcmd == "setlevel":
         if len(args) < 3 or not str(args[2]).isdigit():
-            _reply(bot, msg, f"Usage: {_command_prefix(bot)}idlerpg setlevel <character> <level>")
+            _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg setlevel <character> <level>")
             return True
-        previous_achievements = _achievement_keys(player)
+        previous_achievements = _dep_leveling._achievement_keys(player)
         player["level"] = max(0, int(args[2]))
-        player["next"] = _ttl_for_level(player["level"])
-        _check_level_achievements(player, room)
-        text = f"✅ Set {name} to level {player['level']}. " + _next_level_line(player)
-        achievement_lines = _achievement_announcements(player, previous_achievements)
+        player["next"] = _dep_leveling._ttl_for_level(player["level"])
+        _dep_leveling._check_level_achievements(player, room)
+        text = f"✅ Set {name} to level {player['level']}. " + _dep_formatting._next_level_line(player)
+        achievement_lines = _dep_leveling._achievement_announcements(player, previous_achievements)
         if achievement_lines:
             text += "\n" + "\n".join(achievement_lines)
     elif subcmd == "reset":
         player["level"] = 0
-        player["next"] = _ttl_for_level(0)
+        player["next"] = _dep_leveling._ttl_for_level(0)
         player["idled"] = 0
-        player["items"] = {item: 0 for item in ITEMS}
+        player["items"] = {item: 0 for item in _dep_constants.ITEMS}
         player["penalties"] = {}
-        text = f"✅ Reset {name}. " + _next_level_line(player)
+        text = f"✅ Reset {name}. " + _dep_formatting._next_level_line(player)
     else:
         room.get("players", {}).pop(str(jid), None)
-        _rebuild_name_index(room)
+        _dep_state._rebuild_name_index(room)
         text = f"🗑️ Deleted IdleRPG character {name}."
-    await _set_data(bot, data)
+    await _dep_state._set_data(bot, data)
     await audit_event(bot, f"idlerpg_{subcmd}", actor=sender_jid, target=room_jid, details={"character": name})
-    _reply(bot, msg, text)
+    _dep_formatting._reply(bot, msg, text)
     return True
 
 
@@ -1070,17 +928,17 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
             msg,
             is_room,
             toggle_args,
-            store_getter=get_idlerpg_store,
-            key=IDLERPG_ENABLED_KEY,
+            store_getter=_dep_formatting.get_idlerpg_store,
+            key=_dep_constants.IDLERPG_ENABLED_KEY,
             label="IdleRPG",
             log_prefix="[IDLERPG]",
         )
         if handled_toggle:
-            await _sync_tasks_to_enabled_rooms(bot)
+            await _dep_tasks._sync_tasks_to_enabled_rooms(bot)
             return
 
     if not args:
-        _reply(bot, msg, _usage(bot))
+        _dep_formatting._reply(bot, msg, _dep_formatting._usage(bot))
         return
 
     resolved_sender, _, _ = await _core.get_real_jid(bot, msg)
@@ -1134,52 +992,21 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
     elif subcmd in {"remove-me", "removeme"}:
         await _handle_remove_me(bot, sender, msg, is_room)
     elif subcmd in {"help", "usage"}:
-        _reply(bot, msg, _usage(bot))
+        _dep_formatting._reply(bot, msg, _dep_formatting._usage(bot))
     else:
-        _reply(bot, msg, f"❌ Unknown IdleRPG command: {subcmd}\n" + _usage(bot))
+        _dep_formatting._reply(bot, msg, f"❌ Unknown IdleRPG command: {subcmd}\n" + _dep_formatting._usage(bot))
 
-
-async def on_message(bot, msg):
-    try:
-        body = str(msg.get("body", "") or "").strip()
-        if not body or msg.get("type") != "groupchat":
-            return
-        room_jid = str(msg["from"].bare)
-        if not await _core._is_enabled_for_room(bot, IDLERPG_ENABLED_KEY, PLUGIN_NAME, room_jid):
-            return
-        bot_nick = getattr(getattr(bot, "presence", None), "joined_rooms", {}).get(room_jid)
-        actor_nick = _message_actor_nick(msg)
-        if bot_nick and actor_nick and str(bot_nick).lower() == str(actor_nick).lower():
-            return
-        if not COUNT_COMMAND_MESSAGES and body.startswith(_command_prefix(bot)):
-            return
-        target_jid = await _message_penalty_target_jid(bot, msg, room_jid, str(actor_nick or ""))
-        if not target_jid:
-            log.debug(
-                "[IDLERPG] Message penalty skipped: no player for room=%s nick=%s",
-                room_jid,
-                actor_nick,
-            )
-            return
-        if _message_penalty_seen(msg):
-            return
-        await _penalize_player(
-            bot,
-            room_jid,
-            target_jid,
-            "message",
-            max(1, len(body)) * MESSAGE_PENALTY,
-            announce=True,
-        )
-    except Exception:
-        log.exception("[IDLERPG] Error in on_message")
-
-
-async def on_muc_presence(bot, pres):
-    try:
-        room_jid = str(pres["from"].bare)
-        if not await _core._is_enabled_for_room(bot, IDLERPG_ENABLED_KEY, PLUGIN_NAME, room_jid):
-            return
-        await _ensure_game_task(bot, room_jid)
-    except Exception:
-        log.debug("[IDLERPG] Presence handling failed", exc_info=True)
+# Explicit module dependencies; module-qualified access keeps cyclic domain
+# relationships visible without copying names into sibling namespaces.
+from . import config as _dep_config  # noqa: E402
+from . import constants as _dep_constants  # noqa: E402
+from . import events as _dep_events  # noqa: E402
+from . import export as _dep_export  # noqa: E402
+from . import formatting as _dep_formatting  # noqa: E402
+from . import items as _dep_items  # noqa: E402
+from . import leveling as _dep_leveling  # noqa: E402
+from . import map as _dep_map  # noqa: E402
+from . import quests as _dep_quests  # noqa: E402
+from . import seasons as _dep_seasons  # noqa: E402
+from . import state as _dep_state  # noqa: E402
+from . import tasks as _dep_tasks  # noqa: E402

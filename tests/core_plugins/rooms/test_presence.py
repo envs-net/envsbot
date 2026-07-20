@@ -98,7 +98,7 @@ async def test_on_muc_presence_does_not_store_occupant_jid_when_real_jid_missing
 
 @pytest.mark.asyncio
 async def test_is_valid_room_jid_success(fake_bot, fake_msg):
-    with patch("core_plugins.rooms.is_valid_muc_domain",
+    with patch("core_plugins.rooms.presence.is_valid_muc_domain",
                AsyncMock(return_value=True)):
         jid = "room@conference.domain"
         assert await rooms.is_valid_room_jid(fake_bot, jid, fake_msg) is True
@@ -106,7 +106,7 @@ async def test_is_valid_room_jid_success(fake_bot, fake_msg):
 
 @pytest.mark.asyncio
 async def test_is_valid_room_jid_failures(fake_bot, fake_msg):
-    with patch("core_plugins.rooms.is_valid_muc_domain",
+    with patch("core_plugins.rooms.presence.is_valid_muc_domain",
                AsyncMock(return_value=False)):
         assert await rooms.is_valid_room_jid(fake_bot,
                                              "room/conference",
@@ -144,7 +144,7 @@ async def test_rooms_delete_suppresses_delayed_presence_until_rejoin(fake_bot, f
     rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick", "nicks": {}}
     fake_bot.presence.joined_rooms[room_jid] = "BotNick"
 
-    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+    with patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)):
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
 
     assert room_jid not in rooms.JOINED_ROOMS
@@ -161,7 +161,7 @@ async def test_rooms_delete_suppresses_delayed_presence_until_rejoin(fake_bot, f
     fake_bot.db.rooms.get = AsyncMock(return_value=None)
     fake_bot.db.rooms.add = AsyncMock()
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
-    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+    with patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)):
         await rooms.rooms_join(fake_bot, "jid", "nick", [room_jid, "BotNick"], fake_msg, False)
 
     await rooms.on_muc_presence(
@@ -180,7 +180,7 @@ async def test_rooms_delete_leaves_presence_only_runtime_entry(fake_bot, fake_ms
     fake_bot.presence.joined_rooms[room_jid] = "BotNick"
     fake_bot.plugin["xep_0045"].leave_muc = AsyncMock()
 
-    with patch("core_plugins.rooms.is_valid_room_jid", AsyncMock(return_value=True)):
+    with patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)):
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
 
     assert room_jid not in rooms.JOINED_ROOMS
@@ -194,7 +194,7 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     fake_bot.db.rooms.add = AsyncMock()
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
     fake_bot.presence.joined_rooms = {}
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_join(fake_bot, "jid", "nick",
                                ["room@conf", "BotNick"], fake_msg, False)
@@ -206,7 +206,7 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick"}
     fake_bot.presence.joined_rooms[room_jid] = "BotNick"
     fake_bot.plugin["xep_0045"].leave_muc = MagicMock()
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_leave(fake_bot, "jid", "nick", [room_jid],
                                 fake_msg, False)
@@ -218,7 +218,7 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     ])
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
     rooms.JOINED_ROOMS["room@c1"] = {"nick": "Bot"}
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_sync(fake_bot, "jid", "nick", [], fake_msg, False)
 
@@ -235,7 +235,7 @@ async def test_rooms_leave_reports_noop_state(fake_bot, fake_msg):
     rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick"}
     fake_bot.presence.joined_rooms[room_jid] = "BotNick"
 
-    with patch("core_plugins.rooms.is_valid_room_jid",
+    with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_leave(fake_bot, "jid", "nick", [room_jid],
                                 fake_msg, False)
