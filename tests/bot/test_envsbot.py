@@ -946,7 +946,7 @@ async def test_parse_owner_role_and_reply_shortcuts(monkeypatch, bot):
         {"jid": "legacy-owner@example.org", "role": envsbot.Role.OWNER.value},
         {"jid": "none@example.org", "role": envsbot.Role.NONE.value},
     ])
-    assert await envsbot.Bot.get_user_role(bot, "missing@example.org") == envsbot.Role.NONE
+    assert await envsbot.Bot.get_user_role(bot, "missing@example.org") == envsbot.Role.USER
     assert await envsbot.Bot.get_user_role(bot, "norole@example.org") == envsbot.Role.NONE
     assert await envsbot.Bot.get_user_role(bot, "user@example.org") == envsbot.Role.USER
     assert await envsbot.Bot.get_user_role(bot, "legacy-owner@example.org") == envsbot.Role.USER

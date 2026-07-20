@@ -80,7 +80,13 @@ class PermissionMixin:
         return db_role
 
     async def get_user_role(self, jid: object, room: str | None = None) -> Role:
-        """Resolve a user's role using config and database."""
+        """Resolve a user's role using config and database.
+
+        Every sender with a valid JID is a regular user by default.  Database
+        rows only override that baseline (for example with a trusted, admin,
+        new, or banned role); ``Role.NONE`` remains reserved for identities
+        that cannot be resolved to a valid JID.
+        """
         bare_jid = self._parse_bare_jid(jid, label="user")
         if bare_jid is None:
             return Role.NONE
@@ -91,7 +97,7 @@ class PermissionMixin:
 
         row = await self.db.users.get(bare_jid)
         if row is None:
-            return Role.NONE
+            return await self._get_room_role_from_presence(bare_jid, room, Role.USER)
 
         try:
             db_role = role_from_int(int(row["role"]))
