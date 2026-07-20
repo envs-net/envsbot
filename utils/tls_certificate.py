@@ -188,6 +188,26 @@ async def _read_xmpp_stream_part(
     return bytes(data)
 
 
+def _xmpp_probe_stream_header(domain: str, source_domain: str) -> str:
+    """Build a pre-TLS S2S stream header suitable for certificate probes.
+
+    RFC 6120 permits the initiating entity to omit ``from`` before TLS.  Do
+    so for self-domain checks because servers commonly reject a stream whose
+    pre-TLS source and target identities are identical before advertising
+    STARTTLS.  Other probes retain their normal source identity.
+    """
+    source = domain_from_xmpp_target(source_domain)
+    target = domain_from_xmpp_target(domain)
+    from_attribute = "" if source == target else f" from={quoteattr(source)}"
+    return (
+        "<?xml version='1.0'?>"
+        "<stream:stream xmlns='jabber:server' "
+        "xmlns:stream='http://etherx.jabber.org/streams'"
+        f"{from_attribute} "
+        f"to={quoteattr(target)} version='1.0'>"
+    )
+
+
 def _certificate_verification_message(
     exc: ssl.SSLCertVerificationError,
     *,
@@ -293,13 +313,7 @@ async def _probe_xmpp_server_certificate(
             port=port,
             family=family,
         )
-        stream = (
-            "<?xml version='1.0'?>"
-            "<stream:stream xmlns='jabber:server' "
-            "xmlns:stream='http://etherx.jabber.org/streams' "
-            f"from={quoteattr(source_domain)} "
-            f"to={quoteattr(domain)} version='1.0'>"
-        )
+        stream = _xmpp_probe_stream_header(domain, source_domain)
         writer.write(stream.encode("utf-8"))
         await writer.drain()
         features = await _read_xmpp_stream_part(reader, b"</stream:features>")

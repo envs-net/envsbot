@@ -53,6 +53,22 @@ def test_certificate_verification_message_classifies_common_failures():
     ) == "TLS certificate has expired."
 
 
+def test_xmpp_probe_stream_omits_source_only_for_self_domain():
+    remote = certificate._xmpp_probe_stream_header(
+        "example.org",
+        "bot.example.org",
+    )
+    own_domain = certificate._xmpp_probe_stream_header(
+        "Example.ORG",
+        "example.org",
+    )
+
+    assert 'from="bot.example.org"' in remote
+    assert 'to="example.org"' in remote
+    assert " from=" not in own_domain
+    assert 'to="example.org"' in own_domain
+
+
 @pytest.mark.asyncio
 async def test_https_certificate_probe_uses_verified_direct_tls(monkeypatch):
     class FakeWriter:

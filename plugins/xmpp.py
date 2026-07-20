@@ -66,7 +66,7 @@ def _compliance_preview_complete(body: bytes) -> bool:
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.3.6",
+    "version": "0.3.7",
     "description":
     "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
