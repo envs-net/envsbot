@@ -264,7 +264,6 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
     )
     if global_default:
         rest.pop(0)
-        room = None
         feed_url = None
         if not await _sender_can_manage_rss_globally(bot, sender_jid):
             bot.reply(
