@@ -94,7 +94,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `rss` | `plugins` | `info` | RSS/Atom feed watcher and poster | [`docs/plugins/rss.md`](plugins/rss.md) |
 | `sed` | `plugins` | `tools` | Message correction using sed-like syntax | [`docs/plugins/sed.md`](plugins/sed.md) |
 | `tell` | `plugins` | `utility` | Store and deliver messages for users when they join a room again. | [`docs/plugins/tell.md`](plugins/tell.md) |
-| `tools` | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Unix timestamp conversion, and XMPP S2S certificate checks | [`docs/plugins/tools.md`](plugins/tools.md) |
+| `tools` | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Unix timestamp conversion, and HTTPS certificate checks | [`docs/plugins/tools.md`](plugins/tools.md) |
 | `translate` | `plugins` | `utility` | Translate text or replied-to messages with optional source-language auto-detection. | [`docs/plugins/translate.md`](plugins/translate.md) |
 | `urlcheck` | `plugins` | `info` | URL title and YouTube info fetcher for groupchats | [`docs/plugins/urlcheck.md`](plugins/urlcheck.md) |
 | `vcard` | `plugins` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only | [`docs/plugins/vcard.md`](plugins/vcard.md) |
@@ -244,7 +244,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,cert` | [`tools`](plugins/tools.md) | `user` | `any` | Check an XMPP server-to-server TLS certificate. |
+| `,cert` | [`tools`](plugins/tools.md) | `user` | `any` | Check the TLS certificate of an HTTPS website. |
 | `,date` | [`tools`](plugins/tools.md) | `user` | `any` | Show the current date from a stored profile timezone. |
 | `,echo` | [`tools`](plugins/tools.md) | `user` | `any` | Echo text back to you. |
 | `,ping` | [`tools`](plugins/tools.md) | `user` | `any` | Check whether the bot is alive. |

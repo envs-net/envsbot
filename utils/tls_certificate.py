@@ -1,4 +1,4 @@
-"""Safe, bounded XMPP server-to-server STARTTLS certificate diagnostics."""
+"""Safe, bounded TLS certificate diagnostics for HTTPS and XMPP S2S."""
 
 from __future__ import annotations
 
@@ -7,10 +7,43 @@ import ipaddress
 import socket
 import ssl
 from contextlib import suppress
+from urllib.parse import urlsplit
 from xml.sax.saxutils import quoteattr
 
 
-VALID_CERTIFICATE_MESSAGE = "S2S TLS certificate is valid."
+VALID_HTTPS_CERTIFICATE_MESSAGE = "TLS certificate is valid."
+VALID_XMPP_CERTIFICATE_MESSAGE = "S2S TLS certificate is valid."
+
+
+def parse_https_certificate_target(value: object) -> tuple[str, int]:
+    """Return a normalized HTTPS hostname and the supported port 443."""
+    target = str(value or "").strip()
+    if not target:
+        raise ValueError("Website cannot be empty")
+
+    parsed = urlsplit(target if "://" in target else f"//{target}")
+    if parsed.scheme and parsed.scheme.lower() != "https":
+        raise ValueError("only HTTPS websites are supported")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("website URLs with credentials are not allowed")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("website must include a hostname")
+    try:
+        port = parsed.port or 443
+    except ValueError as exc:
+        raise ValueError("website contains an invalid port") from exc
+    if port != 443:
+        raise ValueError("only HTTPS port 443 is supported")
+
+    try:
+        normalized = hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ValueError("website hostname is invalid") from exc
+    valid, error = validate_dns_hostname(normalized)
+    if not valid:
+        raise ValueError(error)
+    return normalized, port
 
 
 def domain_from_xmpp_target(value: object) -> str:
@@ -21,8 +54,8 @@ def domain_from_xmpp_target(value: object) -> str:
     return target.split("/", 1)[0].strip().lower()
 
 
-def validate_xmpp_domain(domain: str) -> tuple[bool, str]:
-    """Validate an XMPP domain and return ``(is_valid, error_message)``."""
+def validate_dns_hostname(domain: str) -> tuple[bool, str]:
+    """Validate a DNS hostname and return ``(is_valid, error_message)``."""
     if not domain or not domain.strip():
         return False, "Domain cannot be empty"
 
@@ -49,6 +82,11 @@ def validate_xmpp_domain(domain: str) -> tuple[bool, str]:
     if len(labels[-1]) < 2:
         return False, f"'{domain}' has invalid TLD (must be at least 2 characters)"
     return True, ""
+
+
+def validate_xmpp_domain(domain: str) -> tuple[bool, str]:
+    """Validate an XMPP domain using the shared DNS hostname rules."""
+    return validate_dns_hostname(domain)
 
 
 def source_domain_from_jid(value: object) -> str:
@@ -150,20 +188,93 @@ async def _read_xmpp_stream_part(
     return bytes(data)
 
 
-def _certificate_verification_message(exc: ssl.SSLCertVerificationError) -> str:
+def _certificate_verification_message(
+    exc: ssl.SSLCertVerificationError,
+    *,
+    label: str,
+    mismatch_target: str,
+) -> str:
     """Return a concise operator-facing certificate verification result."""
     message = str(getattr(exc, "verify_message", "") or exc).strip()
     lowered = message.lower()
     if getattr(exc, "verify_code", None) == 10 or "expired" in lowered:
-        return "S2S TLS certificate has expired."
+        return f"{label} has expired."
     if getattr(exc, "verify_code", None) == 9 or "not yet valid" in lowered:
-        return "S2S TLS certificate is not valid yet."
+        return f"{label} is not valid yet."
     if "hostname mismatch" in lowered or "not valid for" in lowered:
-        return "S2S TLS certificate does not match the XMPP domain."
+        return f"{label} does not match the {mismatch_target}."
     safe_message = " ".join(message.split())[:160].rstrip(".")
     if safe_message:
-        return f"S2S TLS certificate validation failed: {safe_message}."
-    return "S2S TLS certificate validation failed."
+        return f"{label} validation failed: {safe_message}."
+    return f"{label} validation failed."
+
+
+async def _probe_https_certificate(
+    address: str,
+    family: int,
+    hostname: str,
+    port: int,
+    timeout_seconds: float,
+) -> str | None:
+    """Open a verified direct TLS connection to one HTTPS endpoint."""
+    writer = None
+    try:
+        context = ssl.create_default_context()
+        _reader, writer = await asyncio.open_connection(
+            host=address,
+            port=port,
+            family=family,
+            ssl=context,
+            server_hostname=hostname,
+            ssl_handshake_timeout=timeout_seconds,
+        )
+        return VALID_HTTPS_CERTIFICATE_MESSAGE
+    except ssl.SSLCertVerificationError as exc:
+        return _certificate_verification_message(
+            exc,
+            label="TLS certificate",
+            mismatch_target="requested domain",
+        )
+    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+        return None
+    finally:
+        if writer is not None:
+            writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
+
+
+async def diagnose_https_certificate(
+    hostname: str,
+    *,
+    port: int = 443,
+    timeout_seconds: float = 5.0,
+) -> str | None:
+    """Check one public HTTPS endpoint with normal CA and hostname validation."""
+    hostname, parsed_port = parse_https_certificate_target(hostname)
+    if port != parsed_port:
+        raise ValueError("only HTTPS port 443 is supported")
+    timeout_seconds = max(1.0, min(30.0, float(timeout_seconds)))
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            addresses = await asyncio.to_thread(
+                _public_endpoint_addresses,
+                hostname,
+                port,
+            )
+            for family, address in addresses:
+                result = await _probe_https_certificate(
+                    address,
+                    family,
+                    hostname,
+                    port,
+                    timeout_seconds,
+                )
+                if result:
+                    return result
+    except (OSError, asyncio.TimeoutError, TypeError, ValueError):
+        return None
+    return None
 
 
 async def _probe_xmpp_server_certificate(
@@ -210,8 +321,12 @@ async def _probe_xmpp_server_certificate(
                 ssl_handshake_timeout=timeout_seconds,
             )
         except ssl.SSLCertVerificationError as exc:
-            return _certificate_verification_message(exc)
-        return VALID_CERTIFICATE_MESSAGE
+            return _certificate_verification_message(
+                exc,
+                label="S2S TLS certificate",
+                mismatch_target="XMPP domain",
+            )
+        return VALID_XMPP_CERTIFICATE_MESSAGE
     except (OSError, asyncio.TimeoutError, ssl.SSLError):
         return None
     finally:

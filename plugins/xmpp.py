@@ -32,8 +32,8 @@ import slixmpp
 from utils.command import command, Role
 from utils.config import config
 from utils.http_fetch import fetch_preview, passthrough_validator
-from utils.xmpp_certificate import (
-    VALID_CERTIFICATE_MESSAGE as XMPP_VALID_CERTIFICATE_MESSAGE,
+from utils.tls_certificate import (
+    VALID_XMPP_CERTIFICATE_MESSAGE as XMPP_VALID_CERTIFICATE_MESSAGE,
     diagnose_xmpp_server_certificate,
     make_srv_resolver as _make_srv_resolver,
     source_domain_from_jid,
@@ -66,7 +66,7 @@ def _compliance_preview_complete(body: bytes) -> bool:
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.3.5",
+    "version": "0.3.6",
     "description":
     "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",

@@ -9,24 +9,25 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `utility`
 
-Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Unix timestamp conversion, and XMPP S2S certificate checks
+Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Unix timestamp conversion, and HTTPS certificate checks
 
 ## Commands
 
 ### `,cert`
 
-Check an XMPP server-to-server TLS certificate.
+Check the TLS certificate of an HTTPS website.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,cert <domain>`
+Usage: `,cert <domain|https-url>`
 
 Aliases: `,certificate`
 
 Examples:
 
-- `,cert envs.net`
+- `,cert example.org`
+- `,cert https://example.org`
 
 ### `,date`
 

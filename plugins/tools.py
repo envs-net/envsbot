@@ -17,7 +17,7 @@ Commands:
     {prefix}date [nick]
     {prefix}utc
     {prefix}ts <unix_timestamp>
-    {prefix}cert <domain>
+    {prefix}cert <domain|https-url>
 """
 
 import pytz
@@ -27,12 +27,10 @@ from datetime import datetime
 from datetime import timezone as dt_timezone
 from utils.command import command, Role
 from utils.config import config
-from utils.xmpp_certificate import (
-    VALID_CERTIFICATE_MESSAGE,
-    diagnose_xmpp_server_certificate,
-    domain_from_xmpp_target,
-    source_domain_from_jid,
-    validate_xmpp_domain,
+from utils.tls_certificate import (
+    VALID_HTTPS_CERTIFICATE_MESSAGE,
+    diagnose_https_certificate,
+    parse_https_certificate_target,
 )
 from core_plugins._core import (
     _is_muc_pm,
@@ -47,16 +45,16 @@ from core_plugins._core import (
 log = logging.getLogger(__name__)
 
 TOOLS_KEY = "TOOLS"
-CERTIFICATE_PROBE_TIMEOUT_SECONDS = max(
+HTTPS_CERTIFICATE_TIMEOUT_SECONDS = max(
     1.0,
-    min(5.0, float(config.get("xmpp_query_timeout_seconds", 8) or 8)),
+    min(5.0, float(config.get("http_timeout_seconds", 8) or 8)),
 )
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.5.1",
+    "version": "0.5.2",
     "description":
     "Utility commands: ping/pong, message echo, timezone-aware time/date"
-    " lookups, Unix timestamp conversion, and XMPP S2S certificate checks",
+    " lookups, Unix timestamp conversion, and HTTPS certificate checks",
     "category": "utility",
     "requires": ["_core", "vcard"],
 }
@@ -110,42 +108,39 @@ async def get_tools_store(bot):
     "cert",
     role=Role.USER,
     aliases=["certificate"],
-    short="Check an XMPP server-to-server TLS certificate.",
-    usage="{prefix}cert <domain>",
-    examples=["{prefix}cert envs.net"],
+    short="Check the TLS certificate of an HTTPS website.",
+    usage="{prefix}cert <domain|https-url>",
+    examples=["{prefix}cert example.org", "{prefix}cert https://example.org"],
     category="utility",
     context="any",
 )
 async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
-    """Check the S2S STARTTLS certificate used by an XMPP domain."""
+    """Check the normal TLS certificate used by an HTTPS website."""
     enabled_rooms = await _get_enabled_rooms(bot, TOOLS_KEY, "tools")
     if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
         bot.reply(msg, "ℹ️ cert is disabled in this room.")
         return
 
     if not args:
-        bot.reply(msg, f"❌ Missing domain\nUsage: {config.get('prefix', ',')}cert <domain>")
+        bot.reply(
+            msg,
+            "❌ Missing website\n"
+            f"Usage: {config.get('prefix', ',')}cert <domain|https-url>",
+        )
         return
 
     raw_target = str(args[0]).strip()
-    domain = domain_from_xmpp_target(raw_target)
-    is_valid, error_msg = validate_xmpp_domain(domain)
-    if not is_valid:
-        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+    try:
+        hostname, port = parse_https_certificate_target(raw_target)
+    except ValueError as exc:
+        bot.reply(msg, f"❌ Invalid website: {exc}")
         return
 
-    if "@" in raw_target:
-        bot.reply(
-            msg,
-            "Note: 'cert' only works with domains."
-            f" Using '{domain}' from '{raw_target}'.",
-        )
-
     try:
-        certificate = await diagnose_xmpp_server_certificate(
-            domain,
-            source_domain=source_domain_from_jid(config.get("jid", "")),
-            timeout_seconds=CERTIFICATE_PROBE_TIMEOUT_SECONDS,
+        certificate = await diagnose_https_certificate(
+            hostname,
+            port=port,
+            timeout_seconds=HTTPS_CERTIFICATE_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         status = "🔴"
@@ -153,8 +148,8 @@ async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         if certificate is None:
             status = "⚠️"
-            certificate = "S2S TLS certificate could not be checked."
-        elif certificate == VALID_CERTIFICATE_MESSAGE:
+            certificate = "TLS certificate could not be checked."
+        elif certificate == VALID_HTTPS_CERTIFICATE_MESSAGE:
             status = "✅"
         else:
             status = "🔴"
@@ -162,7 +157,7 @@ async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
     bot.reply(
         msg,
         [
-            f"🔐 S2S TLS certificate check for {domain}",
+            f"🔐 TLS certificate check for {hostname}",
             f"{status} {certificate}",
         ],
     )

@@ -89,43 +89,37 @@ async def test_echo_command_usage(bot, simple_msg, enabled_rooms, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_certificate_command_uses_shared_xmpp_probe(
+async def test_certificate_command_uses_shared_https_probe(
     bot,
     simple_msg,
     enabled_rooms,
     monkeypatch,
 ):
-    diagnose = AsyncMock(return_value=tools.VALID_CERTIFICATE_MESSAGE)
+    diagnose = AsyncMock(return_value=tools.VALID_HTTPS_CERTIFICATE_MESSAGE)
     monkeypatch.setattr(
         tools,
         "_get_enabled_rooms",
         AsyncMock(return_value=enabled_rooms),
     )
-    monkeypatch.setattr(
-        tools,
-        "source_domain_from_jid",
-        lambda _jid: "bot.example.org",
-    )
-    monkeypatch.setattr(tools, "diagnose_xmpp_server_certificate", diagnose)
+    monkeypatch.setattr(tools, "diagnose_https_certificate", diagnose)
 
     await tools.certificate_command(
         bot,
         "jid",
         "nick",
-        ["admin@example.org/resource"],
+        ["https://Example.ORG/path"],
         simple_msg,
         True,
     )
 
     diagnose.assert_awaited_once_with(
         "example.org",
-        source_domain="bot.example.org",
-        timeout_seconds=tools.CERTIFICATE_PROBE_TIMEOUT_SECONDS,
+        port=443,
+        timeout_seconds=tools.HTTPS_CERTIFICATE_TIMEOUT_SECONDS,
     )
-    assert "Using 'example.org'" in bot.reply.call_args_list[0].args[1]
-    assert bot.reply.call_args_list[1].args[1] == [
-        "🔐 S2S TLS certificate check for example.org",
-        "✅ S2S TLS certificate is valid.",
+    assert bot.reply.call_args.args[1] == [
+        "🔐 TLS certificate check for example.org",
+        "✅ TLS certificate is valid.",
     ]
 
 
@@ -138,7 +132,7 @@ async def test_certificate_command_handles_disabled_missing_and_invalid(
     enabled = AsyncMock(return_value={})
     diagnose = AsyncMock()
     monkeypatch.setattr(tools, "_get_enabled_rooms", enabled)
-    monkeypatch.setattr(tools, "diagnose_xmpp_server_certificate", diagnose)
+    monkeypatch.setattr(tools, "diagnose_https_certificate", diagnose)
 
     await tools.certificate_command(
         bot,
@@ -154,18 +148,18 @@ async def test_certificate_command_handles_disabled_missing_and_invalid(
     enabled.return_value = {"room@conf.org": True}
     bot.reply.reset_mock()
     await tools.certificate_command(bot, "jid", "nick", [], simple_msg, True)
-    assert "Missing domain" in bot.reply.call_args.args[1]
+    assert "Missing website" in bot.reply.call_args.args[1]
 
     bot.reply.reset_mock()
     await tools.certificate_command(
         bot,
         "jid",
         "nick",
-        ["localhost"],
+        ["http://example.org"],
         simple_msg,
         True,
     )
-    assert "Invalid domain" in bot.reply.call_args.args[1]
+    assert "Invalid website" in bot.reply.call_args.args[1]
 
 
 @pytest.mark.asyncio
