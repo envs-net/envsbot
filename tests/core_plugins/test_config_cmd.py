@@ -382,7 +382,7 @@ async def test_config_set_updates_file_and_applies_reload(tmp_path, monkeypatch)
     )
 
     text = config_path.read_text(encoding="utf-8")
-    assert "LOG_LEVEL = 'DEBUG'" in text
+    assert 'LOG_LEVEL = "DEBUG"' in text
     assert config_cmd.config["loglevel"] == "DEBUG"
     assert bot.reply_ok.called
     assert "LOG_LEVEL updated: 'INFO' → 'DEBUG'" in bot.reply_ok.call_args.args[1]
@@ -439,7 +439,7 @@ async def test_config_unset_resets_to_sample_default(tmp_path, monkeypatch):
     )
 
     text = config_path.read_text(encoding="utf-8")
-    assert "LOG_LEVEL = 'INFO'" in text
+    assert 'LOG_LEVEL = "INFO"' in text
     assert config_cmd.config["loglevel"] == "INFO"
     assert "LOG_LEVEL reset to default" in bot.reply_ok.call_args.args[1]
 
@@ -451,7 +451,7 @@ def test_update_config_file_assignment_success_and_errors(tmp_path, monkeypatch)
 
     config_cmd._update_config_file_assignment("NICK", "new")
     updated = cfg.read_text(encoding="utf-8")
-    assert "NICK = 'new'" in updated
+    assert 'NICK = "new"' in updated
     assert "PREFIX = ','" in updated
 
     missing = tmp_path / "missing.py"
@@ -464,3 +464,13 @@ def test_update_config_file_assignment_success_and_errors(tmp_path, monkeypatch)
     monkeypatch.setattr(config_cmd, "get_runtime_config_path", lambda: legacy)
     with pytest.raises(config_cmd.ConfigError, match="legacy config.json"):
         config_cmd._update_config_file_assignment("NICK", "new")
+
+
+def test_format_config_assignment_uses_safe_double_quoted_strings():
+    assignment = config_cmd._format_config_assignment(
+        "TRANSLATE_TO",
+        'de "quoted"\nnext',
+    )
+
+    assert assignment == 'TRANSLATE_TO = "de \\"quoted\\"\\nnext"'
+    compile(assignment, "<config-assignment>", "exec")

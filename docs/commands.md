@@ -278,7 +278,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,xmpp ping` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Ping an XMPP entity. |
 | `,xmpp srv` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Look up XMPP DNS SRV records. |
 | `,xmpp uptime` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Query XMPP entity uptime. |
-| `,xmpp version` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Query XMPP software version via XEP-0092. |
+| `,xmpp version` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Query XMPP software version and diagnose S2S TLS failures. |
 
 ## Detailed plugin docs
 

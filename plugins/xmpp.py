@@ -24,9 +24,15 @@ Commands:
     {prefix}x compliance <domain>   - Compliance score from
                                       compliance.conversations.im.
 """
-import time
-import slixmpp
 import asyncio
+import ipaddress
+import socket
+import ssl
+import time
+from contextlib import suppress
+from xml.sax.saxutils import quoteattr
+
+import slixmpp
 from utils.command import command, Role
 from utils.config import config
 from utils.http_fetch import fetch_preview, passthrough_validator
@@ -39,6 +45,10 @@ from core_plugins._core import (
 XMPP_KEY = "XMPP"
 XMPP_QUERY_TIMEOUT_SECONDS = float(config.get("xmpp_query_timeout_seconds", 8) or 8)
 XMPP_HTTP_TIMEOUT_SECONDS = float(config.get("http_timeout_seconds", 8) or 8)
+XMPP_CERTIFICATE_PROBE_TIMEOUT_SECONDS = max(
+    1.0,
+    min(5.0, XMPP_QUERY_TIMEOUT_SECONDS),
+)
 XMPP_COMPLIANCE_MAX_READ_BYTES = max(
     8192,
     int(config.get("xmpp_compliance_max_read_bytes", 262144) or 262144),
@@ -53,7 +63,7 @@ def _compliance_preview_complete(body: bytes) -> bool:
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "description":
     "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
@@ -231,7 +241,7 @@ async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
     "xmpp version",
     role=Role.USER,
     aliases=["x version"],
-    short="Query XMPP software version via XEP-0092.",
+    short="Query XMPP software version and diagnose S2S TLS failures.",
     usage="{prefix}xmpp version <jid>",
     examples=["{prefix}x version envs.net"],
     category="xmpp",
@@ -292,7 +302,12 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
                 f" requests (XEP-0092)."
             )
         else:
-            bot.reply(msg, f"🔴 Version request failed: {err_condition}")
+            reply = f"🔴 Version request failed: {err_condition}"
+            if err_condition == "remote-server-timeout":
+                certificate = await _diagnose_xmpp_server_certificate(target)
+                if certificate:
+                    reply += f"\n🔐 {certificate}"
+            bot.reply(msg, reply)
     except Exception as e:
         bot.reply(msg, f"🔴 Error: {e}")
 
@@ -822,6 +837,192 @@ def _collect_all_srv_records(domain, services, resolver, dns_exception):
     }
 
 
+def _xmpp_server_endpoints(domain: str) -> list[tuple[str, int]]:
+    """Return S2S SRV endpoints, falling back to the domain on port 5269."""
+    try:
+        import dns.exception
+        import dns.resolver
+    except ImportError:
+        return [(domain, 5269)]
+
+    try:
+        resolver = _make_srv_resolver(
+            dns.resolver,
+            XMPP_CERTIFICATE_PROBE_TIMEOUT_SECONDS,
+        )
+        answers = resolver.resolve(
+            f"_xmpp-server._tcp.{domain}",
+            "SRV",
+            raise_on_no_answer=False,
+        )
+        records = sorted(
+            (
+                (
+                    int(record.priority),
+                    -int(record.weight),
+                    str(record.target).rstrip("."),
+                    int(record.port),
+                )
+                for record in (answers or [])
+                if str(record.target).rstrip(".")
+                and str(record.target).rstrip(".") != "."
+            ),
+            key=lambda record: (record[0], record[1]),
+        )
+        if records:
+            return [(host, port) for _, _, host, port in records]
+    except (dns.exception.DNSException, OSError, TypeError, ValueError):
+        # Missing/broken SRV is valid for XMPP: RFC 6120 specifies the direct
+        # domain and default S2S port as the fallback.
+        return [(domain, 5269)]
+    return [(domain, 5269)]
+
+
+def _public_endpoint_addresses(host: str, port: int) -> list[tuple[int, str]]:
+    """Resolve an endpoint and retain only public unicast IP addresses."""
+    addresses: list[tuple[int, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for family, socktype, _proto, _canonname, sockaddr in socket.getaddrinfo(
+        host,
+        port,
+        family=socket.AF_UNSPEC,
+        type=socket.SOCK_STREAM,
+    ):
+        if socktype != socket.SOCK_STREAM or family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        address = str(sockaddr[0])
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if not parsed.is_global:
+            continue
+        item = (family, address)
+        if item not in seen:
+            seen.add(item)
+            addresses.append(item)
+    return addresses[:4]
+
+
+async def _read_xmpp_stream_part(reader, marker: bytes, *, limit: int = 65536) -> bytes:
+    """Read a bounded portion of an XMPP stream up to a protocol marker."""
+    data = bytearray()
+    while marker not in data and len(data) < limit:
+        chunk = await reader.read(min(4096, limit - len(data)))
+        if not chunk:
+            break
+        data.extend(chunk)
+    return bytes(data)
+
+
+def _certificate_verification_message(exc: ssl.SSLCertVerificationError) -> str:
+    """Return a concise operator-facing certificate verification result."""
+    message = str(getattr(exc, "verify_message", "") or exc).strip()
+    lowered = message.lower()
+    if getattr(exc, "verify_code", None) == 10 or "expired" in lowered:
+        return "S2S TLS certificate has expired."
+    if getattr(exc, "verify_code", None) == 9 or "not yet valid" in lowered:
+        return "S2S TLS certificate is not valid yet."
+    if "hostname mismatch" in lowered or "not valid for" in lowered:
+        return "S2S TLS certificate does not match the XMPP domain."
+    safe_message = " ".join(message.split())[:160]
+    if safe_message:
+        return f"S2S TLS certificate validation failed: {safe_message}."
+    return "S2S TLS certificate validation failed."
+
+
+def _xmpp_probe_source_domain() -> str:
+    raw_jid = str(config.get("jid", "") or "").split("/", 1)[0]
+    candidate = raw_jid.rsplit("@", 1)[-1].strip().lower()
+    valid, _error = _validate_domain(candidate)
+    return candidate if valid else "envsbot.invalid"
+
+
+async def _probe_xmpp_server_certificate(
+    address: str,
+    family: int,
+    port: int,
+    domain: str,
+) -> str | None:
+    """Negotiate XMPP S2S STARTTLS and return a conclusive TLS result."""
+    writer = None
+    try:
+        reader, writer = await asyncio.open_connection(
+            host=address,
+            port=port,
+            family=family,
+        )
+        stream = (
+            "<?xml version='1.0'?>"
+            "<stream:stream xmlns='jabber:server' "
+            "xmlns:stream='http://etherx.jabber.org/streams' "
+            f"from={quoteattr(_xmpp_probe_source_domain())} "
+            f"to={quoteattr(domain)} version='1.0'>"
+        )
+        writer.write(stream.encode("utf-8"))
+        await writer.drain()
+        features = await _read_xmpp_stream_part(reader, b"</stream:features>")
+        lowered_features = features.lower()
+        if b"<starttls" not in lowered_features or b"xmpp-tls" not in lowered_features:
+            return None
+
+        writer.write(b"<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>")
+        await writer.drain()
+        response = await _read_xmpp_stream_part(reader, b">", limit=8192)
+        if b"<proceed" not in response.lower():
+            return None
+
+        context = ssl.create_default_context()
+        try:
+            await writer.start_tls(
+                context,
+                server_hostname=domain,
+                ssl_handshake_timeout=XMPP_CERTIFICATE_PROBE_TIMEOUT_SECONDS,
+            )
+        except ssl.SSLCertVerificationError as exc:
+            return _certificate_verification_message(exc)
+        return "S2S TLS certificate is valid; the timeout occurs later in federation."
+    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+        return None
+    finally:
+        if writer is not None:
+            writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
+
+
+async def _diagnose_xmpp_server_certificate(domain: str) -> str | None:
+    """Run one bounded, public-network-only S2S certificate diagnosis."""
+    domain = get_domain_from_jid(str(domain)).split("/", 1)[0].strip().lower()
+    valid, _error = _validate_domain(domain)
+    if not valid:
+        return None
+
+    try:
+        async with asyncio.timeout(XMPP_CERTIFICATE_PROBE_TIMEOUT_SECONDS):
+            endpoints = await asyncio.to_thread(_xmpp_server_endpoints, domain)
+            for host, port in endpoints[:4]:
+                if not 1 <= port <= 65535:
+                    continue
+                addresses = await asyncio.to_thread(
+                    _public_endpoint_addresses,
+                    host,
+                    port,
+                )
+                for family, address in addresses:
+                    result = await _probe_xmpp_server_certificate(
+                        address,
+                        family,
+                        port,
+                        domain,
+                    )
+                    if result:
+                        return result
+    except (OSError, asyncio.TimeoutError):
+        return None
+    return None
+
+
 def _build_xmpp_srv_result(domain, services, srv_records):
     result = f"🔍 DNS SRV records for **{domain}**:\n"
     found_any = False
@@ -966,6 +1167,11 @@ async def _xmpp_check_version(bot, target: str) -> tuple[str, str]:
         condition = _get_iq_error_condition(exc)
         if condition == "service-unavailable":
             return "ℹ️", "version: unsupported"
+        if condition == "remote-server-timeout":
+            domain = get_domain_from_jid(str(target)).split("/", 1)[0]
+            certificate = await _diagnose_xmpp_server_certificate(domain)
+            if certificate:
+                return "⚠️", f"version: {condition}; {certificate}"
         return "⚠️", f"version: {condition}"
     except Exception as exc:
         return "⚠️", f"version: {exc}"

@@ -166,7 +166,7 @@ Examples:
 
 ### `,xmpp version`
 
-Query XMPP software version via XEP-0092.
+Query XMPP software version and diagnose S2S TLS failures.
 
 Role: `user`<br>
 Context: `any`<br>

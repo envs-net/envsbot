@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import pprint
 from collections.abc import Iterable, Sequence
@@ -35,7 +36,7 @@ from utils.redaction import is_secret_key as _central_is_secret_key, redact_name
 
 PLUGIN_META = {
     "name": "config_cmd",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Safe config inspection, validation and reload commands.",
     "category": "core",
 }
@@ -115,7 +116,13 @@ def _parse_config_value(raw: str) -> object:
 
 
 def _format_config_assignment(display_key: str, value: object) -> str:
-    rendered = pprint.pformat(value, width=88, sort_dicts=False)
+    # Keep simple strings consistent with config_sample.py. JSON string syntax is
+    # also valid Python syntax and reliably escapes quotes, control characters
+    # and non-ASCII text while always using double quotes.
+    if isinstance(value, str):
+        rendered = json.dumps(value, ensure_ascii=False)
+    else:
+        rendered = pprint.pformat(value, width=88, sort_dicts=False)
     return f"{display_key} = {rendered}"
 
 
