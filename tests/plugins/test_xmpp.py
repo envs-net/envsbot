@@ -484,16 +484,13 @@ async def test_xmpp_check_version_success_unsupported_and_errors(monkeypatch, bo
     bot.plugin["xep_0092"].get_version = AsyncMock(side_effect=FakeIqError("service-unavailable"))
     assert await xmpp._xmpp_check_version(bot, "example.org") == ("ℹ️", "version: unsupported")
 
-    diagnose = AsyncMock(return_value="S2S TLS certificate has expired.")
-    monkeypatch.setattr(xmpp, "_diagnose_xmpp_server_certificate", diagnose)
     bot.plugin["xep_0092"].get_version = AsyncMock(
         side_effect=FakeIqError("remote-server-timeout")
     )
     assert await xmpp._xmpp_check_version(bot, "example.org") == (
         "⚠️",
-        "version: remote-server-timeout; S2S TLS certificate has expired.",
+        "version: remote-server-timeout",
     )
-    diagnose.assert_awaited_once_with("example.org")
 
     bot.plugin["xep_0092"].get_version = AsyncMock(side_effect=FakeTimeout())
     assert await xmpp._xmpp_check_version(bot, "example.org") == ("⚠️", "version: timed out")
@@ -532,8 +529,10 @@ async def test_certificate_probe_negotiates_xmpp_starttls(monkeypatch):
     class FakeReader:
         def __init__(self):
             self.responses = iter([
-                b"<stream:features><starttls "
-                b"xmlns='urn:ietf:params:xml:ns:xmpp-tls'/></stream:features>",
+                b"".join((
+                    b"<stream:features><starttls ",
+                    b"xmlns='urn:ietf:params:xml:ns:xmpp-tls'/></stream:features>",
+                )),
                 b"<proceed xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>",
             ])
 
@@ -575,9 +574,7 @@ async def test_certificate_probe_negotiates_xmpp_starttls(monkeypatch):
         "example.org",
     )
 
-    assert result == (
-        "S2S TLS certificate is valid; the timeout occurs later in federation."
-    )
+    assert result == "S2S TLS certificate is valid."
     assert b"<stream:stream" in writer.writes[0]
     assert b"<starttls" in writer.writes[1]
     assert writer.tls_kwargs["server_hostname"] == "example.org"
@@ -612,6 +609,59 @@ async def test_certificate_diagnosis_uses_resolved_public_endpoint(monkeypatch):
         5269,
         "example.org",
     )
+
+
+@pytest.mark.asyncio
+async def test_xmpp_check_certificate_maps_probe_results(monkeypatch):
+    diagnose = AsyncMock(return_value=xmpp.XMPP_VALID_CERTIFICATE_MESSAGE)
+    monkeypatch.setattr(xmpp, "_diagnose_xmpp_server_certificate", diagnose)
+    assert await xmpp._xmpp_check_certificate("example.org") == (
+        "✅",
+        "S2S TLS certificate is valid.",
+    )
+
+    diagnose.return_value = "S2S TLS certificate has expired."
+    assert await xmpp._xmpp_check_certificate("example.org") == (
+        "🔴",
+        "S2S TLS certificate has expired.",
+    )
+
+    diagnose.return_value = None
+    assert await xmpp._xmpp_check_certificate("example.org") == (
+        "⚠️",
+        "S2S TLS certificate could not be checked.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cmd_xmpp_cert_manual_check_and_validation(monkeypatch, bot, msg):
+    m = msg()
+    check = AsyncMock(return_value=("✅", "S2S TLS certificate is valid."))
+    monkeypatch.setattr(xmpp, "_xmpp_check_certificate", check)
+
+    await xmpp.cmd_xmpp_cert(
+        bot,
+        "jid",
+        "nick",
+        ["admin@example.org/resource"],
+        m,
+        False,
+    )
+
+    check.assert_awaited_once_with("example.org")
+    assert "Using 'example.org'" in bot.reply.call_args_list[0].args[1]
+    assert bot.reply.call_args_list[1].args[1] == [
+        "🔐 S2S TLS certificate check for example.org",
+        "✅ S2S TLS certificate is valid.",
+    ]
+
+    bot.reply.reset_mock()
+    await xmpp.cmd_xmpp_cert(bot, "jid", "nick", [], m, False)
+    assert "Missing domain" in bot.reply.call_args.args[1]
+
+    bot.reply.reset_mock()
+    await xmpp.cmd_xmpp_cert(bot, "jid", "nick", ["invalid"], m, False)
+    assert "Invalid domain" in bot.reply.call_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -683,6 +733,8 @@ async def test_cmd_xmpp_check_replies_with_combined_diagnostics(monkeypatch, bot
     monkeypatch.setattr(xmpp, "_xmpp_check_ping", AsyncMock(return_value=("✅", "ping ok")))
     monkeypatch.setattr(xmpp, "_xmpp_check_disco", AsyncMock(return_value=("✅", "disco ok")))
     monkeypatch.setattr(xmpp, "_xmpp_check_version", AsyncMock(return_value=("ℹ️", "version unsupported")))
+    certificate = AsyncMock(return_value=("✅", "S2S TLS certificate is valid."))
+    monkeypatch.setattr(xmpp, "_xmpp_check_certificate", certificate)
 
     async def fake_to_thread(fn, *args, **kwargs):
         assert fn is xmpp._xmpp_check_srv
@@ -699,7 +751,9 @@ async def test_cmd_xmpp_check_replies_with_combined_diagnostics(monkeypatch, bot
         "✅ disco ok",
         "ℹ️ version unsupported",
         "✅ SRV records: _xmpp-client._tcp",
+        "✅ S2S TLS certificate is valid.",
     ]
+    certificate.assert_awaited_once_with("example.org")
 
 
 @pytest.mark.asyncio

@@ -269,7 +269,8 @@ Lower role values have more privileges. A command is visible when your role is s
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
 | `,xmpp` | [`xmpp`](plugins/xmpp.md) | `user` | `room or MUC PM` | Enable, disable or show room access to XMPP lookup commands. |
-| `,xmpp check` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Run combined XMPP service diagnostics. |
+| `,xmpp cert` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Check an XMPP server-to-server TLS certificate. |
+| `,xmpp check` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Run combined XMPP service and S2S TLS diagnostics. |
 | `,xmpp compliance` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Check XMPP compliance features via disco. |
 | `,xmpp contact` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Show contact addresses from service discovery. |
 | `,xmpp help` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Show help for XMPP lookup subcommands. |

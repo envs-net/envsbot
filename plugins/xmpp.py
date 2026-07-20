@@ -17,7 +17,8 @@ Commands:
                                       server (XEP-0030).
     {prefix}x info <domain|jid>     - Shows identities & features (XEP-0030).
     {prefix}x ping <domain|jid>     - Pings an XMPP entity (XEP-0199).
-    {prefix}x check <domain|jid>    - Run ping/disco/version/SRV diagnostics.
+    {prefix}x cert <domain>         - Check the XMPP S2S TLS certificate.
+    {prefix}x check <domain|jid>    - Run ping/disco/version/SRV/TLS diagnostics.
     {prefix}x uptime <domain>       - Shows the uptime of an XMPP server
                                       (XEP-0012).
     {prefix}x srv <domain>          - DNS SRV lookup.
@@ -49,6 +50,7 @@ XMPP_CERTIFICATE_PROBE_TIMEOUT_SECONDS = max(
     1.0,
     min(5.0, XMPP_QUERY_TIMEOUT_SECONDS),
 )
+XMPP_VALID_CERTIFICATE_MESSAGE = "S2S TLS certificate is valid."
 XMPP_COMPLIANCE_MAX_READ_BYTES = max(
     8192,
     int(config.get("xmpp_compliance_max_read_bytes", 262144) or 262144),
@@ -63,7 +65,7 @@ def _compliance_preview_complete(body: bytes) -> bool:
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.3.3",
+    "version": "0.3.4",
     "description":
     "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
@@ -79,7 +81,8 @@ XMPP Utility Commands:
   {prefix}x contact <domain>      - Show server contact information (XEP-0030)
   {prefix}x info <domain|jid>     - Show identities & features (XEP-0030)
   {prefix}x ping <domain|jid>     - Ping entity (XEP-0199)
-  {prefix}x check <domain|jid>    - Run ping/disco/version/SRV diagnostics
+  {prefix}x cert <domain>         - Check the XMPP S2S TLS certificate
+  {prefix}x check <domain|jid>    - Run ping/disco/version/SRV/TLS diagnostics
   {prefix}x uptime <domain>       - Show server uptime (XEP-0012)
   {prefix}x srv <domain>          - DNS SRV lookup
   {prefix}x compliance <domain>   - Compliance score
@@ -306,6 +309,8 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
             if err_condition == "remote-server-timeout":
                 certificate = await _diagnose_xmpp_server_certificate(target)
                 if certificate:
+                    if certificate == XMPP_VALID_CERTIFICATE_MESSAGE:
+                        certificate += " The timeout occurs later in federation."
                     reply += f"\n🔐 {certificate}"
             bot.reply(msg, reply)
     except Exception as e:
@@ -981,7 +986,7 @@ async def _probe_xmpp_server_certificate(
             )
         except ssl.SSLCertVerificationError as exc:
             return _certificate_verification_message(exc)
-        return "S2S TLS certificate is valid; the timeout occurs later in federation."
+        return XMPP_VALID_CERTIFICATE_MESSAGE
     except (OSError, asyncio.TimeoutError, ssl.SSLError):
         return None
     finally:
@@ -1021,6 +1026,67 @@ async def _diagnose_xmpp_server_certificate(domain: str) -> str | None:
     except (OSError, asyncio.TimeoutError):
         return None
     return None
+
+
+async def _xmpp_check_certificate(domain: str) -> tuple[str, str]:
+    """Return one compact certificate status line for manual and full checks."""
+    try:
+        certificate = await _diagnose_xmpp_server_certificate(domain)
+    except Exception as exc:
+        return "🔴", f"certificate check failed: {exc}"
+    if certificate is None:
+        return "⚠️", "S2S TLS certificate could not be checked."
+    if certificate == XMPP_VALID_CERTIFICATE_MESSAGE:
+        return "✅", certificate
+    return "🔴", certificate
+
+
+@command(
+    "xmpp cert",
+    role=Role.USER,
+    aliases=["x cert", "xmpp certificate", "x certificate"],
+    short="Check an XMPP server-to-server TLS certificate.",
+    usage="{prefix}xmpp cert <domain>",
+    examples=["{prefix}x cert envs.net"],
+    category="xmpp",
+    context="any",
+)
+async def cmd_xmpp_cert(bot, sender_jid, nick, args, msg, is_room):
+    """Check the S2S STARTTLS certificate used by an XMPP domain."""
+    store = await get_xmpp_store(bot)
+    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+        return
+
+    if not args:
+        bot.reply(
+            msg,
+            f"❌ Missing domain\nUsage: {config.get('prefix', ',')}x cert <domain>",
+        )
+        return
+
+    raw_target = str(args[0]).strip()
+    domain = get_domain_from_jid(raw_target).split("/", 1)[0]
+    is_valid, error_msg = _validate_domain(domain)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
+    if "@" in raw_target:
+        bot.reply(
+            msg,
+            "Note: 'cert' only works with domains."
+            f" Using '{domain}' from '{raw_target}'.",
+        )
+
+    status, line = await _xmpp_check_certificate(domain)
+    bot.reply(
+        msg,
+        [
+            f"🔐 S2S TLS certificate check for {domain}",
+            f"{status} {line}",
+        ],
+    )
 
 
 def _build_xmpp_srv_result(domain, services, srv_records):
@@ -1167,11 +1233,6 @@ async def _xmpp_check_version(bot, target: str) -> tuple[str, str]:
         condition = _get_iq_error_condition(exc)
         if condition == "service-unavailable":
             return "ℹ️", "version: unsupported"
-        if condition == "remote-server-timeout":
-            domain = get_domain_from_jid(str(target)).split("/", 1)[0]
-            certificate = await _diagnose_xmpp_server_certificate(domain)
-            if certificate:
-                return "⚠️", f"version: {condition}; {certificate}"
         return "⚠️", f"version: {condition}"
     except Exception as exc:
         return "⚠️", f"version: {exc}"
@@ -1230,7 +1291,7 @@ def _xmpp_check_srv(domain: str) -> tuple[str, str]:
     "xmpp check",
     role=Role.USER,
     aliases=["x check"],
-    short="Run combined XMPP service diagnostics.",
+    short="Run combined XMPP service and S2S TLS diagnostics.",
     usage="{prefix}xmpp check <domain|jid>",
     examples=["{prefix}x check envs.net", "{prefix}x check conference.envs.net"],
     category="xmpp",
@@ -1259,10 +1320,19 @@ async def cmd_xmpp_check(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, f"❌ Invalid target: {error_msg}")
         return
 
-    ping_status, ping_line = await _xmpp_check_ping(bot, target)
-    disco_status, disco_line = await _xmpp_check_disco(bot, target)
-    version_status, version_line = await _xmpp_check_version(bot, target)
-    srv_status, srv_line = await asyncio.to_thread(_xmpp_check_srv, domain)
+    (
+        (ping_status, ping_line),
+        (disco_status, disco_line),
+        (version_status, version_line),
+        (srv_status, srv_line),
+        (certificate_status, certificate_line),
+    ) = await asyncio.gather(
+        _xmpp_check_ping(bot, target),
+        _xmpp_check_disco(bot, target),
+        _xmpp_check_version(bot, target),
+        asyncio.to_thread(_xmpp_check_srv, domain),
+        _xmpp_check_certificate(domain),
+    )
 
     lines = [
         f"🩺 XMPP check for {target}",
@@ -1270,6 +1340,7 @@ async def cmd_xmpp_check(bot, sender_jid, nick, args, msg, is_room):
         f"{disco_status} {disco_line}",
         f"{version_status} {version_line}",
         f"{srv_status} {srv_line}",
+        f"{certificate_status} {certificate_line}",
     ]
     bot.reply(msg, lines)
 

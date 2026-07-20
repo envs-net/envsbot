@@ -28,9 +28,24 @@ Examples:
 
 - `,xmpp status`
 
+### `,xmpp cert`
+
+Check an XMPP server-to-server TLS certificate.
+
+Role: `user`<br>
+Context: `any`<br>
+Category: `xmpp`<br>
+Usage: `,xmpp cert <domain>`
+
+Aliases: `,x cert`, `,x certificate`, `,xmpp certificate`
+
+Examples:
+
+- `,x cert envs.net`
+
 ### `,xmpp check`
 
-Run combined XMPP service diagnostics.
+Run combined XMPP service and S2S TLS diagnostics.
 
 Role: `user`<br>
 Context: `any`<br>
