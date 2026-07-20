@@ -53,7 +53,7 @@ PLUGIN_META = {
     "name": "ducks",
     "version": "1.4.1",
     "description": "Duck game for MUCs with room toggles and leaderboards",
-    "category": "fun",
+    "category": "games",
     "requires": ["rooms", "_core"],
 }
 

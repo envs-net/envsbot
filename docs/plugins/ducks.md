@@ -7,7 +7,7 @@ python scripts/generate_commands_md.py
 ```
 
 Source: `plugins`
-Category: `fun`
+Category: `games`
 
 Duck game for MUCs with room toggles and leaderboards
 

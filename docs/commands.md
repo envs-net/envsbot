@@ -82,10 +82,10 @@ Lower role values have more privileges. A command is visible when your role is s
 | `rooms` | `core` | `core` | Database-backed room management | [`docs/plugins/rooms.md`](plugins/rooms.md) |
 | `tasks` | `core` | `core` | Inspect supervised background tasks. | [`docs/plugins/tasks.md`](plugins/tasks.md) |
 | `users` | `core` | `core` | User management with caching, nick lookup and logging | [`docs/plugins/users.md`](plugins/users.md) |
-| `birthday_notify` | `plugins` | `fun` | Automatic birthday notifications in rooms (opt-in per room) | [`docs/plugins/birthday_notify.md`](plugins/birthday_notify.md) |
+| `birthday_notify` | `plugins` | `info` | Automatic birthday notifications in rooms (opt-in per room) | [`docs/plugins/birthday_notify.md`](plugins/birthday_notify.md) |
 | `dice` | `plugins` | `games` | Roll dice with optional modifiers and success conditions. | [`docs/plugins/dice.md`](plugins/dice.md) |
-| `ducks` | `plugins` | `fun` | Duck game for MUCs with room toggles and leaderboards | [`docs/plugins/ducks.md`](plugins/ducks.md) |
-| `idlerpg` | `plugins` | `fun` | IdleRPG game for MUCs, inspired by the classic IRC game | [`docs/plugins/idlerpg.md`](plugins/idlerpg.md) |
+| `ducks` | `plugins` | `games` | Duck game for MUCs with room toggles and leaderboards | [`docs/plugins/ducks.md`](plugins/ducks.md) |
+| `idlerpg` | `plugins` | `games` | IdleRPG game for MUCs, inspired by the classic IRC game | [`docs/plugins/idlerpg.md`](plugins/idlerpg.md) |
 | `info` | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. | [`docs/plugins/info.md`](plugins/info.md) |
 | `karma` | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- | [`docs/plugins/karma.md`](plugins/karma.md) |
 | `pin` | `plugins` | `utility` | Pin room messages with paging, search, tags, important pins and non-reply fallback. | [`docs/plugins/pin.md`](plugins/pin.md) |

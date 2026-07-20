@@ -83,3 +83,16 @@ def test_cross_plugin_imports_are_declared_as_dependencies():
     for module_name, dependencies in expected.items():
         metadata = import_module(module_name).PLUGIN_META
         assert dependencies <= set(metadata.get("requires", [])), module_name
+
+
+def test_plugin_categories_match_help_grouping():
+    expected = {
+        "core_plugins._core": "core",
+        "plugins.birthday_notify": "info",
+        "plugins.ducks": "games",
+        "plugins.idlerpg": "games",
+    }
+
+    for module_name, category in expected.items():
+        metadata = import_module(module_name).PLUGIN_META
+        assert metadata["category"] == category, module_name

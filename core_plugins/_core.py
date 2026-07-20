@@ -32,7 +32,7 @@ PLUGIN_META = {
     "name": "_core",
     "version": "0.4.0",
     "description": "Core utilities and shared helpers for other plugins.",
-    "category": "internal",
+    "category": "core",
     "requires": [],
     "hidden": True,         # Optional: Hide from user plugin listings
 }

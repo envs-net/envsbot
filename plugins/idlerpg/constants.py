@@ -7,7 +7,7 @@ PLUGIN_META = {
     "name": "idlerpg",
     "version": "1.0.0",
     "description": "IdleRPG game for MUCs, inspired by the classic IRC game",
-    "category": "fun",
+    "category": "games",
     "requires": ["rooms", "_core"],
 }
 

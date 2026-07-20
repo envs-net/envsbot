@@ -53,7 +53,7 @@ PLUGIN_META = {
     "version": "1.1.1",
     "description":
         "Automatic birthday notifications in rooms (opt-in per room)",
-    "category": "fun",
+    "category": "info",
     "requires": ["rooms", "_core", "vcard"],
 }
 
