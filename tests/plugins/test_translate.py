@@ -109,13 +109,19 @@ def test_parse_translation_args_uses_configured_defaults(monkeypatch):
     assert explicit == translate.TranslationRequest("auto", "uk", "Hello")
 
 
-def test_parse_translation_args_accepts_auto_with_configured_target(monkeypatch):
+def test_parse_translation_args_treats_auto_as_text_with_configured_target(
+    monkeypatch,
+):
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "en")
     monkeypatch.setattr(translate, "TRANSLATE_TO", "de")
 
-    request = translate._parse_translation_args(["auto", "Hello", "world"])
+    single_word = translate._parse_translation_args(["auto"])
+    phrase = translate._parse_translation_args(["auto", "repair", "shop"])
+    explicit_languages = translate._parse_translation_args(["auto", "de"])
 
-    assert request == translate.TranslationRequest("auto", "de", "Hello world")
+    assert single_word == translate.TranslationRequest("en", "de", "auto")
+    assert phrase == translate.TranslationRequest("en", "de", "auto repair shop")
+    assert explicit_languages == translate.TranslationRequest("auto", "de", "")
 
 
 def test_parse_translation_args_validates_configured_defaults(monkeypatch):
@@ -257,6 +263,41 @@ async def test_translate_command_uses_defaults_for_direct_text(monkeypatch):
         source_language="en",
     )
     bot.reply.assert_called_once_with(msg, "Hallo Welt!", mention=False)
+
+
+@pytest.mark.asyncio
+async def test_translate_command_treats_auto_as_text_with_default_target(
+    monkeypatch,
+):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(
+        ",tr auto",
+        room="alice@example.org",
+        msg_type="chat",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "en")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "de")
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    worker = AsyncMock(return_value=translate.TranslationResult("Auto", "en"))
+    monkeypatch.setattr(translate, "translate_text", worker)
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["auto"],
+        msg,
+        False,
+    )
+
+    worker.assert_awaited_once_with(
+        "auto",
+        target_language="de",
+        source_language="en",
+    )
+    bot.reply.assert_called_once_with(msg, "Auto", mention=False)
 
 
 @pytest.mark.asyncio

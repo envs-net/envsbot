@@ -48,6 +48,8 @@ Reply to a message with ,tr
 
 A target argument such as `,tr pl Text` overrides `TRANSLATE_TO`; an explicit pair such as `,tr en uk Text` overrides both defaults. The settings are applied by `,config reload` without restarting the bot.
 
+With `TRANSLATE_TO` configured, `,tr auto` translates the literal word `auto`. To explicitly select automatic source detection for a reply, include the target too, for example `,tr auto de`.
+
 The command works in public rooms, MUC private messages and normal direct chats. Reply to an existing message and omit the text to translate the replied-to message:
 
 ```text
@@ -97,6 +99,7 @@ Examples:
 - `,tr uk Hallo Welt!`
 - `,tr auto pl Guten Morgen`
 - `With TRANSLATE_TO configured: ,tr Hello, world!`
+- `With TRANSLATE_TO configured: ,tr auto`
 - `With TRANSLATE_TO configured, reply with ,tr`
 - `Reply in a room, MUC PM or private chat with ,tr en uk`
 - `Reply in a room, MUC PM or private chat with ,tr uk`

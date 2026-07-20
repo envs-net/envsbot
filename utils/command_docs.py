@@ -322,6 +322,8 @@ def _translate_notes() -> list[str]:
         "",
         "A target argument such as `,tr pl Text` overrides `TRANSLATE_TO`; an explicit pair such as `,tr en uk Text` overrides both defaults. The settings are applied by `,config reload` without restarting the bot.",
         "",
+        f"With `TRANSLATE_TO` configured, `{PREFIX}tr auto` translates the literal word `auto`. To explicitly select automatic source detection for a reply, include the target too, for example `{PREFIX}tr auto de`.",
+        "",
         "The command works in public rooms, MUC private messages and normal direct chats. Reply to an existing message and omit the text to translate the replied-to message:",
         "",
         "```text",

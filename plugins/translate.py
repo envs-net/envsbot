@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": (
         "Translate text or replied-to messages with optional "
         "source-language auto-detection."
@@ -183,7 +183,9 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
     When the first two tokens are language codes they are interpreted as an
     explicit source/target pair. A leading language code otherwise overrides
     the configured target. When no leading language code is present, the
-    complete argument list is text for the configured target language.
+    complete argument list is text for the configured target language. Since
+    ``auto`` cannot be a target language, it remains text unless a supported
+    target code follows it explicitly.
     """
     tokens = [str(item) for item in args]
     source = _configured_source_language()
@@ -221,8 +223,11 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
             text_start = 2
 
     if target == "auto" and configured_target is not None:
-        source = "auto"
-        target = configured_target
+        return TranslationRequest(
+            source_language=source,
+            target_language=configured_target,
+            text=" ".join(tokens).strip(),
+        )
 
     if target == "auto":
         raise TranslationUsageError("The target language cannot be 'auto'.")
@@ -419,6 +424,7 @@ async def _room_translation_enabled(bot, msg, is_room: bool) -> bool:
         "{prefix}tr uk Hallo Welt!",
         "{prefix}tr auto pl Guten Morgen",
         "With TRANSLATE_TO configured: {prefix}tr Hello, world!",
+        "With TRANSLATE_TO configured: {prefix}tr auto",
         "With TRANSLATE_TO configured, reply with {prefix}tr",
         "Reply in a room, MUC PM or private chat with {prefix}tr en uk",
         "Reply in a room, MUC PM or private chat with {prefix}tr uk",
