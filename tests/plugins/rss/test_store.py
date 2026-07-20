@@ -98,6 +98,15 @@ async def test_rss_room_template_store_helpers(make_bot):
     bot = make_bot()
     store = bot.plugin_store
 
+    assert await rss.get_default_template(store) is None
+    await rss.set_default_template(store, "GLOBAL $title")
+    assert await rss.get_default_template(store) == "GLOBAL $title"
+    assert await rss.get_effective_template(
+        store,
+        "room@conference.example.org",
+        "https://example.org/feed.xml",
+    ) == "GLOBAL $title"
+
     await rss.set_room_template(store, "Room@Conference.Example.org", "$title")
 
     assert await rss.get_room_template(store, "room@conference.example.org") == "$title"
@@ -143,6 +152,9 @@ async def test_rss_room_template_store_helpers(make_bot):
         "https://example.org/feed.xml",
     ) is False
     assert await rss.get_feed_templates(store) == {}
+    assert await rss.unset_default_template(store) is True
+    assert await rss.unset_default_template(store) is False
+    assert await rss.get_default_template(store) is None
 
 
 @pytest.mark.asyncio

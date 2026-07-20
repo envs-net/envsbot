@@ -5,7 +5,7 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.4",
+    "version": "0.2.5",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms", "_core", "users"],
@@ -13,6 +13,7 @@ PLUGIN_META = {
 
 
 RSS_KEY = "RSS"
+RSS_DEFAULT_TEMPLATE_KEY = "RSS_DEFAULT_TEMPLATE"
 RSS_TEMPLATES_KEY = "RSS_TEMPLATES"
 RSS_FEED_TEMPLATES_KEY = "RSS_FEED_TEMPLATES"
 
@@ -99,6 +100,7 @@ RSS_BROKEN_ERROR_THRESHOLD = max(
 __all__ = [
     'PLUGIN_META',
     'RSS_KEY',
+    'RSS_DEFAULT_TEMPLATE_KEY',
     'RSS_TEMPLATES_KEY',
     'RSS_FEED_TEMPLATES_KEY',
     'DEFAULT_RSS_TEMPLATE',

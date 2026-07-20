@@ -47,15 +47,18 @@ from .store import (
     _now,
     _set_feed_field,
     get_effective_template,
+    get_default_template,
     get_feed_template,
     get_feeds,
     get_room_template,
     log,
     save_feeds,
     set_feed_template,
+    set_default_template,
     set_room_template,
     unset_feed_template,
     unset_feed_templates_for_feed,
+    unset_default_template,
     unset_room_template,
 )
 from .tasks import (
@@ -240,7 +243,7 @@ async def _sender_can_manage_template(
         return False
     return await _sender_can_manage_rss_room(bot, sender_jid, room)
 async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
-    """Handle room- and feed-scoped RSS template commands."""
+    """Handle global-, room-, and feed-scoped RSS template commands."""
     if not args:
         action = "show"
         rest = []
@@ -256,18 +259,33 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
             action = "show"
             rest = list(args)
 
-    room, feed_url, rest = _split_template_scope_args(msg, is_room, rest)
-    if not room:
-        bot.reply(msg, _rss_template_usage(bot))
-        return
+    global_default = bool(
+        rest and str(rest[0]).strip().lower() in {"default", "global"}
+    )
+    if global_default:
+        rest.pop(0)
+        room = None
+        feed_url = None
+        if not await _sender_can_manage_rss_globally(bot, sender_jid):
+            bot.reply(
+                msg,
+                "🔴 You need a global moderator role to manage the default "
+                "RSS template.",
+            )
+            return
+    else:
+        room, feed_url, rest = _split_template_scope_args(msg, is_room, rest)
+        if not room:
+            bot.reply(msg, _rss_template_usage(bot))
+            return
 
-    if not await _sender_can_manage_template(bot, sender_jid, room):
-        bot.reply(
-            msg,
-            "🔴 You need a global moderator role, or an RSS plugin grant "
-            f"and owner/admin affiliation in {room}.",
-        )
-        return
+        if not await _sender_can_manage_template(bot, sender_jid, room):
+            bot.reply(
+                msg,
+                "🔴 You need a global moderator role, or an RSS plugin grant "
+                f"and owner/admin affiliation in {room}.",
+            )
+            return
 
     feed = None
     if feed_url:
@@ -276,28 +294,44 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
             bot.reply(msg, f"🔴 Feed is not configured for {room}: {feed_url}")
             return
 
-    scope = f"{room} / {feed_url}" if feed_url else room
+    scope = (
+        "global default"
+        if global_default
+        else f"{room} / {feed_url}" if feed_url else room
+    )
 
     if action == "show":
         if rest:
             bot.reply(msg, _rss_template_usage(bot))
             return
-        if feed_url:
+        if global_default:
+            template = await get_default_template(store)
+            source = "custom" if template else "built-in"
+            template = template or DEFAULT_RSS_TEMPLATE
+        elif feed_url:
             feed_template = await get_feed_template(store, room, feed_url)
             room_template = await get_room_template(store, room)
+            default_template = await get_default_template(store)
             if feed_template:
                 source = "feed custom"
                 template = feed_template
             elif room_template:
                 source = "room custom"
                 template = room_template
+            elif default_template:
+                source = "global default"
+                template = default_template
             else:
-                source = "default"
+                source = "built-in default"
                 template = DEFAULT_RSS_TEMPLATE
         else:
             template = await get_room_template(store, room)
-            source = "custom" if template else "default"
-            template = template or DEFAULT_RSS_TEMPLATE
+            if template:
+                source = "custom"
+            else:
+                template = await get_default_template(store)
+                source = "global default" if template else "built-in default"
+                template = template or DEFAULT_RSS_TEMPLATE
         bot.reply(
             msg,
             f"🧩 RSS template for {scope} ({source}):\n"
@@ -309,7 +343,12 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         if rest:
             bot.reply(msg, _rss_template_usage(bot))
             return
-        if feed_url:
+        if global_default:
+            removed = await unset_default_template(store)
+            event_type = "rss_default_template_unset"
+            success = "✅ Global default RSS template reset to the built-in default."
+            unchanged = "ℹ️ The built-in default RSS template is already active."
+        elif feed_url:
             removed = await unset_feed_template(store, room, feed_url)
             event_type = "rss_feed_template_unset"
             success = f"✅ RSS feed template reset for {scope}."
@@ -333,8 +372,8 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
 
     if action == "test":
         template = _join_template_args(rest) if rest else (
-            await get_effective_template(store, room, feed_url)
-            if feed_url else await get_room_template(store, room)
+            await get_default_template(store)
+            if global_default else await get_effective_template(store, room, feed_url)
         ) or DEFAULT_RSS_TEMPLATE
         error = _validate_rss_template(template)
         if error:
@@ -353,7 +392,11 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         if error:
             bot.reply(msg, f"🔴 {error}\n{_rss_template_variables_text()}")
             return
-        if feed_url:
+        if global_default:
+            await set_default_template(store, template)
+            event_type = "rss_default_template_set"
+            success = "✅ Global default RSS template set for all rooms."
+        elif feed_url:
             await set_feed_template(store, room, feed_url, template)
             event_type = "rss_feed_template_set"
             success = f"✅ RSS feed template set for {scope}."
@@ -498,6 +541,7 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
         "{prefix}rss reset all",
         "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss template",
+        "{prefix}rss template set default 📰 $feed_title: $title\n$link",
         "{prefix}rss template set 📰 $feed_title: $title\n$link",
         "{prefix}rss template test [$feed_title] $title",
         "{prefix}rss template unset",
@@ -521,7 +565,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss pause|resume <feedurl> [room_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [room_jid] [page|all|last]
-    {prefix}rss template [show|set|unset|test] [room_jid] [feedurl] [template]
+    {prefix}rss template [show|set|unset|test] [default|room_jid] [feedurl] [template]
     """
     store = bot.db.users.plugin("rss")
 

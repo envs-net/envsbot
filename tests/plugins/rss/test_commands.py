@@ -489,7 +489,7 @@ async def test_rss_template_show_set_test_unset(make_bot):
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
     await rss.rss_command(bot, "jid", "nick", ["template"], msg, True)
-    assert "RSS template for room@conference.example.org (default)" in bot.replies[-1][1]
+    assert "RSS template for room@conference.example.org (built-in default)" in bot.replies[-1][1]
     assert "$summary_line" in bot.replies[-1][1]
 
     await rss.rss_command(
@@ -521,6 +521,87 @@ async def test_rss_template_show_set_test_unset(make_bot):
     await rss.rss_command(bot, "jid", "nick", ["template", "unset"], msg, True)
     assert "reset to default" in bot.replies[-1][1]
     assert bot.plugin_store[rss.RSS_TEMPLATES_KEY] == {}
+
+
+@pytest.mark.asyncio
+async def test_rss_global_default_template_show_set_test_unset(make_bot):
+    bot = make_bot()
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    await rss.rss_command(
+        bot, "admin@example.org", "admin", ["template", "default"], msg, False
+    )
+    assert "RSS template for global default (built-in)" in bot.replies[-1][1]
+    assert rss.DEFAULT_RSS_TEMPLATE in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "set", "default", "GLOBAL", "$title\\n$link"],
+        msg,
+        False,
+    )
+    assert "Global default RSS template set for all rooms" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_DEFAULT_TEMPLATE_KEY] == "GLOBAL $title\n$link"
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "show", "global"],
+        msg,
+        False,
+    )
+    assert "RSS template for global default (custom)" in bot.replies[-1][1]
+
+    room = "room@conference.example.org"
+    room_msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+    await rss.rss_command(
+        bot, "admin@example.org", "admin", ["template", "show"], room_msg, True
+    )
+    assert "(global default)" in bot.replies[-1][1]
+    assert "GLOBAL $title" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "test", "default"],
+        msg,
+        False,
+    )
+    assert "GLOBAL Example entry" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "unset", "default"],
+        msg,
+        False,
+    )
+    assert "reset to the built-in default" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_DEFAULT_TEMPLATE_KEY] is None
+
+
+@pytest.mark.asyncio
+async def test_rss_global_default_template_requires_global_moderator(make_bot):
+    bot = make_bot()
+    bot.get_user_role = AsyncMock(return_value=Role.USER)
+    msg = {"from": SimpleNamespace(bare="user@example.org"), "type": "chat"}
+
+    await rss.rss_command(
+        bot,
+        "user@example.org",
+        "user",
+        ["template", "set", "default", "$title"],
+        msg,
+        False,
+    )
+
+    assert "global moderator role" in bot.replies[-1][1]
+    assert rss.RSS_DEFAULT_TEMPLATE_KEY not in bot.plugin_store
 
 
 
@@ -805,7 +886,7 @@ async def test_rss_feed_template_command_private_room_and_default_paths(make_bot
         msg,
         False,
     )
-    assert "(default)" in bot.replies[-1][1]
+    assert "(built-in default)" in bot.replies[-1][1]
     assert rss.DEFAULT_RSS_TEMPLATE in bot.replies[-1][1]
 
     await rss.rss_command(

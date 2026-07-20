@@ -13,7 +13,7 @@ RSS/Atom feed watcher and poster
 
 ## RSS templates
 
-RSS posts can use a room-wide template or a feed-specific template. Feed-specific templates take precedence over the room template, and the room template takes precedence over the built-in default.
+RSS posts can use a global default, a room-wide template or a feed-specific template. The priority is: feed-specific template, room template, global default, built-in default.
 
 ### Template variables
 
@@ -50,6 +50,19 @@ The stored and rendered message is equivalent to:
 ```
 
 Do not add an accidental space after `\n` unless the following line should be indented. For example, use `📝\n$summary`, not `📝\n $summary`.
+
+### Global default template
+
+Global moderators can set one persistent default for every room that has no room- or feed-specific override:
+
+```text
+,rss template show default
+,rss template set default 🌐 $feed_link\n📰 $title\n📝 $summary\n🔗 $link\n\n
+,rss template test default
+,rss template unset default
+```
+
+`unset default` restores the built-in RSS template. The alias `global` can be used instead of `default`.
 
 ### Room-wide templates
 
@@ -110,6 +123,7 @@ Examples:
 - `,rss reset all`
 - `,rss retry https://example.org/feed.rss room@conference.example.org`
 - `,rss template`
+- `,rss template set default 📰 $feed_title: $title\n$link`
 - `,rss template set 📰 $feed_title: $title\n$link`
 - `,rss template test [$feed_title] $title`
 - `,rss template unset`

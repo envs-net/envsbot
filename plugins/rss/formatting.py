@@ -53,7 +53,8 @@ def _rss_template_usage(bot=None) -> str:
         f"Usage: {prefix}rss template [show] [room_jid] [feedurl]\n"
         f"       {prefix}rss template set [room_jid] [feedurl] <template>\n"
         f"       {prefix}rss template unset [room_jid] [feedurl]\n"
-        f"       {prefix}rss template test [room_jid] [feedurl] [template]"
+        f"       {prefix}rss template test [room_jid] [feedurl] [template]\n"
+        f"       {prefix}rss template <show|set|unset|test> default [template]"
     )
 def _rss_template_variables_text() -> str:
     """Return the supported template variables as a readable list."""

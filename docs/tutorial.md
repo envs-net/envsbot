@@ -197,10 +197,13 @@ Common maintenance commands:
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
-Room owners/admins can customize RSS post formatting per room and, optionally, for a specific feed in that room. Feed-specific templates override the room template; room templates override the default output. Supported variables include `$feed_title`, `$title`, `$summary`, `$summary_line`, `$link`, `$feed_url`, `$feed_link`, `$id`, and `$date`. Use `\n` for a newline and `$$` for a literal dollar sign.
+Global moderators can set a persistent default RSS template for all rooms. Room owners/admins can customize RSS post formatting per room and, optionally, for a specific feed in that room. The priority is feed-specific template → room template → global default → built-in default. Supported variables include `$feed_title`, `$title`, `$summary`, `$summary_line`, `$link`, `$feed_url`, `$feed_link`, `$id`, and `$date`. Use `\n` for a newline and `$$` for a literal dollar sign.
 
 ```text
 ,rss template
+,rss template set default 🌐 $feed_link\n📰 $title\n🔗 $link\n\n
+,rss template show default
+,rss template unset default
 ,rss template set 📰 $feed_title: $title\n$link
 ,rss template set https://example.org/feed.rss [$feed_title] $title
 ,rss template test [$feed_title] $title

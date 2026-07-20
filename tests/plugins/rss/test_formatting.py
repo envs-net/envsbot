@@ -208,11 +208,12 @@ async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
     url = "https://example.org/feed.xml"
     room_a = "room-a@conference.example.org"
     room_b = "room-b@conference.example.org"
+    room_c = "room-c@conference.example.org"
     store[rss.RSS_KEY] = {
         url: {
             "title": "Feed",
             "link": "https://example.org/",
-            "rooms": [room_a, room_b],
+            "rooms": [room_a, room_b, room_c],
             "last_id": "old",
         }
     }
@@ -223,8 +224,10 @@ async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
         room_a: {url: "FEED $title -> $feed_url"},
         room_b: {"https://example.org/other.xml": "IGNORED $title"},
     }
+    store[rss.RSS_DEFAULT_TEMPLATE_KEY] = "GLOBAL $title -> $link"
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room_a, True)
     monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room_b, True)
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room_c, True)
 
     entry = Entry(
         title="Entry",
@@ -239,13 +242,14 @@ async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
         url,
         "Feed",
         "https://example.org/",
-        [room_a, room_b],
+        [room_a, room_b, room_c],
         [(entry, "entry-1")],
     )
 
     posted = [reply[1] for reply in bot.replies]
     assert "FEED Entry -> https://example.org/feed.xml" in posted
     assert "CUSTOM Feed :: Entry :: https://example.org/a" in posted
+    assert "GLOBAL Entry -> https://example.org/a" in posted
     assert store[rss.RSS_KEY][url]["last_id"] == "entry-1"
 
 

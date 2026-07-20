@@ -8,6 +8,7 @@ import time
 
 from .config import (
     MAX_BACKOFF_TIME,
+    RSS_DEFAULT_TEMPLATE_KEY,
     RSS_FEED_TEMPLATES_KEY,
     RSS_KEY,
     RSS_RETRY_BACKOFF_MULTIPLIER,
@@ -43,6 +44,21 @@ async def _flush_user_store(bot):
 async def get_rss_store(bot):
     """Return the runtime store for RSS feed state."""
     return bot.db.users.plugin("rss")
+async def get_default_template(store) -> str | None:
+    """Return the custom global RSS template, if one is configured."""
+    template = await store.get_global(RSS_DEFAULT_TEMPLATE_KEY, default=None)
+    if not isinstance(template, str) or not template.strip():
+        return None
+    return template
+async def set_default_template(store, template: str) -> None:
+    """Persist the custom global RSS template used by all rooms."""
+    await store.set_global(RSS_DEFAULT_TEMPLATE_KEY, template)
+async def unset_default_template(store) -> bool:
+    """Remove the custom global RSS template."""
+    if await get_default_template(store) is None:
+        return False
+    await store.set_global(RSS_DEFAULT_TEMPLATE_KEY, None)
+    return True
 async def get_room_templates(store) -> dict[str, str]:
     """Return custom RSS templates keyed by normalized room JID."""
     templates = await store.get_global(RSS_TEMPLATES_KEY, default={})
@@ -147,11 +163,14 @@ async def unset_feed_templates_for_room(store, room: str) -> int:
         await save_feed_templates(store, templates)
     return removed
 async def get_effective_template(store, room: str, url: str) -> str | None:
-    """Return the room/feed template override, falling back to room template."""
+    """Return the feed, room, or global RSS template override."""
     feed_template = await get_feed_template(store, room, url)
     if feed_template:
         return feed_template
-    return await get_room_template(store, room)
+    room_template = await get_room_template(store, room)
+    if room_template:
+        return room_template
+    return await get_default_template(store)
 async def get_room_template(store, room: str) -> str | None:
     """Return the custom RSS template for a room, if one is configured."""
     templates = await get_room_templates(store)
