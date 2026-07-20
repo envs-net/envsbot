@@ -109,6 +109,23 @@ def test_parse_translation_args_uses_configured_defaults(monkeypatch):
     assert explicit == translate.TranslationRequest("auto", "uk", "Hello")
 
 
+def test_parse_translation_args_auto_detects_when_shorthand_would_be_noop(
+    monkeypatch,
+):
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "en")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "en")
+
+    reply = translate._parse_translation_args([])
+    direct = translate._parse_translation_args(["Hausaufgaben"])
+    target_override = translate._parse_translation_args(["en", "Blume"])
+    explicit = translate._parse_translation_args(["en", "en", "flower"])
+
+    assert reply == translate.TranslationRequest("auto", "en", "")
+    assert direct == translate.TranslationRequest("auto", "en", "Hausaufgaben")
+    assert target_override == translate.TranslationRequest("auto", "en", "Blume")
+    assert explicit == translate.TranslationRequest("en", "en", "flower")
+
+
 def test_parse_translation_args_treats_auto_as_text_with_configured_target(
     monkeypatch,
 ):
@@ -197,6 +214,32 @@ def test_provider_payload_helpers_cover_nested_detection_and_errors():
         translate._translation_text_from_payload({"bad": "shape"})
     with pytest.raises(translate.TranslationProviderError):
         translate._translation_text_from_payload([[]])
+
+
+def test_auto_detection_noop_response_recommends_explicit_source():
+    request = translate.TranslationRequest("auto", "en", "Blume")
+    result = translate.TranslationResult("Blume", "en")
+
+    direct = translate._format_translation_response(
+        "Blume", request, result, is_room=False
+    )
+    room = translate._format_translation_response(
+        "Blume", request, result, is_room=True
+    )
+
+    assert "Auto-detection returned the text unchanged" in direct
+    assert "detected: en" in direct
+    assert ",tr de en <text>" in direct
+    assert room == f"> Blume\n\n{direct}"
+
+
+def test_explicit_source_keeps_unchanged_provider_response():
+    request = translate.TranslationRequest("de", "en", "Blume")
+    result = translate.TranslationResult("Blume", "de")
+
+    assert translate._format_translation_response(
+        "Blume", request, result, is_room=False
+    ) == "Blume"
 
 
 @pytest.mark.asyncio

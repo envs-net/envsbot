@@ -578,7 +578,7 @@ def test_build_reply_message_formats_groupchat_private_and_hints(bot):
         mention=True,
         thread=True,
         ephemeral=False,
-        no_store=False,
+        no_store=None,
     )
 
     assert message is private_msg_obj
@@ -590,6 +590,17 @@ def test_build_reply_message_formats_groupchat_private_and_hints(bot):
     )
     private_msg_obj.__setitem__.assert_called_with("thread", "thread-1")
     private_msg_obj.append.assert_not_called()
+
+    private_msg_obj.reset_mock()
+    bot._build_reply_message(
+        private_msg,
+        "temporary",
+        mention=False,
+        thread=False,
+        ephemeral=True,
+        no_store=None,
+    )
+    private_msg_obj.append.assert_called_once()
 
 
 @pytest.mark.asyncio

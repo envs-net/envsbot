@@ -60,7 +60,7 @@ class MessageMixin:
                         log.debug("[BOT] Setting thread failed!")
 
         if no_store is None:
-            no_store = ephemeral or msg_type != "groupchat"
+            no_store = ephemeral
         if no_store:
             message.append(ET.Element("{urn:xmpp:hints}no-store"))
 

@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": (
         "Translate text or replied-to messages with optional "
         "source-language auto-detection."
@@ -177,6 +177,11 @@ def _configured_target_language() -> str | None:
     return target
 
 
+def _default_source_for_target(source: str, target: str) -> str:
+    """Avoid a no-op when a shorthand target equals the default source."""
+    return "auto" if source == target else source
+
+
 def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationRequest:
     """Parse compatible arguments with optional configured defaults.
 
@@ -195,7 +200,7 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
         if configured_target is None:
             raise TranslationUsageError("Missing target language.")
         return TranslationRequest(
-            source_language=source,
+            source_language=_default_source_for_target(source, configured_target),
             target_language=configured_target,
             text="",
         )
@@ -207,13 +212,14 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
                 f"Unsupported language code '{tokens[0]}'. Use ISO language codes such as de, en, pl or uk."
             )
         return TranslationRequest(
-            source_language=source,
+            source_language=_default_source_for_target(source, configured_target),
             target_language=configured_target,
             text=" ".join(tokens).strip(),
         )
 
     target = first
     text_start = 1
+    explicit_source = False
 
     if len(tokens) >= 2:
         second = _normalize_language_code(tokens[1])
@@ -221,6 +227,7 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
             source = first
             target = second
             text_start = 2
+            explicit_source = True
 
     if target == "auto" and configured_target is not None:
         return TranslationRequest(
@@ -231,6 +238,9 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
 
     if target == "auto":
         raise TranslationUsageError("The target language cannot be 'auto'.")
+
+    if not explicit_source:
+        source = _default_source_for_target(source, target)
 
     return TranslationRequest(
         source_language=source,
@@ -332,6 +342,36 @@ def _detected_language_from_payload(data: Any) -> str | None:
     except (IndexError, KeyError, TypeError):
         return None
     return _normalize_language_code(nested) or None
+
+
+def _normalized_translation_text(value: object) -> str:
+    """Normalize provider text for unchanged-result detection."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _format_translation_response(
+    original_text: str,
+    request: TranslationRequest,
+    result: TranslationResult,
+    *,
+    is_room: bool,
+) -> str:
+    """Format a translation and explain ambiguous automatic no-op results."""
+    translated = result.text
+    if (
+        request.source_language == "auto"
+        and _normalized_translation_text(original_text)
+        == _normalized_translation_text(result.text)
+    ):
+        detected = result.source_language or "unknown"
+        example_source = "de" if request.target_language == "en" else "en"
+        translated = (
+            "🟡️ Auto-detection returned the text unchanged "
+            f"(detected: {detected}). Specify the source language for short "
+            f"or ambiguous text, e.g. {_prefix()}tr {example_source} "
+            f"{request.target_language} <text>."
+        )
+    return f"> {original_text}\n\n{translated}" if is_room else translated
 
 
 async def translate_text(
@@ -503,7 +543,12 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🔴 Translation failed due to an internal error.", mention=False)
         return
 
-    response = f"> {text}\n\n{result.text}" if is_room else result.text
+    response = _format_translation_response(
+        text,
+        request,
+        result,
+        is_room=is_room,
+    )
     bot.reply(msg, response, mention=False)
 
 
