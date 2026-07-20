@@ -342,6 +342,15 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             "PAGE_SIZE": _to_int(cfg.get("pin_page_size") or 10, 10),
         },
         "plugins.translate": {
+            "TRANSLATE_FROM": _to_str(
+                cfg.get("translate_from") or "auto",
+                "auto",
+            ),
+            "TRANSLATE_TO": (
+                None
+                if cfg.get("translate_to") is None
+                else _to_str(cfg.get("translate_to"))
+            ),
             "TRANSLATE_TIMEOUT_SECONDS": max(
                 1.0,
                 _to_float(

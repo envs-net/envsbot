@@ -23,6 +23,31 @@ Translate text with an explicit source language, automatic source-language detec
 
 Language arguments use supported ISO or BCP-47 codes such as `de`, `en`, `pl`, `uk`, `pt-BR` or `zh-CN`. `auto` is valid only as the source language.
 
+## Configured language defaults
+
+The global Python configuration supports:
+
+```python
+TRANSLATE_FROM = "auto"
+TRANSLATE_TO = None
+```
+
+These values preserve the original behavior: the source is detected automatically and every command still requires a target language. Set `TRANSLATE_TO` to a supported language code to enable shorter commands:
+
+```python
+TRANSLATE_FROM = "auto"
+TRANSLATE_TO = "de"
+```
+
+With that example configuration, direct text and replies can be translated without language arguments:
+
+```text
+,tr Hello, world!
+Reply to a message with ,tr
+```
+
+A target argument such as `,tr pl Text` overrides `TRANSLATE_TO`; an explicit pair such as `,tr en uk Text` overrides both defaults. The settings are applied by `,config reload` without restarting the bot.
+
 The command works in public rooms, MUC private messages and normal direct chats. Reply to an existing message and omit the text to translate the replied-to message:
 
 ```text
@@ -62,7 +87,7 @@ Translate text or a replied-to message.
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
-Usage: `,tr [from] <to> [text or reply]`
+Usage: `,tr [from] [to] [text or reply]`
 
 Aliases: `,tr`
 
@@ -71,6 +96,8 @@ Examples:
 - `,tr en uk Hello, world!`
 - `,tr uk Hallo Welt!`
 - `,tr auto pl Guten Morgen`
+- `With TRANSLATE_TO configured: ,tr Hello, world!`
+- `With TRANSLATE_TO configured, reply with ,tr`
 - `Reply in a room, MUC PM or private chat with ,tr en uk`
 - `Reply in a room, MUC PM or private chat with ,tr uk`
 - `,translate status`

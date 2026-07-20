@@ -38,6 +38,13 @@ def test_config_display_sections_follow_sample_order_and_names():
         ],
     ) in sections
     assert ("URL Check", [("URLCHECK_WAIT_SECONDS", 120)]) in sections
+    assert (
+        "Translate",
+        [("TRANSLATE_FROM", "auto"), ("TRANSLATE_TO", None)],
+    ) in config_mod.get_config_display_sections({
+        "translate_from": "auto",
+        "translate_to": None,
+    })
     assert ("Duck Game", [("DUCKS", {"spawn_chance": 20})]) in sections
     assert (
         "Room Plugin Defaults",

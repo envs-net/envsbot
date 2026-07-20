@@ -769,7 +769,7 @@ async def test_translate_help_includes_complete_context_and_room_controls(monkey
         role=command_utils.Role.USER,
         aliases=["tr"],
         short="Translate text or a replied-to message.",
-        usage="{prefix}tr [from] <to> [text or reply]",
+        usage="{prefix}tr [from] [to] [text or reply]",
         examples=[
             "{prefix}tr en uk Hello, world!",
             "Reply in a room, MUC PM or private chat with {prefix}tr de",
@@ -786,7 +786,7 @@ async def test_translate_help_includes_complete_context_and_room_controls(monkey
             __name__="translate",
             PLUGIN_META={
                 "name": "translate",
-                "version": "0.1.2",
+                "version": "0.2.0",
                 "description": "Translate text or replied-to messages.",
                 "category": "utility",
                 "requires": ["rooms", "_core"],

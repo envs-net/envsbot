@@ -316,8 +316,12 @@ PIN_PAGE_SIZE = 10
 
 # ================= TRANSLATE =================
 
-# Translate uses the same public Google Translate endpoint as maubot/translate.
+# Translate uses the same public Google Translate endpoint as translate.
 # No API key is required, but the endpoint is unofficial and may change.
+# Set TRANSLATE_TO to a language code such as "de" to allow `,tr` for replies
+# and `,tr text` for direct text. None keeps the target argument mandatory.
+TRANSLATE_FROM = "auto"
+TRANSLATE_TO = None
 TRANSLATE_TIMEOUT_SECONDS = HTTP_TIMEOUT_SECONDS
 TRANSLATE_MAX_INPUT_LENGTH = 2000
 TRANSLATE_MAX_OUTPUT_LENGTH = 6000

@@ -140,6 +140,26 @@ def test_validate_config_rejects_wrong_optional_types():
     assert "rss_max_entries_per_poll: expected int" in msg
 
 
+def test_validate_config_accepts_translate_defaults_and_rejects_bad_types():
+    config_mod.validate_config(
+        {
+            "translate_from": "auto",
+            "translate_to": None,
+        }
+    )
+    config_mod.validate_config(
+        {
+            "translate_from": "en",
+            "translate_to": "de",
+        }
+    )
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config({"translate_to": 123})
+
+    assert "translate_to: expected str" in str(exc.value)
+
+
 def test_validate_startup_config_rejects_invalid_bot_jid():
     cfg = {
         "jid": "not-a-jid",

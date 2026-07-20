@@ -167,6 +167,8 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'BIRTHDAY_CACHE_TTL_SECONDS = 3600',
             'MESSAGE_CACHE_SIZE = 40',
             'POLL_MAX_OPTIONS = 7',
+            'TRANSLATE_FROM = "en"',
+            'TRANSLATE_TO = "de"',
             'KARMA_DELAY_SECONDS = 10',
             'TELL_DELIVERY_DELAY_SECONDS = 2',
             'XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.2',
@@ -188,6 +190,8 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["birthday_cache_ttl_seconds"] == 3600
     assert result["message_cache_size"] == 40
     assert result["poll_max_options"] == 7
+    assert result["translate_from"] == "en"
+    assert result["translate_to"] == "de"
     assert result["karma_delay_seconds"] == 10
     assert result["tell_delivery_delay_seconds"] == 2
     assert result["xkcd_index_request_delay_seconds"] == 0.2

@@ -25,6 +25,8 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.PIN_PAGE_SIZE > 0
     assert sample.IDLERPG["tick_seconds"] > 0
     assert sample.IDLERPG["rp_base"] > 0
+    assert sample.TRANSLATE_FROM == "auto"
+    assert sample.TRANSLATE_TO is None
     assert sample.TRANSLATE_TIMEOUT_SECONDS > 0
     assert sample.TRANSLATE_MAX_INPUT_LENGTH > 0
     assert sample.TRANSLATE_MAX_OUTPUT_LENGTH > 0

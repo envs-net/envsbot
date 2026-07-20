@@ -125,6 +125,27 @@ def test_runtime_refresh_updates_reminder_default_timezone(monkeypatch):
     assert any("plugins.reminder" in line for line in refreshed)
 
 
+def test_runtime_refresh_updates_translate_defaults(monkeypatch):
+    from plugins import translate
+
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", None)
+
+    refreshed = runtime.refresh_runtime_config_constants(
+        {
+            "translate_from": "en",
+            "translate_to": "de",
+        }
+    )
+
+    assert translate.TRANSLATE_FROM == "en"
+    assert translate.TRANSLATE_TO == "de"
+    assert translate._parse_translation_args(["Hello"]) == (
+        translate.TranslationRequest("en", "de", "Hello")
+    )
+    assert any("plugins.translate" in line for line in refreshed)
+
+
 def test_runtime_refresh_updates_default_pagination(monkeypatch):
     from utils import formatting
 

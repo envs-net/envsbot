@@ -44,6 +44,8 @@ def make_message(
 @pytest.fixture(autouse=True)
 def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "FALLBACK_NAMESPACE", "translate-test-fallback")
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", None)
     message_cache._PROCESSED_STANZAS.clear()
     message_cache._PROCESSED_STANZA_ORDER.clear()
 
@@ -84,6 +86,51 @@ def test_parse_translation_args_rejects_missing_or_auto_target():
         translate._parse_translation_args(["auto", "hello"])
     with pytest.raises(translate.TranslationUsageError, match="Unsupported language"):
         translate._parse_translation_args(["english", "de", "hello"])
+
+
+def test_parse_translation_args_uses_configured_defaults(monkeypatch):
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "en")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "de")
+
+    reply = translate._parse_translation_args([])
+    assert reply == translate.TranslationRequest("en", "de", "")
+
+    direct = translate._parse_translation_args(["Hello", "world"])
+    assert direct == translate.TranslationRequest("en", "de", "Hello world")
+
+    target_override = translate._parse_translation_args(["pl", "Good", "morning"])
+    assert target_override == translate.TranslationRequest(
+        "en",
+        "pl",
+        "Good morning",
+    )
+
+    explicit = translate._parse_translation_args(["auto", "uk", "Hello"])
+    assert explicit == translate.TranslationRequest("auto", "uk", "Hello")
+
+
+def test_parse_translation_args_accepts_auto_with_configured_target(monkeypatch):
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "en")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "de")
+
+    request = translate._parse_translation_args(["auto", "Hello", "world"])
+
+    assert request == translate.TranslationRequest("auto", "de", "Hello world")
+
+
+def test_parse_translation_args_validates_configured_defaults(monkeypatch):
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "none")
+    with pytest.raises(translate.TranslationUsageError, match="Missing target"):
+        translate._parse_translation_args([])
+
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "invalid-source")
+    with pytest.raises(translate.TranslationUsageError, match="Configured source"):
+        translate._parse_translation_args(["de", "Hello"])
+
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "invalid-target")
+    with pytest.raises(translate.TranslationUsageError, match="Configured target"):
+        translate._parse_translation_args([])
 
 
 def test_language_code_normalization_supports_bcp47():
@@ -175,6 +222,41 @@ async def test_translate_command_translates_direct_text(monkeypatch):
         source_language="en",
     )
     bot.reply.assert_called_once_with(msg, "Привіт, світе!", mention=False)
+
+
+@pytest.mark.asyncio
+async def test_translate_command_uses_defaults_for_direct_text(monkeypatch):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(
+        ",tr Hello, world!",
+        room="alice@example.org",
+        msg_type="chat",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_FROM", "en")
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "de")
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    worker = AsyncMock(
+        return_value=translate.TranslationResult("Hallo Welt!", "en")
+    )
+    monkeypatch.setattr(translate, "translate_text", worker)
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["Hello,", "world!"],
+        msg,
+        False,
+    )
+
+    worker.assert_awaited_once_with(
+        "Hello, world!",
+        target_language="de",
+        source_language="en",
+    )
+    bot.reply.assert_called_once_with(msg, "Hallo Welt!", mention=False)
 
 
 @pytest.mark.asyncio
@@ -280,6 +362,52 @@ async def test_translate_command_uses_cached_reply_target(monkeypatch):
     bot.reply.assert_called_once_with(
         msg,
         "> Hello from the cache\n\nПривіт із кешу",
+        mention=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_translate_command_uses_default_target_for_reply(monkeypatch):
+    room = "room@conference.example.org"
+    bot = _bot_with_cache(room=room)
+    msg = make_message(",tr", room=room, reply_id="original-default")
+    await bot.message_cache.add_entry(
+        {
+            "conversation": room,
+            "nick": "bob",
+            "body": "Hello with defaults",
+            "stanza_id": "original-default",
+        }
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "de")
+    monkeypatch.setattr(
+        _core, "handle_room_toggle_command", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    worker = AsyncMock(
+        return_value=translate.TranslationResult("Hallo mit Defaults", "en")
+    )
+    monkeypatch.setattr(translate, "translate_text", worker)
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        "alice",
+        [],
+        msg,
+        True,
+    )
+
+    worker.assert_awaited_once_with(
+        "Hello with defaults",
+        target_language="de",
+        source_language="auto",
+    )
+    bot.reply.assert_called_once_with(
+        msg,
+        "> Hello with defaults\n\nHallo mit Defaults",
         mention=False,
     )
 
@@ -605,7 +733,17 @@ async def test_doctor_and_on_load(monkeypatch):
 
     global_lines = await translate.doctor(bot)
     assert global_lines[0].startswith("✅ Translate:")
+    assert "default_from=auto" in global_lines[0]
+    assert "default_to=none" in global_lines[0]
 
+    monkeypatch.setattr(translate, "TRANSLATE_TO", "invalid-target")
+    assert (await translate.doctor(bot))[0].startswith(
+        "❌ Translate: invalid defaults:"
+    )
+
+    monkeypatch.setattr(translate, "TRANSLATE_TO", None)
     monkeypatch.setattr(_core, "_is_enabled_for_room", AsyncMock(return_value=True))
     room_lines = await translate.doctor(bot, "room@conference.example.org")
     assert "enabled" in room_lines[0]
+    assert "default_from=auto" in room_lines[0]
+    assert "default_to=none" in room_lines[0]

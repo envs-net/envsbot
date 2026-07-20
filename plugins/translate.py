@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "description": (
         "Translate text or replied-to messages with optional "
         "source-language auto-detection."
@@ -76,6 +76,14 @@ TRANSLATE_MAX_RESPONSE_BYTES = max(
     4096,
     int(config.get("translate_max_response_bytes", 262144) or 262144),
 )
+TRANSLATE_FROM = str(config.get("translate_from", "auto") or "auto")
+_configured_translate_to = config.get("translate_to")
+TRANSLATE_TO = (
+    None
+    if _configured_translate_to is None
+    else str(_configured_translate_to)
+)
+del _configured_translate_to
 # Google Cloud's NMT language-code list is intentionally kept as codes rather
 # than display names. Regional/script variants are normalized case-insensitively.
 # ``auto`` is valid only for the source language.
@@ -133,8 +141,8 @@ def _usage() -> str:
     prefix = _prefix()
     return (
         f"{prefix}tr <from> <to> <text> | "
-        f"{prefix}tr <to> <text> | reply with "
-        f"{prefix}tr [from] <to>"
+        f"{prefix}tr <to> <text> | with TRANSLATE_TO: "
+        f"{prefix}tr [text] | reply with {prefix}tr [from] [to]"
     )
 
 
@@ -149,24 +157,59 @@ def _is_supported_language(code: object, *, allow_auto: bool = True) -> bool:
     return normalized in SUPPORTED_LANGUAGE_CODES
 
 
+def _configured_source_language() -> str:
+    source = _normalize_language_code(TRANSLATE_FROM) or "auto"
+    if not _is_supported_language(source):
+        raise TranslationUsageError(
+            f"Configured source language '{TRANSLATE_FROM}' is unsupported."
+        )
+    return source
+
+
+def _configured_target_language() -> str | None:
+    target = _normalize_language_code(TRANSLATE_TO)
+    if target in {"", "none"}:
+        return None
+    if not _is_supported_language(target, allow_auto=False):
+        raise TranslationUsageError(
+            f"Configured target language '{TRANSLATE_TO}' is unsupported."
+        )
+    return target
+
+
 def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationRequest:
-    """Parse maubot-compatible ``[from] to [text]`` arguments.
+    """Parse compatible arguments with optional configured defaults.
 
     When the first two tokens are language codes they are interpreted as an
-    explicit source/target pair. Otherwise the first token is the target and
-    the source defaults to ``auto``.
+    explicit source/target pair. A leading language code otherwise overrides
+    the configured target. When no leading language code is present, the
+    complete argument list is text for the configured target language.
     """
     tokens = [str(item) for item in args]
+    source = _configured_source_language()
+    configured_target = _configured_target_language()
+
     if not tokens:
-        raise TranslationUsageError("Missing target language.")
+        if configured_target is None:
+            raise TranslationUsageError("Missing target language.")
+        return TranslationRequest(
+            source_language=source,
+            target_language=configured_target,
+            text="",
+        )
 
     first = _normalize_language_code(tokens[0])
     if not _is_supported_language(first):
-        raise TranslationUsageError(
-            f"Unsupported language code '{tokens[0]}'. Use ISO language codes such as de, en, pl or uk."
+        if configured_target is None:
+            raise TranslationUsageError(
+                f"Unsupported language code '{tokens[0]}'. Use ISO language codes such as de, en, pl or uk."
+            )
+        return TranslationRequest(
+            source_language=source,
+            target_language=configured_target,
+            text=" ".join(tokens).strip(),
         )
 
-    source = "auto"
     target = first
     text_start = 1
 
@@ -176,6 +219,10 @@ def _parse_translation_args(args: list[str] | tuple[str, ...]) -> TranslationReq
             source = first
             target = second
             text_start = 2
+
+    if target == "auto" and configured_target is not None:
+        source = "auto"
+        target = configured_target
 
     if target == "auto":
         raise TranslationUsageError("The target language cannot be 'auto'.")
@@ -366,11 +413,13 @@ async def _room_translation_enabled(bot, msg, is_room: bool) -> bool:
     role=Role.USER,
     aliases=["tr"],
     short="Translate text or a replied-to message.",
-    usage="{prefix}tr [from] <to> [text or reply]",
+    usage="{prefix}tr [from] [to] [text or reply]",
     examples=[
         "{prefix}tr en uk Hello, world!",
         "{prefix}tr uk Hallo Welt!",
         "{prefix}tr auto pl Guten Morgen",
+        "With TRANSLATE_TO configured: {prefix}tr Hello, world!",
+        "With TRANSLATE_TO configured, reply with {prefix}tr",
         "Reply in a room, MUC PM or private chat with {prefix}tr en uk",
         "Reply in a room, MUC PM or private chat with {prefix}tr uk",
         "{prefix}translate status",
@@ -500,6 +549,12 @@ async def _on_private_message(bot, msg) -> None:
 
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
     """Return translate plugin diagnostics without calling the provider."""
+    try:
+        default_from = _configured_source_language()
+        default_to = _configured_target_language() or "none"
+    except TranslationUsageError as exc:
+        return [f"❌ Translate: invalid defaults: {exc}"]
+
     if room_jid:
         enabled = await _core._is_enabled_for_room(
             bot,
@@ -510,11 +565,14 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
         state = "enabled" if enabled else "disabled"
         return [
             f"✅ Translate for {room_jid}: {state}, provider=google, "
+            f"default_from={default_from}, default_to={default_to}, "
             f"max_input={TRANSLATE_MAX_INPUT_LENGTH}"
         ]
     return [
-        "✅ Translate: provider=google, auto-detection=yes, "
-        f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, timeout={TRANSLATE_TIMEOUT_SECONDS:g}s"
+        "✅ Translate: provider=google, "
+        f"default_from={default_from}, default_to={default_to}, "
+        f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
+        f"timeout={TRANSLATE_TIMEOUT_SECONDS:g}s"
     ]
 
 
