@@ -4,11 +4,11 @@ import logging
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 import plugins.rss as rss
+import plugins.rss.commands as rss_commands
 
 import core_plugins.rooms
 from utils.command import Role
 from utils.task_supervisor import TaskSupervisor
-from plugins.rss import commands as rss_commands
 
 
 def patch_config(monkeypatch):

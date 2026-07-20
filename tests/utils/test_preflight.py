@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
-from types import SimpleNamespace
-
+import utils.command_docs as command_docs
 import utils.preflight as preflight
 
 
@@ -13,8 +11,11 @@ def test_preflight_command_docs_uses_importable_validator(monkeypatch):
         calls.append("validated")
         return [], 121
 
-    fake_module = SimpleNamespace(validate_command_docs=fake_validate_command_docs)
-    monkeypatch.setitem(sys.modules, "scripts.check_command_docs", fake_module)
+    monkeypatch.setattr(
+        command_docs,
+        "validate_command_docs",
+        fake_validate_command_docs,
+    )
 
     ok, message = preflight._check_command_docs()
 
@@ -27,8 +28,11 @@ def test_preflight_command_docs_reports_validation_errors(monkeypatch):
     def fake_validate_command_docs():
         return ["docs missing", "metadata missing", "usage missing", "extra"], 120
 
-    fake_module = SimpleNamespace(validate_command_docs=fake_validate_command_docs)
-    monkeypatch.setitem(sys.modules, "scripts.check_command_docs", fake_module)
+    monkeypatch.setattr(
+        command_docs,
+        "validate_command_docs",
+        fake_validate_command_docs,
+    )
 
     ok, message = preflight._check_command_docs()
 

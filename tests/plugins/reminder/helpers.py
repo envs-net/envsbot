@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytz
 import re
 import plugins.reminder as reminder
-from plugins.reminder import runtime as reminder_runtime
+import plugins.reminder.runtime as reminder_runtime
 from utils.command import Role
 
 
