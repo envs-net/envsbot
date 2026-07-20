@@ -53,6 +53,16 @@ def test_removed_duplicate_helper_modules_stay_removed():
     assert not (ROOT / "utils" / "xmpp_identity.py").exists()
 
 
+def test_xmpp_certificate_network_logic_is_shared_by_both_plugins():
+    utility = ROOT / "utils" / "xmpp_certificate.py"
+    assert utility.exists()
+    for relative_path in ("plugins/xmpp.py", "plugins/tools.py"):
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "from utils.xmpp_certificate import" in source
+        assert "asyncio.open_connection" not in source
+        assert ".start_tls(" not in source
+
+
 def test_split_store_modules_contain_no_commands_or_event_handlers():
     for relative_path in ("plugins/reminder/store.py", "plugins/vcard/store.py"):
         path = ROOT / relative_path

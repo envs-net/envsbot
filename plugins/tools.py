@@ -17,6 +17,7 @@ Commands:
     {prefix}date [nick]
     {prefix}utc
     {prefix}ts <unix_timestamp>
+    {prefix}cert <domain>
 """
 
 import pytz
@@ -26,6 +27,13 @@ from datetime import datetime
 from datetime import timezone as dt_timezone
 from utils.command import command, Role
 from utils.config import config
+from utils.xmpp_certificate import (
+    VALID_CERTIFICATE_MESSAGE,
+    diagnose_xmpp_server_certificate,
+    domain_from_xmpp_target,
+    source_domain_from_jid,
+    validate_xmpp_domain,
+)
 from core_plugins._core import (
     _is_muc_pm,
     handle_room_toggle_command,
@@ -39,12 +47,16 @@ from core_plugins._core import (
 log = logging.getLogger(__name__)
 
 TOOLS_KEY = "TOOLS"
+CERTIFICATE_PROBE_TIMEOUT_SECONDS = max(
+    1.0,
+    min(5.0, float(config.get("xmpp_query_timeout_seconds", 8) or 8)),
+)
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description":
     "Utility commands: ping/pong, message echo, timezone-aware time/date"
-    " lookups, and Unix timestamp conversion",
+    " lookups, Unix timestamp conversion, and XMPP S2S certificate checks",
     "category": "utility",
     "requires": ["_core", "vcard"],
 }
@@ -92,6 +104,68 @@ async def information_command(bot, sender_jid, nick, args, msg, is_room):
 
 async def get_tools_store(bot):
     return bot.db.users.plugin("tools")
+
+
+@command(
+    "cert",
+    role=Role.USER,
+    aliases=["certificate"],
+    short="Check an XMPP server-to-server TLS certificate.",
+    usage="{prefix}cert <domain>",
+    examples=["{prefix}cert envs.net"],
+    category="utility",
+    context="any",
+)
+async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
+    """Check the S2S STARTTLS certificate used by an XMPP domain."""
+    enabled_rooms = await _get_enabled_rooms(bot, TOOLS_KEY, "tools")
+    if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
+        bot.reply(msg, "ℹ️ cert is disabled in this room.")
+        return
+
+    if not args:
+        bot.reply(msg, f"❌ Missing domain\nUsage: {config.get('prefix', ',')}cert <domain>")
+        return
+
+    raw_target = str(args[0]).strip()
+    domain = domain_from_xmpp_target(raw_target)
+    is_valid, error_msg = validate_xmpp_domain(domain)
+    if not is_valid:
+        bot.reply(msg, f"❌ Invalid domain: {error_msg}")
+        return
+
+    if "@" in raw_target:
+        bot.reply(
+            msg,
+            "Note: 'cert' only works with domains."
+            f" Using '{domain}' from '{raw_target}'.",
+        )
+
+    try:
+        certificate = await diagnose_xmpp_server_certificate(
+            domain,
+            source_domain=source_domain_from_jid(config.get("jid", "")),
+            timeout_seconds=CERTIFICATE_PROBE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        status = "🔴"
+        certificate = f"certificate check failed: {exc}"
+    else:
+        if certificate is None:
+            status = "⚠️"
+            certificate = "S2S TLS certificate could not be checked."
+        elif certificate == VALID_CERTIFICATE_MESSAGE:
+            status = "✅"
+        else:
+            status = "🔴"
+
+    bot.reply(
+        msg,
+        [
+            f"🔐 S2S TLS certificate check for {domain}",
+            f"{status} {certificate}",
+        ],
+    )
 
 
 @command(
