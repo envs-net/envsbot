@@ -1171,3 +1171,52 @@ async def test_trusted_user_cannot_remove_another_direct_subscription(make_bot):
     )
     assert "bob@example.org" in bot.plugin_store[rss.RSS_KEY][url]["users"]
     assert "Only owner, superadmin, or admin" in bot.replies[-1][1]
+
+
+def test_compact_subscription_lines_groups_room_feeds_by_room():
+    feeds = {
+        "https://example.org/z.xml": {
+            "title": "Zulu",
+            "period": 1200,
+            "rooms": ["z-room@conference.example.org", "a-room@conference.example.org"],
+        },
+        "https://example.org/a.xml": {
+            "title": "Alpha",
+            "period": 600,
+            "rooms": ["a-room@conference.example.org"],
+        },
+    }
+
+    lines = rss_commands._compact_subscription_lines(feeds)
+
+    assert lines[:6] == [
+        "Room feeds (3):",
+        "• a-room@conference.example.org",
+        "  • Alpha | ok | 600s | https://example.org/a.xml",
+        "  • Zulu | ok | 1200s | https://example.org/z.xml",
+        "• z-room@conference.example.org",
+        "  • Zulu | ok | 1200s | https://example.org/z.xml",
+    ]
+    assert lines.count("• a-room@conference.example.org") == 1
+
+
+def test_compact_subscription_lines_keeps_direct_feed_sections():
+    feeds = {
+        "https://example.org/direct.xml": {
+            "title": "Direct",
+            "period": 300,
+            "rooms": [],
+            "users": {
+                "trusted@example.org": {"role": "trusted"},
+                "mod@example.org": {"role": "moderator"},
+            },
+        }
+    }
+
+    lines = rss_commands._compact_subscription_lines(feeds)
+
+    assert lines[0:2] == ["Room feeds (0):", "• none"]
+    assert "Moderator feeds (1):" in lines
+    assert "• Direct | ok | 300s | mod@example.org | https://example.org/direct.xml" in lines
+    assert "Trusted user feeds (1):" in lines
+    assert "• Direct | ok | 300s | trusted@example.org | https://example.org/direct.xml" in lines

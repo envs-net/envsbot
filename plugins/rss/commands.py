@@ -143,20 +143,54 @@ def _trusted_feed_count(feeds: dict, owner: str) -> int:
 
 
 def _compact_subscription_lines(feeds: dict) -> list[str]:
-    room_lines, mod_lines, trusted_lines = [], [], []
-    for url, feed in sorted(feeds.items()):
+    room_feeds: dict[str, list[tuple[str, str]]] = {}
+    mod_lines, trusted_lines = [], []
+    room_subscription_count = 0
+
+    for url, feed in feeds.items():
         title = str(feed.get("title") or url)
         status = _feed_status_label(feed)
         period = feed.get("period", "?")
+        room_line = f"  • {title} | {status} | {period}s | {url}"
+
         for room in feed.get("rooms", []):
-            room_lines.append(f"• {title} | {status} | {period}s | {room} | {url}")
+            room_name = str(room)
+            room_feeds.setdefault(room_name, []).append((title, room_line))
+            room_subscription_count += 1
+
         for jid, meta in sorted(_direct_subscriptions(feed).items()):
             role = str((meta or {}).get("role") or "trusted").lower()
             line = f"• {title} | {status} | {period}s | {jid} | {url}"
-            (mod_lines if role in {"owner", "superadmin", "admin", "moderator"} else trusted_lines).append(line)
-    lines = [f"Room feeds ({len(room_lines)}):", *(room_lines or ["• none"]), "",
-             f"Moderator feeds ({len(mod_lines)}):", *(mod_lines or ["• none"]), "",
-             f"Trusted user feeds ({len(trusted_lines)}):", *(trusted_lines or ["• none"])]
+            target = (
+                mod_lines
+                if role in {"owner", "superadmin", "admin", "moderator"}
+                else trusted_lines
+            )
+            target.append(line)
+
+    room_lines: list[str] = []
+    for room in sorted(room_feeds, key=str.casefold):
+        room_lines.append(f"• {room}")
+        room_lines.extend(
+            line
+            for _title, line in sorted(
+                room_feeds[room],
+                key=lambda item: (item[0].casefold(), item[1].casefold()),
+            )
+        )
+
+    mod_lines.sort(key=str.casefold)
+    trusted_lines.sort(key=str.casefold)
+    lines = [
+        f"Room feeds ({room_subscription_count}):",
+        *(room_lines or ["• none"]),
+        "",
+        f"Moderator feeds ({len(mod_lines)}):",
+        *(mod_lines or ["• none"]),
+        "",
+        f"Trusted user feeds ({len(trusted_lines)}):",
+        *(trusted_lines or ["• none"]),
+    ]
     return lines
 def _looks_like_room_arg(value) -> bool:
     """Best-effort test for explicit room JID arguments."""
