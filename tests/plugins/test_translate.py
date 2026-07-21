@@ -668,6 +668,111 @@ async def test_translate_command_respects_room_toggle(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_room_translation_uses_effective_default(monkeypatch):
+    bot = SimpleNamespace()
+    msg = make_message(",tr de hello")
+    feature = SimpleNamespace(enabled=True, default=True, modified=False)
+    get_feature = AsyncMock(return_value=feature)
+    monkeypatch.setattr(translate, "get_room_feature", get_feature)
+
+    assert await translate._room_translation_enabled(bot, msg, True) is True
+    get_feature.assert_awaited_once_with(
+        bot,
+        "room@conference.example.org",
+        "translate",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("subcmd", "current", "expected_override", "expected_text"),
+    [
+        ("status", True, None, "enabled"),
+        ("status", False, None, "disabled"),
+        ("on", True, None, "already enabled"),
+        ("off", False, None, "already disabled"),
+        ("on", False, True, "enabled"),
+        ("off", True, False, "disabled"),
+    ],
+)
+async def test_translate_room_controls_use_effective_state(
+    monkeypatch,
+    subcmd,
+    current,
+    expected_override,
+    expected_text,
+):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(f",translate {subcmd}")
+    monkeypatch.setattr(
+        _core,
+        "muc_pm_sender_can_manage_room",
+        AsyncMock(
+            return_value=(True, "room@conference.example.org", None)
+        ),
+    )
+    monkeypatch.setattr(
+        translate,
+        "get_room_feature",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                enabled=current,
+                default=True,
+                modified=False,
+            )
+        ),
+    )
+    set_feature = AsyncMock()
+    monkeypatch.setattr(translate, "set_room_feature", set_feature)
+
+    handled = await translate._handle_room_toggle_command(
+        bot,
+        msg,
+        True,
+        [subcmd],
+    )
+
+    assert handled is True
+    if expected_override is None:
+        set_feature.assert_not_awaited()
+    else:
+        set_feature.assert_awaited_once_with(
+            bot,
+            "room@conference.example.org",
+            "translate",
+            expected_override,
+        )
+    assert expected_text in bot.reply.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_translate_room_control_rejects_unauthorized_sender(monkeypatch):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(",translate off")
+    monkeypatch.setattr(
+        _core,
+        "muc_pm_sender_can_manage_room",
+        AsyncMock(return_value=(False, "room@conference.example.org", "denied")),
+    )
+    get_feature = AsyncMock()
+    set_feature = AsyncMock()
+    monkeypatch.setattr(translate, "get_room_feature", get_feature)
+    monkeypatch.setattr(translate, "set_room_feature", set_feature)
+
+    handled = await translate._handle_room_toggle_command(
+        bot,
+        msg,
+        True,
+        ["off"],
+    )
+
+    assert handled is True
+    get_feature.assert_not_awaited()
+    set_feature.assert_not_awaited()
+    bot.reply.assert_called_once_with(msg, "denied")
+
+
+@pytest.mark.asyncio
 async def test_translate_command_handles_provider_failure(monkeypatch):
     bot = SimpleNamespace(reply=Mock())
     msg = make_message(",tr de hello", room="alice@example.org", msg_type="chat")
@@ -863,7 +968,11 @@ async def test_doctor_and_on_load(monkeypatch):
     )
 
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
-    monkeypatch.setattr(_core, "_is_enabled_for_room", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        translate,
+        "get_room_feature",
+        AsyncMock(return_value=SimpleNamespace(enabled=True)),
+    )
     room_lines = await translate.doctor(bot, "room@conference.example.org")
     assert "enabled" in room_lines[0]
     assert "default_from=auto" in room_lines[0]
