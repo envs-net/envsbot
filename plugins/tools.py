@@ -90,6 +90,7 @@ async def information_command(bot, sender_jid, nick, args, msg, is_room):
             store_getter=get_tools_store,
             key=TOOLS_KEY,
             label="Get online infos",
+            plugin="tools",
             storage="dict",
             log_prefix="[INFORMATION]",
         )
@@ -761,7 +762,9 @@ def _joined_nick_count(room_jid: str | None = None) -> int:
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return small tools counters for diagnostics."""
-    enabled_rooms = await _get_enabled_rooms(bot, TOOLS_KEY, "tools")
+    enabled_rooms = await _get_enabled_rooms(
+        bot, TOOLS_KEY, "tools", [room_jid] if room_jid else ()
+    )
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
         "joined_rooms": 1 if room_jid and _joined_nick_count(room_jid) else (len(JOINED_ROOMS) if not room_jid else 0),

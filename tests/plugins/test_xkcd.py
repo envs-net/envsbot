@@ -764,10 +764,12 @@ async def test_xkcd_runtime_state_global_and_room(monkeypatch):
     monkeypatch.setattr(xkcd, "INDEX_TASK", _XkcdDoneTask())
 
     assert await xkcd.get_runtime_state(bot, "room@conf/nick") == {
+        "enabled_rooms": 1,
         "legacy_rooms": 1,
         "indexed_comics": 2,
     }
     assert await xkcd.get_runtime_state(bot) == {
+        "enabled_rooms": 2,
         "legacy_rooms": 2,
         "indexed_comics": 2,
         "check_task_running": 1,
@@ -783,6 +785,7 @@ async def test_xkcd_runtime_state_handles_bad_store_shapes(monkeypatch):
     monkeypatch.setattr(xkcd, "INDEX_TASK", None)
 
     assert await xkcd.get_runtime_state(bot) == {
+        "enabled_rooms": 0,
         "legacy_rooms": 0,
         "indexed_comics": 0,
         "check_task_running": 0,

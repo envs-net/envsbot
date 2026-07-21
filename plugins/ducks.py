@@ -660,6 +660,7 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_ducks_store,
         key=DUCKS_KEY,
         label="Duck game",
+        plugin="ducks",
         storage="dict",
         log_prefix="[DUCKS]",
     )

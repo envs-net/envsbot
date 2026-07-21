@@ -18,6 +18,11 @@ from typing import Any, Awaitable, Callable, Optional
 
 from utils.command import Role
 from utils import message_cache as _message_cache
+from utils.room_features import (
+    get_enabled_room_jids,
+    get_room_feature,
+    set_room_feature,
+)
 
 from bot.room_state import JOINED_ROOMS
 
@@ -30,7 +35,7 @@ remember_stanza = _message_cache.remember_stanza
 
 PLUGIN_META = {
     "name": "_core",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "Core utilities and shared helpers for other plugins.",
     "category": "core",
     "requires": [],
@@ -217,25 +222,32 @@ async def _get_user_timezone(bot, timezone_jid: str | None) -> str:
 
 
 # ------------------------------------------------------------------------
-# Helpers for managing room-scoped plugin settings, stored in the global
-# store as a dict of {room_jid: True}.
+# Helpers for managing room-scoped plugin settings. Registered features use
+# their configured default plus explicit {room_jid: bool} overrides.
 # -------------------------------------------------------------------------
-async def _get_enabled_rooms(bot, key, plugin) -> dict:
-    """
-    Return a dict of {room_jid: True} for rooms where the feature is enabled.
-    """
-    store = await get_plugin_store(bot, plugin)
-    data = await store.get_global(key, default={})
-    return data if isinstance(data, dict) else {}
+async def _get_enabled_rooms(bot, key, plugin, room_jids=()) -> dict:
+    """Return effective enabled flags for active and explicitly stored rooms."""
+    active_rooms = set(JOINED_ROOMS)
+    presence = getattr(bot, "presence", None)
+    active_rooms.update(getattr(presence, "joined_rooms", {}) or {})
+    active_rooms.update(str(room) for room in room_jids if room)
+    try:
+        return await get_enabled_room_jids(bot, plugin, active_rooms)
+    except KeyError:
+        # Backward-compatible fallback for third-party features that are not
+        # registered in core_plugins.rooms.PLUGIN_STORE_CONFIG.
+        store = await get_plugin_store(bot, plugin)
+        data = await store.get_global(key, default={})
+        return data if isinstance(data, dict) else {}
 
 
 async def _is_enabled_for_room(bot, key, plugin, room_jid: str) -> bool:
-    """Return True if the feature is enabled for the given room_jid, based on
-    the dict of {room_jid: True} stored in the global store under the given
-    key.
-    """
-    enabled = await _get_enabled_rooms(bot, key, plugin)
-    return bool(enabled.get(room_jid))
+    """Return the effective configured or overridden state for one room."""
+    try:
+        return (await get_room_feature(bot, str(room_jid), plugin)).enabled
+    except KeyError:
+        enabled = await _get_enabled_rooms(bot, key, plugin)
+        return bool(enabled.get(room_jid))
 
 
 async def get_plugin_store(bot, plugin):
@@ -541,6 +553,7 @@ async def handle_room_toggle_command(
     store_getter: StoreGetter,
     key: str,
     label: str,
+    plugin: str | None = None,
     storage: str = "dict",
     list_field: str = "rooms",
     log_prefix: str = "[PLUGIN]",
@@ -551,9 +564,9 @@ async def handle_room_toggle_command(
     handled. Returns False for all other subcommands so the plugin can continue
     normal handling.
 
-    Supported storage formats:
-    - storage="dict": {room_jid: True}
-    - storage="list": {list_field: [room_jid, ...]}
+    Registered ``plugin`` names resolve their effective default and persist
+    explicit boolean overrides. Omitting ``plugin`` retains the legacy raw
+    dictionary behavior for third-party callers.
     """
     # -----------------------------------------------------------
     # DELETED STORAGE TYPE 'list' to reduce cyclomatic complexity
@@ -576,9 +589,40 @@ async def handle_room_toggle_command(
         bot.reply(msg, reason)
         return True
 
-    store = await store_getter(bot)
-
     if storage == "dict":
+        if plugin is not None:
+            try:
+                feature = await get_room_feature(bot, room_jid, plugin)
+            except KeyError:
+                feature = None
+        else:
+            feature = None
+
+        if feature is not None:
+            enabled = feature.enabled
+
+            if subcmd == "status":
+                bot.reply(msg, _format_status(label, enabled))
+                return True
+
+            requested = subcmd == "on"
+            if enabled == requested:
+                formatter = (
+                    _format_already_enabled
+                    if requested
+                    else _format_already_disabled
+                )
+                bot.reply(msg, formatter(label))
+                return True
+
+            await set_room_feature(bot, room_jid, plugin, requested)
+            formatter = _format_enabled if requested else _format_disabled
+            bot.reply(msg, formatter(label))
+            state_label = "enabled" if requested else "disabled"
+            log.info("%s Room %s %s", log_prefix, room_jid, state_label)
+            return True
+
+        store = await store_getter(bot)
         state = await store.get_global(key, default={})
 
         if not isinstance(state, dict):

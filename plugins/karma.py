@@ -25,6 +25,7 @@ from utils.command import command, Role
 from utils.config import config
 from core_plugins._core import (
     _is_muc_pm,
+    _get_enabled_rooms,
     JOINED_ROOMS,
     handle_room_toggle_command,
     _is_enabled_for_room,
@@ -244,6 +245,7 @@ async def karma_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_karma_store,
         key=KARMA_ENABLED_KEY,
         label="Karma",
+        plugin="karma",
         storage="dict",
         log_prefix="[KARMA]",
     )
@@ -420,9 +422,9 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     scores = await store.get_global(KARMA_SCORES_KEY, default={})
     if not isinstance(scores, dict):
         scores = {}
-    enabled = await store.get_global(KARMA_ENABLED_KEY, default={})
-    if not isinstance(enabled, dict):
-        enabled = {}
+    enabled = await _get_enabled_rooms(
+        bot, KARMA_ENABLED_KEY, "karma", [room_jid] if room_jid else ()
+    )
     if room_jid:
         target = str(room_jid or "").split("/", 1)[0].strip().lower()
         matching = next(

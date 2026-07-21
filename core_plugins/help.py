@@ -903,6 +903,7 @@ async def help_inroom_command(bot, sender_jid, sender_nick,
         store_getter=get_help_store,
         key=HELP_KEY,
         label="In-Room Help",
+        plugin="help",
         storage="dict",
         log_prefix="[HELP]",
     )

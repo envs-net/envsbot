@@ -20,7 +20,27 @@ import plugins.rss.lifecycle as rss_lifecycle
 import plugins.tell as tell
 import plugins.urlcheck as urlcheck
 import plugins.weather as weather
+from core_plugins.rooms.defaults import (
+    PLUGIN_STORE_CONFIG,
+    get_room_plugin_defaults,
+)
+from utils import room_features
 from utils.message_cache import MessageCache
+
+
+@pytest.fixture(autouse=True)
+def configure_production_room_features():
+    previous_store_config = room_features._FEATURE_STORE_CONFIG
+    previous_defaults_provider = room_features._FEATURE_DEFAULTS_PROVIDER
+    room_features.configure_room_features(
+        PLUGIN_STORE_CONFIG,
+        get_room_plugin_defaults,
+    )
+    yield
+    room_features.configure_room_features(
+        previous_store_config,
+        previous_defaults_provider,
+    )
 
 
 class FakeTask:
@@ -83,7 +103,7 @@ async def test_room_toggle_diagnostic_hooks_count_enabled_rooms_and_scope(monkey
 
     assert await weather.get_runtime_state(bot) == {"enabled_rooms": 2}
     assert await weather.get_runtime_state(bot, room_jid="room@conf") == {"enabled_rooms": 1}
-    assert await weather.get_runtime_state(bot, room_jid="missing@conf") == {"enabled_rooms": 0}
+    assert await weather.get_runtime_state(bot, room_jid="missing@conf") == {"enabled_rooms": 1}
     assert await weather.doctor(bot, room_jid="room@conf") == [
         f"✅ Weather for room@conf: enabled_rooms=1, timeout={weather.WEATHER_HTTP_TIMEOUT:g}s"
     ]
@@ -94,7 +114,7 @@ async def test_room_toggle_diagnostic_hooks_count_enabled_rooms_and_scope(monkey
         "cached_urls": 2,
     }
     assert await urlcheck.get_runtime_state(bot, room_jid="missing@conf") == {
-        "enabled_rooms": 0,
+        "enabled_rooms": 1,
         "cached_urls": 0,
     }
     assert await urlcheck.doctor(bot, room_jid="room@conf") == [
@@ -134,7 +154,7 @@ async def test_tell_runtime_state_and_doctor_counts_pending_messages_by_room():
         "pending_messages": 2,
     }
     assert await tell.get_runtime_state(bot, room_jid="missing@conf") == {
-        "enabled_rooms": 0,
+        "enabled_rooms": 1,
         "pending_messages": 0,
     }
     assert await tell.doctor(bot, room_jid="room@conf") == [
@@ -499,9 +519,10 @@ async def test_poll_and_xkcd_doctor_hooks(monkeypatch):
     monkeypatch.setattr(xkcd, "INDEX_TASK", FakeTask(done=True))
 
     assert await xkcd.doctor(bot, "room@conf") == [
-        "✅ XKCD for room@conf: legacy_rooms=1, indexed_comics=2"
+        "✅ XKCD for room@conf: enabled_rooms=1, legacy_rooms=1, "
+        "indexed_comics=2"
     ]
     assert await xkcd.doctor(bot) == [
-        "✅ XKCD: legacy_rooms=2, indexed_comics=2, "
+        "✅ XKCD: enabled_rooms=2, legacy_rooms=2, indexed_comics=2, "
         "check_task_running=1, index_task_running=0"
     ]

@@ -273,7 +273,7 @@ async def add_comic_to_index(bot, comic: dict[str, Any] | None):
 
 
 async def get_subscribed_rooms(bot) -> list[str]:
-    """Return subscribed rooms.
+    """Return effectively enabled rooms.
 
     Supports both legacy list storage:
         {"rooms": ["room@conference.example"]}
@@ -292,8 +292,8 @@ async def get_subscribed_rooms(bot) -> list[str]:
     if isinstance(rooms, list):
         return [str(room) for room in rooms if room]
 
-    # New format.
-    return [str(room) for room, enabled in state.items() if enabled is True]
+    enabled = await _core._get_enabled_rooms(bot, XKCD_KEY, "xkcd")
+    return list(enabled)
 
 
 async def migrate_xkcd_room_storage(bot):
@@ -588,6 +588,7 @@ async def xkcd_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_xkcd_store,
         key=XKCD_KEY,
         label="XKCD posting",
+        plugin="xkcd",
         storage="dict",
         log_prefix="[XKCD]",
     ):
@@ -913,12 +914,17 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     store = await get_xkcd_store(bot)
     state = await store.get_global(XKCD_KEY, default={})
     index = await store.get_global(XKCD_INDEX_KEY, default={})
+    enabled_rooms = await get_subscribed_rooms(bot)
     rooms = state.get("rooms", []) if isinstance(state, dict) else []
     if not isinstance(rooms, list):
         rooms = []
     if room_jid:
         target = str(room_jid or "").split("/", 1)[0].strip().lower()
         return {
+            "enabled_rooms": int(any(
+                str(room).split("/", 1)[0].strip().lower() == target
+                for room in enabled_rooms
+            )),
             "legacy_rooms": sum(
                 1 for room in rooms
                 if str(room).split("/", 1)[0].strip().lower() == target
@@ -926,6 +932,7 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
             "indexed_comics": len(index) if isinstance(index, dict) else 0,
         }
     return {
+        "enabled_rooms": len(enabled_rooms),
         "legacy_rooms": len(rooms),
         "indexed_comics": len(index) if isinstance(index, dict) else 0,
         "check_task_running": int(CHECK_TASK is not None and not CHECK_TASK.done()),
@@ -939,11 +946,13 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     scope = f" for {room_jid}" if room_jid else ""
     if room_jid:
         return [
-            f"✅ XKCD{scope}: legacy_rooms={state['legacy_rooms']}, "
+            f"✅ XKCD{scope}: enabled_rooms={state['enabled_rooms']}, "
+            f"legacy_rooms={state['legacy_rooms']}, "
             f"indexed_comics={state['indexed_comics']}"
         ]
     return [
-        f"✅ XKCD: legacy_rooms={state['legacy_rooms']}, "
+        f"✅ XKCD: enabled_rooms={state['enabled_rooms']}, "
+        f"legacy_rooms={state['legacy_rooms']}, "
         f"indexed_comics={state['indexed_comics']}, "
         f"check_task_running={state['check_task_running']}, "
         f"index_task_running={state['index_task_running']}"

@@ -187,6 +187,87 @@ async def test_enabled_room_and_plugin_store_helpers():
 
 
 @pytest.mark.asyncio
+async def test_registered_room_helpers_use_effective_feature_state(monkeypatch):
+    calls = []
+
+    async def enabled_rooms(bot, plugin, room_jids):
+        calls.append((bot, plugin, set(room_jids)))
+        return {"joined@example.test": True, "default@example.test": True}
+
+    async def feature_state(bot, room_jid, plugin):
+        calls.append((bot, plugin, room_jid))
+        return SimpleNamespace(enabled=True)
+
+    monkeypatch.setattr(xmpp_identity, "JOINED_ROOMS", {"joined@example.test": {}})
+    monkeypatch.setattr(xmpp_identity, "get_enabled_room_jids", enabled_rooms)
+    monkeypatch.setattr(xmpp_identity, "get_room_feature", feature_state)
+    bot = SimpleNamespace(presence=SimpleNamespace(joined_rooms={}))
+
+    assert await xmpp_identity._get_enabled_rooms(
+        bot,
+        "PIN",
+        "pin",
+        ["default@example.test"],
+    ) == {"joined@example.test": True, "default@example.test": True}
+    assert calls[0] == (
+        bot,
+        "pin",
+        {"joined@example.test", "default@example.test"},
+    )
+    assert await xmpp_identity._is_enabled_for_room(
+        bot,
+        "PIN",
+        "pin",
+        "default@example.test",
+    ) is True
+    assert calls[1] == (bot, "pin", "default@example.test")
+
+
+@pytest.mark.asyncio
+async def test_registered_toggle_persists_explicit_default_override(monkeypatch):
+    async def allowed(_bot, _msg, _is_room):
+        return True, "room@example.test", None
+
+    async def feature_state(_bot, room_jid, plugin):
+        assert room_jid == "room@example.test"
+        assert plugin == "translate"
+        return SimpleNamespace(enabled=True)
+
+    saved = []
+
+    async def set_feature(_bot, room_jid, plugin, enabled):
+        saved.append((room_jid, plugin, enabled))
+        return SimpleNamespace(enabled=enabled)
+
+    async def unused_store_getter(_bot):
+        raise AssertionError("registered features must use room_features")
+
+    monkeypatch.setattr(
+        room_toggles,
+        "muc_pm_sender_can_manage_room",
+        allowed,
+    )
+    monkeypatch.setattr(room_toggles, "get_room_feature", feature_state)
+    monkeypatch.setattr(room_toggles, "set_room_feature", set_feature)
+    bot = ReplyBot()
+
+    handled = await room_toggles.handle_room_toggle_command(
+        bot,
+        FakeMsg("room@example.test", "Owner"),
+        False,
+        ["off"],
+        store_getter=unused_store_getter,
+        key="TRANSLATE",
+        label="Translate",
+        plugin="translate",
+    )
+
+    assert handled is True
+    assert saved == [("room@example.test", "translate", False)]
+    assert bot.replies == ["✅ Translate disabled in this room."]
+
+
+@pytest.mark.asyncio
 async def test_ensure_user_exists_and_check_user_exists():
     class Users:
         def __init__(self):

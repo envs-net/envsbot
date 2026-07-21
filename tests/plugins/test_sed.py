@@ -278,17 +278,15 @@ async def test_on_message_async(monkeypatch):
     }
     room_name = "room1"
 
-    # Mock enabled_rooms to allow SED feature in room
-    async def fake_get_sed_store(bot_self):
-        plugin_mock = MagicMock()
-        plugin_mock.get_global = AsyncMock(return_value={room_name: True})
-        return plugin_mock
-
     # Patch all the needed underlying helpers
     with \
-            patch.object(sed._core, "get_stanza_id", return_value="id456"), \
-            patch.object(sed._core, "remember_stanza", return_value=True), \
-            patch.object(sed, "get_sed_store", fake_get_sed_store), \
+                patch.object(sed._core, "get_stanza_id", return_value="id456"), \
+                patch.object(sed._core, "remember_stanza", return_value=True), \
+                patch.object(
+                    sed._core,
+                    "_is_enabled_for_room",
+                    AsyncMock(return_value=True),
+                ), \
             patch.object(sed, "process_sed_correction",
                          AsyncMock()) as process_correction_mock, \
             patch.object(sed, "parse_any_sed_command",

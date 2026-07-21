@@ -26,6 +26,8 @@ from utils.config import config
 from core_plugins._core import (
     handle_room_toggle_command,
     get_jids_from_nick_index,
+    _get_enabled_rooms,
+    _is_enabled_for_room,
     _is_muc_pm,
     get_user_tzinfo,
 )
@@ -115,6 +117,7 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
         store_getter=get_tell_store,
         key=TELL_KEY,
         label="Use 'tell' command",
+        plugin="tell",
         storage="dict",
         log_prefix="[TELL]",
     )
@@ -122,9 +125,12 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
         return
 
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_tell_store(bot)
-    enabled_rooms = await store.get_global(TELL_KEY, default={})
-    if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
+    if (
+        (is_room or _is_muc_pm(msg))
+        and not await _is_enabled_for_room(
+            bot, TELL_KEY, "tell", str(msg["from"].bare)
+        )
+    ):
         return
 
     prefix = config.get("prefix", ",")
@@ -208,9 +214,9 @@ async def deliver_tell_messages(bot, msg):
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return tell counters for diagnostics."""
     store = await get_tell_store(bot)
-    enabled = await store.get_global(TELL_KEY, default={})
-    if not isinstance(enabled, dict):
-        enabled = {}
+    enabled = await _get_enabled_rooms(
+        bot, TELL_KEY, "tell", [room_jid] if room_jid else ()
+    )
 
     pending = 0
     users = getattr(getattr(bot, "db", None), "users", None)

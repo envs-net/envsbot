@@ -41,6 +41,7 @@ from utils.tls_certificate import (
 )
 from core_plugins._core import (
         handle_room_toggle_command,
+        _get_enabled_rooms,
         _is_muc_pm,
         JOINED_ROOMS,
 )
@@ -164,6 +165,7 @@ async def cmd_xmpp(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_xmpp_store,
         key=XMPP_KEY,
         label="Use XMPP commands",
+        plugin="xmpp",
         storage="dict",
         log_prefix="[XMPP]",
     )
@@ -194,8 +196,7 @@ async def cmd_xmpp_help(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x help
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -219,8 +220,7 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp version <domain>
         {prefix}x version <domain>
     """
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if _should_block_xmpp_version(is_room, msg, enabled_rooms):
         return
 
@@ -339,8 +339,7 @@ async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x uptime <domain>
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -411,8 +410,7 @@ async def cmd_xmpp_items(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x items <domain|jid>
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -470,8 +468,7 @@ async def cmd_xmpp_contact(bot, sender_jid, nick, args, msg, is_room):
         {prefix}xmpp contact <domain>
         {prefix}x contact <domain>
     """
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if _should_block_xmpp_contact(is_room, msg, enabled_rooms):
         return
 
@@ -659,8 +656,7 @@ async def cmd_xmpp_info(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x info <domain|jid>
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -701,8 +697,7 @@ async def cmd_xmpp_ping(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x ping <jid|domain>
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -831,8 +826,7 @@ async def _xmpp_check_certificate(domain: str) -> tuple[str, str]:
 )
 async def cmd_xmpp_cert(bot, sender_jid, nick, args, msg, is_room):
     """Check the S2S STARTTLS certificate used by an XMPP domain."""
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -914,8 +908,7 @@ async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x srv user@example.com    (uses example.com)
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -1077,8 +1070,7 @@ def _xmpp_check_srv(domain: str) -> tuple[str, str]:
 )
 async def cmd_xmpp_check(bot, sender_jid, nick, args, msg, is_room):
     """Run a compact XMPP health check for a domain or service JID."""
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -1142,8 +1134,7 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
         {prefix}x compliance <domain>
     """
     # Check, if command is allowed in this context (room or MUC PM)
-    store = await get_xmpp_store(bot)
-    enabled_rooms = await store.get_global(XMPP_KEY, default={})
+    enabled_rooms = await _get_enabled_rooms(bot, XMPP_KEY, "xmpp")
     if (is_room or _is_muc_pm(msg)) and msg["from"].bare not in enabled_rooms:
         return
 
@@ -1218,8 +1209,9 @@ def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
     """Return small XMPP plugin counters for diagnostics."""
-    store = await get_xmpp_store(bot)
-    enabled_state = await store.get_global(XMPP_KEY, default={})
+    enabled_state = await _get_enabled_rooms(
+        bot, XMPP_KEY, "xmpp", [room_jid] if room_jid else ()
+    )
     enabled_rooms = _enabled_rooms_from_state(enabled_state)
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),

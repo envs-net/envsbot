@@ -931,6 +931,7 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
             store_getter=_dep_formatting.get_idlerpg_store,
             key=_dep_constants.IDLERPG_ENABLED_KEY,
             label="IdleRPG",
+            plugin=_dep_constants.PLUGIN_NAME,
             log_prefix="[IDLERPG]",
         )
         if handled_toggle:

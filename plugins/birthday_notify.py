@@ -36,6 +36,7 @@ from utils.config import config
 from core_plugins._core import (
     handle_room_toggle_command,
     JOINED_ROOMS,
+    _get_enabled_rooms,
     _ensure_user_exists,
     _is_enabled_for_room,
 )
@@ -627,6 +628,7 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=_get_birthday_store,
         key="birthday_notify",
         label="Birthday notifications",
+        plugin="birthday_notify",
         storage="dict",
         log_prefix="[BIRTHDAY]",
     ):
@@ -653,10 +655,12 @@ async def _get_birthday_store(bot):
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return birthday notification counters for diagnostics."""
-    store = await _get_birthday_store(bot)
-    enabled = await store.get_global("birthday_notify", default={})
-    if not isinstance(enabled, dict):
-        enabled = {}
+    enabled = await _get_enabled_rooms(
+        bot,
+        "birthday_notify",
+        "birthday_notify",
+        [room_jid] if room_jid else (),
+    )
     task_running = int(_BIRTHDAY_CHECK_TASK is not None and not _BIRTHDAY_CHECK_TASK.done())
     if room_jid:
         target = str(room_jid or "").split("/", 1)[0].strip().lower()

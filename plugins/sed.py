@@ -574,6 +574,7 @@ async def cmd_sed_handler(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_sed_store,
         key=SED_KEY,
         label="SED corrections",
+        plugin="sed",
         storage="dict",
         log_prefix="[SED]",
     ):
@@ -623,13 +624,9 @@ async def on_message(bot, msg):
         room = _room_key_from_msg(bot, msg, is_room)
 
         if is_room:
-            store = await get_sed_store(bot)
-            enabled_rooms = await store.get_global(SED_KEY, default={})
-
-            if not isinstance(enabled_rooms, dict):
-                enabled_rooms = {}
-
-            if enabled_rooms.get(room) is not True:
+            if not await _core._is_enabled_for_room(
+                bot, SED_KEY, "sed", room
+            ):
                 return
 
             bot_nick = bot.presence.joined_rooms.get(room)
@@ -686,7 +683,9 @@ def _sed_cache_counts(bot, room_jid: str | None = None) -> tuple[int, int]:
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
     """Return small sed counters for diagnostics."""
-    enabled_rooms = await _core._get_enabled_rooms(bot, SED_KEY, "sed")
+    enabled_rooms = await _core._get_enabled_rooms(
+        bot, SED_KEY, "sed", [room_jid] if room_jid else ()
+    )
     cached_rooms, cached_messages = _sed_cache_counts(bot, room_jid)
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),

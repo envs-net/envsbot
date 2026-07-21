@@ -106,3 +106,30 @@ def test_plugin_categories_match_help_grouping():
     for module_name, category in expected.items():
         metadata = import_module(module_name).PLUGIN_META
         assert metadata["category"] == category, module_name
+
+
+def test_room_toggle_commands_declare_registered_plugin_name():
+    offenders: list[str] = []
+    for package in ("core_plugins", "plugins"):
+        for path in (ROOT / package).rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                function = node.func
+                name = (
+                    function.id
+                    if isinstance(function, ast.Name)
+                    else function.attr
+                    if isinstance(function, ast.Attribute)
+                    else ""
+                )
+                if name != "handle_room_toggle_command":
+                    continue
+                keywords = {item.arg for item in node.keywords}
+                if "plugin" not in keywords:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno}"
+                    )
+
+    assert offenders == []

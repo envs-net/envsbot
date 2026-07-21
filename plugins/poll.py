@@ -914,6 +914,7 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_poll_store,
         key=POLL_ENABLED_KEY,
         label="Polls",
+        plugin="poll",
         storage="dict",
         log_prefix="[POLL]",
     )

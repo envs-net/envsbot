@@ -91,6 +91,7 @@ async def presence_show(bot, sender_jid, nick, args, msg, is_room):
             store_getter=get_presence_store,
             key=PRESENCE_KEY,
             label="Get/Set bot presence",
+            plugin="presence",
             storage="dict",
             log_prefix="[PRESENCE]",
         )

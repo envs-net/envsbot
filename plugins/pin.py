@@ -644,6 +644,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_pin_store,
         key=PIN_ENABLED_KEY,
         label="Pin plugin",
+        plugin="pin",
         storage="dict",
         log_prefix="[PIN]",
     )

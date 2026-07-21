@@ -4,23 +4,22 @@ from __future__ import annotations
 
 import datetime
 
+from utils.room_features import get_room_feature
+
 from . import runtime
-from .config import REMINDER_KEY
 
 log = runtime.log
+
+
 async def get_reminder_store(bot):
     """Return the plugin runtime store used for room-scoped settings."""
     return bot.db.users.plugin("reminder")
-async def _get_room_reminder_state(bot, room_jid: str) -> bool:
-    """Return whether reminders are enabled for a room.
 
-    This intentionally matches core_plugins/rooms.py dict semantics:
-    {room_jid: True} means enabled. Missing keys are disabled, even if the
-    configured default is on, because rooms.py writes defaults explicitly.
-    """
+
+async def _get_room_reminder_state(bot, room_jid: str) -> bool:
+    """Return the effective reminder state for a room."""
     try:
-        store = await get_reminder_store(bot)
-        state = await store.get_global(REMINDER_KEY, default={})
+        return (await get_room_feature(bot, room_jid, "reminder")).enabled
     except Exception as exc:
         log.exception(
             "[REMINDER] Error reading room control state for %s: %s",
@@ -29,10 +28,7 @@ async def _get_room_reminder_state(bot, room_jid: str) -> bool:
         )
         return False
 
-    if not isinstance(state, dict):
-        return False
 
-    return bool(state.get(room_jid))
 async def _init_reminder_db(bot):
     """Create the reminders table and indexes if they do not exist.
 

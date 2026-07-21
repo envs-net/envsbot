@@ -123,6 +123,7 @@ async def dice_command(bot, sender_jid, nick, args, msg, is_room):
             store_getter=get_dice_store,
             key=DICE_KEY,
             label="Roll Dice",
+            plugin="dice",
             storage="dict",
             log_prefix="[DICE]",
         )
@@ -203,7 +204,9 @@ def _room_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return small dice counters for diagnostics."""
-    enabled_rooms = await _get_enabled_rooms(bot, DICE_KEY, "dice")
+    enabled_rooms = await _get_enabled_rooms(
+        bot, DICE_KEY, "dice", [room_jid] if room_jid else ()
+    )
     return {
         "enabled_rooms": _room_enabled_count(enabled_rooms, room_jid),
         "max_dice": 10,

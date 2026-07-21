@@ -712,7 +712,7 @@ async def test_translate_room_controls_use_effective_state(
         ),
     )
     monkeypatch.setattr(
-        translate,
+        _core,
         "get_room_feature",
         AsyncMock(
             return_value=SimpleNamespace(
@@ -723,7 +723,7 @@ async def test_translate_room_controls_use_effective_state(
         ),
     )
     set_feature = AsyncMock()
-    monkeypatch.setattr(translate, "set_room_feature", set_feature)
+    monkeypatch.setattr(_core, "set_room_feature", set_feature)
 
     handled = await translate._handle_room_toggle_command(
         bot,
@@ -756,8 +756,8 @@ async def test_translate_room_control_rejects_unauthorized_sender(monkeypatch):
     )
     get_feature = AsyncMock()
     set_feature = AsyncMock()
-    monkeypatch.setattr(translate, "get_room_feature", get_feature)
-    monkeypatch.setattr(translate, "set_room_feature", set_feature)
+    monkeypatch.setattr(_core, "get_room_feature", get_feature)
+    monkeypatch.setattr(_core, "set_room_feature", set_feature)
 
     handled = await translate._handle_room_toggle_command(
         bot,

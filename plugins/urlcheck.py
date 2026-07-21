@@ -40,7 +40,11 @@ from utils.http_fetch import fetch_preview, fetch_json, passthrough_validator
 from utils.urlcheck_extraction import extract_urls_from_message_text
 from utils.url_safety import UnsafeFetchURL
 from bot.room_state import JOINED_ROOMS
-from core_plugins._core import handle_room_toggle_command
+from core_plugins._core import (
+    _get_enabled_rooms,
+    _is_enabled_for_room,
+    handle_room_toggle_command,
+)
 
 log = logging.getLogger(__name__)
 
@@ -99,10 +103,9 @@ async def get_urlcheck_store(bot):
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return URLCheck counters for diagnostics."""
-    store = await get_urlcheck_store(bot)
-    enabled = await store.get_global(URLCHECK_KEY, default={})
-    if not isinstance(enabled, dict):
-        enabled = {}
+    enabled = await _get_enabled_rooms(
+        bot, URLCHECK_KEY, "urlcheck", [room_jid] if room_jid else ()
+    )
     if room_jid:
         target = str(room_jid or "").split("/", 1)[0].strip().lower()
         room_enabled = any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled)
@@ -157,6 +160,7 @@ async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_urlcheck_store,
         key=URLCHECK_KEY,
         label="URL checking",
+        plugin="urlcheck",
         storage="dict",
         log_prefix="[URLCHECK]",
     )
@@ -187,9 +191,7 @@ async def on_groupchat_message(bot, msg):
     if room not in JOINED_ROOMS:
         return
 
-    store = await get_urlcheck_store(bot)
-    enabled_rooms = await store.get_global(URLCHECK_KEY, default={})
-    if room not in enabled_rooms:
+    if not await _is_enabled_for_room(bot, URLCHECK_KEY, "urlcheck", room):
         return
 
     text = msg.get("body", "")

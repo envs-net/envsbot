@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import random
 from typing import Any
+from core_plugins import _core
 from utils.command import Role
 from bot.room_state import JOINED_ROOMS
 
@@ -311,11 +312,11 @@ async def _sender_can_manage_room(bot, sender_jid: str | None, room_jid: str | N
 
 
 async def _enabled_rooms(bot) -> dict[str, bool]:
-    store = await _dep_formatting.get_idlerpg_store(bot)
-    state = await store.get_global(_dep_constants.IDLERPG_ENABLED_KEY, default={})
-    if not isinstance(state, dict):
-        return {}
-    return {str(room_jid): bool(enabled) for room_jid, enabled in state.items()}
+    return await _core._get_enabled_rooms(
+        bot,
+        _dep_constants.IDLERPG_ENABLED_KEY,
+        _dep_constants.PLUGIN_NAME,
+    )
 
 # Explicit module dependencies; module-qualified access keeps cyclic domain
 # relationships visible without copying names into sibling namespaces.

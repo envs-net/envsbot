@@ -929,6 +929,7 @@ async def information_command(bot, sender_jid, nick, args, msg, is_room):
             store_getter=get_info_store,
             key=INFO_KEY,
             label="Get Urban Dictionary summaries",
+            plugin="information",
             storage="dict",
             log_prefix="[INFORMATION]",
         )
@@ -968,7 +969,9 @@ def _csv_row_count(path: str) -> int:
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
     """Return small info-plugin counters for diagnostics."""
-    enabled_rooms = await _get_enabled_rooms(bot, INFO_KEY, "information")
+    enabled_rooms = await _get_enabled_rooms(
+        bot, INFO_KEY, "information", [room_jid] if room_jid else ()
+    )
     definitions = load_main_definitions()
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),

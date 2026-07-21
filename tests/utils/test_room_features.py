@@ -570,6 +570,95 @@ async def test_room_feature_set_rejects_unsupported_list_storage(
 
 
 @pytest.mark.asyncio
+async def test_get_enabled_room_jids_combines_defaults_and_overrides(
+    monkeypatch,
+):
+    _install_room_features_module(
+        monkeypatch,
+        store_config=_basic_store_config(),
+        plugin_defaults={"pin": True},
+    )
+    bot = _bot_with_store(
+        DummyStore(
+            {
+                "PIN": {
+                    "disabled@conf": False,
+                    "stored@conf": True,
+                    "invalid@conf": "invalid",
+                }
+            }
+        )
+    )
+
+    enabled = await room_features.get_enabled_room_jids(
+        bot,
+        "pin",
+        ["default@conf", "disabled@conf", ""],
+    )
+
+    assert enabled == {
+        "default@conf": True,
+        "stored@conf": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_enabled_room_jids_omits_missing_rooms_when_default_off(
+    monkeypatch,
+):
+    _install_room_features_module(
+        monkeypatch,
+        store_config=_basic_store_config(),
+        plugin_defaults={"pin": False},
+    )
+    bot = _bot_with_store(
+        DummyStore({"PIN": {"enabled@conf": True, "disabled@conf": False}})
+    )
+
+    enabled = await room_features.get_enabled_room_jids(
+        bot,
+        "pin",
+        ["missing@conf", "enabled@conf"],
+    )
+
+    assert enabled == {"enabled@conf": True}
+
+
+@pytest.mark.asyncio
+async def test_room_feature_room_ids_are_bare_casefolded_and_deduplicated(
+    monkeypatch,
+):
+    _install_room_features_module(
+        monkeypatch,
+        store_config=_basic_store_config(),
+        plugin_defaults={"pin": False},
+    )
+    store = DummyStore({"PIN": {"Room@Conference.Example/Nick": True}})
+    bot = _bot_with_store(store)
+
+    state = await room_features.get_room_feature(
+        bot,
+        " room@conference.example/OtherNick ",
+        "pin",
+    )
+    enabled = await room_features.get_enabled_room_jids(
+        bot,
+        "pin",
+        ["ROOM@CONFERENCE.EXAMPLE/ThirdNick"],
+    )
+    await room_features.set_room_feature(
+        bot,
+        "ROOM@CONFERENCE.EXAMPLE/NewNick",
+        "pin",
+        False,
+    )
+
+    assert state.enabled is True
+    assert enabled == {"room@conference.example": True}
+    assert store.data["PIN"] == {"room@conference.example": False}
+
+
+@pytest.mark.asyncio
 async def test_defaults_provider_overrides_static_defaults_and_validates_types(
     monkeypatch, caplog
 ):

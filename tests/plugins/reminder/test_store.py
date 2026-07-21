@@ -66,23 +66,20 @@ async def test_restore_pending_reminders(dummy_bot):
 
 @pytest.mark.asyncio
 async def test_room_reminder_state_and_send_message(monkeypatch):
-    class Store:
-        def __init__(self, state):
-            self.state = state
-
-        async def get_global(self, key, default=None):
-            assert key == reminder.REMINDER_KEY
-            return self.state
-
     bot = MagicMock()
-    monkeypatch.setattr(reminder_store, "get_reminder_store", AsyncMock(return_value=Store({"room@conf": True})))
+    async def feature_state(_bot, room_jid, plugin):
+        assert plugin == "reminder"
+        return MagicMock(enabled=room_jid == "room@conf")
+
+    monkeypatch.setattr(reminder_store, "get_room_feature", feature_state)
     assert await reminder._get_room_reminder_state(bot, "room@conf") is True
     assert await reminder._get_room_reminder_state(bot, "other@conf") is False
 
-    monkeypatch.setattr(reminder_store, "get_reminder_store", AsyncMock(return_value=Store(["bad"])))
-    assert await reminder._get_room_reminder_state(bot, "room@conf") is False
-
-    monkeypatch.setattr(reminder_store, "get_reminder_store", AsyncMock(side_effect=RuntimeError("db")))
+    monkeypatch.setattr(
+        reminder_store,
+        "get_room_feature",
+        AsyncMock(side_effect=RuntimeError("db")),
+    )
     assert await reminder._get_room_reminder_state(bot, "room@conf") is False
 
     sent = []

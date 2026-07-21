@@ -73,6 +73,7 @@ async def _handle_reminder_control_command(bot, args,
             store_getter=get_reminder_store,
             key=REMINDER_KEY,
             label="Use 'reminder' commands",
+            plugin="reminder",
             storage="dict",
             log_prefix="[REMINDER]",
         )

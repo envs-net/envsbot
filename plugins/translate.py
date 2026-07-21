@@ -37,7 +37,7 @@ from utils.command import Role, command
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
 from utils import message_cache
-from utils.room_features import get_room_feature, set_room_feature
+from utils.room_features import get_room_feature
 from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL
 
 log = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ PLUGIN_META = {
 }
 
 FALLBACK_NAMESPACE = "translate-fallback-command"
+TRANSLATE_KEY = "TRANSLATE"
 GOOGLE_TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 
 TRANSLATE_TIMEOUT_SECONDS = max(
@@ -445,42 +446,24 @@ async def _room_translation_enabled(bot, msg, is_room: bool) -> bool:
     return state.enabled
 
 
+async def get_translate_store(bot):
+    return bot.db.users.plugin("translate")
+
+
 async def _handle_room_toggle_command(bot, msg, is_room: bool, args: list[str]) -> bool:
-    """Handle Translate room controls using effective feature defaults."""
-    if not args:
-        return False
-
-    subcmd = str(args[0]).lower()
-    if subcmd not in {"on", "off", "status"}:
-        return False
-
-    allowed, room_jid, reason = await _core.muc_pm_sender_can_manage_room(
+    """Delegate Translate room controls to the shared effective-state helper."""
+    return await _core.handle_room_toggle_command(
         bot,
         msg,
         is_room,
+        args,
+        store_getter=get_translate_store,
+        key=TRANSLATE_KEY,
+        label="Translate plugin",
+        plugin="translate",
+        storage="dict",
+        log_prefix="[TRANSLATE]",
     )
-    if not allowed:
-        bot.reply(msg, reason)
-        return True
-
-    state = await get_room_feature(bot, room_jid, "translate")
-    if subcmd == "status":
-        status = "enabled" if state.enabled else "disabled"
-        icon = "✅" if state.enabled else "ℹ️"
-        bot.reply(msg, f"{icon} Translate plugin is **{status}** in this room.")
-        return True
-
-    enabled = subcmd == "on"
-    if state.enabled == enabled:
-        status = "enabled" if enabled else "disabled"
-        bot.reply(msg, f"ℹ️ Translate plugin already {status}.")
-        return True
-
-    await set_room_feature(bot, room_jid, "translate", enabled)
-    status = "enabled" if enabled else "disabled"
-    bot.reply(msg, f"✅ Translate plugin {status} in this room.")
-    log.info("[TRANSLATE] Room %s %s", room_jid, status)
-    return True
 
 
 @command(

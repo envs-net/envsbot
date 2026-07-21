@@ -79,10 +79,9 @@ async def get_weather_store(bot):
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return weather room-toggle counters for diagnostics."""
-    store = await get_weather_store(bot)
-    enabled = await store.get_global(WEATHER_KEY, default={})
-    if not isinstance(enabled, dict):
-        enabled = {}
+    enabled = await _core._get_enabled_rooms(
+        bot, WEATHER_KEY, "weather", [room_jid] if room_jid else ()
+    )
     if room_jid:
         target = str(room_jid or "").split("/", 1)[0].strip().lower()
         return {
@@ -133,6 +132,7 @@ async def weather_command(bot, sender_jid, nick, args, msg, is_room):
         store_getter=get_weather_store,
         key=WEATHER_KEY,
         label="Get weather",
+        plugin="weather",
         storage="dict",
         log_prefix="[WEATHER]",
     )

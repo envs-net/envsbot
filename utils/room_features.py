@@ -358,6 +358,11 @@ def _coerce_supported_feature_value(
         return None
 
 
+def _normalize_room_jid(value: object) -> str:
+    """Return the canonical bare room JID used by feature overrides."""
+    return str(value).split("/", 1)[0].strip().lower()
+
+
 def _safe_room_feature_state(
     state: FeatureFlagMap,
 ) -> FeatureFlagState:
@@ -388,7 +393,13 @@ def _safe_room_feature_state(
                 value,
             )
             continue
-        safe_state[key] = coerced
+        room_jid = _normalize_room_jid(key)
+        if not room_jid:
+            log.warning(
+                "[ROOM_FEATURES] Ignoring empty room id in feature state"
+            )
+            continue
+        safe_state[room_jid] = coerced
     return safe_state
 
 
@@ -446,6 +457,7 @@ async def _state_for(
     conf = await _feature_config_async(plugin)
     state = await _room_feature_map(bot, plugin, conf)
     default = defaults.get(plugin, False)
+    room_jid = _normalize_room_jid(room_jid)
     enabled = _coerce_feature_flag(state.get(room_jid), fallback=default)
     modified = enabled != default
     return RoomFeatureState(
@@ -467,6 +479,32 @@ async def get_room_feature(
     """
     defaults = await _resolved_plugin_defaults_async()
     return await _state_for(bot, room_jid, plugin, defaults=defaults)
+
+
+async def get_enabled_room_jids(
+    bot: BotProtocol,
+    plugin: str,
+    room_jids: list[str] | tuple[str, ...] | set[str] = (),
+) -> dict[str, bool]:
+    """Return effective enabled flags for explicit and supplied room IDs.
+
+    Stored overrides and configured defaults are resolved once, so callers
+    can check several active rooms without issuing one database query per
+    room. Explicitly disabled rooms are omitted from the returned mapping.
+    """
+    plugin = _normalize_plugin_name(plugin)
+    conf = await _feature_config_async(plugin)
+    state = await _room_feature_map(bot, plugin, conf)
+    defaults = await _resolved_plugin_defaults_async()
+    default = defaults.get(plugin, False)
+    candidates = set(state)
+    candidates.update(_normalize_room_jid(room) for room in room_jids if room)
+    candidates.discard("")
+    return {
+        room: True
+        for room in sorted(candidates)
+        if _coerce_feature_flag(state.get(room), fallback=default)
+    }
 
 
 def _updated_feature_state(
@@ -504,6 +542,7 @@ async def set_room_feature(
     plugin = _normalize_plugin_name(plugin)
     conf = await _feature_config_async(plugin)
     store = bot.db.users.plugin(plugin)
+    room_jid = _normalize_room_jid(room_jid)
     updater = partial(
         _updated_feature_state,
         room_jid=room_jid,

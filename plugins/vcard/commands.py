@@ -142,6 +142,7 @@ async def vcard_command(bot, sender_jid, sender_nick, args, msg, is_room):
             store_getter=get_vcard_store,
             key=VCARD_KEY,
             label="Get vCard data",
+            plugin="vcard",
             storage="dict",
             log_prefix="[VCARD]",
         )
@@ -483,7 +484,9 @@ def _joined_nick_count(room_jid: str | None = None) -> int:
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int | float]:
     """Return small vCard counters for diagnostics."""
-    enabled_rooms = await _core._get_enabled_rooms(bot, VCARD_KEY, "vcard")
+    enabled_rooms = await _core._get_enabled_rooms(
+        bot, VCARD_KEY, "vcard", [room_jid] if room_jid else ()
+    )
     plugin_map = getattr(bot, "plugin", {}) or {}
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
