@@ -142,7 +142,11 @@ def _trusted_feed_count(feeds: dict, owner: str) -> int:
     )
 
 
-def _compact_subscription_lines(feeds: dict) -> list[str]:
+def _compact_subscription_lines(
+    feeds: dict,
+    section: str | None = None,
+) -> list[str]:
+    """Return the compact subscription overview, optionally for one section."""
     room_feeds: dict[str, list[tuple[str, str]]] = {}
     mod_lines, trusted_lines = [], []
     room_subscription_count = 0
@@ -181,17 +185,30 @@ def _compact_subscription_lines(feeds: dict) -> list[str]:
 
     mod_lines.sort(key=str.casefold)
     trusted_lines.sort(key=str.casefold)
-    lines = [
-        f"Room feeds ({room_subscription_count}):",
-        *(room_lines or ["• none"]),
+    sections = {
+        "rooms": [
+            f"Room feeds ({room_subscription_count}):",
+            *(room_lines or ["• none"]),
+        ],
+        "mods": [
+            f"Moderator feeds ({len(mod_lines)}):",
+            *(mod_lines or ["• none"]),
+        ],
+        "trusted": [
+            f"Trusted user feeds ({len(trusted_lines)}):",
+            *(trusted_lines or ["• none"]),
+        ],
+    }
+    if section:
+        return sections[section]
+
+    return [
+        *sections["rooms"],
         "",
-        f"Moderator feeds ({len(mod_lines)}):",
-        *(mod_lines or ["• none"]),
+        *sections["mods"],
         "",
-        f"Trusted user feeds ({len(trusted_lines)}):",
-        *(trusted_lines or ["• none"]),
+        *sections["trusted"],
     ]
-    return lines
 def _looks_like_room_arg(value) -> bool:
     """Best-effort test for explicit room JID arguments."""
     text = str(value or "").strip()
@@ -200,7 +217,10 @@ async def _save_last_id(bot, store, url, entry_id):
     return await _set_feed_field(bot, store, url, "last_id", entry_id)
 def _rss_list_usage(bot=None) -> str:
     """Return the usage string for paginated RSS list output."""
-    return f"Usage: {_command_prefix(bot)}rss list [page|all|last]"
+    return (
+        f"Usage: {_command_prefix(bot)}rss list "
+        "[rooms|mods|trusted|room_jid] [page|all|last]"
+    )
 async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=""):
     """
     Burst the last N entries of the given feed to the room.
@@ -608,6 +628,9 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
     examples=[
         "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss list room@conference.example.org",
+        "{prefix}rss list rooms",
+        "{prefix}rss list mods",
+        "{prefix}rss list trusted",
         "{prefix}rss list 2",
         "{prefix}rss list all",
         "{prefix}rss retry all",
@@ -641,7 +664,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss pause|resume <feedurl> [room_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
-    {prefix}rss list [room_jid] [page|all|last]
+    {prefix}rss list [rooms|mods|trusted|room_jid] [page|all|last]
     {prefix}rss template [show|set|unset|test] [default|room_jid] [feedurl] [template]
     """
     store = bot.db.users.plugin("rss")
@@ -935,7 +958,11 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         list_args = args
         target_room = room
         explicit_room = False
-        if len(args) >= 2 and _looks_like_room_arg(args[1]):
+        compact_section = None
+        if len(args) >= 2 and str(args[1]).lower() in {"rooms", "mods", "trusted"}:
+            compact_section = str(args[1]).lower()
+            list_args = [args[0], *args[2:]]
+        elif len(args) >= 2 and _looks_like_room_arg(args[1]):
             target_room = _normalize_room_jid(args[1])
             list_args = [args[0], *args[2:]]
             explicit_room = True
@@ -944,15 +971,36 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             bot, sender_jid
         )
         if not explicit_room and msg.get("type") in ("chat", "normal"):
+            if compact_section and len(list_args) != 1:
+                bot.reply(msg, _rss_list_usage(bot))
+                return
             role = await _sender_role(bot, sender_jid)
             if role <= Role.MODERATOR:
-                bot.reply(msg, _compact_subscription_lines(feeds))
+                bot.reply(
+                    msg,
+                    _compact_subscription_lines(feeds, compact_section),
+                )
                 return
             if role <= Role.TRUSTED:
                 owner = _normalize_room_jid(sender_jid)
-                own = {url: {**feed, "rooms": [], "users": {owner: _direct_subscriptions(feed).get(owner)}}
-                       for url, feed in feeds.items() if owner in _direct_subscriptions(feed)}
-                bot.reply(msg, _compact_subscription_lines(own) if own else "No direct RSS feeds configured for you.")
+                own = {
+                    url: {
+                        **feed,
+                        "rooms": [],
+                        "users": {
+                            owner: _direct_subscriptions(feed).get(owner),
+                        },
+                    }
+                    for url, feed in feeds.items()
+                    if owner in _direct_subscriptions(feed)
+                }
+                if not own:
+                    bot.reply(msg, "No direct RSS feeds configured for you.")
+                    return
+                bot.reply(
+                    msg,
+                    _compact_subscription_lines(own, compact_section),
+                )
                 return
         if explicit_room or not is_global_manager:
             if not target_room:
@@ -973,6 +1021,22 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             if not feeds:
                 bot.reply(msg, f"No feeds configured for {target_room}.")
                 return
+
+        if compact_section:
+            if compact_section in {"mods", "trusted"} and not is_global_manager:
+                bot.reply(
+                    msg,
+                    "🔴 Only global moderators can list direct RSS subscriptions.",
+                )
+                return
+            if len(list_args) != 1:
+                bot.reply(msg, _rss_list_usage(bot))
+                return
+            bot.reply(
+                msg,
+                _compact_subscription_lines(feeds, compact_section),
+            )
+            return
 
         lines = _format_feed_list(feeds, list_args, bot=bot)
 

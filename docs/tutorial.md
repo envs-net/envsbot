@@ -177,6 +177,15 @@ Add a feed for the current room when running the command in a room or MUC PM:
 ,rss list
 ```
 
+In a private chat, global moderators can limit the compact overview to one
+subscription type:
+
+```text
+,rss list rooms
+,rss list mods
+,rss list trusted
+```
+
 From a normal private chat, pass the target room explicitly:
 
 ```text

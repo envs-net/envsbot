@@ -392,7 +392,10 @@ async def test_rss_list_all_and_invalid_page(monkeypatch, make_bot):
     assert "next page" not in all_text
 
     await rss.rss_command(bot, "jid", "nick", ["list", "nope"], msg, True)
-    assert bot.replies[-1][1] == "Usage: ,rss list [page|all|last]"
+    assert bot.replies[-1][1] == (
+        "Usage: ,rss list "
+        "[rooms|mods|trusted|room_jid] [page|all|last]"
+    )
 
 
 @pytest.mark.asyncio
@@ -1220,3 +1223,114 @@ def test_compact_subscription_lines_keeps_direct_feed_sections():
     assert "• Direct | ok | 300s | mod@example.org | https://example.org/direct.xml" in lines
     assert "Trusted user feeds (1):" in lines
     assert "• Direct | ok | 300s | trusted@example.org | https://example.org/direct.xml" in lines
+
+
+def test_compact_subscription_lines_can_select_one_section():
+    feeds = {
+        "https://example.org/shared.xml": {
+            "title": "Shared",
+            "period": 900,
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                "mod@example.org": {"role": "moderator"},
+                "trusted@example.org": {"role": "trusted"},
+            },
+        }
+    }
+
+    assert rss_commands._compact_subscription_lines(feeds, "rooms") == [
+        "Room feeds (1):",
+        "• room@conference.example.org",
+        "  • Shared | ok | 900s | https://example.org/shared.xml",
+    ]
+    assert rss_commands._compact_subscription_lines(feeds, "mods") == [
+        "Moderator feeds (1):",
+        "• Shared | ok | 900s | mod@example.org | https://example.org/shared.xml",
+    ]
+    assert rss_commands._compact_subscription_lines(feeds, "trusted") == [
+        "Trusted user feeds (1):",
+        "• Shared | ok | 900s | trusted@example.org | https://example.org/shared.xml",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("selector", "expected_heading", "excluded_headings"),
+    [
+        ("rooms", "Room feeds (1):", {"Moderator feeds", "Trusted user feeds"}),
+        ("mods", "Moderator feeds (1):", {"Room feeds", "Trusted user feeds"}),
+        ("trusted", "Trusted user feeds (1):", {"Room feeds", "Moderator feeds"}),
+    ],
+)
+async def test_global_moderator_can_filter_compact_rss_list(
+    make_bot,
+    selector,
+    expected_heading,
+    excluded_headings,
+):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/shared.xml": {
+            "title": "Shared",
+            "period": 900,
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                "mod@example.org": {"role": "moderator"},
+                "trusted@example.org": {"role": "trusted"},
+            },
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="moderator@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "moderator@example.org",
+        "moderator",
+        ["list", selector],
+        msg,
+        False,
+    )
+
+    lines = bot.replies[-1][1]
+    assert lines[0] == expected_heading
+    assert all(
+        not any(heading in line for heading in excluded_headings)
+        for line in lines
+    )
+
+
+@pytest.mark.asyncio
+async def test_compact_rss_list_without_selector_keeps_all_sections(make_bot):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/shared.xml": {
+            "title": "Shared",
+            "period": 900,
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                "mod@example.org": {"role": "moderator"},
+                "trusted@example.org": {"role": "trusted"},
+            },
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="moderator@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "moderator@example.org",
+        "moderator",
+        ["list"],
+        msg,
+        False,
+    )
+
+    text = "\n".join(bot.replies[-1][1])
+    assert "Room feeds (1):" in text
+    assert "Moderator feeds (1):" in text
+    assert "Trusted user feeds (1):" in text

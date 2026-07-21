@@ -114,6 +114,9 @@ Examples:
 - `,rss add https://example.org/feed.rss room@conference.example.org`
 - `,rss add https://example.org/feed.rss` in a direct chat (trusted role or higher)
 - `,rss list room@conference.example.org`
+- `,rss list rooms`
+- `,rss list mods`
+- `,rss list trusted`
 - `,rss list 2`
 - `,rss list all`
 - `,rss retry all`
@@ -145,3 +148,6 @@ superadmin, and admin users may remove a trusted user's subscription explicitly:
 
 In direct chat, `,rss list` uses compact sections for room, moderator, and
 trusted-user feeds while retaining title, status, interval, destination, and URL.
+Global moderators may select a single section with `,rss list rooms`,
+`,rss list mods`, or `,rss list trusted`. Trusted users still see only their own
+direct subscriptions.
