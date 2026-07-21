@@ -189,17 +189,11 @@ class MessageCache:
         cutoff = self._minimum_received_at()
         prune_all = getattr(store, "prune_all", None)
         if callable(prune_all):
-            try:
-                await prune_all(self.max_messages, min_received_at=cutoff)
-            except TypeError:
-                await prune_all(self.max_messages)
-        try:
-            rows = await store.load_recent(
-                self.max_messages,
-                min_received_at=cutoff,
-            )
-        except TypeError:
-            rows = await store.load_recent(self.max_messages)
+            await prune_all(self.max_messages, min_received_at=cutoff)
+        rows = await store.load_recent(
+            self.max_messages,
+            min_received_at=cutoff,
+        )
         for row in rows:
             if cutoff is not None and int(row.get("received_at") or 0) < cutoff:
                 continue

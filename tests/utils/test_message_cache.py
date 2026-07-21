@@ -31,8 +31,15 @@ class FakeStore:
         self.saved = []
         self.cleared = []
 
-    async def load_recent(self, limit):
-        return self.rows[-limit:]
+    async def load_recent(self, limit, *, min_received_at=None):
+        rows = self.rows
+        if min_received_at is not None:
+            rows = [
+                row
+                for row in rows
+                if int(row.get("received_at") or 0) >= min_received_at
+            ]
+        return rows[-limit:]
 
     async def save_batch(self, entries, *, limit_per_conversation):
         self.saved.extend(dict(entry) for entry in entries)

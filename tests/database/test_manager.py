@@ -274,7 +274,7 @@ async def test_close_continues_when_background_flush_task_failed(tmp_path):
 
     original_task = db._flush_task
     db._stop_event.set()
-    await original_task
+    await asyncio.gather(original_task)
 
     async def fail_flush():
         raise RuntimeError("flush task failed")

@@ -183,7 +183,6 @@ OPTIONAL_CONFIG_TYPES = {
     "vcard_fetch_timeout_seconds": (int, float),
     "updatecheck_timeout_seconds": (int, float),
     "rss_global_query_interval": int,
-    "message_cache_size": int,
     "max_new_feed_entries": int,
     "rss_max_entries_per_poll": int,
     "rss_retry_initial_delay": int,
