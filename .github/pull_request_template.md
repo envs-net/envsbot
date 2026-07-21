@@ -31,7 +31,7 @@ Describe what this pull request changes and why.
 ## Testing
 
 - [ ] `PYTHONPATH="$PWD" pytest`
-- [ ] `PYTHONPATH="$PWD" pytest --cov=envsbot --cov-report=term-missing`
+- [ ] `PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing`
 - [ ] `PYTHONPATH="$PWD" mutmut run`
 - [ ] Live XMPP integration test
 - [ ] Not run, reason:

@@ -4,13 +4,10 @@ Admin management commands.
 This plugin exposes administrative commands for bot management,
 like restart, shutdown, and status monitoring.
 
-The bot restart command simply stops the bot, which is then restarted by
-the system's service functions.
-
-The bot shutdown command is built from the "stop_cmd" key in the config.py
-like this:
-"stop_cmd": ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
-(This may be different for your setup and used init system)
+The restart and shutdown commands disconnect gracefully. A systemd unit using
+``Restart=on-failure`` restarts the dedicated restart exit code but leaves a
+clean shutdown stopped. Operators may optionally configure ``STOP_CMD`` as an
+external service-manager override.
 """
 
 import asyncio
@@ -18,7 +15,8 @@ import json
 import logging
 import os
 import platform
-import subprocess
+import tempfile
+from contextlib import suppress
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -28,6 +26,7 @@ import psutil
 from bot.lifecycle import _restart_notification_paths
 from core_plugins._core import JOINED_ROOMS
 from utils.command import COMMANDS, Role, command
+from utils.file_security import PRIVATE_FILE_MODE
 from utils.config import config
 from utils.audit import audit_event
 from utils.task_supervisor import create_plugin_task
@@ -464,6 +463,74 @@ def _reply_status_usage(bot, msg):
         bot.reply(msg, f"Usage: {usage}")
 
 
+def _write_private_json(path: Path, payload: dict) -> None:
+    """Atomically write a small owner-only runtime JSON file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp = Path(tmp_name)
+    try:
+        os.chmod(tmp, PRIVATE_FILE_MODE)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        os.chmod(path, PRIVATE_FILE_MODE)
+    except Exception:
+        with suppress(OSError):
+            os.close(fd)
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+async def _run_stop_command(stop_cmd: list[str], timeout: float) -> tuple[int, str]:
+    """Run an optional service-manager command without blocking the event loop."""
+    if not stop_cmd or not all(isinstance(item, str) and item for item in stop_cmd):
+        raise ValueError("stop_cmd must be a non-empty list of arguments")
+    process = await asyncio.create_subprocess_exec(
+        *stop_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        raise
+    detail = (stderr or stdout or b"").decode("utf-8", errors="replace").strip()
+    return int(process.returncode or 0), detail[:300]
+
+
+async def _graceful_command_shutdown(bot, *, exit_code: int) -> None:
+    """Disconnect and drain runtime state for an operator-requested exit."""
+    bot._requested_exit_code = int(exit_code)
+    bot.disconnect()
+    disconnected = getattr(bot, "disconnected", None)
+    if disconnected is not None:
+        try:
+            await asyncio.wait_for(disconnected, timeout=5)
+        except asyncio.TimeoutError:
+            log.warning("[ADMIN] Disconnect timeout during requested shutdown")
+
+    shutdown_runtime = getattr(bot, "shutdown_runtime", None)
+    if callable(shutdown_runtime):
+        await shutdown_runtime()
+        return
+
+    message_cache = getattr(bot, "message_cache", None)
+    close_cache = getattr(message_cache, "close", None)
+    if callable(close_cache):
+        await close_cache()
+    close_db = getattr(getattr(bot, "db", None), "close", None)
+    if callable(close_db):
+        await close_db()
+
+
 # --------------
 # ADMIN COMMANDS
 # --------------
@@ -494,11 +561,8 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
     # Wait a moment to ensure the reply is sent
     await asyncio.sleep(0.5)
 
-    # Initiate graceful shutdown
-    log.info("[ADMIN] Initiating graceful shutdown...")
-    bot.disconnect()
-
-    # Store restart notification info to file
+    # Store restart notification before disconnecting so the main shutdown
+    # path cannot race ahead of the persistent confirmation metadata.
     notification_data = {
         "sender": str(sender),
         "sender_bare":
@@ -513,10 +577,7 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
     for path in _restart_notification_paths(config):
         try:
             notification_path = Path(path)
-            if notification_path.parent != Path(""):
-                notification_path.parent.mkdir(parents=True, exist_ok=True)
-            with notification_path.open("w") as f:
-                json.dump(notification_data, f)
+            _write_private_json(notification_path, notification_data)
             saved_paths.append(str(notification_path))
         except Exception as e:
             log.warning("[ADMIN] Failed to save restart notification to %s: %s", path, e)
@@ -525,41 +586,20 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
     else:
         log.error("[ADMIN] Failed to save restart notification to any configured path")
 
-    # Wait for disconnect with timeout
+    # Exit 75 is deliberately non-zero so a Restart=on-failure systemd unit
+    # starts the process again.
+    log.info("[ADMIN] Initiating graceful restart...")
     try:
-        await asyncio.wait_for(bot.disconnected, timeout=5)
-    except asyncio.TimeoutError:
-        log.warning(
-            "[ADMIN] Disconnect timeout - proceeding with restart anyway")
-
-    # Flush plugin tasks and the persistent message cache before SQLite is
-    # closed. Lifecycle shutdown is idempotent because the main coroutine may
-    # reach its own finally block at the same time.
-    shutdown_runtime = getattr(bot, "shutdown_runtime", None)
-    if callable(shutdown_runtime):
-        try:
-            await shutdown_runtime()
-        except Exception as e:
-            log.error("[ADMIN] Error during graceful shutdown: %s", e)
-    else:
-        message_cache = getattr(bot, "message_cache", None)
-        close_cache = getattr(message_cache, "close", None)
-        if callable(close_cache):
-            try:
-                await close_cache()
-            except Exception as e:
-                log.error("[ADMIN] Error flushing message cache: %s", e)
-        try:
-            await bot.db.close()
-        except Exception as e:
-            log.error("[ADMIN] Error closing database: %s", e)
+        await _graceful_command_shutdown(bot, exit_code=75)
+    except Exception:
+        log.exception("[ADMIN] Error during graceful restart")
 
 
 @command(
     "bot shutdown",
     role=Role.OWNER,
     aliases=["shutdown"],
-    short="Stop the bot using the configured stop command.",
+    short="Stop the bot gracefully, optionally using a configured command.",
     usage="{prefix}bot shutdown",
     examples=["{prefix}bot shutdown"],
     category="admin",
@@ -569,28 +609,47 @@ async def bot_shutdown(bot, sender, nick, args, msg, is_room):
     """
     Gracefully shutdown the bot.
 
-    Shuts down the bot using the "stop_cmd" list from the config file
-    which builds the shutdown system command, for example:
-    ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
-    (This may be different for your setup and used system init system)
+    Without ``STOP_CMD`` the process exits cleanly after flushing runtime
+    state. An optional ``STOP_CMD`` may be configured for installations that
+    require an external service-manager command.
 
     Usage:
         {prefix}bot shutdown
     """
-    try:
-        stop_cmd = config["stop_cmd"]
-        if not stop_cmd:
-            raise KeyError
-    except KeyError:
-        bot.reply(msg, "🛑 No shutdown command provided in config file!")
-        log.info("[ADMIN] 🛑 Shutdown request failed. No shutdown command"
-                 " in config file provided.")
-        return
+    stop_cmd = config.get("stop_cmd") or []
+    timeout = max(1.0, float(config.get("stop_cmd_timeout_seconds", 10) or 10))
+
     bot.reply(msg, "🛑 Bot shutting down...")
     log.info("[ADMIN] 🛑 Bot shutdown requested by %s", sender)
     await audit_event(bot, "bot_shutdown", actor=sender, target="bot")
+    await asyncio.sleep(0.5)
 
-    subprocess.run(stop_cmd)
+    if stop_cmd:
+        try:
+            returncode, detail = await _run_stop_command(list(stop_cmd), timeout)
+        except asyncio.TimeoutError:
+            bot.reply(msg, f"🔴 Shutdown command timed out after {timeout:g}s.")
+            log.error("[ADMIN] Shutdown command timed out after %.1fs", timeout)
+            return
+        except Exception as exc:
+            bot.reply(msg, f"🔴 Shutdown command failed to start: {type(exc).__name__}.")
+            log.exception("[ADMIN] Shutdown command failed to start")
+            return
+        if returncode != 0:
+            suffix = f": {detail}" if detail else ""
+            bot.reply(msg, f"🔴 Shutdown command exited with {returncode}{suffix}")
+            log.error("[ADMIN] Shutdown command exited with %d: %s", returncode, detail)
+            return
+        # If the external command returns before the service manager has
+        # terminated us, still drain and exit cleanly ourselves.
+        await _graceful_command_shutdown(bot, exit_code=0)
+        return
+
+    try:
+        await _graceful_command_shutdown(bot, exit_code=0)
+    except Exception:
+        log.exception("[ADMIN] Graceful shutdown failed")
+        bot.reply(msg, "🔴 Graceful shutdown failed; check the bot log.")
 
 
 @command(

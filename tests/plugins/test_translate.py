@@ -242,6 +242,41 @@ def test_explicit_source_keeps_unchanged_provider_response():
     ) == "Blume"
 
 
+
+
+@pytest.mark.asyncio
+async def test_translate_request_failure_does_not_log_private_text(
+    monkeypatch, caplog
+):
+    secret = "private-homework-secret"
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(f",tr de {secret}", room="alice@example.org", msg_type="chat")
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_text",
+        AsyncMock(side_effect=aiohttp.ClientError(f"https://provider/?q={secret}")),
+    )
+
+    with caplog.at_level("WARNING", logger=translate.__name__):
+        await translate.translate_command(
+            bot,
+            "alice@example.org",
+            None,
+            ["de", secret],
+            msg,
+            False,
+        )
+
+    assert secret not in caplog.text
+    assert "ClientError" in caplog.text
+    bot.reply.assert_called_once_with(
+        msg, "🔴 Translation service request failed.", mention=False
+    )
+
+
 @pytest.mark.asyncio
 async def test_translate_command_translates_direct_text(monkeypatch):
     bot = SimpleNamespace(reply=Mock())
@@ -341,6 +376,8 @@ async def test_translate_command_treats_auto_as_text_with_default_target(
         source_language="en",
     )
     bot.reply.assert_called_once_with(msg, "Auto", mention=False)
+
+
 
 
 @pytest.mark.asyncio

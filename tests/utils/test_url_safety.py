@@ -234,3 +234,25 @@ async def test_validate_fetch_url_async_uses_running_loop_executor(monkeypatch):
 
     assert result == "https://example.org/feed"
     assert calls == [None]
+
+
+def test_resolve_fetch_target_returns_only_validated_addresses():
+    target = url_safety.resolve_fetch_target(
+        "https://example.org/path",
+        resolver=lambda _hostname: ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"],
+    )
+    assert target.hostname == "example.org"
+    assert target.port == 443
+    assert set(target.addresses) == {
+        "93.184.216.34",
+        "2606:2800:220:1:248:1893:25c8:1946",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_fetch_target_async_rejects_rebinding_private_answer():
+    with pytest.raises(url_safety.UnsafeFetchURL):
+        await url_safety.resolve_fetch_target_async(
+            "https://example.org/",
+            resolver=lambda _hostname: ["127.0.0.1"],
+        )

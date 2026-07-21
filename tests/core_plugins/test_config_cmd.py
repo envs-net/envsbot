@@ -474,3 +474,14 @@ def test_format_config_assignment_uses_safe_double_quoted_strings():
 
     assert assignment == 'TRANSLATE_TO = "de \\"quoted\\"\\nnext"'
     compile(assignment, "<config-assignment>", "exec")
+
+
+def test_write_config_text_atomic_enforces_owner_only_mode(tmp_path):
+    path = tmp_path / "config.py"
+    path.write_text('JID = "bot@example.org"\n', encoding="utf-8")
+    path.chmod(0o644)
+
+    config_cmd._write_config_text_atomic(path, 'JID = "new@example.org"\n')
+
+    assert path.read_text(encoding="utf-8") == 'JID = "new@example.org"\n'
+    assert path.stat().st_mode & 0o777 == 0o600

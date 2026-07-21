@@ -124,7 +124,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,backup verify` | [`backups`](plugins/backups.md) | `admin` | `private recommended` | Verify one managed backup archive. |
 | `,bot checkupdate` | [`_admin`](plugins/_admin.md) | `admin` | `private chat / MUC PM` | Check whether a newer EnvsBot release is available. |
 | `,bot restart` | [`_admin`](plugins/_admin.md) | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
-| `,bot shutdown` | [`_admin`](plugins/_admin.md) | `owner` | `private chat / MUC PM` | Stop the bot using the configured stop command. |
+| `,bot shutdown` | [`_admin`](plugins/_admin.md) | `owner` | `private chat / MUC PM` | Stop the bot gracefully, optionally using a configured command. |
 | `,bot status` | [`_admin`](plugins/_admin.md) | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP, plugin and database status. |
 | `,config diff` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Show config values that differ from config_sample.py defaults. |
 | `,config reload` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |

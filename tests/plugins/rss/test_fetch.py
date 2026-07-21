@@ -107,9 +107,11 @@ async def test_fetch_feed_bytes_redirect_and_size_limit(monkeypatch):
                     None, (), status=self.status
                 )
 
+    session_calls = []
+
     class DummySession:
         def __init__(self, **kwargs):
-            self.calls = []
+            self.calls = session_calls
 
         async def __aenter__(self):
             return self

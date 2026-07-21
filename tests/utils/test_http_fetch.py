@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
@@ -210,3 +211,59 @@ async def test_fetch_preview_obeys_stop_predicate():
 
     assert result.body == b"<html><head><title>Example</title>"
     assert result.truncated is False
+
+
+
+
+@pytest.mark.asyncio
+async def test_pinned_resolver_uses_only_validated_addresses():
+    from utils.http_fetch import _PinnedResolver
+    from utils.url_safety import ValidatedFetchTarget
+
+    resolver = _PinnedResolver(
+        ValidatedFetchTarget(
+            "https://example.org/path",
+            "example.org",
+            443,
+            ("93.184.216.34", "2001:4860:4860::8888"),
+        )
+    )
+
+    ipv4 = await resolver.resolve("example.org", 443, family=__import__("socket").AF_INET)
+    assert [item["host"] for item in ipv4] == ["93.184.216.34"]
+    assert all(item["hostname"] == "example.org" for item in ipv4)
+
+    both = await resolver.resolve("EXAMPLE.ORG.", 443, family=__import__("socket").AF_UNSPEC)
+    assert {item["host"] for item in both} == {
+        "93.184.216.34",
+        "2001:4860:4860::8888",
+    }
+
+    with pytest.raises(OSError, match="differs"):
+        await resolver.resolve("attacker.example", 443)
+
+
+@pytest.mark.asyncio
+async def test_validated_hop_builds_pinned_connector_for_real_aiohttp(monkeypatch):
+    from utils import http_fetch
+    from utils.url_safety import ValidatedFetchTarget, validate_fetch_url_async
+
+    target = ValidatedFetchTarget(
+        "https://example.org/path",
+        "example.org",
+        443,
+        ("93.184.216.34",),
+    )
+    monkeypatch.setattr(http_fetch, "resolve_fetch_target_async", AsyncMock(return_value=target))
+    connector = object()
+    monkeypatch.setattr(http_fetch, "_pinned_connector", lambda value: connector)
+
+    url, resolved_connector = await http_fetch._validated_hop(
+        target.url,
+        validator=validate_fetch_url_async,
+        allow_private=False,
+        session_factory=http_fetch.aiohttp.ClientSession,
+    )
+
+    assert url == target.url
+    assert resolved_connector is connector

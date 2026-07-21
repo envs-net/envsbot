@@ -44,7 +44,7 @@ PYTHONPATH="$PWD" pytest
 Run with coverage:
 
 ```bash
-PYTHONPATH="$PWD" pytest --cov=envsbot --cov-report=term-missing
+PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
 ```
 
 Optional mutation testing:
@@ -80,7 +80,7 @@ PYTHONPATH="$PWD" pytest
 Recommended for larger changes:
 
 ```bash
-PYTHONPATH="$PWD" pytest --cov=envsbot --cov-report=term-missing
+PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
 PYTHONPATH="$PWD" mutmut run
 ```
 

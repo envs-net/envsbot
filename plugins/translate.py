@@ -523,8 +523,12 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
     except TranslationUsageError as exc:
         bot.reply(msg, f"🟡️ {exc}\nUsage: {_usage()}", mention=False)
         return
-    except (asyncio.TimeoutError, aiohttp.ClientError, UnsafeFetchURL):
-        log.warning("[TRANSLATE] Translation request failed", exc_info=True)
+    except (asyncio.TimeoutError, aiohttp.ClientError, UnsafeFetchURL) as exc:
+        log.warning(
+            "[TRANSLATE] Translation request failed error=%s status=%s",
+            type(exc).__name__,
+            getattr(exc, "status", "n/a"),
+        )
         bot.reply(msg, "🔴 Translation service request failed.", mention=False)
         return
     except (
@@ -532,14 +536,22 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
         json.JSONDecodeError,
         TranslationProviderError,
         ValueError,
-    ):
-        log.warning("[TRANSLATE] Invalid translation provider response", exc_info=True)
+    ) as exc:
+        log.warning(
+            "[TRANSLATE] Invalid provider response error=%s",
+            type(exc).__name__,
+        )
         bot.reply(
             msg, "🔴 Translation service returned an invalid response.", mention=False
         )
         return
-    except Exception:
-        log.exception("[TRANSLATE] Unexpected translation error")
+    except Exception as exc:
+        # Do not log exception text here: aiohttp errors may embed the full GET
+        # URL, including the private text in the q= query parameter.
+        log.error(
+            "[TRANSLATE] Unexpected translation error type=%s",
+            type(exc).__name__,
+        )
         bot.reply(msg, "🔴 Translation failed due to an internal error.", mention=False)
         return
 

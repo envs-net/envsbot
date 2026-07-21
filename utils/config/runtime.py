@@ -21,6 +21,7 @@ STARTUP_ONLY_KEYS = {
     "direct_tls",
     "db",
     "message_cache_size",
+    "message_cache_max_age_days",
 }
 
 _RATE_LIMIT_KEYS = {

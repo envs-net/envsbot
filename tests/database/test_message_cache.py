@@ -11,7 +11,7 @@ async def test_message_cache_survives_restart_and_prunes_per_conversation(tmp_db
     db = DatabaseManager(tmp_db_path)
     await db.connect()
 
-    first = MessageCache(max_messages=3)
+    first = MessageCache(max_messages=3, max_age_days=0)
     await first.start(db.message_cache)
     for index in range(3):
         await first.add_entry(
@@ -25,7 +25,7 @@ async def test_message_cache_survives_restart_and_prunes_per_conversation(tmp_db
         )
     await first.close()
 
-    second = MessageCache(max_messages=2)
+    second = MessageCache(max_messages=2, max_age_days=0)
     await second.start(db.message_cache)
     assert [
         entry["body"]

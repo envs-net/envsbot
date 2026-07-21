@@ -352,16 +352,6 @@ def test_restart_notification_paths_include_persistent_fallback(tmp_path):
     assert "/tmp/envsbot_restart_notification.json" in paths
 
 
-def test_get_latest_git_tag(monkeypatch):
-    monkeypatch.setattr(envsbot.subprocess, "check_output",
-                        lambda *a, **k: b"v1.2.3\n")
-    assert envsbot.get_latest_git_tag() == "v1.2.3"
-    def raise_cpe(
-        *a, **k): raise envsbot.subprocess.CalledProcessError(1, "git")
-    monkeypatch.setattr(envsbot.subprocess, "check_output", raise_cpe)
-    assert envsbot.get_latest_git_tag() is None
-
-
 def test_main_copy_behavior(monkeypatch, tmp_path):
     source = tmp_path / "init_chat_slang.csv"
     target = tmp_path / "chat_slang.csv"
@@ -1134,6 +1124,31 @@ async def test_main_shutdown_timeout_and_close_error(monkeypatch):
         "db.close",
     ]
 
+
+
+def test_install_shutdown_signal_handlers_requests_clean_disconnect():
+    callbacks = {}
+
+    class Loop:
+        def add_signal_handler(self, sig, callback, *args):
+            callbacks[sig] = (callback, args)
+
+    xmpp = types.SimpleNamespace(
+        _requested_exit_code=1,
+        disconnect=MagicMock(),
+    )
+    installed = envsbot._install_shutdown_signal_handlers(xmpp, Loop())
+
+    assert set(installed) == {envsbot.signal.SIGINT, envsbot.signal.SIGTERM}
+    callback, args = callbacks[envsbot.signal.SIGTERM]
+    callback(*args)
+    assert xmpp._requested_exit_code == 0
+    assert xmpp._signal_shutdown_requested is True
+    xmpp.disconnect.assert_called_once_with()
+
+    # Repeated signals must not start a second concurrent shutdown.
+    callback(*args)
+    xmpp.disconnect.assert_called_once_with()
 
 def test_copy_initial_chat_slang_paths(tmp_path, monkeypatch):
     source = tmp_path / "init_chat_slang.csv"

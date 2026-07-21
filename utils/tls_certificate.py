@@ -215,7 +215,8 @@ def _certificate_verification_message(
     mismatch_target: str,
 ) -> str:
     """Return a concise operator-facing certificate verification result."""
-    message = str(getattr(exc, "verify_message", "") or exc).strip()
+    verify_message = getattr(exc, "verify_message", None)
+    message = (str(exc) if verify_message is None else str(verify_message)).strip()
     lowered = message.lower()
     if getattr(exc, "verify_code", None) == 10 or "expired" in lowered:
         return f"{label} has expired."

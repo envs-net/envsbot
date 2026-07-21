@@ -104,6 +104,7 @@ def _validate_numeric_ranges(cfg, errors):
         "rss_fetch_timeout_seconds",
         "rss_retry_backoff_multiplier",
         "sed_regex_timeout",
+        "stop_cmd_timeout_seconds",
         "updatecheck_timeout_seconds",
         "urlcheck_fetch_timeout_seconds",
         "vcard_fetch_timeout_seconds",
@@ -111,7 +112,7 @@ def _validate_numeric_ranges(cfg, errors):
         "xkcd_http_timeout",
         "xkcd_index_request_delay_seconds",
     }
-    zero_or_greater_integer_keys = {"max_new_feed_entries"}
+    zero_or_greater_integer_keys = {"max_new_feed_entries", "message_cache_max_age_days"}
     default_pagination = cfg.get("default_pagination")
     if default_pagination is not None:
         if str(default_pagination).strip().lower() != "all":

@@ -62,8 +62,11 @@ DB_FILE = "bot.db"
 # Keep this outside /tmp when systemd PrivateTmp=true is enabled.
 RESTART_NOTIFICATION_FILE = "data/envsbot_restart_notification.json"
 
-# Command used by ,bot shutdown. Keep this as a list of arguments.
-STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
+# Optional external command used by ,bot shutdown. Leave empty to perform a
+# clean internal exit. With systemd, use Restart=on-failure so ,bot restart
+# (exit code 75) restarts while a clean shutdown remains stopped.
+STOP_CMD = []
+STOP_CMD_TIMEOUT_SECONDS = 10
 
 # Command execution guardrails. Slow commands are logged; timed-out commands
 # return a friendly error and the traceback stays in the log.
@@ -83,6 +86,8 @@ DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
 # Message bodies are therefore persisted in the bot database and included in
 # normal database backups. Lower this value if less retained history is wanted.
 MESSAGE_CACHE_SIZE = 100
+# Remove cached messages older than this many days. Set 0 to disable age pruning.
+MESSAGE_CACHE_MAX_AGE_DAYS = 30
 
 # Default paging behavior for commands supporting [page|last|all].
 # "all" shows the full list by default. A positive integer, e.g. 20,

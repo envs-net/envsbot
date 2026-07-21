@@ -205,7 +205,7 @@ easier to filter. Common examples are:
 ```text
 [COMMAND] event=slow command=doctor actor=user@example.org room=room@conference.example.org duration_ms=45 status=ok
 [LIFECYCLE] event=shutdown phase=tasks status=ok cancelled=21
-[DB] event=migration status=ok version=0003_room_invites
+[DB] event=migration status=ok version=0004_message_cache
 ```
 
 Sensitive values and URLs with embedded credentials are passed through the

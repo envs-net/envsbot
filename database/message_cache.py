@@ -40,8 +40,20 @@ class MessageCacheStore:
             "WHERE stanza_id IS NOT NULL"
         )
 
-    async def prune_all(self, limit_per_conversation: int) -> int:
-        """Apply the current per-conversation limit to persisted history."""
+    async def prune_all(
+        self,
+        limit_per_conversation: int,
+        *,
+        min_received_at: int | None = None,
+    ) -> int:
+        """Apply the current age and per-conversation retention limits."""
+        removed = 0
+        if min_received_at is not None:
+            cursor = await self.db.execute(
+                "DELETE FROM message_cache WHERE received_at < ?",
+                (int(min_received_at),),
+            )
+            removed += max(0, int(cursor.rowcount or 0))
         limit = max(1, int(limit_per_conversation))
         cursor = await self.db.execute(
             """
@@ -61,11 +73,17 @@ class MessageCacheStore:
             """,
             (limit,),
         )
-        return max(0, int(cursor.rowcount or 0))
+        return removed + max(0, int(cursor.rowcount or 0))
 
-    async def load_recent(self, limit_per_conversation: int) -> list[dict[str, Any]]:
+    async def load_recent(
+        self,
+        limit_per_conversation: int,
+        *,
+        min_received_at: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Load the retained rows in stable conversation/message order."""
         limit = max(1, int(limit_per_conversation))
+        cutoff = 0 if min_received_at is None else int(min_received_at)
         cursor = await self.db.execute(
             """
             SELECT id, cache_key, conversation, stanza_id, sender_nick,
@@ -78,11 +96,12 @@ class MessageCacheStore:
                            ORDER BY id DESC
                        ) AS row_number
                 FROM message_cache
+                WHERE received_at >= ?
             )
             WHERE row_number <= ?
             ORDER BY conversation ASC, id ASC
             """,
-            (limit,),
+            (cutoff, limit),
         )
         return [dict(row) for row in await cursor.fetchall()]
 
@@ -91,6 +110,7 @@ class MessageCacheStore:
         entries: Iterable[Mapping[str, Any]],
         *,
         limit_per_conversation: int,
+        min_received_at: int | None = None,
     ) -> None:
         """Persist an idempotent batch and prune each touched conversation."""
         rows = [
@@ -112,6 +132,11 @@ class MessageCacheStore:
         limit = max(1, int(limit_per_conversation))
         conversations = sorted({row[1] for row in rows})
         try:
+            if min_received_at is not None:
+                await self.db.conn.execute(
+                    "DELETE FROM message_cache WHERE received_at < ?",
+                    (int(min_received_at),),
+                )
             await self.db.conn.executemany(
                 """
                 INSERT OR IGNORE INTO message_cache (

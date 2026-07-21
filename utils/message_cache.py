@@ -154,8 +154,9 @@ class MessageCache:
     shutdown, so cached messages remain available after a restart.
     """
 
-    def __init__(self, max_messages: int = 100):
+    def __init__(self, max_messages: int = 100, max_age_days: int = 30):
         self.max_messages = max(1, int(max_messages))
+        self.max_age_days = max(0, int(max_age_days))
         self._messages: dict[str, deque[dict[str, Any]]] = {}
         self._by_stanza_id: dict[str, dict[str, dict[str, Any]]] = {}
         self._store = None
@@ -164,6 +165,18 @@ class MessageCache:
         self._writer_task: asyncio.Task | None = None
         self._started = False
         self._closing = False
+        self._retry_backlog: deque[dict[str, Any]] = deque(
+            maxlen=max(100, self.max_messages * 10)
+        )
+        self._persistence_failures = 0
+        self._dropped_persistence_entries = 0
+        self._last_persistence_error: str | None = None
+        self._last_persistence_failure_at: int | None = None
+
+    def _minimum_received_at(self) -> int | None:
+        if self.max_age_days <= 0:
+            return None
+        return int(time.time()) - (self.max_age_days * 86400)
 
     async def start(self, store) -> None:
         """Load persisted entries and start the asynchronous writer."""
@@ -173,11 +186,23 @@ class MessageCache:
         self._messages.clear()
         self._by_stanza_id.clear()
         self._store = store
+        cutoff = self._minimum_received_at()
         prune_all = getattr(store, "prune_all", None)
         if callable(prune_all):
-            await prune_all(self.max_messages)
-        rows = await store.load_recent(self.max_messages)
+            try:
+                await prune_all(self.max_messages, min_received_at=cutoff)
+            except TypeError:
+                await prune_all(self.max_messages)
+        try:
+            rows = await store.load_recent(
+                self.max_messages,
+                min_received_at=cutoff,
+            )
+        except TypeError:
+            rows = await store.load_recent(self.max_messages)
         for row in rows:
+            if cutoff is not None and int(row.get("received_at") or 0) < cutoff:
+                continue
             entry = {
                 "cache_key": str(row["cache_key"]),
                 "conversation": str(row["conversation"]),
@@ -216,12 +241,18 @@ class MessageCache:
         task = self._writer_task
         if task is not None:
             await asyncio.gather(task)
+        if self._retry_backlog:
+            await self._persist_with_retry([], queue_failed=False)
         self._writer_task = None
         self._started = False
+        status = "degraded" if self._retry_backlog else "flushed"
         log.info(
-            "[MESSAGE_CACHE] event=stop status=flushed messages=%d pending=%d",
+            "[MESSAGE_CACHE] event=stop status=%s messages=%d pending=%d "
+            "retry_backlog=%d",
+            status,
             self.message_count,
             self._queue.qsize(),
+            len(self._retry_backlog),
         )
 
     async def add_message(
@@ -344,27 +375,59 @@ class MessageCache:
             if stop_after_batch:
                 return
 
-    async def _persist_with_retry(self, batch: list[object]) -> None:
-        entries = [entry for entry in batch if isinstance(entry, Mapping)]
+    async def _persist_with_retry(
+        self,
+        batch: list[object],
+        *,
+        queue_failed: bool = True,
+    ) -> bool:
+        incoming = [dict(entry) for entry in batch if isinstance(entry, Mapping)]
+        combined: dict[str, dict[str, Any]] = {
+            str(entry.get("cache_key")): dict(entry)
+            for entry in self._retry_backlog
+        }
+        for entry in incoming:
+            combined[str(entry.get("cache_key"))] = entry
+        entries = list(combined.values())
         if not entries or self._store is None:
-            return
+            return True
 
         for attempt in range(3):
             try:
-                await self._store.save_batch(
-                    entries,
-                    limit_per_conversation=self.max_messages,
-                )
-                return
-            except Exception:
+                try:
+                    await self._store.save_batch(
+                        entries,
+                        limit_per_conversation=self.max_messages,
+                        min_received_at=self._minimum_received_at(),
+                    )
+                except TypeError:
+                    await self._store.save_batch(
+                        entries,
+                        limit_per_conversation=self.max_messages,
+                    )
+                self._retry_backlog.clear()
+                self._last_persistence_error = None
+                return True
+            except Exception as exc:
                 if attempt == 2:
+                    self._persistence_failures += 1
+                    self._last_persistence_error = type(exc).__name__
+                    self._last_persistence_failure_at = int(time.time())
+                    if queue_failed:
+                        backlog_limit = self._retry_backlog.maxlen or len(entries)
+                        dropped = max(0, len(entries) - backlog_limit)
+                        self._dropped_persistence_entries += dropped
+                        self._retry_backlog.clear()
+                        self._retry_backlog.extend(entries[-backlog_limit:])
                     log.exception(
                         "[MESSAGE_CACHE] event=persist status=failed "
-                        "entries=%d",
+                        "entries=%d backlog=%d",
                         len(entries),
+                        len(self._retry_backlog),
                     )
-                    return
+                    return False
                 await asyncio.sleep(0.25 * (2**attempt))
+        return False
 
     def get_messages(
         self,
@@ -421,7 +484,9 @@ class MessageCache:
         """Return the total number of retained in-memory messages."""
         return sum(len(messages) for messages in self._messages.values())
 
-    def stats(self, conversation: str | None = None) -> dict[str, int | bool]:
+    def stats(
+        self, conversation: str | None = None
+    ) -> dict[str, int | bool | str | None]:
         """Return small runtime counters for diagnostics."""
         if conversation is not None:
             count = len(self._messages.get(str(conversation), ()))
@@ -433,6 +498,17 @@ class MessageCache:
             "conversations": conversations,
             "messages": count,
             "max_per_conversation": self.max_messages,
+            "max_age_days": self.max_age_days,
             "pending_writes": self._queue.qsize(),
+            "retry_backlog": len(self._retry_backlog),
+            "persistence_failures": self._persistence_failures,
+            "dropped_persistence_entries": self._dropped_persistence_entries,
+            "last_persistence_error": self._last_persistence_error,
+            "last_persistence_failure_at": self._last_persistence_failure_at,
+            "degraded": bool(
+                self._retry_backlog
+                or self._last_persistence_error
+                or self._dropped_persistence_entries
+            ),
             "persistent": self._store is not None,
         }

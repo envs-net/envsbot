@@ -250,3 +250,50 @@ def test_verify_backup_and_restore_plan(backup_env):
     plan = backups.restore_plan(archive)
     assert plan["entries"] == ["bot.db"]
     assert plan["targets"]["bot.db"] == str(backup_env.db_path)
+
+
+@pytest.mark.asyncio
+async def test_backup_permissions_names_and_no_partial_archive(backup_env, monkeypatch):
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    first = await backups.create_backup(bot, reason="same")
+    second = await backups.create_backup(bot, reason="same")
+
+    assert first != second
+    assert first.stat().st_mode & 0o777 == 0o600
+    assert second.stat().st_mode & 0o777 == 0o600
+    assert backup_env.backup_dir.stat().st_mode & 0o777 == 0o700
+    assert not list(backup_env.backup_dir.glob("*.tmp"))
+
+
+@pytest.mark.asyncio
+async def test_create_backup_removes_temporary_archive_after_write_failure(
+    backup_env, monkeypatch
+):
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+
+    def fail_write(*_args, **_kwargs):
+        raise RuntimeError("archive write failed")
+
+    monkeypatch.setattr(backups, "_write_file", fail_write)
+    with pytest.raises(RuntimeError, match="archive write failed"):
+        await backups.create_backup(bot, reason="failure", prune=False)
+
+    assert not list(backup_env.backup_dir.glob("*.tmp"))
+    assert not list(backup_env.backup_dir.glob("*.zip"))
+
+@pytest.mark.asyncio
+async def test_create_backup_returns_verified_archive_when_prune_fails(
+    backup_env, monkeypatch
+):
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+
+    def fail_prune(**_kwargs):
+        raise OSError("prune failed")
+
+    monkeypatch.setattr(backups, "prune_old_backups", fail_prune)
+    archive = await backups.create_backup(bot, reason="manual", prune=True)
+
+    assert archive.exists()
+    with zipfile.ZipFile(archive) as handle:
+        assert handle.testzip() is None
+        assert backups.MANIFEST_NAME in handle.namelist()

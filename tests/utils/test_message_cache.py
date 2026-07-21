@@ -196,3 +196,78 @@ async def test_cache_can_restart_without_duplicating_loaded_messages():
     await cache.start(store)
     assert [entry["body"] for entry in cache.get_messages("room")] == ["hello"]
     await cache.close()
+
+
+@pytest.mark.asyncio
+async def test_cache_reports_and_retries_persistence_failure(monkeypatch):
+    class FlakyStore(FakeStore):
+        def __init__(self):
+            super().__init__()
+            self.fail = True
+
+        async def save_batch(self, entries, *, limit_per_conversation, **_kwargs):
+            if self.fail:
+                raise RuntimeError("db unavailable")
+            await super().save_batch(entries, limit_per_conversation=limit_per_conversation)
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(message_cache.asyncio, "sleep", no_sleep)
+    store = FlakyStore()
+    cache = message_cache.MessageCache(max_messages=5, max_age_days=0)
+    await cache.start(store)
+    await cache.add_entry({"conversation": "room", "body": "one"})
+    await cache._queue.join()
+    assert cache.stats()["degraded"] is True
+    assert cache.stats()["retry_backlog"] == 1
+
+    store.fail = False
+    await cache.add_entry({"conversation": "room", "body": "two"})
+    await cache._queue.join()
+    assert cache.stats()["degraded"] is False
+    assert [entry["body"] for entry in store.saved] == ["one", "two"]
+    await cache.close()
+
+
+
+
+@pytest.mark.asyncio
+async def test_cache_counts_entries_dropped_from_bounded_retry_backlog(monkeypatch):
+    class FailingStore(FakeStore):
+        async def save_batch(self, entries, *, limit_per_conversation, **_kwargs):
+            raise RuntimeError("database unavailable")
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(message_cache.asyncio, "sleep", no_sleep)
+    cache = message_cache.MessageCache(max_messages=1, max_age_days=0)
+    cache._retry_backlog = deque(maxlen=2)
+    await cache.start(FailingStore())
+    for number in range(4):
+        await cache.add_entry({
+            "conversation": "room",
+            "body": f"message-{number}",
+        })
+    await cache._queue.join()
+
+    stats = cache.stats()
+    assert stats["retry_backlog"] == 2
+    assert stats["dropped_persistence_entries"] == 2
+    assert stats["degraded"] is True
+    await cache.close()
+
+
+@pytest.mark.asyncio
+async def test_cache_age_limit_ignores_stale_loaded_rows(monkeypatch):
+    now = 2_000_000_000
+    monkeypatch.setattr(message_cache.time, "time", lambda: now)
+    store = FakeStore(rows=[
+        {"cache_key": "old", "conversation": "room", "body": "old", "received_at": now - 40 * 86400},
+        {"cache_key": "new", "conversation": "room", "body": "new", "received_at": now - 10},
+    ])
+    cache = message_cache.MessageCache(max_messages=5, max_age_days=30)
+    await cache.start(store)
+    assert [entry["body"] for entry in cache.get_messages("room")] == ["new"]
+    await cache.close()

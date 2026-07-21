@@ -3,6 +3,18 @@ from types import SimpleNamespace
 import utils.config.runtime as runtime
 
 
+def test_message_cache_age_is_startup_only():
+    assert "message_cache_size" in runtime.STARTUP_ONLY_KEYS
+    assert "message_cache_max_age_days" in runtime.STARTUP_ONLY_KEYS
+
+    lines = runtime.startup_change_lines(
+        {"message_cache_max_age_days": 30},
+        {"message_cache_max_age_days": 14},
+    )
+
+    assert any("MESSAGE_CACHE_MAX_AGE_DAYS" in line for line in lines)
+
+
 def test_rate_limiter_from_config_uses_defaults():
     limiter = runtime._rate_limiter_from_config({})
 

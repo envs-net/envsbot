@@ -1,8 +1,11 @@
 import asyncio
 import logging
+from pathlib import Path
+
 import aiosqlite
 
 from utils.config import config
+from utils.file_security import ensure_private_file
 from utils.logging_helpers import kv
 
 from .users import UserManager
@@ -40,45 +43,75 @@ class DatabaseManager:
 
         self._flush_task = None
         self._running = False
+        self._stop_event = asyncio.Event()
+        self._close_lock = asyncio.Lock()
 
     async def connect(self):
-        """Open the database connection and initialize tables."""
+        """Open the database connection and initialize tables safely."""
+        if self.conn is not None:
+            return
 
-        self.conn = await aiosqlite.connect(self.path)
-        self.conn.row_factory = aiosqlite.Row
-
-        # SQLite runtime pragmas. Keep these near connect() so every process
-        # consistently applies them before table managers start using the DB.
-        await self.conn.execute("PRAGMA foreign_keys = ON;")
-        try:
-            busy_timeout = max(0, int(config.get("database_busy_timeout_ms", 5000) or 0))
-        except Exception:
-            busy_timeout = 5000
-        await self.conn.execute(f"PRAGMA busy_timeout = {busy_timeout};")
-        if config.get("database_wal_enabled", False):
-            await self.conn.execute("PRAGMA journal_mode = WAL;")
-
-        # (optional but clean)
-        cursor = await self.conn.execute("PRAGMA foreign_keys;")
-        row = await cursor.fetchone()
-        if row["foreign_keys"] != 1:
-            raise RuntimeError("Failed to enable foreign keys")
-
-        self.users = UserManager(self.conn)
-        self.rooms = Rooms(self.conn)
-        self.audit = AuditLog(self.conn)
-        self.message_cache = MessageCacheStore(self)
-
-        await self._init_schema_migrations()
-        await self.run_migrations()
-
-        # add asyncio sqlite3 stop event
         self._stop_event = asyncio.Event()
+        self._running = False
+        try:
+            self.conn = await aiosqlite.connect(self.path)
+            self.conn.row_factory = aiosqlite.Row
+            self._secure_database_files()
 
-        # start background flush task
-        self._running = True
-        self._flush_task = asyncio.create_task(self._flush_loop())
+            # SQLite runtime pragmas. Keep these near connect() so every process
+            # consistently applies them before table managers start using the DB.
+            await self.conn.execute("PRAGMA foreign_keys = ON;")
+            try:
+                busy_timeout = max(0, int(config.get("database_busy_timeout_ms", 5000) or 0))
+            except Exception:
+                busy_timeout = 5000
+            await self.conn.execute(f"PRAGMA busy_timeout = {busy_timeout};")
+            if config.get("database_wal_enabled", False):
+                await self.conn.execute("PRAGMA journal_mode = WAL;")
+                self._secure_database_files()
 
+            cursor = await self.conn.execute("PRAGMA foreign_keys;")
+            row = await cursor.fetchone()
+            if row["foreign_keys"] != 1:
+                raise RuntimeError("Failed to enable foreign keys")
+
+            self.users = UserManager(self.conn)
+            self.rooms = Rooms(self.conn)
+            self.audit = AuditLog(self.conn)
+            self.message_cache = MessageCacheStore(self)
+
+            await self._init_schema_migrations()
+            await self.run_migrations()
+            self._secure_database_files()
+
+            self._running = True
+            self._flush_task = asyncio.create_task(self._flush_loop())
+        except Exception:
+            conn = self.conn
+            self.conn = None
+            self.users = None
+            self.rooms = None
+            self.audit = None
+            self.message_cache = None
+            self._running = False
+            if conn is not None:
+                try:
+                    await conn.close()
+                except Exception:
+                    log.exception("[DB] Failed to close connection after startup error")
+            raise
+
+    def _database_paths(self) -> tuple[Path, ...]:
+        """Return on-disk SQLite files that should remain owner-only."""
+        raw = str(self.path or "")
+        if raw in {"", ":memory:"} or raw.startswith("file:"):
+            return ()
+        path = Path(raw).expanduser()
+        return (path, Path(f"{path}-wal"), Path(f"{path}-shm"))
+
+    def _secure_database_files(self) -> None:
+        for path in self._database_paths():
+            ensure_private_file(path)
 
     async def _init_schema_migrations(self):
         """Create the lightweight migration bookkeeping table."""
@@ -110,7 +143,6 @@ class DatabaseManager:
             "SELECT version, applied_at FROM schema_migrations ORDER BY version"
         )
         return await cursor.fetchall()
-
 
     async def applied_migration_versions(self) -> set[str]:
         """Return migration versions that have already been applied."""
@@ -172,8 +204,13 @@ class DatabaseManager:
             if self.users:
                 await self._flush_with_retry()
 
-    async def _flush_with_retry(self, max_retries: int = 3,
-                                backoff: float = 1.0):
+    async def _flush_with_retry(
+        self,
+        max_retries: int = 3,
+        backoff: float = 1.0,
+        *,
+        raise_on_failure: bool = False,
+    ) -> bool:
         """
         Flush with exponential backoff retry logic.
 
@@ -184,7 +221,7 @@ class DatabaseManager:
         for attempt in range(max_retries):
             try:
                 await self.users.flush_all()
-                return  # Success
+                return True
             except Exception as e:
                 if attempt < max_retries - 1:
                     wait_time = backoff * (2 ** attempt)
@@ -200,11 +237,15 @@ class DatabaseManager:
                         " %s",
                         max_retries, e
                     )
+                    if raise_on_failure:
+                        raise
+                    return False
+        return False
 
     async def flush(self):
-        """Manually flush cached data with retry logic."""
+        """Manually flush cached data, raising when persistence fails."""
         if self.users:
-            await self._flush_with_retry()
+            await self._flush_with_retry(raise_on_failure=True)
 
     async def integrity_check(self) -> list[str]:
         """Run SQLite PRAGMA integrity_check and return result rows."""
@@ -224,19 +265,34 @@ class DatabaseManager:
         await self.conn.commit()
 
     async def close(self):
-        """
-        Stop background tasks, flush caches, and close the database.
-        """
+        """Stop background tasks, flush caches, and close idempotently."""
+        async with self._close_lock:
+            self._stop_event.set()
+            flush_task = self._flush_task
+            self._flush_task = None
+            if flush_task is not None:
+                try:
+                    await asyncio.wait_for(asyncio.shield(flush_task), timeout=5)
+                except asyncio.TimeoutError:
+                    flush_task.cancel()
+                    await asyncio.gather(flush_task, return_exceptions=True)
+                    log.warning("[DB] Timed out waiting for background flush task")
+                except Exception:
+                    log.exception("[DB] Background flush task failed during shutdown")
 
-        # signal shutdown
-        self._stop_event.set()
+            conn = self.conn
+            self.conn = None
+            self._running = False
+            if conn is not None:
+                try:
+                    await conn.close()
+                finally:
+                    self._secure_database_files()
 
-        flush_task = self._flush_task
-        if flush_task:
-            await asyncio.wait_for(asyncio.shield(flush_task), timeout=5)
-
-        if self.conn:
-            await self.conn.close()
+            self.users = None
+            self.rooms = None
+            self.audit = None
+            self.message_cache = None
 
     async def execute(self, query: str, params: tuple | None = None,
                       auto_commit: bool = True):

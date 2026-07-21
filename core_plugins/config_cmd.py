@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import pprint
+import tempfile
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
 
@@ -29,6 +30,7 @@ from utils.config import (
     validate_config,
 )
 from utils.formatting import format_page, paginate_lines, parse_page_args
+from utils.file_security import PRIVATE_FILE_MODE
 from utils.audit import audit_event
 from utils.backups import create_backup
 from utils.room_features import clear_room_feature_caches
@@ -172,12 +174,26 @@ def _replace_config_assignment(source: str, display_key: str, value: object) -> 
 
 
 def _write_config_text_atomic(path, text: str) -> None:
-    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp_path, path)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = type(path)(tmp_name)
+    try:
+        os.chmod(tmp_path, PRIVATE_FILE_MODE)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        os.chmod(path, PRIVATE_FILE_MODE)
+    except Exception:
+        with suppress(OSError):
+            os.close(fd)
+        with suppress(FileNotFoundError):
+            tmp_path.unlink()
+        raise
     # Directory fsync is best-effort: some platforms/filesystems do not
     # support opening directories, but the atomic replace above is complete.
     with suppress(OSError):

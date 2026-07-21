@@ -12,6 +12,7 @@ import functools
 import ipaddress
 import logging
 import socket
+from dataclasses import dataclass
 from collections.abc import Callable, Iterable
 from urllib.parse import ParseResult, urlparse
 
@@ -20,6 +21,16 @@ ALLOWED_FETCH_SCHEMES = frozenset({"http", "https"})
 LOCALHOST_NAMES = frozenset({"localhost", "localhost.localdomain"})
 Resolver = Callable[[str], Iterable[str]]
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ValidatedFetchTarget:
+    """A validated URL plus the exact addresses allowed for its connection."""
+
+    url: str
+    hostname: str
+    port: int
+    addresses: tuple[str, ...]
 
 
 class UnsafeFetchURL(ValueError):
@@ -127,6 +138,56 @@ def _resolved_ips(
     return ips
 
 
+def resolve_fetch_target(
+    url: str | None,
+    *,
+    allow_private: bool = False,
+    resolver: Resolver | None = None,
+) -> ValidatedFetchTarget:
+    """Validate a URL and return the exact DNS answers allowed for connect.
+
+    Pinning these addresses in the HTTP connector closes the DNS-rebinding gap
+    between pre-flight validation and the actual socket connection.
+    """
+    value = "" if url is None else str(url).strip()
+    parsed = _parse_fetch_url(value)
+    hostname = str(parsed.hostname or "").lower().rstrip(".")
+    if not hostname:
+        raise UnsafeFetchURL("URL must include a hostname")
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+
+    literal = _ip_from_literal(hostname)
+    if literal is not None:
+        ips = {literal}
+    else:
+        if hostname in LOCALHOST_NAMES or hostname.endswith(".localhost"):
+            if not allow_private:
+                raise UnsafeFetchURL("private or local network URLs are not allowed")
+        ips = _resolved_ips(hostname, resolver=resolver)
+
+    if not allow_private and any(not _is_public_ip(ip) for ip in ips):
+        raise UnsafeFetchURL("private or local network URLs are not allowed")
+
+    addresses = tuple(sorted(str(ip) for ip in ips))
+    return ValidatedFetchTarget(value, hostname, int(port), addresses)
+
+
+async def resolve_fetch_target_async(
+    url: str | None,
+    *,
+    allow_private: bool = False,
+    resolver: Resolver | None = None,
+) -> ValidatedFetchTarget:
+    """Run :func:`resolve_fetch_target` outside the event loop."""
+    func = functools.partial(
+        resolve_fetch_target,
+        url,
+        allow_private=allow_private,
+        resolver=resolver,
+    )
+    return await asyncio.get_running_loop().run_in_executor(None, func)
+
+
 def validate_fetch_url(
     url: str | None,
     *,
@@ -138,11 +199,9 @@ def validate_fetch_url(
     When ``allow_private`` is false, loopback, private, link-local, multicast,
     unspecified and otherwise non-global addresses are rejected.  Hostnames are
     resolved before fetches so DNS names pointing to private networks are blocked
-    too.  This is a pre-flight validation step, not a guarantee about the
-    eventual connection target: DNS answers can change between validation and
-    connect.  Callers must validate immediately before each outbound request and
-    before following every redirect target.  Tests can inject ``resolver`` to
-    avoid real DNS.
+    too. For user-controlled network requests, callers should use
+    :func:`resolve_fetch_target_async` and pin its returned addresses in the
+    connector. Tests can inject ``resolver`` to avoid real DNS.
     """
     if url is None:
         url = ""

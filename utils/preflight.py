@@ -19,6 +19,12 @@ from utils.config import (
     validate_startup_config,
 )
 from utils.plugin_metadata import validate_plugin_metadata
+from utils.file_security import (
+    ensure_private_directory,
+    format_mode,
+    has_group_or_other_access,
+    sensitive_permission_targets,
+)
 from utils.redaction import redact_text
 
 log = logging.getLogger(__name__)
@@ -137,7 +143,7 @@ def _check_config_sample(config: Mapping[str, Any]) -> tuple[bool, str]:
 def _check_backup_dir(config: Mapping[str, Any]) -> tuple[bool, str]:
     backup_dir = Path(str(config.get("backup_dir", "data/backups")))
     try:
-        backup_dir.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(backup_dir)
         test_file = backup_dir / ".envsbot-write-test"
         test_file.write_text("ok", encoding="utf-8")
         test_file.unlink(missing_ok=True)
@@ -158,6 +164,23 @@ def _check_runtime_files(config: Mapping[str, Any]) -> tuple[bool, str]:
     if vcard_sample.exists():
         checks.append("vcard_sample=ok")
     return True, f"runtime files: {', '.join(checks) if checks else 'ok'}"
+
+
+def _check_sensitive_permissions(config: Mapping[str, Any]) -> tuple[bool, str]:
+    """Reject runtime secrets that are readable by group or other users."""
+    paths = sensitive_permission_targets(
+        config_path=get_runtime_config_path(),
+        database_path=_runtime_path(config.get("db", "bot.db")),
+        backup_directory=_runtime_path(config.get("backup_dir", "data/backups")),
+    )
+    unsafe = [
+        f"{label}={format_mode(path)}"
+        for label, path in paths
+        if path.exists() and has_group_or_other_access(path)
+    ]
+    if unsafe:
+        return False, "file permissions: group/other access: " + ", ".join(unsafe)
+    return True, "file permissions: owner-only"
 
 
 def _check_config_path() -> tuple[bool, str]:
@@ -187,6 +210,7 @@ async def collect_preflight_checks(config: Mapping[str, Any]) -> list[tuple[bool
         checks.append((False, f"config: {redact_text(exc)}"))
 
     checks.append(_check_config_path())
+    checks.append(_check_sensitive_permissions(config))
     checks.append(_check_config_sample(config))
     checks.append(_check_imports())
     checks.append(_check_plugin_imports_and_metadata())

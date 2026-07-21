@@ -46,7 +46,7 @@ Run the local preflight and the full offline test suite:
 ```bash
 PYTHONPATH="$PWD" envsbot --check
 PYTHONPATH="$PWD" pytest --no-cov -q
-PYTHONPATH="$PWD" pytest --cov=envsbot --cov-report=term-missing
+PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
 ```
 
 Run mutation tests when practical:

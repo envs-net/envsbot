@@ -12,12 +12,18 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from utils.config import BASE_DIR, config, get_runtime_config_path
+from utils.file_security import (
+    PRIVATE_FILE_MODE,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from utils.version import __version__
 
 log = logging.getLogger(__name__)
@@ -94,7 +100,7 @@ def _sha256(path: Path) -> str:
 
 
 def _archive_name(reason: str) -> str:
-    timestamp = _now().strftime("%Y%m%d-%H%M%S")
+    timestamp = _now().strftime("%Y%m%d-%H%M%S-%f")
     return f"{BACKUP_PREFIX}-{timestamp}-{_safe_reason(reason)}.zip"
 
 
@@ -164,11 +170,18 @@ def _write_file(path: Path, arcname: str, archive: zipfile.ZipFile) -> dict[str,
 
 async def create_backup(bot: Any, *, reason: str = "manual", prune: bool = True) -> Path:
     """Create a managed ZIP backup and return its archive path."""
-    directory = backup_dir()
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = ensure_private_directory(backup_dir())
 
     db_path = _resolve_path(config.get("db", "bot.db"))
     archive_path = directory / _archive_name(reason)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{archive_path.name}.",
+        suffix=".tmp",
+        dir=directory,
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    os.chmod(tmp_path, PRIVATE_FILE_MODE)
     manifest: dict[str, Any] = {
         "app": "envsbot",
         "version": __version__,
@@ -178,23 +191,49 @@ async def create_backup(bot: Any, *, reason: str = "manual", prune: bool = True)
         "missing": [],
     }
 
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for arcname, source_path in _source_items(db_path):
-            try:
-                if arcname == "bot.db":
-                    item = await _write_database_snapshot(bot, source_path, archive)
-                else:
-                    if not source_path.exists():
-                        raise FileNotFoundError(source_path)
-                    item = _write_file(source_path, arcname, archive)
-                manifest["files"].append(item)
-            except FileNotFoundError:
-                manifest["missing"].append({"name": arcname, "source": str(source_path)})
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for arcname, source_path in _source_items(db_path):
+                try:
+                    if arcname == "bot.db":
+                        item = await _write_database_snapshot(bot, source_path, archive)
+                    else:
+                        if not source_path.exists():
+                            raise FileNotFoundError(source_path)
+                        item = _write_file(source_path, arcname, archive)
+                    manifest["files"].append(item)
+                except FileNotFoundError:
+                    manifest["missing"].append({"name": arcname, "source": str(source_path)})
 
-        archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2, sort_keys=True))
+            archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2, sort_keys=True))
+
+        with zipfile.ZipFile(tmp_path) as archive:
+            if archive.testzip() is not None:
+                raise BackupError("new backup archive failed CRC verification")
+            if MANIFEST_NAME not in archive.namelist():
+                raise BackupError("new backup archive has no manifest")
+        with tmp_path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, archive_path)
+        ensure_private_file(archive_path)
+        with suppress(OSError):
+            dir_fd = os.open(directory, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
     if prune:
-        prune_old_backups(directory=directory, keep=backup_keep())
+        try:
+            prune_old_backups(directory=directory, keep=backup_keep())
+        except Exception:
+            log.exception(
+                "[BACKUP] archive=%s status=created prune_status=failed",
+                archive_path.name,
+            )
     return archive_path
 
 
@@ -363,11 +402,21 @@ def _safe_members(archive: zipfile.ZipFile) -> set[str]:
 
 def _restore_entry(archive: zipfile.ZipFile, entry: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        with archive.open(entry) as source:
-            shutil.copyfileobj(source, tmp)
-    os.replace(tmp_path, target)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            os.chmod(tmp_path, PRIVATE_FILE_MODE)
+            with archive.open(entry) as source:
+                shutil.copyfileobj(source, tmp)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, target)
+        ensure_private_file(target)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
 
 
 async def _close_database(bot: Any) -> bool:

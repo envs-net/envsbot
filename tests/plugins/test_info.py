@@ -2,7 +2,7 @@ import pytest
 import types
 import csv
 from plugins import info as info_plugin
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 # ---- AIOHTTP ASYNC CTX MOCKING HELPERS ----
 
@@ -169,6 +169,21 @@ async def test_fediverse_usage(dummy_bot, fake_room_msg):
     assert "Usage: !fediverse <@user@instance>" in text
 
 
+def test_parse_fediverse_handle_rejects_url_syntax_and_normalizes_idna():
+    assert info_plugin._parse_fediverse_handle("@user@example.org") == (
+        "user",
+        "example.org",
+    )
+    assert info_plugin._parse_fediverse_handle("@user@BÜCHER.example") == (
+        "user",
+        "xn--bcher-kva.example",
+    )
+    assert info_plugin._parse_fediverse_handle("@user@example.org/path") is None
+    assert info_plugin._parse_fediverse_handle("@user@example.org:8443") is None
+    assert info_plugin._parse_fediverse_handle("@user@localhost") is None
+    assert info_plugin._parse_fediverse_handle("@bad user@example.org") is None
+
+
 @pytest.mark.asyncio
 async def test_fediverse_invalid_format(dummy_bot, fake_room_msg):
     await info_plugin.fediverse_latest(dummy_bot, "jid", "nick", ["invalid"],
@@ -179,33 +194,38 @@ async def test_fediverse_invalid_format(dummy_bot, fake_room_msg):
 
 @pytest.mark.asyncio
 async def test_fediverse_error(monkeypatch, dummy_bot, fake_room_msg):
-    class BrokenSession:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): pass
-        def get(self, *a, **k): raise Exception("fail")
-    monkeypatch.setattr(info_plugin.aiohttp,
-                        "ClientSession", lambda: BrokenSession())
+    monkeypatch.setattr(
+        info_plugin,
+        "fetch_json",
+        AsyncMock(side_effect=RuntimeError("fail")),
+    )
     dummy_bot.reset()
-    await info_plugin.fediverse_latest(dummy_bot, "jid", "nick", ["@foo@bar"],
-                                       fake_room_msg, True)
+    await info_plugin.fediverse_latest(
+        dummy_bot, "jid", "nick", ["@foo@bar.example"], fake_room_msg, True
+    )
     text = "\n".join(str(x) for x in dummy_bot.replies)
     assert "Error fetching from Fediverse" in text
 
 
 @pytest.mark.asyncio
 async def test_fediverse_nomatches(monkeypatch, dummy_bot, fake_room_msg):
-    resp_user = AsyncContextResp(200, {"id": "42"})
-    resp_timeline = AsyncContextResp(200, [])
-    monkeypatch.setattr(
-        info_plugin.aiohttp, "ClientSession",
-        lambda: DummyAioSession(
-            {"lookup": resp_user, "/statuses": resp_timeline}),
+    fetch = AsyncMock(
+        side_effect=[
+            types.SimpleNamespace(status=200, data={"id": "42"}),
+            types.SimpleNamespace(status=200, data=[]),
+        ]
     )
+    monkeypatch.setattr(info_plugin, "fetch_json", fetch)
     dummy_bot.reset()
-    await info_plugin.fediverse_latest(dummy_bot, "jid", "nick",
-                                       ["@someone@host"], fake_room_msg, True)
+    await info_plugin.fediverse_latest(
+        dummy_bot, "jid", "nick", ["@someone@host.example"], fake_room_msg, True
+    )
     text = "\n".join(str(x) for x in dummy_bot.replies).lower()
     assert "no public toots" in text
+    assert fetch.await_args_list[0].args[0].startswith(
+        "https://host.example/api/v1/accounts/lookup?acct=someone"
+    )
+    assert all("validator" not in call.kwargs for call in fetch.await_args_list)
 
 
 @pytest.mark.asyncio
@@ -215,18 +235,21 @@ async def test_fediverse_success(monkeypatch, dummy_bot, fake_room_msg):
         "url": "u", "reblogs_count": 1, "replies_count": 2,
         "favourites_count": 3
     }]
-    resp_user = AsyncContextResp(200, {"id": "42"})
-    resp_timeline = AsyncContextResp(200, timeline_content)
-    monkeypatch.setattr(
-        info_plugin.aiohttp, "ClientSession",
-        lambda: DummyAioSession(
-            {"lookup": resp_user, "/statuses": resp_timeline}),
+    fetch = AsyncMock(
+        side_effect=[
+            types.SimpleNamespace(status=200, data={"id": "42"}),
+            types.SimpleNamespace(status=200, data=timeline_content),
+        ]
     )
+    monkeypatch.setattr(info_plugin, "fetch_json", fetch)
     dummy_bot.reset()
-    await info_plugin.fediverse_latest(dummy_bot, "jid", "nick",
-                                       ["@someone@host"], fake_room_msg, True)
+    await info_plugin.fediverse_latest(
+        dummy_bot, "jid", "nick", ["@someone@host.example"], fake_room_msg, True
+    )
     text = "\n".join(str(x) for x in dummy_bot.replies).lower()
     assert "toot" in text and "hello" in text
+    assert all("validator" not in call.kwargs for call in fetch.await_args_list)
+
 
 # ---- ACRONYMS (all variants) ----
 

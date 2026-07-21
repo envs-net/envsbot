@@ -8,10 +8,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
-import subprocess
+import signal
 
 import slixmpp
 
@@ -174,11 +175,14 @@ class Bot(
         self.command_executor = CommandExecutor(self)
         self.message_cache = MessageCache(
             max_messages=int(config.get("message_cache_size", 100) or 100),
+            max_age_days=int(config.get("message_cache_max_age_days", 30) or 0),
         )
         self.room_state = room_state
         self._startup_backup_done = False
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False
+        # Unexpected disconnects should be restarted by Restart=on-failure.
+        self._requested_exit_code = 1
         self.accepting_commands = True
 
         self.rate_limiter = TokenBucketRateLimiter(
@@ -205,22 +209,6 @@ class Bot(
         self.add_event_handler("message", self.on_private_message)
 
 
-# --------------------------------------------------
-# GET LATEST GIT TAG (for version display)
-# --------------------------------------------------
-
-
-def get_latest_git_tag():
-    try:
-        tag = subprocess.check_output(
-            ["git", "describe", "--tags", "--abbrev=0"],
-            stderr=subprocess.STDOUT,
-        ).strip().decode("utf-8")
-        return tag
-    except subprocess.CalledProcessError:
-        return None
-
-
 # -------------------------------------------------
 # PREFLIGHT / MAIN / CLI
 # -------------------------------------------------
@@ -233,6 +221,31 @@ async def preflight_check() -> int:
     return await run_preflight(config)
 
 
+def _install_shutdown_signal_handlers(xmpp, loop=None) -> tuple[signal.Signals, ...]:
+    """Turn SIGINT/SIGTERM into one clean asynchronous runtime shutdown."""
+    loop = loop or asyncio.get_running_loop()
+    installed: list[signal.Signals] = []
+
+    def request_shutdown(sig: signal.Signals) -> None:
+        if getattr(xmpp, "_signal_shutdown_requested", False):
+            return
+        xmpp._signal_shutdown_requested = True
+        xmpp._requested_exit_code = 0
+        log.info("[XMPP] Shutdown signal received: %s", sig.name)
+        try:
+            xmpp.disconnect()
+        except Exception:
+            log.exception("[XMPP] Failed to disconnect after %s", sig.name)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, request_shutdown, sig)
+        except (NotImplementedError, RuntimeError, ValueError):
+            continue
+        installed.append(sig)
+    return tuple(installed)
+
+
 async def main():
     try:
         validate_startup_config(config)
@@ -241,12 +254,15 @@ async def main():
 
     xmpp = Bot()
     await connect_xmpp(xmpp)
+    loop = asyncio.get_running_loop()
+    installed_signals = _install_shutdown_signal_handlers(xmpp, loop)
     log.info("[XMPP] ✅ Connected successfully. Starting event loop...")
 
     try:
         await xmpp.disconnected
     except (KeyboardInterrupt, asyncio.CancelledError):
         log.info("[XMPP] Shutdown request")
+        xmpp._requested_exit_code = 0
         xmpp.disconnect()
         try:
             await asyncio.wait_for(xmpp.disconnected, timeout=2.0)
@@ -262,7 +278,11 @@ async def main():
                 await xmpp.db.close()
             except Exception as e:
                 log.exception("[XMPP] Error closing database: %s", e)
+        for sig in installed_signals:
+            with contextlib.suppress(Exception):
+                loop.remove_signal_handler(sig)
         log.info("[XMPP] ✅ Database closed! End!")
+    return int(getattr(xmpp, "_requested_exit_code", 1))
 
 
 def copy_initial_chat_slang(source="init_chat_slang.csv", target="chat_slang.csv") -> None:
@@ -287,7 +307,9 @@ def cli() -> None:
     if "--check" in sys.argv:
         raise SystemExit(asyncio.run(preflight_check()))
     try:
-        asyncio.run(main())
+        exit_code = asyncio.run(main())
+        if exit_code:
+            raise SystemExit(exit_code)
     except KeyboardInterrupt:
         log.info("[INIT] Shutdown requested by keyboard interrupt")
 

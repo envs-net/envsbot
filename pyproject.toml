@@ -14,7 +14,7 @@ authors = [
     { name = "~creme", email = "creme@envs.net" },
 ]
 
-license = { text = "GPL-3.0-only" }
+license = "GPL-3.0-only"
 
 dependencies = [
     "aiosqlite>=0.20,<1",
@@ -43,7 +43,6 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Topic :: Communications :: Chat",
     "Topic :: Internet :: XMPP",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

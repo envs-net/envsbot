@@ -1,3 +1,5 @@
+import asyncio
+from unittest.mock import AsyncMock, Mock
 import pytest
 import types
 import os
@@ -309,7 +311,8 @@ async def test_bot_shutdown_handles_errors(monkeypatch, fake_bot):
     monkeypatch.setattr(_admin, "log",
                         types.SimpleNamespace(info=lambda *a, **k: None,
                                               error=lambda *a, **k: None,
-                                              warning=lambda *a, **k: None))
+                                              warning=lambda *a, **k: None,
+                                              exception=lambda *a, **k: None))
     msg = DummyMsg()
     await _admin.bot_shutdown(fake_bot, Sender(), "nick", [], msg, False)
 
@@ -630,3 +633,52 @@ async def test_on_ready_version_worker_branches(monkeypatch, fake_bot):
     assert fake_bot.version_check_task == "task"
     assert created[0][0][1] == "_admin"
     assert created[0][1]["name"] == "version-check"
+
+
+
+
+@pytest.mark.asyncio
+async def test_bot_shutdown_external_success_still_drains_runtime(monkeypatch, fake_bot):
+    monkeypatch.setitem(_admin.config, "stop_cmd", ["service", "envsbot", "stop"])
+    monkeypatch.setitem(_admin.config, "stop_cmd_timeout_seconds", 3)
+    monkeypatch.setattr(_admin, "_run_stop_command", AsyncMock(return_value=(0, "")))
+    monkeypatch.setattr(_admin.asyncio, "sleep", AsyncMock())
+    graceful = AsyncMock()
+    monkeypatch.setattr(_admin, "_graceful_command_shutdown", graceful)
+
+    await _admin.bot_shutdown(
+        fake_bot, Sender(), "nick", [], DummyMsg(), False
+    )
+
+    _admin._run_stop_command.assert_awaited_once_with(
+        ["service", "envsbot", "stop"], 3.0
+    )
+    graceful.assert_awaited_once_with(fake_bot, exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_run_stop_command_reports_output_and_timeout(monkeypatch):
+    class Process:
+        returncode = 3
+
+        async def communicate(self):
+            return b"", b"permission denied"
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(_admin.asyncio, "create_subprocess_exec", AsyncMock(return_value=Process()))
+    code, detail = await _admin._run_stop_command(["systemctl", "stop", "envsbot"], 2)
+    assert code == 3
+    assert detail == "permission denied"
+
+
+@pytest.mark.asyncio
+async def test_graceful_command_shutdown_sets_clean_exit_code(fake_bot):
+    fake_bot.disconnected = asyncio.sleep(0)
+    fake_bot.disconnect = Mock()
+    fake_bot.shutdown_runtime = AsyncMock()
+    await _admin._graceful_command_shutdown(fake_bot, exit_code=0)
+    assert fake_bot._requested_exit_code == 0
+    fake_bot.disconnect.assert_called_once()
+    fake_bot.shutdown_runtime.assert_awaited_once()

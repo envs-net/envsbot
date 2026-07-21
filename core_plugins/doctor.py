@@ -19,6 +19,11 @@ from utils.config import (
     load_default_config_for_diff,
 )
 from utils.formatting import format_page, parse_page_args
+from utils.file_security import (
+    format_mode,
+    has_group_or_other_access,
+    sensitive_permission_targets,
+)
 from utils.updatecheck import check_for_updates_once
 from utils.version import display_version
 
@@ -206,6 +211,23 @@ async def _db_lines(bot: Any) -> list[str]:
                 )
             except Exception as exc:
                 lines.append(_line(False, "Migrations", str(exc)))
+
+    cache = getattr(bot, "message_cache", None)
+    stats = getattr(cache, "stats", None)
+    if callable(stats):
+        try:
+            cache_stats = stats()
+            degraded = bool(cache_stats.get("degraded"))
+            detail = (
+                f"messages={cache_stats.get('messages', 0)}, "
+                f"pending={cache_stats.get('pending_writes', 0)}, "
+                f"retry_backlog={cache_stats.get('retry_backlog', 0)}, "
+                f"failures={cache_stats.get('persistence_failures', 0)}, "
+                f"dropped={cache_stats.get('dropped_persistence_entries', 0)}"
+            )
+            lines.append(_line(not degraded, "Message cache persistence", detail))
+        except Exception as exc:
+            lines.append(_line(False, "Message cache persistence", str(exc)))
     return lines
 
 
@@ -432,6 +454,24 @@ def _config_sample_line() -> str:
     return _line(True, "Config sample", "ok")
 
 
+def _release_permissions_line(bot: Any) -> str:
+    """Return a release warning for broadly readable sensitive runtime paths."""
+    db_path = Path(str(getattr(getattr(bot, "db", None), "path", config.get("db", "bot.db"))))
+    paths = sensitive_permission_targets(
+        config_path=get_runtime_config_path(),
+        database_path=db_path,
+        backup_directory=backup_dir(),
+    )
+    unsafe = [
+        f"{label}={format_mode(path)}"
+        for label, path in paths
+        if path.exists() and has_group_or_other_access(path)
+    ]
+    if unsafe:
+        return _line(False, "File permissions", ", ".join(unsafe))
+    return _line(True, "File permissions", "owner-only")
+
+
 def _release_python_compile_line() -> str:
     """Return a release-check line for basic Python syntax/import safety."""
     root = _repo_root()
@@ -560,6 +600,7 @@ async def _release_lines(bot: Any) -> list[str]:
         await _latest_release_line(bot),
         _command_docs_line(),
         _config_sample_line(),
+        _release_permissions_line(bot),
         _release_python_compile_line(),
         _release_git_status_line(),
         await _release_migration_line(bot),

@@ -259,3 +259,104 @@ async def test_certificate_diagnosis_uses_resolved_public_endpoint(monkeypatch):
         "bot.example.org",
         5.0,
     )
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "expected"),
+    [
+        (9, "certificate is not yet valid", "TLS certificate is not valid yet."),
+        (62, "certificate is not valid for example.org", "TLS certificate does not match the requested domain."),
+        (20, "unable to get local issuer certificate", "TLS certificate validation failed: unable to get local issuer certificate."),
+        (None, "", "TLS certificate validation failed."),
+    ],
+)
+def test_certificate_verification_message_all_branches(code, message, expected):
+    assert certificate._certificate_verification_message(
+        SimpleNamespace(verify_code=code, verify_message=message),
+        label="TLS certificate",
+        mismatch_target="requested domain",
+    ) == expected
+
+
+@pytest.mark.asyncio
+async def test_xmpp_probe_requires_starttls_and_proceed(monkeypatch):
+    class FakeReader:
+        def __init__(self, responses):
+            self.responses = iter(responses)
+
+        async def read(self, _size):
+            return next(self.responses, b"")
+
+    class FakeWriter:
+        def __init__(self):
+            self.closed = False
+
+        def write(self, _data):
+            return None
+
+        async def drain(self):
+            return None
+
+        async def start_tls(self, *_args, **_kwargs):
+            raise AssertionError("TLS should not start")
+
+        def close(self):
+            self.closed = True
+
+        async def wait_closed(self):
+            return None
+
+    no_starttls_writer = FakeWriter()
+    monkeypatch.setattr(
+        certificate.asyncio,
+        "open_connection",
+        AsyncMock(return_value=(FakeReader([b"<stream:features/>\n"]), no_starttls_writer)),
+    )
+    assert await certificate._probe_xmpp_server_certificate(
+        "8.8.8.8", certificate.socket.AF_INET, 5269, "example.org", "bot.example.org", 5
+    ) is None
+    assert no_starttls_writer.closed is True
+
+    rejected_writer = FakeWriter()
+    monkeypatch.setattr(
+        certificate.asyncio,
+        "open_connection",
+        AsyncMock(return_value=(FakeReader([
+            b"<stream:features><starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/></stream:features>",
+            b"<failure xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>",
+        ]), rejected_writer)),
+    )
+    assert await certificate._probe_xmpp_server_certificate(
+        "8.8.8.8", certificate.socket.AF_INET, 5269, "example.org", "bot.example.org", 5
+    ) is None
+    assert rejected_writer.closed is True
+
+
+@pytest.mark.asyncio
+async def test_xmpp_diagnosis_tries_next_endpoint_and_address(monkeypatch):
+    async def immediate_to_thread(func, *args):
+        return func(*args)
+
+    monkeypatch.setattr(certificate.asyncio, "to_thread", immediate_to_thread)
+    monkeypatch.setattr(
+        certificate,
+        "_xmpp_server_endpoints",
+        lambda _domain, _timeout: [("bad.example.org", 5269), ("good.example.org", 5270)],
+    )
+    monkeypatch.setattr(
+        certificate,
+        "_public_endpoint_addresses",
+        lambda host, _port: (
+            [(certificate.socket.AF_INET, "8.8.8.8")]
+            if host == "bad.example.org"
+            else [(certificate.socket.AF_INET6, "2001:4860:4860::8888")]
+        ),
+    )
+    probe = AsyncMock(side_effect=[None, certificate.VALID_XMPP_CERTIFICATE_MESSAGE])
+    monkeypatch.setattr(certificate, "_probe_xmpp_server_certificate", probe)
+
+    result = await certificate.diagnose_xmpp_server_certificate(
+        "example.org", source_domain="bot.example.org", timeout_seconds=5
+    )
+    assert result == certificate.VALID_XMPP_CERTIFICATE_MESSAGE
+    assert probe.await_count == 2

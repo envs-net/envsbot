@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -11,7 +12,13 @@ from urllib.parse import urljoin
 import aiohttp
 
 from utils.config import config
-from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL, validate_fetch_url_async
+from utils.url_safety import (
+    FetchURLTooLarge,
+    UnsafeFetchURL,
+    ValidatedFetchTarget,
+    resolve_fetch_target_async,
+    validate_fetch_url_async,
+)
 
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
@@ -75,15 +82,54 @@ def default_user_agent() -> str:
     )
 
 
+class _PinnedResolver(aiohttp.abc.AbstractResolver):
+    """Resolve one validated hostname only to its pre-approved addresses."""
+
+    def __init__(self, target: ValidatedFetchTarget):
+        self.target = target
+
+    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_INET):
+        if host.rstrip(".").lower() != self.target.hostname:
+            raise OSError("resolver host differs from validated target")
+        results = []
+        for address in self.target.addresses:
+            address_family = socket.AF_INET6 if ":" in address else socket.AF_INET
+            if family not in {socket.AF_UNSPEC, address_family}:
+                continue
+            results.append({
+                "hostname": host,
+                "host": address,
+                "port": port or self.target.port,
+                "family": address_family,
+                "proto": 0,
+                "flags": socket.AI_NUMERICHOST,
+            })
+        if not results:
+            raise OSError("validated target has no address for requested family")
+        return results
+
+    async def close(self) -> None:
+        return None
+
+
+def _pinned_connector(target: ValidatedFetchTarget) -> aiohttp.TCPConnector:
+    return aiohttp.TCPConnector(
+        resolver=_PinnedResolver(target),
+        use_dns_cache=False,
+        force_close=True,
+    )
+
+
 def _session_from_factory(
     session_factory: Callable[..., aiohttp.ClientSession],
     *,
     timeout: aiohttp.ClientTimeout,
     headers: dict[str, str],
+    connector: aiohttp.BaseConnector | None = None,
 ):
     """Create a ClientSession while keeping tests with tiny fakes simple."""
     try:
-        return session_factory(timeout=timeout, headers=headers)
+        return session_factory(timeout=timeout, headers=headers, connector=connector)
     except TypeError:
         try:
             return session_factory(timeout=timeout)
@@ -215,6 +261,26 @@ def _decode_text(body: bytes, content_type: str, encoding: str | None = None) ->
     return body.decode(selected, errors="replace")
 
 
+async def _validated_hop(
+    url: str,
+    *,
+    validator: Callable[..., object],
+    allow_private: bool,
+    session_factory: Callable[..., aiohttp.ClientSession],
+) -> tuple[str, aiohttp.BaseConnector | None]:
+    """Validate one redirect hop and optionally pin its DNS answers."""
+    if validator is validate_fetch_url_async and not allow_private:
+        target = await resolve_fetch_target_async(url, allow_private=False)
+        connector = (
+            _pinned_connector(target)
+            if session_factory is aiohttp.ClientSession
+            else None
+        )
+        return target.url, connector
+    validated = await validator(url, allow_private=allow_private)
+    return str(validated), None
+
+
 async def fetch_bytes(
     url: str,
     *,
@@ -238,9 +304,19 @@ async def fetch_bytes(
 
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     current_url = str(url)
-    async with _session_from_factory(session_factory, timeout=timeout, headers=effective_headers) as session:
-        for _ in range(max_redirects + 1):
-            current_url = await validator(current_url, allow_private=allow_private)
+    for _ in range(max_redirects + 1):
+        current_url, connector = await _validated_hop(
+            current_url,
+            validator=validator,
+            allow_private=allow_private,
+            session_factory=session_factory,
+        )
+        async with _session_from_factory(
+            session_factory,
+            timeout=timeout,
+            headers=effective_headers,
+            connector=connector,
+        ) as session:
             async with _session_get(session, current_url, timeout) as resp:
                 status = int(getattr(resp, "status", 0) or 0)
                 if status in REDIRECT_STATUSES:
@@ -256,7 +332,7 @@ async def fetch_bytes(
                     content_type=_response_content_type(resp),
                     status=status,
                 )
-        raise UnsafeFetchURL("too many redirects")
+    raise UnsafeFetchURL("too many redirects")
 
 
 async def fetch_preview(
@@ -288,9 +364,19 @@ async def fetch_preview(
 
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     current_url = str(url)
-    async with _session_from_factory(session_factory, timeout=timeout, headers=effective_headers) as session:
-        for _ in range(max_redirects + 1):
-            current_url = await validator(current_url, allow_private=allow_private)
+    for _ in range(max_redirects + 1):
+        current_url, connector = await _validated_hop(
+            current_url,
+            validator=validator,
+            allow_private=allow_private,
+            session_factory=session_factory,
+        )
+        async with _session_from_factory(
+            session_factory,
+            timeout=timeout,
+            headers=effective_headers,
+            connector=connector,
+        ) as session:
             async with _session_get(session, current_url, timeout) as resp:
                 status = int(getattr(resp, "status", 0) or 0)
                 if status in REDIRECT_STATUSES:
@@ -313,7 +399,7 @@ async def fetch_preview(
                     content_length=_content_length(resp),
                     truncated=truncated,
                 )
-        raise UnsafeFetchURL("too many redirects")
+    raise UnsafeFetchURL("too many redirects")
 
 
 async def fetch_text(

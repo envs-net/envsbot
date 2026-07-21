@@ -112,7 +112,13 @@ new options and compare your live config with `,config diff`.
 
 ## Minimal Configuration
 
-Copy `config_sample.py` to `config.py` and set at least:
+Create an owner-only runtime config and set at least:
+
+```bash
+install -m 600 config_sample.py config.py
+```
+
+Then edit `config.py`:
 
 ```python
 JID = "envsbot@example.org"
@@ -124,7 +130,8 @@ OWNER = "admin@example.org"
 COMMAND_PREFIX = ","
 TIMEZONE = "Europe/Berlin"
 DB_FILE = "bot.db"
-STOP_CMD = ["/usr/bin/systemctl", "--user", "stop", "envsbot.service"]
+STOP_CMD = []
+STOP_CMD_TIMEOUT_SECONDS = 10
 
 AVATAR_PATH = "data/avatar.jpg"
 AVATAR_TYPE = "image/jpeg"
@@ -326,8 +333,9 @@ User=envsbot
 Group=envsbot
 WorkingDirectory=/srv/envsbot
 Environment=PYTHONUNBUFFERED=1
+UMask=0077
 ExecStart=/srv/envsbot/.venv/bin/envsbot
-Restart=always
+Restart=on-failure
 RestartSec=5
 
 # Basic hardening. Adjust ReadWritePaths when using a different data/log path.

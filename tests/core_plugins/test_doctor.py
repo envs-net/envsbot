@@ -390,3 +390,25 @@ def test_release_backup_line_reports_empty_latest_and_errors(monkeypatch, tmp_pa
 
     monkeypatch.setattr(doctor, "list_backups", broken_backups)
     assert doctor._release_backup_line() == "🔴 Latest backup: backup store failed"
+
+
+def test_release_permissions_line_reports_insecure_backup(bot, tmp_path, monkeypatch):
+    doctor.get_runtime_config_path().chmod(0o600)
+    database = tmp_path / "bot.db"
+    database.write_text("db", encoding="utf-8")
+    database.chmod(0o600)
+    bot.db.path = str(database)
+
+    backups = tmp_path / "backups"
+    backups.mkdir(mode=0o700)
+    archive = backups / "envsbot-backup-test.zip"
+    archive.write_text("archive", encoding="utf-8")
+    archive.chmod(0o644)
+    monkeypatch.setattr(doctor, "backup_dir", lambda: backups)
+
+    line = doctor._release_permissions_line(bot)
+    assert "🔴 File permissions" in line
+    assert "backup envsbot-backup-test.zip=0644" in line
+
+    archive.chmod(0o600)
+    assert "✅ File permissions: owner-only" in doctor._release_permissions_line(bot)

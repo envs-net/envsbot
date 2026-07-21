@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import types
 
@@ -61,6 +62,22 @@ async def test_database_manager_flush(tmp_db_path):
                              ("jid1@example.com",))
     assert row["nickname"] == "user1"
     await db.close()
+
+
+
+
+@pytest.mark.asyncio
+async def test_manual_flush_raises_after_retries(monkeypatch):
+    db = DatabaseManager(":memory:")
+    db.users = types.SimpleNamespace(
+        flush_all=AsyncMock(side_effect=RuntimeError("write failed"))
+    )
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await db.flush()
+
+    assert db.users.flush_all.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -214,3 +231,57 @@ async def test_database_migration_status_and_read_write_check(tmp_path, monkeypa
         assert dict(await live_db.fetch_one("SELECT 1 AS ok")) == {"ok": 1}
     finally:
         await live_db.close()
+
+
+@pytest.mark.asyncio
+async def test_close_before_connect_and_repeated_close_are_safe(tmp_path):
+    db = DatabaseManager(str(tmp_path / "never-opened.db"))
+    await db.close()
+    await db.close()
+    assert db.conn is None
+
+
+@pytest.mark.asyncio
+async def test_connect_failure_closes_partial_connection(tmp_path, monkeypatch):
+    db = DatabaseManager(str(tmp_path / "broken.db"))
+
+    async def fail_migrations():
+        raise RuntimeError("migration failed")
+
+    monkeypatch.setattr(db, "run_migrations", fail_migrations)
+    with pytest.raises(RuntimeError, match="migration failed"):
+        await db.connect()
+
+    assert db.conn is None
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_file_is_owner_only(tmp_path):
+    path = tmp_path / "private.db"
+    db = DatabaseManager(str(path))
+    await db.connect()
+    try:
+        assert path.stat().st_mode & 0o777 == 0o600
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_close_continues_when_background_flush_task_failed(tmp_path):
+    db = DatabaseManager(str(tmp_path / "flush-failed.db"))
+    await db.connect()
+
+    original_task = db._flush_task
+    db._stop_event.set()
+    await original_task
+
+    async def fail_flush():
+        raise RuntimeError("flush task failed")
+
+    db._flush_task = asyncio.create_task(fail_flush())
+    await asyncio.sleep(0)
+    await db.close()
+
+    assert db.conn is None
+    assert db.users is None

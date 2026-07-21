@@ -247,6 +247,11 @@ async def test_check_database_keeps_bare_key_names_in_error_text(monkeypatch, tm
 async def test_collect_preflight_checks_has_stable_order_and_failure_path(monkeypatch, capsys):
     monkeypatch.setattr(preflight, "validate_startup_config", lambda _config: None)
     monkeypatch.setattr(preflight, "_check_config_path", lambda: (True, "config path: ok"))
+    monkeypatch.setattr(
+        preflight,
+        "_check_sensitive_permissions",
+        lambda _config: (True, "permissions ok"),
+    )
     monkeypatch.setattr(preflight, "_check_config_sample", lambda _config: (True, "sample ok"))
     monkeypatch.setattr(preflight, "_check_imports", lambda: (True, "imports ok"))
     monkeypatch.setattr(preflight, "_check_plugin_imports_and_metadata", lambda: (True, "plugins ok"))
@@ -265,6 +270,7 @@ async def test_collect_preflight_checks_has_stable_order_and_failure_path(monkey
     assert checks == [
         (True, "config: ok"),
         (True, "config path: ok"),
+        (True, "permissions ok"),
         (True, "sample ok"),
         (True, "imports ok"),
         (True, "plugins ok"),
@@ -282,3 +288,34 @@ async def test_collect_preflight_checks_has_stable_order_and_failure_path(monkey
     assert status == 1
     assert "Overall: ❌ failed" in out
     assert "imports failed" in out
+
+
+def test_sensitive_permission_check_includes_database_sidecars_and_archives(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config.py"
+    database_path = tmp_path / "bot.db"
+    wal_path = tmp_path / "bot.db-wal"
+    backup_dir = tmp_path / "backups"
+    archive_path = backup_dir / "envsbot-backup-test.zip"
+
+    backup_dir.mkdir(mode=0o700)
+    for path in (config_path, database_path, wal_path, archive_path):
+        path.write_text("secret", encoding="utf-8")
+        path.chmod(0o600)
+    monkeypatch.setattr(preflight, "get_runtime_config_path", lambda: config_path)
+
+    ok, message = preflight._check_sensitive_permissions(
+        {"db": str(database_path), "backup_dir": str(backup_dir)}
+    )
+    assert ok is True
+    assert message == "file permissions: owner-only"
+
+    wal_path.chmod(0o644)
+    archive_path.chmod(0o640)
+    ok, message = preflight._check_sensitive_permissions(
+        {"db": str(database_path), "backup_dir": str(backup_dir)}
+    )
+    assert ok is False
+    assert "database WAL=0644" in message
+    assert "backup envsbot-backup-test.zip=0640" in message

@@ -47,7 +47,7 @@ Examples:
 
 ### `,bot shutdown`
 
-Stop the bot using the configured stop command.
+Stop the bot gracefully, optionally using a configured command.
 
 Role: `owner`<br>
 Context: `private chat / MUC PM`<br>

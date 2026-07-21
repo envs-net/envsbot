@@ -34,6 +34,7 @@ from utils.command import command, Role
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
 from utils.http_fetch import fetch_json, passthrough_validator
+from utils.tls_certificate import validate_dns_hostname
 from core_plugins._core import (
     handle_room_toggle_command,
     _is_muc_pm,
@@ -68,7 +69,25 @@ PLUGIN_META = {
 
 # ---------------- Fediverse ----------------
 
-FEDIVERSE_USER_RE = re.compile(r"^@?([^@]+)@([^@]+)$")
+FEDIVERSE_USER_RE = re.compile(r"^@?([A-Za-z0-9_.-]+)@([^@\s]+)$")
+
+
+def _parse_fediverse_handle(value: object) -> tuple[str, str] | None:
+    """Return a safe ``(username, instance)`` pair for one handle."""
+    match = FEDIVERSE_USER_RE.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    username, raw_instance = match.groups()
+    if any(character in raw_instance for character in "/?#:@[]"):
+        return None
+    try:
+        instance = raw_instance.rstrip(".").encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+    valid, _error = validate_dns_hostname(instance)
+    if not valid:
+        return None
+    return username, instance
 
 
 def html_to_text_with_links(html_content):
@@ -114,8 +133,8 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
         )
         return
 
-    match = FEDIVERSE_USER_RE.match(args[0])
-    if not match:
+    handle = _parse_fediverse_handle(args[0])
+    if handle is None:
         log.warning("[FEDIVERSE] 🟡️ Invalid user format.")
         bot.reply(
             msg,
@@ -123,16 +142,15 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
         )
         return
 
-    username, instance = match.groups()
-    url = f"https://{instance}/api/v1/accounts/lookup?acct={username}"
+    username, instance = handle
+    encoded_username = urllib.parse.quote(username, safe="._-")
+    url = f"https://{instance}/api/v1/accounts/lookup?acct={encoded_username}"
 
     try:
         user_result = await fetch_json(
             url,
             timeout_seconds=INFO_HTTP_TIMEOUT,
             max_bytes=131072,
-            session_factory=aiohttp.ClientSession,
-            validator=passthrough_validator,
             raise_for_status=False,
         )
         if user_result.status != 200:
@@ -145,16 +163,15 @@ async def fediverse_latest(bot, sender_jid, nick, args, msg, is_room):
             log.warning("[FEDIVERSE] 🔴  Could not resolve user ID.")
             bot.reply(msg, "🔴  Could not resolve user.")
             return
+        encoded_user_id = urllib.parse.quote(str(user_id), safe="")
         timeline_url = (
-            f"https://{instance}/api/v1/accounts/{user_id}/statuses"
+            f"https://{instance}/api/v1/accounts/{encoded_user_id}/statuses"
             "?limit=1&exclude_replies=false&exclude_reblogs=false"
         )
         timeline_result = await fetch_json(
             timeline_url,
             timeout_seconds=INFO_HTTP_TIMEOUT,
             max_bytes=262144,
-            session_factory=aiohttp.ClientSession,
-            validator=passthrough_validator,
             raise_for_status=False,
         )
         if timeline_result.status != 200:

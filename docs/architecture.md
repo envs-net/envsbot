@@ -273,7 +273,7 @@ Core logs prefer stable key/value messages:
 ```text
 [COMMAND] event=done command=doctor actor=user@example.org room=room@example.org status=ok duration_ms=42
 [LIFECYCLE] event=shutdown phase=tasks status=ok cancelled=21
-[DB] event=migration status=ok version=0003_room_invites
+[DB] event=migration status=ok version=0004_message_cache
 ```
 
 Use `utils.redaction` for log and audit values that may contain secrets, tokens,
