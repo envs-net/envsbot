@@ -86,6 +86,8 @@ ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
 
 RSS_LIST_PAGE_SIZE = max(1, int(config.get("rss_list_page_size", 10) or 10))
 
+RSS_TRUSTED_MAX_FEEDS = max(0, int(config.get("rss_trusted_max_feeds", 10)))
+
 
 RSS_MAX_ENTRIES_PER_POLL = max(
     1,
@@ -116,6 +118,7 @@ __all__ = [
     'RSS_MAX_READ_BYTES',
     'ALLOW_PRIVATE_FETCH_URLS',
     'RSS_LIST_PAGE_SIZE',
+    'RSS_TRUSTED_MAX_FEEDS',
     'RSS_MAX_ENTRIES_PER_POLL',
     'RSS_BROKEN_ERROR_THRESHOLD',
 ]

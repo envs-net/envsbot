@@ -9,7 +9,11 @@ from bot.room_state import JOINED_ROOMS
 from core_plugins._core import paginate_items
 from core_plugins.users import user_has_room_plugin_grant
 
-from .config import DEFAULT_POLL_INTERVAL, RSS_BROKEN_ERROR_THRESHOLD
+from .config import (
+    DEFAULT_POLL_INTERVAL,
+    RSS_BROKEN_ERROR_THRESHOLD,
+    RSS_TRUSTED_MAX_FEEDS,
+)
 from .fetch import (
     _extract_entry_link,
     _format_feed_fetch_error,
@@ -114,6 +118,46 @@ async def _sender_can_manage_rss_room(bot, sender_jid: str, room: str) -> bool:
 async def _sender_can_manage_rss_globally(bot, sender_jid: str) -> bool:
     """Return True when sender can manage RSS state across all rooms."""
     return await _sender_is_global_rss_manager(bot, sender_jid)
+async def _sender_role(bot, sender_jid: str) -> Role:
+    get_role = getattr(bot, "get_user_role", None)
+    if not callable(get_role):
+        return Role.USER
+    try:
+        return await get_role(str(sender_jid))
+    except Exception:
+        log.debug("[RSS] Could not resolve sender role", exc_info=True)
+        return Role.USER
+
+
+def _direct_subscriptions(feed: dict) -> dict[str, dict]:
+    users = feed.get("users")
+    return users if isinstance(users, dict) else {}
+
+
+def _trusted_feed_count(feeds: dict, owner: str) -> int:
+    key = _normalize_room_jid(owner)
+    return sum(
+        1 for feed in feeds.values()
+        if key in {_normalize_room_jid(jid) for jid in _direct_subscriptions(feed)}
+    )
+
+
+def _compact_subscription_lines(feeds: dict) -> list[str]:
+    room_lines, mod_lines, trusted_lines = [], [], []
+    for url, feed in sorted(feeds.items()):
+        title = str(feed.get("title") or url)
+        status = _feed_status_label(feed)
+        period = feed.get("period", "?")
+        for room in feed.get("rooms", []):
+            room_lines.append(f"• {title} | {status} | {period}s | {room} | {url}")
+        for jid, meta in sorted(_direct_subscriptions(feed).items()):
+            role = str((meta or {}).get("role") or "trusted").lower()
+            line = f"• {title} | {status} | {period}s | {jid} | {url}"
+            (mod_lines if role in {"owner", "superadmin", "admin", "moderator"} else trusted_lines).append(line)
+    lines = [f"Room feeds ({len(room_lines)}):", *(room_lines or ["• none"]), "",
+             f"Moderator feeds ({len(mod_lines)}):", *(mod_lines or ["• none"]), "",
+             f"Trusted user feeds ({len(trusted_lines)}):", *(trusted_lines or ["• none"])]
+    return lines
 def _looks_like_room_arg(value) -> bool:
     """Best-effort test for explicit room JID arguments."""
     text = str(value or "").strip()
@@ -600,10 +644,17 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             explicit_room=args[2] if len(args) == 3 else None,
         )
         if not room:
-            bot.reply(
-                msg,
-                "🔴 RSS add needs a room context or explicit room JID.",
-            )
+            role = await _sender_role(bot, sender_jid)
+            if role > Role.TRUSTED:
+                bot.reply(msg, "🔴 Direct RSS subscriptions require trusted role or higher.")
+                return
+            feeds = await get_feeds(store)
+            owner = _normalize_room_jid(sender_jid)
+            if role == Role.TRUSTED and _trusted_feed_count(feeds, owner) >= RSS_TRUSTED_MAX_FEEDS:
+                bot.reply(msg, f"🔴 Trusted RSS feed limit reached ({RSS_TRUSTED_MAX_FEEDS}).")
+                return
+            await _add_direct_feed(bot, msg, args[1], store, owner, role)
+            await audit_event(bot, "rss_direct_feed_add_requested", actor=sender_jid, target=owner, details={"url": _normalize_url(args[1])})
             return
         if not await _sender_can_manage_rss_room(bot, sender_jid, room):
             bot.reply(
@@ -639,6 +690,20 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         elif room:
             target_room = room
 
+        direct_target = None
+        if delete_target and str(delete_target).strip().lower() != "all":
+            current_feed = (await get_feeds(store)).get(_normalize_url(args[1]), {})
+            candidate = _normalize_room_jid(delete_target)
+            if candidate in _direct_subscriptions(current_feed):
+                direct_target = candidate
+
+        if direct_target:
+            role = await _sender_role(bot, sender_jid)
+            if direct_target != _normalize_room_jid(sender_jid) and role > Role.ADMIN:
+                bot.reply(msg, "🔴 Only owner, superadmin, or admin can remove another user's direct RSS feed.")
+                return
+            await _delete_direct_feed_target(bot, msg, args[1], store, direct_target)
+            return
         if delete_target and str(delete_target).strip().lower() == "all":
             if not await _sender_can_manage_rss_globally(bot, sender_jid):
                 bot.reply(msg, "🔴 Only global moderators can delete RSS feeds everywhere.")
@@ -652,12 +717,18 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
                 )
                 return
         elif not await _sender_can_manage_rss_globally(bot, sender_jid):
-            bot.reply(
-                msg,
-                "🔴 RSS delete from private chat needs an explicit room JID "
-                "unless you are a global moderator.",
-            )
+            role = await _sender_role(bot, sender_jid)
+            if role > Role.TRUSTED:
+                bot.reply(msg, "🔴 Direct RSS subscriptions require trusted role or higher.")
+                return
+            await _delete_direct_feed(bot, msg, args[1], store, sender_jid, allow_other=False)
             return
+
+        if not target_room and not delete_target and not room and msg.get("type") in ("chat", "normal"):
+            role = await _sender_role(bot, sender_jid)
+            if role <= Role.ADMIN:
+                await _delete_direct_feed(bot, msg, args[1], store, sender_jid, allow_other=True)
+                return
 
         await _del_feed(bot, msg, args[1], store, room, delete_target)
         await audit_event(
@@ -838,6 +909,17 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         is_global_manager = await _sender_can_manage_rss_globally(
             bot, sender_jid
         )
+        if not explicit_room and msg.get("type") in ("chat", "normal"):
+            role = await _sender_role(bot, sender_jid)
+            if role <= Role.MODERATOR:
+                bot.reply(msg, _compact_subscription_lines(feeds))
+                return
+            if role <= Role.TRUSTED:
+                owner = _normalize_room_jid(sender_jid)
+                own = {url: {**feed, "rooms": [], "users": {owner: _direct_subscriptions(feed).get(owner)}}
+                       for url, feed in feeds.items() if owner in _direct_subscriptions(feed)}
+                bot.reply(msg, _compact_subscription_lines(own) if own else "No direct RSS feeds configured for you.")
+                return
         if explicit_room or not is_global_manager:
             if not target_room:
                 bot.reply(
@@ -872,6 +954,80 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             "Unknown subcommand. Use add, delete, remove, retry, "
             "reset, pause, resume, health, broken, list, or template.",
         )
+async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
+    url = _normalize_url(url)
+    feeds = await get_feeds(store)
+    if url not in feeds:
+        try:
+            parsed = await fetch_feed(url)
+            feeds[url] = {
+                "title": parsed.feed.get("title", url),
+                "link": parsed.feed.get("link", url),
+                "period": config.get("rss_global_query_interval", DEFAULT_POLL_INTERVAL),
+                "rooms": [], "users": {}, "last_id": None, "error_count": 0,
+                "next_retry": 0, "paused": False, "paused_rooms": [],
+                "last_checked": _now(), "last_success": _now(), "last_error": "",
+                "last_error_at": 0, "last_posted": 0, "posted_count": 0,
+            }
+        except Exception as exc:
+            _log_feed_fetch_error("Failed to add direct RSS feed", url, exc)
+            bot.reply(msg, f"Failed to fetch or parse feed: {_format_feed_fetch_error(url, exc)}")
+            return
+    users = _direct_subscriptions(feeds[url])
+    key = _normalize_room_jid(owner)
+    if key in users:
+        bot.reply(msg, f"ℹ️ Feed already added for you: {url}")
+        return
+    users[key] = {"owner": key, "role": str(role)}
+    feeds[url]["users"] = users
+    await save_feeds(store, feeds)
+    await ensure_task(bot, store, url, feeds[url]["period"])
+    bot.reply(msg, f"✅ Added direct RSS feed: {feeds[url]['title']} ({url})")
+
+
+async def _delete_direct_feed_target(bot, msg, url, store, target: str):
+    url = _normalize_url(url)
+    feeds = await get_feeds(store)
+    feed = feeds.get(url)
+    if not feed:
+        bot.reply(msg, "Feed not found.")
+        return
+    users = _direct_subscriptions(feed)
+    target = _normalize_room_jid(target)
+    if target not in users:
+        bot.reply(msg, f"ℹ️ {target} was not subscribed to the feed.")
+        return
+    users.pop(target, None)
+    if not feed.get("rooms") and not users:
+        feeds.pop(url, None)
+        await unset_feed_templates_for_feed(store, url)
+        await _cancel_feed_task(bot, url)
+    else:
+        feed["users"] = users
+    await save_feeds(store, feeds)
+    bot.reply(msg, f"🗑 Removed direct RSS subscription for {target}: {url}")
+
+
+async def _delete_direct_feed(bot, msg, url, store, actor: str, allow_other: bool):
+    url = _normalize_url(url)
+    feeds = await get_feeds(store)
+    feed = feeds.get(url)
+    if not feed:
+        bot.reply(msg, "Feed not found.")
+        return
+    users = _direct_subscriptions(feed)
+    actor_key = _normalize_room_jid(actor)
+    target = actor_key if actor_key in users else None
+    if target is None and allow_other:
+        trusted = [jid for jid, meta in users.items() if str((meta or {}).get("role", "trusted")).lower() == "trusted"]
+        if len(trusted) == 1:
+            target = trusted[0]
+    if target is None:
+        bot.reply(msg, "🔴 You may only remove your own direct RSS feeds.")
+        return
+    await _delete_direct_feed_target(bot, msg, url, store, target)
+
+
 async def _add_feed(bot, msg, url, store, room):
     url = _normalize_url(url)
     feeds = await get_feeds(store)
@@ -995,7 +1151,7 @@ async def _delete_feed_room(bot, msg, url, store, feeds, room):
 
     rooms.remove(stored_room)
 
-    if not rooms:
+    if not rooms and not _direct_subscriptions(feeds[url]):
         feeds.pop(url)
         await unset_feed_templates_for_feed(store, url)
         await _cancel_feed_task(bot, url)

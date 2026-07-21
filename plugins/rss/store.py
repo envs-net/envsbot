@@ -236,8 +236,9 @@ def _format_rss_timestamp(ts) -> str:
 def _feed_status_label(feed: dict, now: int | None = None) -> str:
     if _feed_is_globally_paused(feed):
         return "paused"
-    if not _feed_active_rooms(feed):
-        return "paused for all rooms"
+    users = feed.get("users") if isinstance(feed, dict) else None
+    if not _feed_active_rooms(feed) and not (isinstance(users, dict) and users):
+        return "paused for all destinations"
     try:
         next_retry = int(feed.get("next_retry", 0) or 0)
     except (TypeError, ValueError):

@@ -132,10 +132,14 @@ async def test_rss_add_rejects_plain_private_chat(monkeypatch, make_bot):
         "type": "chat",
     }
 
+    async def user_role(_jid, room=None):
+        return Role.USER
+
+    bot.get_user_role = user_role
     await rss.rss_command(
         bot, "jid1", "nick1", ["add", "example.org/feed"], msg, False
     )
-    assert bot.replies[-1][1] == "🔴 RSS add needs a room context or explicit room JID."
+    assert bot.replies[-1][1] == "🔴 Direct RSS subscriptions require trusted role or higher."
 
 
 @pytest.mark.asyncio
@@ -1076,3 +1080,94 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
 
     await rss.rss_command(bot, "jid1", "nick1", ["resume", url], msg, True)
     assert bot.plugin_store[rss.RSS_KEY][url]["paused_rooms"] == []
+
+
+@pytest.mark.asyncio
+async def test_trusted_user_can_add_and_remove_own_direct_feed(monkeypatch, make_bot):
+    bot = make_bot()
+    url = "https://example.org/direct.xml"
+    msg = {"from": SimpleNamespace(bare="trusted@example.org", resource="phone"), "type": "chat"}
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    class DummyFeed:
+        feed = {"title": "Direct feed", "link": url}
+        entries = []
+
+    bot.get_user_role = trusted_role
+    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock(return_value=DummyFeed()))
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+
+    await rss.rss_command(bot, "trusted@example.org", "trusted", ["add", url], msg, False)
+    assert bot.plugin_store[rss.RSS_KEY][url]["users"]["trusted@example.org"]["role"] == "trusted"
+
+    await rss.rss_command(bot, "trusted@example.org", "trusted", ["remove", url], msg, False)
+    assert url not in bot.plugin_store[rss.RSS_KEY]
+
+
+@pytest.mark.asyncio
+async def test_trusted_direct_feed_limit_is_enforced(monkeypatch, make_bot):
+    bot = make_bot()
+    owner = "trusted@example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        f"https://example.org/{idx}.xml": {
+            "title": str(idx), "rooms": [], "users": {owner: {"role": "trusted"}}
+        }
+        for idx in range(2)
+    }
+    msg = {"from": SimpleNamespace(bare=owner, resource="phone"), "type": "chat"}
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+    monkeypatch.setattr(rss_commands, "RSS_TRUSTED_MAX_FEEDS", 2)
+
+    await rss.rss_command(bot, owner, "trusted", ["add", "https://example.org/new.xml"], msg, False)
+    assert bot.replies[-1][1] == "🔴 Trusted RSS feed limit reached (2)."
+
+
+@pytest.mark.asyncio
+async def test_admin_can_remove_trusted_users_direct_feed(make_bot):
+    bot = make_bot()
+    url = "https://example.org/direct.xml"
+    owner = "trusted@example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {"title": "Direct", "rooms": [], "users": {owner: {"role": "trusted"}}}
+    }
+    msg = {"from": SimpleNamespace(bare="admin@example.org", resource="desktop"), "type": "chat"}
+
+    async def admin_role(_jid, room=None):
+        return Role.ADMIN
+
+    bot.get_user_role = admin_role
+    await rss.rss_command(bot, "admin@example.org", "admin", ["remove", url, owner], msg, False)
+    assert url not in bot.plugin_store[rss.RSS_KEY]
+
+
+@pytest.mark.asyncio
+async def test_trusted_user_cannot_remove_another_direct_subscription(make_bot):
+    bot = make_bot()
+    url = "https://example.org/shared.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Shared", "rooms": [],
+            "users": {
+                "alice@example.org": {"role": "trusted"},
+                "bob@example.org": {"role": "trusted"},
+            },
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="alice@example.org", resource="phone"), "type": "chat"}
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+    await rss.rss_command(
+        bot, "alice@example.org", "alice",
+        ["remove", url, "bob@example.org"], msg, False,
+    )
+    assert "bob@example.org" in bot.plugin_store[rss.RSS_KEY][url]["users"]
+    assert "Only owner, superadmin, or admin" in bot.replies[-1][1]

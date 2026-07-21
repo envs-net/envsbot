@@ -244,6 +244,10 @@ RSS_GLOBAL_QUERY_INTERVAL = 1200
 # Number of existing entries to show when a feed is newly added.
 MAX_NEW_FEED_ENTRIES = 5
 
+# Maximum personal DM subscriptions for trusted users. Moderators and higher
+# are unlimited. Set to 0 to disable trusted-user DM subscriptions.
+RSS_TRUSTED_MAX_FEEDS = 10
+
 # Maximum number of new entries posted per regular feed poll.
 # If a very active feed publishes more than this between two checks, older
 # unseen entries are skipped and the newest item is remembered as seen.

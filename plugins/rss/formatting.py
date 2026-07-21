@@ -171,7 +171,7 @@ def _format_duration(seconds: int) -> str:
 
     return " ".join(parts[:3])
 async def _post_rss_entry_to_rooms(bot, store, rooms, url, context):
-    """Post one RSS entry using feed, room, or default templates."""
+    """Post one RSS entry to room and direct subscribers."""
     posted = False
     for room in rooms:
         template = await get_effective_template(store, room, url)
@@ -203,7 +203,13 @@ async def _post_new_entries(bot, store, url, feed_title,
             entry_date=_entry_date(entry),
         )
 
-        posted = await _post_rss_entry_to_rooms(bot, store, active_rooms, url, context)
+        posted = await _post_rss_entry_to_rooms(
+            bot, store, active_rooms, url, context
+        )
+        direct_users = sorted((feed or {}).get("users", {}))
+        if direct_users:
+            direct_msg = _build_rss_message_from_context(context)
+            posted = await _post_entry_to_users(bot, direct_users, direct_msg) or posted
 
         def mutator(feed_data):
             changed = _set_last_id_in_feed(feed_data, entry_id)
@@ -289,6 +295,25 @@ async def _post_entry_to_rooms(bot, rooms, msg):
             )
             posted = True
     return posted
+
+async def _post_entry_to_users(bot, users, msg):
+    """Post one RSS entry to bare-JID direct subscribers."""
+    posted = False
+    for user_jid in users:
+        bot.reply(
+            {
+                "from": type("F", (), {"bare": user_jid})(),
+                "type": "chat",
+            },
+            msg,
+            mention=False,
+            thread=False,
+            rate_limit=False,
+            ephemeral=False,
+        )
+        posted = True
+    return posted
+
 def _format_feed_list_item(feed_url: str, data: dict, now=None) -> str:
     """Format one RSS feed entry for ``rss list`` output."""
     status = _format_retry_status(data, now=now)
