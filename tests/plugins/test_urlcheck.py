@@ -208,6 +208,7 @@ async def test_on_groupchat_message_disabled_does_nothing(fake_bot,
     store = fake_bot._test_urlcheck_store
     store.data.clear()
     room_jid = "room1@conf"
+    store.data[room_jid] = False
     urlcheck.JOINED_ROOMS[room_jid] = {"nick": "me"}
     msg = msg_ns_dict(
         **{"from": msg_ns_dict(bare=room_jid, resource="user1"),
