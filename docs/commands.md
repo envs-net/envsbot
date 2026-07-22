@@ -218,7 +218,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms invite` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM / invite notify room` | List, accept, decline or clean up pending room invites. |
 | `,rooms join` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Join a room immediately and store it if needed. |
 | `,rooms leave` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Leave a room without deleting its stored configuration. |
-| `,rooms list` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | List stored rooms and currently joined rooms. |
+| `,rooms list` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | List MUC rooms or direct XMPP contacts. |
 | `,rooms plugins` | [`rooms`](plugins/rooms.md) | `user` | `room / MUC PM / private chat with <room_jid>` | Show room plugin toggles; requires room admin/owner or bot moderator. |
 | `,rooms set_plugin_defaults` | [`rooms`](plugins/rooms.md) | `user` | `room / MUC PM / private chat with <room_jid>` | Restore room plugin toggles for a room; requires room admin/owner or bot moderator. |
 | `,rooms sync` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Synchronize joined rooms with stored autojoin settings. |

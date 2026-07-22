@@ -74,16 +74,23 @@ Add a room to the bot's persistent room list:
 ,rooms add room@conference.example.org
 ,rooms join room@conference.example.org
 ,rooms list
+,rooms list dm
 ```
 
 Show or change stored rooms later:
 
 ```text
 ,rooms list
+,rooms list 1:1
 ,rooms update room@conference.example.org nick EnvsBot
 ,rooms leave room@conference.example.org
 ,rooms delete room@conference.example.org
 ```
+
+`,rooms list` merges stored and currently joined MUCs into one compact list.
+`,rooms list dm` and `,rooms list 1:1` show contacts from the bot's XMPP
+roster. Direct chats are not joined like MUCs, so this is a contact list rather
+than a list of active chat sessions.
 
 Incoming room invites are stored as pending invites when room invites are enabled:
 

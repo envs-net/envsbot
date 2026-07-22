@@ -125,17 +125,105 @@ async def test_rooms_list(fake_bot):
     }
     await rooms.rooms_list(fake_bot, "jid", "nick", [], MagicMock(), False)
     listing = fake_bot.reply.call_args.args[1]
-    assert "Counts: stored=2 | joined=1" in listing
-    assert any("room@conference.a" in line for line in listing)
+    assert "MUC rooms (2): stored=2 | joined=1" in listing
+    room_a_lines = [line for line in listing if "room@conference.a" in line]
+    room_b_lines = [line for line in listing if "room@conference.b" in line]
+    assert len(room_a_lines) == 1
+    assert len(room_b_lines) == 1
+    assert "✅" in room_a_lines[0]
+    assert "affiliation=admin" in room_a_lines[0]
+    assert "⚪" in room_b_lines[0]
+    assert "status=" not in room_b_lines[0]
 
     # Test with no rows and no joined rooms.
     fake_bot.db.rooms.list = AsyncMock(return_value=[])
     rooms.JOINED_ROOMS.clear()
     await rooms.rooms_list(fake_bot, "jid", "nick", [], MagicMock(), False)
     listing = fake_bot.reply.call_args.args[1]
-    assert "Counts: stored=0 | joined=0" in listing
-    assert "Stored rooms: —" in listing
-    assert "Joined rooms: —" in listing
+    assert "MUC rooms (0): stored=0 | joined=0" in listing
+    assert "• none" in listing
+
+
+@pytest.mark.asyncio
+async def test_rooms_list_merges_presence_only_runtime_rooms(fake_bot):
+    fake_bot.db.rooms.list = AsyncMock(return_value=[
+        ("stored@conference.test", "StoredBot", True, None),
+    ])
+    fake_bot.presence.joined_rooms = {
+        "runtime@conference.test": "RuntimeBot",
+    }
+
+    await rooms.rooms_list(fake_bot, "jid", "nick", ["muc", "all"], MagicMock(), False)
+
+    listing = fake_bot.reply.call_args.args[1]
+    assert "MUC rooms (2): stored=1 | joined=1" in listing
+    runtime_line = next(line for line in listing if "runtime@conference.test" in line)
+    assert "✅" in runtime_line
+    assert "nick=RuntimeBot" in runtime_line
+    assert "stored=no" in runtime_line
+
+
+@pytest.mark.asyncio
+async def test_rooms_list_dm_shows_roster_contacts(fake_bot):
+    fake_bot.client_roster = {
+        "bot@domain": {
+            "subscription": "both",
+            "resources": {"BotNick": {}},
+        },
+        "alice@example.org": {
+            "subscription": "both",
+            "name": "Alice",
+            "resources": {"desktop": {"show": "chat"}},
+        },
+        "bob@example.org": {
+            "subscription": "from",
+            "pending_out": True,
+            "resources": {},
+        },
+        "removed@example.org": {
+            "subscription": "remove",
+        },
+    }
+
+    await rooms.rooms_list(fake_bot, "jid", "nick", ["1:1", "all"], MagicMock(), False)
+
+    listing = fake_bot.reply.call_args.args[1]
+    assert listing[0] == "💬 Direct contacts"
+    assert "Direct contacts (2): online=1" in listing
+    assert any(
+        "🟢 alice@example.org" in line
+        and "subscription=both" in line
+        and "name=Alice" in line
+        for line in listing
+    )
+    assert any(
+        "⚪ bob@example.org" in line
+        and "subscription=from" in line
+        and "pending=out" in line
+        for line in listing
+    )
+    assert not any("bot@domain" in line for line in listing)
+    assert not any("removed@example.org" in line for line in listing)
+    fake_bot.db.rooms.list.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rooms_list_dm_handles_missing_roster_and_bad_args(fake_bot):
+    fake_bot.client_roster = None
+    msg = MagicMock()
+
+    await rooms.rooms_list(fake_bot, "jid", "nick", ["dm"], msg, False)
+    listing = fake_bot.reply.call_args.args[1]
+    assert "Direct contacts (0): online=0" in listing
+    assert "• none" in listing
+
+    fake_bot.reply.reset_mock()
+    await rooms.rooms_list(fake_bot, "jid", "nick", ["dm", "all", "extra"], msg, False)
+    fake_bot.reply.assert_not_called()
+    fake_bot.reply_usage.assert_called_once_with(
+        msg,
+        "!rooms list [muc|dm|1:1] [<page>|last|all]",
+    )
 
 
 @pytest.mark.asyncio

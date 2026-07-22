@@ -24,6 +24,117 @@ from .state import (
 )
 
 
+_ROOM_LIST_MUC_SCOPES = {"muc", "room", "rooms"}
+_ROOM_LIST_DM_SCOPES = {"dm", "1:1", "direct", "contacts"}
+
+
+def _parse_rooms_list_args(args):
+    """Return ``(scope, page_request)`` or ``None`` for invalid arguments."""
+    remaining = [str(value).strip() for value in args]
+    scope = "muc"
+    if remaining and remaining[0].lower() in _ROOM_LIST_MUC_SCOPES:
+        remaining.pop(0)
+    elif remaining and remaining[0].lower() in _ROOM_LIST_DM_SCOPES:
+        scope = "dm"
+        remaining.pop(0)
+
+    if len(remaining) > 1:
+        return None
+    if remaining and remaining[0].lower() not in {"all", "last"}:
+        try:
+            int(remaining[0])
+        except ValueError:
+            return None
+    return scope, parse_page_args(remaining)
+
+
+def _runtime_rooms(bot) -> dict[str, dict]:
+    """Return one merged mapping of rooms tracked at runtime."""
+    result = {
+        str(room): {"nick": nick}
+        for room, nick in (
+            getattr(getattr(bot, "presence", None), "joined_rooms", {}) or {}
+        ).items()
+    }
+    for room, data in JOINED_ROOMS.items():
+        result.setdefault(str(room), {}).update(data if isinstance(data, dict) else {})
+    return result
+
+
+def _muc_room_lines(bot, rows) -> tuple[list[str], int, int, int]:
+    """Build a compact union of stored and currently joined MUCs."""
+    stored = {
+        str(room): {"nick": nick, "autojoin": bool(autojoin), "status": status}
+        for room, nick, autojoin, status in rows
+    }
+    runtime = _runtime_rooms(bot)
+    lines = []
+    for room in sorted(set(stored) | set(runtime), key=str.casefold):
+        saved = stored.get(room, {})
+        live = runtime.get(room)
+        values = live or {}
+        fields = [
+            f"nick={values.get('nick') or saved.get('nick') or 'unknown'}",
+            f"autojoin={'yes' if saved.get('autojoin', values.get('autojoin', False)) else 'no'}",
+        ]
+        if live and values.get("affiliation"):
+            fields.append(f"affiliation={values['affiliation']}")
+        if live and values.get("role"):
+            fields.append(f"role={values['role']}")
+        if room not in stored:
+            fields.append("stored=no")
+        status = values.get("status", saved.get("status"))
+        if status not in (None, "", "{}"):
+            fields.append(f"status={status}")
+        lines.append(f"• {'✅' if live is not None else '⚪'} {room} | " + " | ".join(fields))
+    return lines, len(set(stored) | set(runtime)), len(stored), len(runtime)
+
+
+def _roster_value(item, key: str, default=None):
+    """Read one value from a Slixmpp roster item or a test mapping."""
+    try:
+        return item[key]
+    except (KeyError, TypeError):
+        return getattr(item, key, default)
+
+
+def _direct_contact_lines(bot) -> tuple[list[str], int, int]:
+    """Build compact lines for the bot's XMPP roster contacts."""
+    roster = getattr(bot, "client_roster", None)
+    if roster is None:
+        return [], 0, 0
+
+    own_jid = str(getattr(getattr(bot, "boundjid", None), "bare", "")).lower()
+    contacts = []
+    for roster_jid in roster.keys():
+        jid = str(getattr(roster_jid, "bare", roster_jid)).split("/", 1)[0]
+        if not jid or jid.lower() == own_jid:
+            continue
+        item = roster[roster_jid]
+        subscription = str(_roster_value(item, "subscription", "none") or "none")
+        if subscription == "remove":
+            continue
+        resources = _roster_value(item, "resources", {}) or {}
+        name = str(_roster_value(item, "name", "") or "").strip()
+        pending = []
+        if _roster_value(item, "pending_in", False):
+            pending.append("in")
+        if _roster_value(item, "pending_out", False):
+            pending.append("out")
+        contacts.append((jid, subscription, name, bool(resources), pending))
+
+    contacts.sort(key=lambda item: item[0].casefold())
+    lines = []
+    for jid, subscription, name, online, pending in contacts:
+        fields = [f"subscription={subscription}"]
+        if name:
+            fields.append(f"name={name}")
+        if pending:
+            fields.append(f"pending={','.join(pending)}")
+        lines.append(f"• {'🟢' if online else '⚪'} {jid} | " + " | ".join(fields))
+    return lines, len(contacts), sum(1 for item in contacts if item[3])
+
+
 @command(
     "rooms plugins",
     role=Role.USER,
@@ -455,68 +566,62 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
     "rooms list",
     role=Role.ADMIN,
     aliases=["room list"],
-    short="List stored rooms and currently joined rooms.",
-    usage="{prefix}rooms list [all|page|last]",
+    short="List MUC rooms or direct XMPP contacts.",
+    usage="{prefix}rooms list [muc|dm|1:1] [<page>|last|all]",
     examples=[
         "{prefix}rooms list",
         "{prefix}rooms list all",
+        "{prefix}rooms list dm",
+        "{prefix}rooms list 1:1 all",
     ],
     category="rooms",
     context="private chat / MUC PM",
 )
 async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
-    """Show stored and currently joined rooms."""
+    """Show a merged MUC list or the bot's direct-contact roster."""
+    parsed = _parse_rooms_list_args(args)
+    if parsed is None:
+        bot.reply_usage(
+            msg,
+            f"{bot.prefix}rooms list [muc|dm|1:1] [<page>|last|all]",
+        )
+        return
+    scope, page = parsed
 
-    rows = await bot.db.rooms.list()
-    page = parse_page_args(args)
-
-    joined_rooms_copy = dict(JOINED_ROOMS)
-    details = [
-        f"Counts: stored={len(rows)} | joined={len(joined_rooms_copy)}",
-        "",
-    ]
-    if rows:
-        details.append("Stored rooms:")
-        for room_jid, nick_name, autojoin, status in rows:
-            autojoin_flag = "yes" if autojoin else "no"
-            joined_flag = "yes" if room_jid in JOINED_ROOMS else "no"
-            status_display = status if status and status != "{}" else ""
-            details.append(
-                f"• {room_jid} | nick={nick_name} | autojoin={autojoin_flag} "
-                f"| joined={joined_flag} | status={status_display or '—'}"
-            )
+    if scope == "dm":
+        contact_lines, contact_count, online_count = _direct_contact_lines(bot)
+        details = [
+            f"Direct contacts ({contact_count}): online={online_count}",
+            "1:1 chats are not joined like MUCs; this lists XMPP roster contacts.",
+        ]
+        if contact_lines:
+            details.extend(contact_lines)
+        else:
+            details.append("• none")
+        title = "💬 Direct contacts"
+        command_hint = f"{bot.prefix}rooms list dm"
     else:
-        details.append("Stored rooms: —")
-
-    details.append("")
-    details.append("Joined rooms:")
-    if joined_rooms_copy:
-        for room, data in sorted(tuple(joined_rooms_copy.items())):
-            try:
-                nick_name = data.get("nick", "unknown")
-                affiliation = data.get("affiliation", "unknown")
-                role = data.get("role", "unknown")
-                autojoin = "yes" if data.get("autojoin", False) else "no"
-                status = data.get("status") or "—"
-                if status == "{}":
-                    status = "—"
-                details.append(
-                    f"• {room} | nick={nick_name} | affiliation={affiliation} "
-                    f"| role={role} | autojoin={autojoin} | status={status}"
-                )
-            except Exception as e:
-                log.debug("[ROOMS] Error formatting room info for %s: %s", room, e)
-    else:
-        details.append("Joined rooms: —")
+        rows = await bot.db.rooms.list()
+        room_lines, total_count, stored_count, joined_count = _muc_room_lines(bot, rows)
+        details = [
+            f"MUC rooms ({total_count}): stored={stored_count} | joined={joined_count}",
+            "Legend: ✅ joined | ⚪ not joined",
+        ]
+        if room_lines:
+            details.extend(room_lines)
+        else:
+            details.append("• none")
+        title = "📋 Rooms"
+        command_hint = f"{bot.prefix}rooms list"
 
     bot.reply(
         msg,
         format_page(
-            "📋 Rooms",
+            title,
             details,
             page_request=page,
             page_size=12,
-            command_hint=f"{bot.prefix}rooms list",
+            command_hint=command_hint,
         ),
     )
 

@@ -146,12 +146,12 @@ Examples:
 
 ### `,rooms list`
 
-List stored rooms and currently joined rooms.
+List MUC rooms or direct XMPP contacts.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `rooms`<br>
-Usage: `,rooms list [all|page|last]`
+Usage: `,rooms list [muc|dm|1:1] [<page>|last|all]`
 
 Aliases: `,room list`
 
@@ -159,6 +159,8 @@ Examples:
 
 - `,rooms list`
 - `,rooms list all`
+- `,rooms list dm`
+- `,rooms list 1:1 all`
 
 ### `,rooms plugins`
 
