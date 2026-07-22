@@ -83,7 +83,7 @@ From a normal private chat, pass the room JID explicitly:
 
 ### Personal direct-chat templates
 
-Trusted users and higher can set a persistent template for their own 1:1 RSS subscriptions. In a normal direct chat, omit the room JID:
+Trusted users and higher can set a persistent template for their own 1:1 RSS subscriptions. In a normal direct chat, omit the room JID. The bot recognizes the 1:1 destination automatically:
 
 ```text
 ,rss template
@@ -92,7 +92,7 @@ Trusted users and higher can set a persistent template for their own 1:1 RSS sub
 ,rss template unset
 ```
 
-This personal template is independent of room templates and applies only to feeds delivered directly to that user's bare JID.
+This personal template is independent of room templates and applies only to feeds delivered directly to that user's bare JID. An optional `direct` marker is accepted for clarity, but is not required.
 
 ### Feed-specific templates
 
@@ -114,10 +114,13 @@ From a normal private chat, pass both the room JID and feed URL to manage a room
 For a personal direct subscription, omit the room JID and place the subscribed feed URL before the template:
 
 ```text
-,rss template set https://example.org/feed.xml DIRECT $title\n$link\n\n
+,rss template set https://example.org/feed.xml 📰 $title\n$link\n\n
 ,rss template show https://example.org/feed.xml
+,rss template test https://example.org/feed.xml
 ,rss template unset https://example.org/feed.xml
 ```
+
+The equivalent explicit forms `template set direct ...` and `template set <feed-url> direct ...` are also accepted. The `direct` marker selects the personal scope and is never stored as part of the template.
 
 ## Direct subscriptions
 
@@ -165,6 +168,7 @@ Examples:
 - `,rss template`
 - `,rss template set default 📰 $feed_title: $title\n$link`
 - `,rss template set 📰 $feed_title: $title\n$link`
+- `,rss template set https://example.org/feed.rss 📰 $title\n$link`
 - `,rss template test [$feed_title] $title`
 - `,rss template unset`
 - `,rss delete https://example.org/feed.rss`

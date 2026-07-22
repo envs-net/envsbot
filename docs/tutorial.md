@@ -214,12 +214,14 @@ Global moderators can set a persistent default RSS template for all rooms. Room 
 ,rss template show default
 ,rss template unset default
 ,rss template set 📰 $feed_title: $title\n$link
-,rss template set https://example.org/feed.rss [$feed_title] $title
+,rss template set https://example.org/feed.rss 📰 $title\n$link
 ,rss template test [$feed_title] $title
 ,rss template test https://example.org/feed.rss
 ,rss template unset
 ,rss template unset https://example.org/feed.rss
 ```
+
+In a normal 1:1 chat, these commands automatically manage the sender’s personal RSS templates. The optional word `direct` may be placed before or after a feed URL, but it is not required and is never stored as part of the template.
 
 ## 8. Room-scoped plugin grants
 

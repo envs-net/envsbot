@@ -784,6 +784,22 @@ def test_rss_template_scope_and_sample_helpers(make_bot):
     assert rss._looks_like_feed_arg(room) is False
     assert rss._looks_like_feed_arg("") is False
 
+    class GetterOnlyMessage:
+        def __getitem__(self, key):
+            raise KeyError(key)
+
+        def get(self, key):
+            return "normal" if key == "type" else None
+
+    class AttributeOnlyMessage:
+        type = "CHAT"
+
+        def __getitem__(self, key):
+            raise KeyError(key)
+
+    assert rss_commands._message_type(GetterOnlyMessage()) == "normal"
+    assert rss_commands._message_type(AttributeOnlyMessage()) == "chat"
+
     assert rss._split_template_scope_args(public_msg, True, [url, "$title"]) == (
         room,
         url,
@@ -798,6 +814,26 @@ def test_rss_template_scope_and_sample_helpers(make_bot):
         None,
         url,
         [],
+    )
+    assert rss._split_template_scope_args(
+        private_msg,
+        False,
+        [url, "DIRECT", "$title"],
+        sender_jid="admin@example.org",
+    ) == (
+        "admin@example.org",
+        url,
+        ["$title"],
+    )
+    assert rss._split_template_scope_args(
+        private_msg,
+        False,
+        ["direct", url, "$title"],
+        sender_jid="admin@example.org",
+    ) == (
+        "admin@example.org",
+        url,
+        ["$title"],
     )
 
     assert rss._sample_template_context_for_feed(None, url)["feed_url"] == url
@@ -844,6 +880,18 @@ async def test_rss_template_command_usage_permission_and_error_paths(make_bot):
         False,
     )
     assert "Usage:" in bot.replies[-1][1]
+
+    room_msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["template", "set", "direct", "$title"],
+        room_msg,
+        True,
+    )
+    assert "Usage:" in bot.replies[-1][1]
+    assert rss.RSS_TEMPLATES_KEY not in bot.plugin_store
 
     await rss.rss_command(
         bot,
@@ -942,13 +990,13 @@ async def test_rss_personal_template_show_set_test_unset_in_direct_chat(make_bot
         bot,
         user,
         "trusted",
-        ["template", "set", "DIRECT", "$feed_title", "::", "$title"],
+        ["template", "set", "$feed_title", "::", "$title"],
         msg,
         False,
     )
     assert f"Personal RSS template set for {user}" in bot.replies[-1][1]
     assert bot.plugin_store[rss.RSS_TEMPLATES_KEY][user] == (
-        "DIRECT $feed_title :: $title"
+        "$feed_title :: $title"
     )
 
     await rss.rss_command(
@@ -959,7 +1007,7 @@ async def test_rss_personal_template_show_set_test_unset_in_direct_chat(make_bot
         msg,
         False,
     )
-    assert "DIRECT Example Feed :: Example entry" in bot.replies[-1][1]
+    assert "Example Feed :: Example entry" in bot.replies[-1][1]
 
     await rss.rss_command(
         bot,
@@ -1010,9 +1058,37 @@ async def test_rss_personal_feed_template_requires_direct_subscription(make_bot)
         False,
     )
     assert f"direct user {user} / {url}" in bot.replies[-1][1]
-    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY][user][url] == (
-        "DIRECT $title"
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY][user][url] == "$title"
+
+
+@pytest.mark.asyncio
+async def test_rss_personal_template_supports_index_only_stanza(make_bot):
+    bot = make_bot()
+    user = "trusted@example.org"
+    bot.get_user_role = AsyncMock(return_value=Role.TRUSTED)
+
+    class IndexOnlyMessage:
+        def __init__(self):
+            self.values = {
+                "from": SimpleNamespace(bare=user, resource="desktop"),
+                "type": "chat",
+            }
+
+        def __getitem__(self, key):
+            return self.values[key]
+
+    msg = IndexOnlyMessage()
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["template", "set", "📰", "$title\\n$link"],
+        msg,
+        False,
     )
+
+    assert f"Personal RSS template set for {user}" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_TEMPLATES_KEY][user] == "📰 $title\n$link"
 
 
 @pytest.mark.asyncio

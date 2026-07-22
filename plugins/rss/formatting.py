@@ -50,15 +50,24 @@ _SAMPLE_TEMPLATE_CONTEXT = {
 def _template_command_prefix(bot=None) -> str:
     return str(getattr(bot, "prefix", None) or config.get("prefix", ",") or ",")
 def _rss_template_usage(bot=None) -> str:
-    """Return RSS template command usage."""
+    """Return RSS template command usage for each supported destination."""
     prefix = _template_command_prefix(bot)
     return (
-        f"Usage: {prefix}rss template [show] [room_jid] [feedurl]\n"
-        f"       {prefix}rss template set [room_jid] [feedurl] <template>\n"
-        f"       {prefix}rss template unset [room_jid] [feedurl]\n"
-        f"       {prefix}rss template test [room_jid] [feedurl] [template]\n"
-        f"       {prefix}rss template <show|set|unset|test> default [template]\n"
-        "In a direct chat, omit room_jid to manage your personal RSS template."
+        "Usage: RSS templates (personal 1:1 chat)\n"
+        f"  {prefix}rss template [show]\n"
+        f"  {prefix}rss template set <template>\n"
+        f"  {prefix}rss template set <feedurl> <template>\n"
+        f"  {prefix}rss template unset [feedurl]\n"
+        f"  {prefix}rss template test [feedurl] [template]\n"
+        "Room or MUC PM (current room is inferred):\n"
+        f"  {prefix}rss template [show|set|unset|test] [feedurl] [template]\n"
+        "Private admin chat for a room:\n"
+        f"  {prefix}rss template <show|set|unset|test> <room_jid> "
+        "[feedurl] [template]\n"
+        "Global default (moderator+):\n"
+        f"  {prefix}rss template <show|set|unset|test> default [template]\n"
+        "Optional: write 'direct' before or after feedurl in a 1:1 chat. "
+        "Use \\n for line breaks in a template."
     )
 def _rss_template_variables_text() -> str:
     """Return the supported template variables as a readable list."""

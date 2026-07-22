@@ -77,6 +77,19 @@ def _command_prefix(bot=None) -> str:
         or config.get("prefix", ",")
         or ","
     )
+def _message_type(msg) -> str:
+    """Return a normalized message type for mappings and Slixmpp stanzas."""
+    try:
+        value = msg["type"]
+    except Exception:
+        getter = getattr(msg, "get", None)
+        try:
+            value = getter("type") if callable(getter) else None
+        except Exception:
+            value = None
+    if value in (None, ""):
+        value = getattr(msg, "type", "")
+    return str(value or "").strip().lower()
 def _room_for_feed_command(msg, is_room: bool, explicit_room=None) -> str | None:
     """Return the target room for RSS commands.
 
@@ -90,11 +103,13 @@ def _room_for_feed_command(msg, is_room: bool, explicit_room=None) -> str | None
     sender = msg["from"]
     room_jid = getattr(sender, "bare", None)
 
-    if is_room and msg.get("type") == "groupchat" and room_jid:
+    msg_type = _message_type(msg)
+
+    if is_room and msg_type == "groupchat" and room_jid:
         return str(room_jid)
 
     if (
-        msg.get("type") in ("chat", "normal")
+        msg_type in ("chat", "normal")
         and room_jid in JOINED_ROOMS
         and getattr(sender, "resource", None)
     ):
@@ -294,28 +309,44 @@ def _split_template_scope_args(
     * ``[room_jid] <feed_url>`` targets a feed template in that room.
     * In a public room/MUC PM, ``<feed_url>`` is enough for a feed template.
     * In a normal direct chat, an omitted room targets the sender's direct
-      subscriptions.
+      subscriptions. The optional ``direct`` marker is accepted before or
+      after the feed URL for clarity and is never stored as template text.
     """
     rest = list(args)
+    direct_requested = False
+    if rest and str(rest[0]).strip().lower() == "direct":
+        direct_requested = True
+        rest.pop(0)
+
     explicit_room = None
     if rest and _looks_like_room_arg(rest[0]):
         explicit_room = rest.pop(0)
+
+    implied_room = _room_for_feed_command(msg, is_room)
     destination = _room_for_feed_command(
         msg,
         is_room,
         explicit_room=explicit_room,
     )
-    if (
-        destination is None
-        and explicit_room is None
-        and sender_jid
-        and msg.get("type") in ("chat", "normal")
-    ):
-        destination = _normalize_room_jid(sender_jid)
 
     feed_url = None
     if rest and _looks_like_feed_arg(rest[0]):
         feed_url = _normalize_url(rest.pop(0))
+
+    if rest and str(rest[0]).strip().lower() == "direct":
+        direct_requested = True
+        rest.pop(0)
+
+    personal_direct = (
+        not is_room
+        and explicit_room is None
+        and implied_room is None
+        and bool(sender_jid)
+    )
+    if personal_direct:
+        destination = _normalize_room_jid(sender_jid)
+    elif direct_requested:
+        return None, feed_url, rest
 
     return destination, feed_url, rest
 
@@ -327,7 +358,7 @@ def _is_personal_template_scope(
     destination: str | None,
 ) -> bool:
     """Return True for the sender's direct-subscription template scope."""
-    if not destination or msg.get("type") not in ("chat", "normal"):
+    if not destination or is_room:
         return False
     if _room_for_feed_command(msg, is_room) is not None:
         return False
@@ -754,6 +785,7 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
         "{prefix}rss template",
         "{prefix}rss template set default 📰 $feed_title: $title\n$link",
         "{prefix}rss template set 📰 $feed_title: $title\n$link",
+        "{prefix}rss template set https://example.org/feed.rss 📰 $title\n$link",
         "{prefix}rss template test [$feed_title] $title",
         "{prefix}rss template unset",
         "{prefix}rss delete https://example.org/feed.rss",
@@ -776,8 +808,9 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss pause|resume <feedurl> [room_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [rooms|mods|trusted|room_jid] [page|all|last]
-    {prefix}rss template [show|set|unset|test] [default|room_jid] [feedurl] [template]
-    In direct chat, omit room_jid to manage your personal template.
+    {prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feedurl] [template]
+    Direct chat: omit room_jid to manage your personal template.
+    Room/MUC PM: omit room_jid to manage the current room template.
     """
     store = bot.db.users.plugin("rss")
 
