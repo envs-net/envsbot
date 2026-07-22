@@ -83,6 +83,35 @@ function idlerpg_player_online($player) {
     return false;
 }
 
+function idlerpg_quest_player_lookup($quest) {
+    if (!is_array($quest)) {
+        return [];
+    }
+
+    $participants = [];
+    foreach (['questers', 'participants'] as $field) {
+        if (!isset($quest[$field]) || !is_array($quest[$field])) {
+            continue;
+        }
+        foreach ($quest[$field] as $participant) {
+            $name = is_array($participant)
+                ? idlerpg_player_name($participant)
+                : (string) $participant;
+            $key = strtolower(trim((string) $name));
+            if ($key !== '') {
+                $participants[$key] = true;
+            }
+        }
+    }
+
+    return $participants;
+}
+
+function idlerpg_player_on_quest($player, $quest_player_lookup) {
+    $name = strtolower(trim((string) idlerpg_player_name($player)));
+    return $name !== '' && isset($quest_player_lookup[$name]);
+}
+
 function idlerpg_player_coord($player, $axis) {
     if (isset($player[$axis]) && is_numeric($player[$axis])) {
         return (float) $player[$axis];
@@ -361,6 +390,7 @@ foreach ($players as $player) {
 $view = idlerpg_current_view();
 $render_map = false;
 $quest = is_array($map_payload['quest'] ?? null) ? $map_payload['quest'] : null;
+$quest_player_lookup = idlerpg_quest_player_lookup($quest);
 $map_width = max(1, (int) ($map_payload['width'] ?? $map_payload['map_x'] ?? 500));
 $map_height = max(1, (int) ($map_payload['height'] ?? $map_payload['map_y'] ?? 500));
 $online_count = 0;
@@ -420,6 +450,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 .marker:hover text, .marker:focus text { font-weight: 700; }
 .marker.online circle { fill: #2f80ff; }
 .marker.offline circle { fill: #b33; }
+.marker.quester circle { fill: #d99b00; }
 .marker circle { stroke: #111; stroke-width: 1.5; }
 .quest-point { fill: #d99b00; stroke: #111; stroke-width: 1.5; }
 .quest-line { fill: none; stroke: #d99b00; stroke-width: 2; stroke-dasharray: 6 5; }
@@ -560,7 +591,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 
             <?php if ($render_map || $view === 'map'): ?>
                 <h2><?php echo $view === 'map' ? 'World Map' : 'Quest Map'; ?></h2>
-                <p class="muted">Blue = online, red = offline, orange = grid quest point. Labels are staggered when players stand close together; hover a marker for exact details.</p>
+                <p class="muted">Blue circles = online, red circles = offline, orange circles = active quest participants. Orange squares and lines show a grid-quest route. Labels are staggered when players stand close together; hover a marker for exact details.</p>
                 <?php if (count($map_players) > 0): ?>
                     <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
                         <defs><pattern id="noise" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/></pattern></defs>
@@ -580,8 +611,8 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                             <?php endforeach; ?>
                         <?php endif; ?>
                         <?php $occupied_labels = []; ?>
-                        <?php foreach (array_slice($map_players, 0, 120) as $player): $name = idlerpg_player_name($player); $x = max(0, min($map_width, idlerpg_player_coord($player, 'x'))); $y = max(0, min($map_height, idlerpg_player_coord($player, 'y'))); $label = idlerpg_map_label_position($x, $y, $name, $map_width, $map_height, $occupied_labels); $class = idlerpg_player_online($player) ? 'marker online' : 'marker offline'; if ($label['crowded']) { $class .= ' crowded'; } ?>
-                            <a href="<?php echo h(idlerpg_player_url($name)); ?>"><g class="<?php echo h($class); ?>"><title><?php echo h($label['title'] . ' · lv.' . idlerpg_player_level($player)); ?></title><circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/><text text-anchor="<?php echo h($label['anchor']); ?>" x="<?php echo h($label['x']); ?>" y="<?php echo h($label['y']); ?>"><?php echo h($name); ?></text></g></a>
+                        <?php foreach (array_slice($map_players, 0, 120) as $player): $name = idlerpg_player_name($player); $x = max(0, min($map_width, idlerpg_player_coord($player, 'x'))); $y = max(0, min($map_height, idlerpg_player_coord($player, 'y'))); $label = idlerpg_map_label_position($x, $y, $name, $map_width, $map_height, $occupied_labels); $on_quest = idlerpg_player_on_quest($player, $quest_player_lookup); $class = $on_quest ? 'marker quester' : (idlerpg_player_online($player) ? 'marker online' : 'marker offline'); if ($label['crowded']) { $class .= ' crowded'; } $marker_state = idlerpg_player_online($player) ? 'online' : 'offline'; if ($on_quest) { $marker_state .= ' · quest participant'; } ?>
+                            <a href="<?php echo h(idlerpg_player_url($name)); ?>"><g class="<?php echo h($class); ?>"><title><?php echo h($label['title'] . ' · lv.' . idlerpg_player_level($player) . ' · ' . $marker_state); ?></title><circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/><text text-anchor="<?php echo h($label['anchor']); ?>" x="<?php echo h($label['x']); ?>" y="<?php echo h($label['y']); ?>"><?php echo h($name); ?></text></g></a>
                         <?php endforeach; ?>
                     </svg>
                     <h3>Map positions</h3>
@@ -622,7 +653,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
         <aside>
             <div class="card"><h2>Quick start</h2><ul><li><code>,idlerpg register &lt;name&gt; &lt;class&gt;</code></li><li><code>,idlerpg login</code></li><li><code>,idlerpg status</code></li><li><code>,idlerpg top</code></li></ul></div>
             <div class="card"><h2>Data setup</h2><p class="muted">Put JSON exports in <code>data/&lt;room-slug&gt;/</code> or set <code>IDLERPG_DATA_DIR</code>. Open <code>?debug=1</code> to check readable paths.</p></div>
-            <div class="card"><h2>Map legend</h2><p class="muted">Blue = online, red = offline, orange = quest point. <code>[293,133] lv.16</code> means x=293, y=133 and level 16.</p></div>
+            <div class="card"><h2>Map legend</h2><p class="muted">Blue circles = online, red circles = offline, orange circles = active quest participants. Orange squares and lines show a grid-quest route. <code>[293,133] lv.16</code> means x=293, y=133 and level 16.</p></div>
         </aside>
     </div>
 </div>

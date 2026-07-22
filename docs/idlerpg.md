@@ -492,7 +492,10 @@ the current quest point more slowly than normal random movement.
 ```
 
 The XMPP command renders a compact text map with player markers and a legend.
-The website uses the exported `map.json` for a visual map.
+The website uses the exported `map.json` for a visual map. Online players use
+blue circular markers, offline players use red circular markers and active
+quest participants use orange circular markers. Grid-quest route points are
+shown as orange squares connected by an orange line.
 
 Example legend line:
 
