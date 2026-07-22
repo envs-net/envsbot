@@ -2,6 +2,7 @@
 
 from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
+from bot.room_state import joined_room_jids
 from .formatting import _audit_reason, _send_user_info, _write_user_audit
 from .lookup import _parse_user_jid, _valid_plugin_names, find_users_by_nick_safe
 from .permissions import (
@@ -242,11 +243,27 @@ def _known_user_sections(bot, users, joined_rooms, scope: str):
     direct_state = _direct_user_state(bot)
     room_state = _room_user_state(joined_rooms)
     historic_room_users = set(getattr(bot.db.users, "_room_users", set()) or set())
+    muc_jids = joined_room_jids(bot, joined_rooms)
+
+    direct_state = {
+        jid: state
+        for jid, state in direct_state.items()
+        if jid.casefold() not in muc_jids
+    }
+    room_state = {
+        jid: state
+        for jid, state in room_state.items()
+        if jid.casefold() not in muc_jids
+    }
+    historic_room_users = {
+        jid for jid in historic_room_users if str(jid).casefold() not in muc_jids
+    }
 
     roster_jids = {
         jid for jid, state in direct_state.items() if state.get("roster")
     }
     all_jids = set(users_by_jid) | roster_jids | set(room_state)
+    all_jids = {jid for jid in all_jids if jid.casefold() not in muc_jids}
     own_jid = _parse_user_jid(getattr(getattr(bot, "boundjid", None), "bare", ""))
     if own_jid:
         all_jids.discard(own_jid)

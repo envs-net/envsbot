@@ -235,8 +235,14 @@ async def test_users_list_includes_direct_roster_contacts(mock_bot, mock_msg):
     mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
     mock_bot.db.users._direct_users = set()
     mock_bot.db.users._room_users = set()
-    mock_bot.db.users.list = AsyncMock(return_value=[])
-    mock_bot.bot_plugins.plugins = {}
+    mock_bot.db.users.list = AsyncMock(return_value=[
+        {"jid": "room@conference.test", "role": users_mod.Role.USER.value},
+    ])
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(
+            JOINED_ROOMS={"room@conference.test": {"nicks": {}}},
+        ),
+    }
     mock_bot.client_roster = {
         "bot@example.org": {
             "subscription": "both",
@@ -246,6 +252,10 @@ async def test_users_list_includes_direct_roster_contacts(mock_bot, mock_msg):
             "subscription": "both",
             "name": "Alice",
             "resources": {"phone": {"show": "chat"}},
+        },
+        "room@conference.test": {
+            "subscription": "both",
+            "resources": {"EnvBot": {}},
         },
         "removed@example.org": {"subscription": "remove"},
     }
@@ -266,6 +276,7 @@ async def test_users_list_includes_direct_roster_contacts(mock_bot, mock_msg):
         in reply_text
     )
     assert "bot@example.org" not in reply_text
+    assert "room@conference.test" not in reply_text
     assert "removed@example.org" not in reply_text
 
 

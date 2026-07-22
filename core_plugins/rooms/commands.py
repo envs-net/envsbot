@@ -4,6 +4,7 @@ from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
 from utils.room_features import format_room_feature_line, list_room_features
+from bot.room_state import joined_room_jids
 
 from .defaults import _cleanup_room_plugin_state
 from .presence import (
@@ -105,10 +106,11 @@ def _direct_contact_lines(bot) -> tuple[list[str], int, int]:
         return [], 0, 0
 
     own_jid = str(getattr(getattr(bot, "boundjid", None), "bare", "")).lower()
+    muc_jids = joined_room_jids(bot, _runtime_rooms(bot))
     contacts = []
     for roster_jid in roster.keys():
         jid = str(getattr(roster_jid, "bare", roster_jid)).split("/", 1)[0]
-        if not jid or jid.lower() == own_jid:
+        if not jid or jid.lower() == own_jid or jid.casefold() in muc_jids:
             continue
         item = roster[roster_jid]
         subscription = str(_roster_value(item, "subscription", "none") or "none")

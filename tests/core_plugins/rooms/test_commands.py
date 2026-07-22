@@ -165,6 +165,9 @@ async def test_rooms_list_merges_presence_only_runtime_rooms(fake_bot):
 
 @pytest.mark.asyncio
 async def test_rooms_list_dm_shows_roster_contacts(fake_bot):
+    fake_bot.presence.joined_rooms = {
+        "room@conference.test": "BotNick",
+    }
     fake_bot.client_roster = {
         "bot@domain": {
             "subscription": "both",
@@ -179,6 +182,10 @@ async def test_rooms_list_dm_shows_roster_contacts(fake_bot):
             "subscription": "from",
             "pending_out": True,
             "resources": {},
+        },
+        "room@conference.test": {
+            "subscription": "both",
+            "resources": {"BotNick": {}},
         },
         "removed@example.org": {
             "subscription": "remove",
@@ -203,6 +210,7 @@ async def test_rooms_list_dm_shows_roster_contacts(fake_bot):
         for line in listing
     )
     assert not any("bot@domain" in line for line in listing)
+    assert not any("room@conference.test" in line for line in listing)
     assert not any("removed@example.org" in line for line in listing)
     fake_bot.db.rooms.list.assert_not_awaited()
 
