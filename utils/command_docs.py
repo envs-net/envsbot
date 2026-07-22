@@ -4,7 +4,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout when imported from mutmut's copy.
+
+    mutmut copies production modules below ``<repo>/mutants`` but does not
+    copy the generated Markdown documentation.  Documentation validation must
+    therefore compare against the files in the original checkout.
+    """
+    if path.name == "mutants":
+        checkout = path.parent
+        if (checkout / "pyproject.toml").exists():
+            return checkout
+    return path
+
+
+ROOT = _checkout_root(Path(__file__).resolve().parents[1])
 
 from utils.command import Role
 from utils.config import config
