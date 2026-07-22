@@ -280,6 +280,19 @@ def _rss_notes() -> list[str]:
         f"{PREFIX}rss template set room@conference.example.org https://example.org/feed.xml 📰 $title\\n$link\\n\\n",
         "```",
         "",
+        "## Direct subscriptions",
+        "",
+        "Trusted users and higher may subscribe to feeds in a direct chat. Trusted users are limited by `RSS_TRUSTED_MAX_FEEDS` (default: 10); moderators and higher are unlimited.",
+        "",
+        "Trusted users may remove only their own subscriptions. Owner, superadmin, and admin users may remove a trusted user's subscription explicitly:",
+        "",
+        "```text",
+        f"{PREFIX}rss remove <feed-url> <user-jid>",
+        "```",
+        "",
+        f"In direct chat, `{PREFIX}rss list` uses compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.",
+        f"Global moderators may select a single section with `{PREFIX}rss list rooms`, `{PREFIX}rss list mods`, or `{PREFIX}rss list trusted`. Trusted users still see only their own direct subscriptions.",
+        "",
     ]
 
 

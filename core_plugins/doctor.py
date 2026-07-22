@@ -428,7 +428,11 @@ def _command_docs_line() -> str:
 
     issues = [line for line in output.splitlines() if line.lstrip().startswith("- ")]
     if issues:
-        return _line(False, "Command docs", f"{len(issues)} issue(s); regenerate docs/commands.md")
+        return _line(
+            False,
+            "Command docs",
+            f"{len(issues)} issue(s); run scripts/generate_commands_md.py",
+        )
 
     detail = output.splitlines()[-1] if output else f"checker exited with {proc.returncode}"
     return _line(False, "Command docs", detail[:160])

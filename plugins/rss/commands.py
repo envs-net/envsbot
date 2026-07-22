@@ -627,6 +627,7 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
     usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
     examples=[
         "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
+        "{prefix}rss add https://example.org/feed.rss",
         "{prefix}rss list room@conference.example.org",
         "{prefix}rss list rooms",
         "{prefix}rss list mods",

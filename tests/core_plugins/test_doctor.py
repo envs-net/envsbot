@@ -341,7 +341,9 @@ def test_release_command_docs_line_handles_ok_errors_and_exceptions(monkeypatch,
         )
 
     monkeypatch.setattr(doctor.subprocess, "run", fake_errors)
-    assert doctor._command_docs_line() == "🔴 Command docs: 1 issue(s); regenerate docs/commands.md"
+    assert doctor._command_docs_line() == (
+        "🔴 Command docs: 1 issue(s); run scripts/generate_commands_md.py"
+    )
 
     def fake_exception(*args, **kwargs):
         raise RuntimeError("validator unavailable")

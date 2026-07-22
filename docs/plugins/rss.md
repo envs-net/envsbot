@@ -98,6 +98,19 @@ From a normal private chat, pass both the room JID and feed URL:
 ,rss template set room@conference.example.org https://example.org/feed.xml 📰 $title\n$link\n\n
 ```
 
+## Direct subscriptions
+
+Trusted users and higher may subscribe to feeds in a direct chat. Trusted users are limited by `RSS_TRUSTED_MAX_FEEDS` (default: 10); moderators and higher are unlimited.
+
+Trusted users may remove only their own subscriptions. Owner, superadmin, and admin users may remove a trusted user's subscription explicitly:
+
+```text
+,rss remove <feed-url> <user-jid>
+```
+
+In direct chat, `,rss list` uses compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
+Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. Trusted users still see only their own direct subscriptions.
+
 ## Commands
 
 ### `,rss`
@@ -112,7 +125,7 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
 Examples:
 
 - `,rss add https://example.org/feed.rss room@conference.example.org`
-- `,rss add https://example.org/feed.rss` in a direct chat (trusted role or higher)
+- `,rss add https://example.org/feed.rss`
 - `,rss list room@conference.example.org`
 - `,rss list rooms`
 - `,rss list mods`
@@ -133,21 +146,3 @@ Examples:
 - `,rss template unset`
 - `,rss delete https://example.org/feed.rss`
 - `,rss remove https://example.org/feed.rss old@conference.example.org`
-
-
-## Direct subscriptions
-
-Trusted users and higher may subscribe to feeds in a direct chat. Trusted users
-are limited by `RSS_TRUSTED_MAX_FEEDS` (default: 10); moderators and higher are
-unlimited. Trusted users may remove only their own subscriptions. Owner,
-superadmin, and admin users may remove a trusted user's subscription explicitly:
-
-```text
-,rss remove <feed-url> <user-jid>
-```
-
-In direct chat, `,rss list` uses compact sections for room, moderator, and
-trusted-user feeds while retaining title, status, interval, destination, and URL.
-Global moderators may select a single section with `,rss list rooms`,
-`,rss list mods`, or `,rss list trusted`. Trusted users still see only their own
-direct subscriptions.
