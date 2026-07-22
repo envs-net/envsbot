@@ -343,7 +343,7 @@ async def test_cache_xep0153_hash_supports_async_api_and_missing_api():
 
     class BrokenAPI:
         def __getitem__(self, key):
-            raise RuntimeError(key)
+            raise KeyError(key)
 
     bot["xep_0153"] = types.SimpleNamespace(api=BrokenAPI())
     assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is False
