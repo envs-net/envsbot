@@ -9,6 +9,51 @@ from .lookup import _parse_user_jid
 from .roles import MAX_ROOM_NICKS, log
 
 
+_DIRECT_USERS_KEY = "_direct_users"
+_ROOM_USERS_KEY = "_room_users"
+
+
+def _normalized_jid_set(value) -> set[str]:
+    """Return a normalized set of bare JIDs from persisted source data."""
+    if not isinstance(value, (list, tuple, set)):
+        return set()
+    result = set()
+    for item in value:
+        jid = _parse_user_jid(item)
+        if jid:
+            result.add(jid)
+    return result
+
+
+async def _remember_user_source(bot, real_jid: str, source: str) -> None:
+    """Persist whether a user was learned directly or from a room."""
+    if source == "direct":
+        attr = "_direct_users"
+        key = _DIRECT_USERS_KEY
+    elif source == "room":
+        attr = "_room_users"
+        key = _ROOM_USERS_KEY
+    else:
+        raise ValueError(f"Unsupported user source: {source}")
+
+    users = bot.db.users
+    known = set(getattr(users, attr, set()) or set())
+    if real_jid in known:
+        return
+
+    def add_jid(current):
+        updated = _normalized_jid_set(current)
+        updated.add(real_jid)
+        return sorted(updated)
+
+    persisted = await users.plugin("users").update_global(
+        key,
+        add_jid,
+        default=sorted(known),
+    )
+    setattr(users, attr, set(persisted))
+
+
 async def on_muc_presence(bot, pres):
     if pres["type"] not in ("available", "unavailable"):
         return
@@ -134,6 +179,7 @@ async def on_private_message(bot, msg):
         log.info("[USERS] ✅ Creating direct-message user: '%s'", real_jid)
         await users.create(real_jid)
 
+    await _remember_user_source(bot, real_jid, "direct")
     await update_last_seen(bot, real_jid)
 
 
@@ -154,6 +200,17 @@ async def on_load(bot):
     bot.db.users._nick_index = await store.get_global("_nick_index", {})
     if bot.db.users._nick_index is None:
         bot.db.users._nick_index = {}
+
+    bot.db.users._direct_users = _normalized_jid_set(
+        await store.get_global(_DIRECT_USERS_KEY, [])
+    )
+    room_users = _normalized_jid_set(
+        await store.get_global(_ROOM_USERS_KEY, [])
+    )
+    if not room_users:
+        for jids in bot.db.users._nick_index.values():
+            room_users.update(_normalized_jid_set(jids))
+    bot.db.users._room_users = room_users
 
     # --- add event handlers ---
     bot.bot_plugins.register_event(
@@ -180,6 +237,8 @@ async def track_room_nick(bot, real_jid: str, room: str, nick: str):
     if await um.get(real_jid) is None:
         log.info(f"[USERS] ✅ Creating user: '{real_jid}'")
         await um.create(real_jid, nick)
+
+    await _remember_user_source(bot, real_jid, "room")
 
     store = um.plugin("users")
 

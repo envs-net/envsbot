@@ -75,6 +75,7 @@ Add a room to the bot's persistent room list:
 ,rooms join room@conference.example.org
 ,rooms list
 ,rooms list dm
+,rooms list direct
 ```
 
 Show or change stored rooms later:
@@ -82,15 +83,17 @@ Show or change stored rooms later:
 ```text
 ,rooms list
 ,rooms list 1:1
+,rooms list contacts
 ,rooms update room@conference.example.org nick EnvsBot
 ,rooms leave room@conference.example.org
 ,rooms delete room@conference.example.org
 ```
 
 `,rooms list` merges stored and currently joined MUCs into one compact list.
-`,rooms list dm` and `,rooms list 1:1` show contacts from the bot's XMPP
-roster. Direct chats are not joined like MUCs, so this is a contact list rather
-than a list of active chat sessions.
+`,rooms list dm`, `,rooms list 1:1`, `,rooms list direct` and
+`,rooms list contacts` show contacts from the bot's XMPP roster. Direct chats
+are not joined like MUCs, so this is a contact list rather than a list of
+active chat sessions.
 
 Incoming room invites are stored as pending invites when room invites are enabled:
 
@@ -262,6 +265,19 @@ Show roles and privileged users:
 ```text
 ,users roles
 ,users admins
+,users list
+,users list active
+,users list passive
+```
+
+`,users list` groups all users known to the bot by how they were learned.
+Active users contacted the bot directly in a 1:1 chat; passive users were
+observed in one or more MUCs. Users created manually through role management
+remain visible as stored-only users. Pass an explicit room JID to retain the
+detailed current-occupant view:
+
+```text
+,users list room@conference.example.org
 ```
 
 Change or inspect a user:

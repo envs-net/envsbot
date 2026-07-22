@@ -91,18 +91,20 @@ Examples:
 
 ### `,users list`
 
-List users currently known in one joined room.
+List known users by direct, room-observed or stored-only source.
 
 Role: `admin`<br>
 Context: `private chat only`<br>
 Category: `users`<br>
-Usage: `,users list [room_jid] [all|page|last]`
+Usage: `,users list [active|passive|known|room_jid] [all|page|last]`
 
 Aliases: `,user list`
 
 Examples:
 
-- `,users list test@conference.example.org`
+- `,users list`
+- `,users list active`
+- `,users list passive all`
 - `,users list test@conference.example.org 2`
 
 ### `,users permissions`

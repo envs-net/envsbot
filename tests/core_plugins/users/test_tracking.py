@@ -87,6 +87,10 @@ async def test_on_private_message_creates_and_tracks_direct_user(mock_bot):
     mock_bot._is_muc_private_message = MagicMock(return_value=False)
     mock_bot.db.users.get = AsyncMock(return_value=None)
     mock_bot.db.users.create = AsyncMock()
+    mock_bot.db.users._direct_users = set()
+    store = AsyncMock()
+    store.update_global = AsyncMock(return_value=["member@example.org"])
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
     msg = {
         "type": "chat",
         "from": "member@example.org/phone",
@@ -102,6 +106,11 @@ async def test_on_private_message_creates_and_tracks_direct_user(mock_bot):
         await users_mod.on_private_message(mock_bot, msg)
 
     mock_bot.db.users.create.assert_awaited_once_with("member@example.org")
+    store.update_global.assert_awaited_once()
+    key, updater = store.update_global.await_args.args
+    assert key == "_direct_users"
+    assert updater([]) == ["member@example.org"]
+    assert store.update_global.await_args.kwargs == {"default": []}
     last_seen.assert_awaited_once_with(mock_bot, "member@example.org")
 
 
@@ -131,7 +140,7 @@ async def test_on_private_message_skips_muc_pm_and_own_messages(mock_bot):
 @pytest.mark.asyncio
 async def test_users_on_load_registers_direct_message_runtime_handler(mock_bot):
     store = AsyncMock()
-    store.get_global = AsyncMock(return_value={})
+    store.get_global = AsyncMock(side_effect=[{}, ["direct@example.org"], []])
     mock_bot.db.users.plugin = MagicMock(return_value=store)
 
     await users_mod.on_load(mock_bot)
@@ -139,12 +148,47 @@ async def test_users_on_load_registers_direct_message_runtime_handler(mock_bot):
     mock_bot.bot_plugins.register_runtime_event.assert_called_once()
     args = mock_bot.bot_plugins.register_runtime_event.call_args.args
     assert args[:2] == ("users", "private_message_received")
+    assert mock_bot.db.users._direct_users == {"direct@example.org"}
+    assert mock_bot.db.users._room_users == set()
+
+
+@pytest.mark.asyncio
+async def test_users_on_load_bootstraps_room_sources_from_nick_index(mock_bot):
+    store = AsyncMock()
+    store.get_global = AsyncMock(side_effect=[
+        {"RoomNick": ["room-user@example.org"]},
+        [],
+        [],
+    ])
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
+
+    await users_mod.on_load(mock_bot)
+
+    assert mock_bot.db.users._room_users == {"room-user@example.org"}
+
+
+@pytest.mark.asyncio
+async def test_remember_user_source_skips_known_and_rejects_unknown(mock_bot):
+    mock_bot.db.users._direct_users = {"known@example.org"}
+    store = AsyncMock()
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
+
+    await tracking_module._remember_user_source(
+        mock_bot, "known@example.org", "direct"
+    )
+    store.update_global.assert_not_awaited()
+
+    with pytest.raises(ValueError, match="Unsupported user source"):
+        await tracking_module._remember_user_source(
+            mock_bot, "other@example.org", "invalid"
+        )
 
 
 @pytest.mark.asyncio
 async def test_track_room_nick(build_mock_bot, monkeypatch):
     bot = build_mock_bot()
     plugin_store = AsyncMock()
+    plugin_store.update_global = AsyncMock(return_value=["jid@x"])
     plugin_store.get = AsyncMock(return_value={
         "roomY": ["oldnick", "oldernick"],
         "roomZ": ["sharednick"],
@@ -165,6 +209,11 @@ async def test_track_room_nick(build_mock_bot, monkeypatch):
     await users_mod.track_room_nick(bot, "jid@x", "roomY", "nickname")
 
     user_store.create.assert_awaited_once_with("jid@x", "nickname")
+    plugin_store.update_global.assert_awaited_once()
+    key, updater = plugin_store.update_global.await_args.args
+    assert key == "_room_users"
+    assert updater([]) == ["jid@x"]
+    assert plugin_store.update_global.await_args.kwargs == {"default": []}
     plugin_store.set.assert_awaited_once_with(
         "jid@x",
         "roomnicks",
@@ -239,6 +288,15 @@ async def test_on_private_message_accepts_stanzas_without_get(mock_bot):
     mock_bot._is_muc_private_message = MagicMock(return_value=False)
     mock_bot.db.users.get = AsyncMock(return_value=None)
     mock_bot.db.users.create = AsyncMock()
+    mock_bot.db.users._direct_users = set()
+    store = AsyncMock()
+    store.update_global = AsyncMock(
+        side_effect=[
+            ["indexed@example.org"],
+            ["attribute@example.org", "indexed@example.org"],
+        ]
+    )
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
 
     class IndexOnlyMessage:
         def __init__(self):
@@ -268,3 +326,7 @@ async def test_on_private_message_accepts_stanzas_without_get(mock_bot):
         (mock_bot, "indexed@example.org"),
         (mock_bot, "attribute@example.org"),
     ]
+    assert mock_bot.db.users._direct_users == {
+        "indexed@example.org",
+        "attribute@example.org",
+    }

@@ -121,125 +121,287 @@ async def users_info(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, "🟡️ Failed to fetch user info.")
 
 
+_USER_LIST_ACTIVE_SCOPES = {"active", "direct", "dm", "1:1"}
+_USER_LIST_PASSIVE_SCOPES = {"passive", "room", "rooms", "muc"}
+_USER_LIST_KNOWN_SCOPES = {"known", "stored", "other"}
+_USER_LIST_PAGE_TOKENS = {"all", "last"}
+
+
+def _parse_users_list_args(args):
+    """Return ``(scope, room_jid, page_request)`` for ``users list``."""
+    remaining = [str(value).strip() for value in args]
+    scope = "all"
+    room_jid = None
+
+    if remaining:
+        first = remaining[0].lower()
+        if first in _USER_LIST_ACTIVE_SCOPES:
+            scope = "active"
+            remaining.pop(0)
+        elif first in _USER_LIST_PASSIVE_SCOPES:
+            scope = "passive"
+            remaining.pop(0)
+        elif first in _USER_LIST_KNOWN_SCOPES:
+            scope = "known"
+            remaining.pop(0)
+        elif first not in _USER_LIST_PAGE_TOKENS and not first.isdigit():
+            room_jid = remaining.pop(0)
+            scope = "room"
+
+    if len(remaining) > 1:
+        return None
+    if remaining and remaining[0].lower() not in _USER_LIST_PAGE_TOKENS:
+        try:
+            int(remaining[0])
+        except ValueError:
+            return None
+    return scope, room_jid, parse_page_args(remaining)
+
+
+def _user_roster_value(item, key: str, default=None):
+    """Read one field from a Slixmpp roster item or a test mapping."""
+    try:
+        return item[key]
+    except (KeyError, TypeError):
+        return getattr(item, key, default)
+
+
+def _direct_user_state(bot) -> dict[str, dict]:
+    """Return direct users learned from messages and the current roster."""
+    result = {
+        jid: {"roster": False, "online": False, "name": ""}
+        for jid in set(getattr(bot.db.users, "_direct_users", set()) or set())
+    }
+    roster = getattr(bot, "client_roster", None)
+    if roster is None:
+        return result
+
+    own_jid = _parse_user_jid(getattr(getattr(bot, "boundjid", None), "bare", ""))
+    for roster_jid in roster.keys():
+        jid = _parse_user_jid(getattr(roster_jid, "bare", roster_jid))
+        if not jid or jid == own_jid:
+            continue
+        item = roster[roster_jid]
+        if str(_user_roster_value(item, "subscription", "none") or "none") == "remove":
+            continue
+        result[jid] = {
+            "roster": True,
+            "online": bool(_user_roster_value(item, "resources", {}) or {}),
+            "name": str(_user_roster_value(item, "name", "") or "").strip(),
+        }
+    return result
+
+
+def _room_user_state(joined_rooms) -> dict[str, dict]:
+    """Return users currently visible in joined MUCs."""
+    result = {}
+    for room, room_info in (joined_rooms or {}).items():
+        if not isinstance(room_info, dict):
+            continue
+        for nick, user_info in (room_info.get("nicks", {}) or {}).items():
+            if not isinstance(user_info, dict):
+                continue
+            jid = _parse_user_jid(user_info.get("jid"))
+            if not jid:
+                continue
+            state = result.setdefault(jid, {"rooms": set(), "nicks": set()})
+            state["rooms"].add(str(room))
+            if str(nick).strip():
+                state["nicks"].add(str(nick).strip())
+    return result
+
+
+def _known_user_line(user, *, kind: str, direct=None, room=None) -> str:
+    """Format one compact known-user line."""
+    jid = str(user.get("jid") or "unknown")
+    fields = [f"role={_role_label(_role_from_user(user))}"]
+    nickname = str(user.get("nickname") or "").strip()
+    if not nickname and direct:
+        nickname = str(direct.get("name") or "").strip()
+    if not nickname and room and room.get("nicks"):
+        nickname = sorted(room["nicks"], key=str.casefold)[0]
+    if nickname:
+        fields.append(f"nick={nickname}")
+    if kind == "active" and direct and direct.get("roster"):
+        fields.append(f"online={'yes' if direct.get('online') else 'no'}")
+    if room and room.get("rooms"):
+        fields.append(f"rooms={len(room['rooms'])}")
+    if not user.get("stored", True):
+        fields.append("stored=no")
+    icon = {"active": "💬", "passive": "👥", "known": "⚪"}[kind]
+    return f"• {icon} {jid} | " + " | ".join(fields)
+
+
+def _known_user_sections(bot, users, joined_rooms, scope: str):
+    """Build categorized lines for all users known to the bot."""
+    users_by_jid = {
+        str(user.get("jid")): {**user, "stored": True}
+        for user in users
+        if user.get("jid") and str(user.get("jid")) != "__GLOBAL__"
+    }
+    direct_state = _direct_user_state(bot)
+    room_state = _room_user_state(joined_rooms)
+    historic_room_users = set(getattr(bot.db.users, "_room_users", set()) or set())
+
+    roster_jids = {
+        jid for jid, state in direct_state.items() if state.get("roster")
+    }
+    all_jids = set(users_by_jid) | roster_jids | set(room_state)
+    own_jid = _parse_user_jid(getattr(getattr(bot, "boundjid", None), "bare", ""))
+    if own_jid:
+        all_jids.discard(own_jid)
+
+    active_jids = set(direct_state) & all_jids
+    passive_jids = (
+        (set(room_state) | (historic_room_users & set(users_by_jid))) & all_jids
+    ) - active_jids
+    known_jids = all_jids - active_jids - passive_jids
+
+    def rows_for(jids, kind):
+        rows = []
+        for jid in jids:
+            user = users_by_jid.get(jid, {"jid": jid, "stored": False})
+            rows.append((
+                int(_role_from_user(user)),
+                jid.casefold(),
+                _known_user_line(
+                    user,
+                    kind=kind,
+                    direct=direct_state.get(jid),
+                    room=room_state.get(jid),
+                ),
+            ))
+        return [row[2] for row in sorted(rows)]
+
+    groups = {
+        "active": rows_for(active_jids, "active"),
+        "passive": rows_for(passive_jids, "passive"),
+        "known": rows_for(known_jids, "known"),
+    }
+    counts = {name: len(lines) for name, lines in groups.items()}
+
+    if scope != "all":
+        labels = {
+            "active": "Active/direct users",
+            "passive": "Passive/room users",
+            "known": "Stored-only users",
+        }
+        lines = [f"{labels[scope]} ({counts[scope]}):"]
+        lines.extend(groups[scope] or ["• none"])
+        return lines, counts
+
+    lines = [
+        (
+            f"Known users ({sum(counts.values())}): active={counts['active']} | "
+            f"passive={counts['passive']} | stored-only={counts['known']}"
+        ),
+        "Legend: 💬 active/direct | 👥 passive/room | ⚪ stored only",
+        "",
+        f"Active/direct users ({counts['active']}):",
+        *(groups["active"] or ["• none"]),
+        "",
+        f"Passive/room users ({counts['passive']}):",
+        *(groups["passive"] or ["• none"]),
+    ]
+    if counts["known"]:
+        lines.extend([
+            "",
+            f"Stored-only users ({counts['known']}):",
+            *groups["known"],
+        ])
+    return lines, counts
+
+
+async def _list_room_users(bot, msg, room_jid: str, page_request) -> None:
+    """Keep the detailed per-room occupant list for explicit room queries."""
+    rooms_plugin = bot.bot_plugins.plugins.get("rooms")
+    joined_rooms = getattr(rooms_plugin, "JOINED_ROOMS", None) if rooms_plugin else None
+    if joined_rooms is None:
+        bot.reply(msg, "🟡️ Rooms plugin not loaded or JOINED_ROOMS missing.")
+        return
+    if room_jid not in joined_rooms:
+        bot.reply(msg, f"🟡️ Not joined to room: {room_jid}")
+        return
+
+    nicks = joined_rooms[room_jid].get("nicks", {})
+    if not nicks:
+        bot.reply(msg, f"ℹ️ No users found in room: {room_jid}")
+        return
+
+    lines = []
+    for room_nick, user_info in tuple(nicks.items()):
+        jid = user_info.get("jid", "—")
+        affiliation = user_info.get("affiliation", "—")
+        role = user_info.get("role", "—")
+        lines.append(f"[{affiliation}/{role}] {room_nick} ({jid})")
+    lines.sort()
+    bot.reply(
+        msg,
+        "\n".join(format_page(
+            f"📋 Users in {room_jid}:",
+            lines,
+            page_request=page_request,
+            page_size=20,
+            command_hint=f"{_command_prefix(bot)}users list {room_jid}",
+        )),
+    )
+
+
 @command(
     "users list",
     role=Role.ADMIN,
     aliases=["user list"],
-    short="List users currently known in one joined room.",
-    usage="{prefix}users list [room_jid] [all|page|last]",
+    short="List known users by direct, room-observed or stored-only source.",
+    usage="{prefix}users list [active|passive|known|room_jid] [all|page|last]",
     examples=[
-        "{prefix}users list test@conference.example.org",
+        "{prefix}users list",
+        "{prefix}users list active",
+        "{prefix}users list passive all",
         "{prefix}users list test@conference.example.org 2",
     ],
     category="users",
     context="private chat only",
 )
 async def users_list(bot, sender, nick, args, msg, is_room):
-    """
-    List all users of a room. If no room JID is given, use the sender's bare
-    JID (private chat context).
-
-    Usage:
-        {prefix}users list [room_jid] [all|page|last]
-    """
+    """List all known users, or current occupants of one explicit room."""
     try:
-        # Import JOINED_ROOMS from rooms plugin
-        rooms_plugin = bot.bot_plugins.plugins.get("rooms")
-        if not rooms_plugin or not hasattr(rooms_plugin, "JOINED_ROOMS"):
-            log.error(
-                "[USERS] 🟡️ Rooms plugin not loaded or JOINED_ROOMS missing."
-            )
-            bot.reply(
-                msg,
-                "🟡️ Rooms plugin not loaded or JOINED_ROOMS missing."
-            )
-            return
-        JOINED_ROOMS = rooms_plugin.JOINED_ROOMS
-
         if is_room:
-            log.warning(
-                "[USERS] 🚫 users_list called from a room,"
-                " which is not allowed.",
-            )
-            bot.reply(
-                msg,
-                "🟡️ This command can only be used in a private chat"
-                " with the bot.",
-            )
+            bot.reply(msg, "🟡️ This command can only be used in a private chat with the bot.")
             return
 
-        # Determine room_jid and optional pagination.
-        page_tokens = {"all", "last"}
-        if args and (str(args[0]).lower() in page_tokens or str(args[0]).isdigit()):
-            room_jid = msg["from"].bare
-            page_args = args[:1]
-        elif args:
-            room_jid = args[0]
-            page_args = args[1:2]
-            if room_jid not in JOINED_ROOMS:
-                log.warning(
-                    "[USERS] 🚫 Room JID not found in JOINED_ROOMS: %s",
-                    room_jid
-                )
-                bot.reply(
-                    msg,
-                    f"🟡️ Not joined to room: {room_jid}"
-                )
-                return
-        else:
-            room_jid = msg["from"].bare
-            page_args = []
-            if room_jid not in JOINED_ROOMS:
-                log.warning(
-                    "[USERS] 🚫 Room JID not in JOINED_ROOMS: %s",
-                    room_jid,
-                )
-                bot.reply(
-                    msg,
-                    f"🟡️ Not joined to room: {room_jid}"
-                )
-                return
-
-        room_info = JOINED_ROOMS[room_jid]
-        nicks = room_info.get("nicks", {})
-        if not nicks:
-            log.info(
-                "[USERS] ℹ️ No users found in room: %s",
-                room_jid
-            )
-            bot.reply(
+        parsed = _parse_users_list_args(args)
+        if parsed is None:
+            bot.reply_usage(
                 msg,
-                f"ℹ️ No users found in room: {room_jid}"
+                (
+                    f"{_command_prefix(bot)}users list "
+                    "[active|passive|known|room_jid] [all|page|last]"
+                ),
             )
             return
+        scope, room_jid, page_request = parsed
 
-        lines = []
-        for nick, user_info in tuple(nicks.items()):
-            jid = user_info.get("jid", "—")
-            affiliation = user_info.get("affiliation", "—")
-            role = user_info.get("role", "—")
-            lines.append(
-                f"[{affiliation}/{role}] {nick} ({jid})"
-            )
+        if scope == "room":
+            await _list_room_users(bot, msg, room_jid, page_request)
+            return
 
-        lines.sort()
-        page_request = parse_page_args(page_args)
-
-        log.info(
-            "[USERS] 📋 Listed users for room: %s",
-            room_jid
-        )
+        users = await bot.db.users.list()
+        rooms_plugin = bot.bot_plugins.plugins.get("rooms")
+        joined_rooms = getattr(rooms_plugin, "JOINED_ROOMS", {}) if rooms_plugin else {}
+        lines, _counts = _known_user_sections(bot, users, joined_rooms, scope)
+        command_hint = f"{_command_prefix(bot)}users list"
+        if scope != "all":
+            command_hint += f" {scope}"
         bot.reply(
             msg,
             "\n".join(format_page(
-                f"📋 Users in {room_jid}:",
+                "👥 Known users",
                 lines,
                 page_request=page_request,
                 page_size=20,
-                command_hint=f"{_command_prefix(bot)}users list {room_jid}",
+                command_hint=command_hint,
             )),
         )
-
     except Exception:
         log.exception("[USERS] 🔴  users list failed")
         bot.reply(msg, "🟡️ Failed to list users.")

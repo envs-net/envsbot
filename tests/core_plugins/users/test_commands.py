@@ -115,40 +115,158 @@ async def test_users_info_self_in_direct_message_and_permission_guard(mock_bot, 
 
 
 @pytest.mark.asyncio
-async def test_users_list_shows_users(mock_bot, mock_msg):
-    # Simulate room context
-    users_mod.JOINED_ROOMS["room-A"] = {
-        "nicks": {
-            "A": {"jid": "a@example",
-                  "affiliation": "member", "role": "user"},
-            "B": {"jid": "b@example",
-                  "affiliation": "member", "role": "admin"},
-        }
+async def test_users_list_groups_known_users_by_source(mock_bot, mock_msg):
+    mock_bot.client_roster = None
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot.db.users._direct_users = {"active@example.org"}
+    mock_bot.db.users._room_users = {
+        "active@example.org",
+        "passive@example.org",
     }
-    fake_rooms = types.SimpleNamespace(JOINED_ROOMS=users_mod.JOINED_ROOMS)
-    mock_bot.bot_plugins.plugins = {"rooms": fake_rooms}
-    mock_msg['from'].bare = "room-A"
-    with (patch.object(users_mod, "prefix", ","),
-          patch.object(mock_bot, "reply") as bot_reply):
-        await users_mod.users_list(mock_bot, "send", "nick", [],
-                                   mock_msg, False)
-        reply_text = bot_reply.call_args.args[1]
-        assert "📋 Users in room-A:" in reply_text
-        assert "[member/admin] B (b@example)" in reply_text
-        assert "[member/user] A (a@example)" in reply_text
-        assert reply_text.index("[member/admin] B") < reply_text.index(
-            "[member/user] A"
-        )
-    # No nicks
-    users_mod.JOINED_ROOMS["room-B"] = {"nicks": {}}
-    mock_msg['from'].bare = "room-B"
-    fake_rooms = types.SimpleNamespace(JOINED_ROOMS=users_mod.JOINED_ROOMS)
-    mock_bot.bot_plugins.plugins = {"rooms": fake_rooms}
-    with (patch.object(users_mod, "prefix", ","),
-          patch.object(mock_bot, "reply") as bot_reply):
-        await users_mod.users_list(mock_bot, "send", "nick", ["room-B"],
-                                   mock_msg, False)
-        assert bot_reply.call_args.args[1] == "ℹ️ No users found in room: room-B"
+    mock_bot.db.users.list = AsyncMock(return_value=[
+        {
+            "jid": "active@example.org",
+            "nickname": "Active",
+            "role": users_mod.Role.TRUSTED.value,
+        },
+        {
+            "jid": "passive@example.org",
+            "nickname": "Passive",
+            "role": users_mod.Role.USER.value,
+        },
+        {
+            "jid": "stored@example.org",
+            "nickname": None,
+            "role": users_mod.Role.ADMIN.value,
+        },
+        {"jid": "__GLOBAL__", "role": users_mod.Role.USER.value},
+    ])
+    joined_rooms = {
+        "room@example.org": {
+            "nicks": {
+                "ActiveRoomNick": {
+                    "jid": "active@example.org",
+                    "affiliation": "member",
+                    "role": "participant",
+                },
+                "PassiveRoomNick": {
+                    "jid": "passive@example.org",
+                    "affiliation": "member",
+                    "role": "participant",
+                },
+            },
+        },
+    }
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(JOINED_ROOMS=joined_rooms),
+    }
+
+    await users_mod.users_list(mock_bot, "admin@example.org", "nick", [], mock_msg, False)
+
+    reply_text = mock_bot.reply.call_args.args[1]
+    assert "Known users (3): active=1 | passive=1 | stored-only=1" in reply_text
+    assert "💬 active@example.org | role=trusted | nick=Active | rooms=1" in reply_text
+    assert "👥 passive@example.org | role=user | nick=Passive | rooms=1" in reply_text
+    assert "⚪ stored@example.org | role=admin" in reply_text
+    assert reply_text.count("active@example.org") == 1
+    assert "__GLOBAL__" not in reply_text
+
+
+@pytest.mark.asyncio
+async def test_users_list_filters_and_explicit_room(mock_bot, mock_msg):
+    mock_bot.client_roster = None
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot.db.users._direct_users = {"active@example.org"}
+    mock_bot.db.users._room_users = {"passive@example.org"}
+    mock_bot.db.users.list = AsyncMock(return_value=[
+        {"jid": "active@example.org", "role": users_mod.Role.USER.value},
+        {"jid": "passive@example.org", "role": users_mod.Role.USER.value},
+    ])
+    joined_rooms = {
+        "room@example.org": {
+            "nicks": {
+                "B": {"jid": "b@example.org", "affiliation": "member", "role": "admin"},
+                "A": {"jid": "a@example.org", "affiliation": "member", "role": "user"},
+            },
+        },
+        "empty@example.org": {"nicks": {}},
+    }
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(JOINED_ROOMS={}),
+    }
+
+    await users_mod.users_list(
+        mock_bot, "admin@example.org", "nick", ["active"], mock_msg, False
+    )
+    active_reply = mock_bot.reply.call_args.args[1]
+    assert "Active/direct users (1):" in active_reply
+    assert "active@example.org" in active_reply
+    assert "passive@example.org" not in active_reply
+
+    await users_mod.users_list(
+        mock_bot, "admin@example.org", "nick", ["passive", "all"], mock_msg, False
+    )
+    passive_reply = mock_bot.reply.call_args.args[1]
+    assert "Passive/room users (1):" in passive_reply
+    assert "passive@example.org" in passive_reply
+    assert "active@example.org" not in passive_reply
+
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(JOINED_ROOMS=joined_rooms),
+    }
+
+    await users_mod.users_list(
+        mock_bot, "admin@example.org", "nick", ["room@example.org"], mock_msg, False
+    )
+    room_reply = mock_bot.reply.call_args.args[1]
+    assert "📋 Users in room@example.org:" in room_reply
+    assert room_reply.index("[member/admin] B") < room_reply.index("[member/user] A")
+
+    await users_mod.users_list(
+        mock_bot, "admin@example.org", "nick", ["empty@example.org"], mock_msg, False
+    )
+    assert mock_bot.reply.call_args.args[1] == (
+        "ℹ️ No users found in room: empty@example.org"
+    )
+
+
+@pytest.mark.asyncio
+async def test_users_list_includes_direct_roster_contacts(mock_bot, mock_msg):
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot.db.users._direct_users = set()
+    mock_bot.db.users._room_users = set()
+    mock_bot.db.users.list = AsyncMock(return_value=[])
+    mock_bot.bot_plugins.plugins = {}
+    mock_bot.client_roster = {
+        "bot@example.org": {
+            "subscription": "both",
+            "resources": {"server": {}},
+        },
+        "alice@example.org": {
+            "subscription": "both",
+            "name": "Alice",
+            "resources": {"phone": {"show": "chat"}},
+        },
+        "removed@example.org": {"subscription": "remove"},
+    }
+
+    await users_mod.users_list(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["dm", "all"],
+        mock_msg,
+        False,
+    )
+
+    reply_text = mock_bot.reply.call_args.args[1]
+    assert "Active/direct users (1):" in reply_text
+    assert (
+        "💬 alice@example.org | role=user | nick=Alice | online=yes | stored=no"
+        in reply_text
+    )
+    assert "bot@example.org" not in reply_text
+    assert "removed@example.org" not in reply_text
 
 
 @pytest.mark.asyncio
@@ -233,20 +351,28 @@ async def test__send_user_info_display_full(mock_bot, mock_msg):
 
 @pytest.mark.asyncio
 async def test_users_list_error_branches(mock_bot, mock_msg):
-    await users_mod.users_list(mock_bot, "sender", "nick", [], mock_msg, False)
-    assert "Rooms plugin" in mock_bot.reply.call_args.args[1]
-
-    rooms = types.SimpleNamespace(JOINED_ROOMS={"room@example.org": {"nicks": {}}})
-    mock_bot.bot_plugins.plugins = {"rooms": rooms}
+    mock_bot.reply_usage = MagicMock()
     await users_mod.users_list(mock_bot, "sender", "nick", [], mock_msg, True)
     assert "private chat" in mock_bot.reply.call_args.args[1]
 
-    mock_msg["from"].bare = "missing@example.org"
-    await users_mod.users_list(mock_bot, "sender", "nick", [], mock_msg, False)
+    await users_mod.users_list(
+        mock_bot, "sender", "nick", ["active", "all", "extra"], mock_msg, False
+    )
+    mock_bot.reply_usage.assert_called_once()
+
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(JOINED_ROOMS={"room@example.org": {"nicks": {}}}),
+    }
+    await users_mod.users_list(
+        mock_bot, "sender", "nick", ["missing@example.org"], mock_msg, False
+    )
     assert "Not joined" in mock_bot.reply.call_args.args[1]
 
-    await users_mod.users_list(mock_bot, "sender", "nick", ["missing@example.org"], mock_msg, False)
-    assert "Not joined" in mock_bot.reply.call_args.args[1]
+    mock_bot.bot_plugins.plugins = {}
+    await users_mod.users_list(
+        mock_bot, "sender", "nick", ["room@example.org"], mock_msg, False
+    )
+    assert "Rooms plugin" in mock_bot.reply.call_args.args[1]
 
 
 @pytest.mark.asyncio

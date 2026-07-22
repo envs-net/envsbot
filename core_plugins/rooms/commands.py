@@ -573,6 +573,8 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
         "{prefix}rooms list all",
         "{prefix}rooms list dm",
         "{prefix}rooms list 1:1 all",
+        "{prefix}rooms list direct",
+        "{prefix}rooms list contacts all",
     ],
     category="rooms",
     context="private chat / MUC PM",

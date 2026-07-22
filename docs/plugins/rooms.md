@@ -161,6 +161,8 @@ Examples:
 - `,rooms list all`
 - `,rooms list dm`
 - `,rooms list 1:1 all`
+- `,rooms list direct`
+- `,rooms list contacts all`
 
 ### `,rooms plugins`
 
