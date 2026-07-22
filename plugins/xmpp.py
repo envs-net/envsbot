@@ -271,7 +271,7 @@ async def cmd_xmpp_version(bot, sender_jid, nick, args, msg, is_room):
             if err_condition == "remote-server-timeout":
                 certificate = await _diagnose_xmpp_server_certificate(target)
                 if certificate:
-                    if certificate == XMPP_VALID_CERTIFICATE_MESSAGE:
+                    if certificate.startswith(XMPP_VALID_CERTIFICATE_MESSAGE):
                         certificate += " The timeout occurs later in federation."
                     reply += f"\n🔐 {certificate}"
             bot.reply(msg, reply)
@@ -809,7 +809,7 @@ async def _xmpp_check_certificate(domain: str) -> tuple[str, str]:
         return "🔴", f"certificate check failed: {exc}"
     if certificate is None:
         return "⚠️", "S2S TLS certificate could not be checked."
-    if certificate == XMPP_VALID_CERTIFICATE_MESSAGE:
+    if certificate.startswith(XMPP_VALID_CERTIFICATE_MESSAGE):
         return "✅", certificate
     return "🔴", certificate
 

@@ -15,19 +15,19 @@ Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Uni
 
 ### `,cert`
 
-Check the TLS certificate of an HTTPS website.
+Check an HTTPS TLS certificate and its remaining lifetime.
 
 Role: `user`<br>
 Context: `any`<br>
 Category: `utility`<br>
 Usage: `,cert <domain|https-url>`
 
-Aliases: `,certificate`
+Aliases: `,certificate`, `,check`
 
 Examples:
 
 - `,cert example.org`
-- `,cert https://example.org`
+- `,check https://example.org`
 
 ### `,date`
 

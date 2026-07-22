@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import socket
 import ssl
+import tempfile
+import time
 from contextlib import suppress
 from urllib.parse import urlsplit
 from xml.sax.saxutils import quoteattr
@@ -13,6 +16,137 @@ from xml.sax.saxutils import quoteattr
 
 VALID_HTTPS_CERTIFICATE_MESSAGE = "TLS certificate is valid."
 VALID_XMPP_CERTIFICATE_MESSAGE = "S2S TLS certificate is valid."
+
+
+def _format_certificate_duration(seconds: float) -> str:
+    """Return a compact two-unit duration for certificate validity output."""
+    remaining = max(0, int(seconds))
+    parts: list[str] = []
+    for size, suffix in ((86400, "d"), (3600, "h"), (60, "m"), (1, "s")):
+        value, remaining = divmod(remaining, size)
+        if value or (suffix == "s" and not parts):
+            parts.append(f"{value}{suffix}")
+        if len(parts) == 2:
+            break
+    return " ".join(parts)
+
+
+def _format_certificate_timestamp(timestamp: float) -> str:
+    """Format a certificate timestamp consistently in UTC."""
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(timestamp))
+
+
+def _certificate_validity_details(
+    certificate: dict | None,
+    *,
+    now: float | None = None,
+) -> str:
+    """Describe how long a peer certificate is valid, expired or pending."""
+    if not certificate:
+        return ""
+
+    try:
+        not_after = ssl.cert_time_to_seconds(str(certificate["notAfter"]))
+    except (KeyError, TypeError, ValueError, ssl.SSLError):
+        return ""
+
+    current = time.time() if now is None else float(now)
+    not_before = None
+    try:
+        raw_not_before = certificate.get("notBefore")
+        if raw_not_before:
+            not_before = ssl.cert_time_to_seconds(str(raw_not_before))
+    except (TypeError, ValueError, ssl.SSLError):
+        not_before = None
+
+    if not_before is not None and current < not_before:
+        duration = _format_certificate_duration(not_before - current)
+        starts = _format_certificate_timestamp(not_before)
+        return f"Valid in {duration} (from {starts})."
+
+    if current <= not_after:
+        duration = _format_certificate_duration(not_after - current)
+        expires = _format_certificate_timestamp(not_after)
+        return f"Valid for another {duration} (until {expires})."
+
+    duration = _format_certificate_duration(current - not_after)
+    expired = _format_certificate_timestamp(not_after)
+    return f"Expired {duration} ago (on {expired})."
+
+
+def _append_certificate_validity(
+    message: str,
+    certificate: dict | None,
+) -> str:
+    """Append peer-certificate lifetime details when they are available."""
+    details = _certificate_validity_details(certificate)
+    return f"{message} {details}" if details else message
+
+
+def _decode_der_certificate(certificate_der: bytes) -> dict | None:
+    """Decode a DER certificate with Python's bundled certificate parser."""
+    decoder = getattr(getattr(ssl, "_ssl", None), "_test_decode_cert", None)
+    if not callable(decoder) or not certificate_der:
+        return None
+
+    path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="ascii",
+            suffix=".pem",
+            delete=False,
+        ) as certificate_file:
+            path = certificate_file.name
+            certificate_file.write(ssl.DER_cert_to_PEM_cert(certificate_der))
+        decoded = decoder(path)
+        return decoded if isinstance(decoded, dict) else None
+    except (OSError, ValueError, ssl.SSLError):
+        return None
+    finally:
+        if path:
+            with suppress(OSError):
+                os.unlink(path)
+
+
+def _peer_certificate_from_writer(writer) -> dict | None:
+    """Return the parsed peer certificate from an asyncio TLS writer."""
+    get_extra_info = getattr(writer, "get_extra_info", None)
+    if not callable(get_extra_info):
+        return None
+    ssl_object = get_extra_info("ssl_object")
+    if ssl_object is None:
+        return None
+
+    try:
+        certificate = ssl_object.getpeercert()
+    except (AttributeError, OSError, ValueError, ssl.SSLError):
+        certificate = None
+    if isinstance(certificate, dict) and certificate:
+        return certificate
+
+    try:
+        certificate_der = ssl_object.getpeercert(binary_form=True)
+    except (AttributeError, OSError, ValueError, ssl.SSLError):
+        return None
+    return _decode_der_certificate(certificate_der)
+
+
+async def _close_writer(writer) -> None:
+    """Close an asyncio stream writer without masking probe results."""
+    if writer is None:
+        return
+    writer.close()
+    with suppress(Exception):
+        await writer.wait_closed()
+
+
+def _unverified_tls_context() -> ssl.SSLContext:
+    """Create a client TLS context used only to inspect a rejected peer cert."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 def parse_https_certificate_target(value: object) -> tuple[str, int]:
@@ -249,20 +383,53 @@ async def _probe_https_certificate(
             server_hostname=hostname,
             ssl_handshake_timeout=timeout_seconds,
         )
-        return VALID_HTTPS_CERTIFICATE_MESSAGE
+        return _append_certificate_validity(
+            VALID_HTTPS_CERTIFICATE_MESSAGE,
+            _peer_certificate_from_writer(writer),
+        )
     except ssl.SSLCertVerificationError as exc:
-        return _certificate_verification_message(
+        message = _certificate_verification_message(
             exc,
             label="TLS certificate",
             mismatch_target="requested domain",
         )
+        certificate = await _probe_unverified_https_certificate(
+            address,
+            family,
+            hostname,
+            port,
+            timeout_seconds,
+        )
+        return _append_certificate_validity(message, certificate)
     except (OSError, asyncio.TimeoutError, ssl.SSLError):
         return None
     finally:
-        if writer is not None:
-            writer.close()
-            with suppress(Exception):
-                await writer.wait_closed()
+        await _close_writer(writer)
+
+
+async def _probe_unverified_https_certificate(
+    address: str,
+    family: int,
+    hostname: str,
+    port: int,
+    timeout_seconds: float,
+) -> dict | None:
+    """Reconnect without verification to inspect a rejected HTTPS cert."""
+    writer = None
+    try:
+        _reader, writer = await asyncio.open_connection(
+            host=address,
+            port=port,
+            family=family,
+            ssl=_unverified_tls_context(),
+            server_hostname=hostname,
+            ssl_handshake_timeout=timeout_seconds,
+        )
+        return _peer_certificate_from_writer(writer)
+    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+        return None
+    finally:
+        await _close_writer(writer)
 
 
 async def diagnose_https_certificate(
@@ -298,15 +465,16 @@ async def diagnose_https_certificate(
     return None
 
 
-async def _probe_xmpp_server_certificate(
+async def _open_xmpp_starttls_writer(
     address: str,
     family: int,
     port: int,
     domain: str,
     source_domain: str,
     timeout_seconds: float,
-) -> str | None:
-    """Negotiate XMPP S2S STARTTLS and return a conclusive TLS result."""
+    context: ssl.SSLContext,
+):
+    """Negotiate XMPP S2S STARTTLS and return the upgraded writer."""
     writer = None
     try:
         reader, writer = await asyncio.open_connection(
@@ -320,35 +488,101 @@ async def _probe_xmpp_server_certificate(
         features = await _read_xmpp_stream_part(reader, b"</stream:features>")
         lowered_features = features.lower()
         if b"<starttls" not in lowered_features or b"xmpp-tls" not in lowered_features:
+            await _close_writer(writer)
             return None
 
         writer.write(b"<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>")
         await writer.drain()
         response = await _read_xmpp_stream_part(reader, b">", limit=8192)
         if b"<proceed" not in response.lower():
+            await _close_writer(writer)
             return None
 
-        context = ssl.create_default_context()
+        await writer.start_tls(
+            context,
+            server_hostname=domain,
+            ssl_handshake_timeout=timeout_seconds,
+        )
+        return writer
+    except Exception:
+        await _close_writer(writer)
+        raise
+
+
+async def _probe_unverified_xmpp_server_certificate(
+    address: str,
+    family: int,
+    port: int,
+    domain: str,
+    source_domain: str,
+    timeout_seconds: float,
+) -> dict | None:
+    """Reconnect with STARTTLS without verification to inspect a rejected cert."""
+    writer = None
+    try:
+        writer = await _open_xmpp_starttls_writer(
+            address,
+            family,
+            port,
+            domain,
+            source_domain,
+            timeout_seconds,
+            _unverified_tls_context(),
+        )
+        return _peer_certificate_from_writer(writer) if writer is not None else None
+    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+        return None
+    finally:
+        await _close_writer(writer)
+
+
+async def _probe_xmpp_server_certificate(
+    address: str,
+    family: int,
+    port: int,
+    domain: str,
+    source_domain: str,
+    timeout_seconds: float,
+) -> str | None:
+    """Negotiate XMPP S2S STARTTLS and return a conclusive TLS result."""
+    writer = None
+    try:
         try:
-            await writer.start_tls(
-                context,
-                server_hostname=domain,
-                ssl_handshake_timeout=timeout_seconds,
+            writer = await _open_xmpp_starttls_writer(
+                address,
+                family,
+                port,
+                domain,
+                source_domain,
+                timeout_seconds,
+                ssl.create_default_context(),
             )
         except ssl.SSLCertVerificationError as exc:
-            return _certificate_verification_message(
+            message = _certificate_verification_message(
                 exc,
                 label="S2S TLS certificate",
                 mismatch_target="XMPP domain",
             )
-        return VALID_XMPP_CERTIFICATE_MESSAGE
+            certificate = await _probe_unverified_xmpp_server_certificate(
+                address,
+                family,
+                port,
+                domain,
+                source_domain,
+                timeout_seconds,
+            )
+            return _append_certificate_validity(message, certificate)
+
+        if writer is None:
+            return None
+        return _append_certificate_validity(
+            VALID_XMPP_CERTIFICATE_MESSAGE,
+            _peer_certificate_from_writer(writer),
+        )
     except (OSError, asyncio.TimeoutError, ssl.SSLError):
         return None
     finally:
-        if writer is not None:
-            writer.close()
-            with suppress(Exception):
-                await writer.wait_closed()
+        await _close_writer(writer)
 
 
 async def diagnose_xmpp_server_certificate(

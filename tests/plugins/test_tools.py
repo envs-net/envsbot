@@ -95,7 +95,11 @@ async def test_certificate_command_uses_shared_https_probe(
     enabled_rooms,
     monkeypatch,
 ):
-    diagnose = AsyncMock(return_value=tools.VALID_HTTPS_CERTIFICATE_MESSAGE)
+    certificate_result = (
+        tools.VALID_HTTPS_CERTIFICATE_MESSAGE
+        + " Valid for another 30d (until 2026-08-21 12:00 UTC)."
+    )
+    diagnose = AsyncMock(return_value=certificate_result)
     monkeypatch.setattr(
         tools,
         "_get_enabled_rooms",
@@ -119,7 +123,7 @@ async def test_certificate_command_uses_shared_https_probe(
     )
     assert bot.reply.call_args.args[1] == [
         "🔐 TLS certificate check for example.org",
-        "✅ TLS certificate is valid.",
+        f"✅ {certificate_result}",
     ]
 
 

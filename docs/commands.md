@@ -244,7 +244,7 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,cert` | [`tools`](plugins/tools.md) | `user` | `any` | Check the TLS certificate of an HTTPS website. |
+| `,cert` | [`tools`](plugins/tools.md) | `user` | `any` | Check an HTTPS TLS certificate and its remaining lifetime. |
 | `,date` | [`tools`](plugins/tools.md) | `user` | `any` | Show the current date from a stored profile timezone. |
 | `,echo` | [`tools`](plugins/tools.md) | `user` | `any` | Echo text back to you. |
 | `,ping` | [`tools`](plugins/tools.md) | `user` | `any` | Check whether the bot is alive. |

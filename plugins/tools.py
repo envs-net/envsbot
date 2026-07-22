@@ -18,6 +18,7 @@ Commands:
     {prefix}utc
     {prefix}ts <unix_timestamp>
     {prefix}cert <domain|https-url>
+    {prefix}check <domain|https-url>
 """
 
 import pytz
@@ -108,10 +109,13 @@ async def get_tools_store(bot):
 @command(
     "cert",
     role=Role.USER,
-    aliases=["certificate"],
-    short="Check the TLS certificate of an HTTPS website.",
+    aliases=["certificate", "check"],
+    short="Check an HTTPS TLS certificate and its remaining lifetime.",
     usage="{prefix}cert <domain|https-url>",
-    examples=["{prefix}cert example.org", "{prefix}cert https://example.org"],
+    examples=[
+        "{prefix}cert example.org",
+        "{prefix}check https://example.org",
+    ],
     category="utility",
     context="any",
 )
@@ -150,7 +154,7 @@ async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
         if certificate is None:
             status = "⚠️"
             certificate = "TLS certificate could not be checked."
-        elif certificate == VALID_HTTPS_CERTIFICATE_MESSAGE:
+        elif certificate.startswith(VALID_HTTPS_CERTIFICATE_MESSAGE):
             status = "✅"
         else:
             status = "🔴"

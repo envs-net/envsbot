@@ -54,6 +54,61 @@ def test_certificate_verification_message_classifies_common_failures():
     ) == "TLS certificate has expired."
 
 
+def test_certificate_validity_details_reports_remaining_expired_and_pending():
+    now = certificate.ssl.cert_time_to_seconds("Jul 22 12:00:00 2026 GMT")
+
+    assert certificate._certificate_validity_details(
+        {
+            "notBefore": "Jul 20 12:00:00 2026 GMT",
+            "notAfter": "Jul 25 14:30:00 2026 GMT",
+        },
+        now=now,
+    ) == "Valid for another 3d 2h (until 2026-07-25 14:30 UTC)."
+
+    assert certificate._certificate_validity_details(
+        {"notAfter": "Jul 20 09:30:00 2026 GMT"},
+        now=now,
+    ) == "Expired 2d 2h ago (on 2026-07-20 09:30 UTC)."
+
+    assert certificate._certificate_validity_details(
+        {
+            "notBefore": "Jul 23 15:15:00 2026 GMT",
+            "notAfter": "Aug 23 15:15:00 2026 GMT",
+        },
+        now=now,
+    ) == "Valid in 1d 3h (from 2026-07-23 15:15 UTC)."
+
+    assert certificate._certificate_validity_details({}, now=now) == ""
+
+
+def test_certificate_duration_context_and_binary_peer_decode(monkeypatch):
+    assert certificate._format_certificate_duration(0) == "0s"
+    assert certificate._format_certificate_duration(90061) == "1d 1h"
+
+    context = certificate._unverified_tls_context()
+    assert context.check_hostname is False
+    assert context.verify_mode == certificate.ssl.CERT_NONE
+
+    decoded = {"notAfter": "Jul 25 14:30:00 2026 GMT"}
+    monkeypatch.setattr(
+        certificate,
+        "_decode_der_certificate",
+        lambda value: decoded if value == b"certificate" else None,
+    )
+
+    class BinaryOnlySSLObject:
+        def getpeercert(self, binary_form=False):
+            return b"certificate" if binary_form else {}
+
+    class Writer:
+        def get_extra_info(self, name):
+            assert name == "ssl_object"
+            return BinaryOnlySSLObject()
+
+    assert certificate._peer_certificate_from_writer(Writer()) == decoded
+    assert certificate._peer_certificate_from_writer(object()) is None
+
+
 def test_xmpp_probe_stream_omits_source_only_for_self_domain():
     remote = certificate._xmpp_probe_stream_header(
         "example.org",
@@ -99,6 +154,93 @@ async def test_https_certificate_probe_uses_verified_direct_tls(monkeypatch):
     assert connect.await_args.kwargs["server_hostname"] == "example.org"
     assert connect.await_args.kwargs["ssl"] is not None
     assert writer.closed is True
+
+
+@pytest.mark.asyncio
+async def test_https_certificate_probe_reports_remaining_lifetime(monkeypatch):
+    now = certificate.ssl.cert_time_to_seconds("Jul 22 12:00:00 2026 GMT")
+    monkeypatch.setattr(certificate.time, "time", lambda: now)
+
+    class FakeSSLObject:
+        def getpeercert(self, binary_form=False):
+            assert binary_form is False
+            return {"notAfter": "Jul 24 18:00:00 2026 GMT"}
+
+    class FakeWriter:
+        def get_extra_info(self, name):
+            assert name == "ssl_object"
+            return FakeSSLObject()
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            return None
+
+    monkeypatch.setattr(
+        certificate.asyncio,
+        "open_connection",
+        AsyncMock(return_value=(object(), FakeWriter())),
+    )
+
+    result = await certificate._probe_https_certificate(
+        "8.8.8.8",
+        certificate.socket.AF_INET,
+        "example.org",
+        443,
+        5.0,
+    )
+
+    assert result == (
+        "TLS certificate is valid. "
+        "Valid for another 2d 6h (until 2026-07-24 18:00 UTC)."
+    )
+
+
+@pytest.mark.asyncio
+async def test_https_certificate_probe_reports_how_long_cert_expired(monkeypatch):
+    now = certificate.ssl.cert_time_to_seconds("Jul 22 12:00:00 2026 GMT")
+    monkeypatch.setattr(certificate.time, "time", lambda: now)
+
+    class FakeSSLObject:
+        def getpeercert(self, binary_form=False):
+            assert binary_form is False
+            return {"notAfter": "Jul 19 10:00:00 2026 GMT"}
+
+    class FakeWriter:
+        def get_extra_info(self, name):
+            assert name == "ssl_object"
+            return FakeSSLObject()
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            return None
+
+    verification_error = certificate.ssl.SSLCertVerificationError(
+        1,
+        "certificate has expired",
+    )
+    connect = AsyncMock(
+        side_effect=[verification_error, (object(), FakeWriter())],
+    )
+    monkeypatch.setattr(certificate.asyncio, "open_connection", connect)
+
+    result = await certificate._probe_https_certificate(
+        "8.8.8.8",
+        certificate.socket.AF_INET,
+        "example.org",
+        443,
+        5.0,
+    )
+
+    assert result == (
+        "TLS certificate has expired. "
+        "Expired 3d 2h ago (on 2026-07-19 10:00 UTC)."
+    )
+    assert connect.await_count == 2
+    assert connect.await_args_list[1].kwargs["ssl"].verify_mode == certificate.ssl.CERT_NONE
 
 
 @pytest.mark.asyncio
@@ -222,6 +364,76 @@ async def test_certificate_probe_negotiates_xmpp_starttls(monkeypatch):
     assert b"<starttls" in writer.writes[1]
     assert writer.tls_kwargs["server_hostname"] == "example.org"
     assert writer.closed is True
+
+
+@pytest.mark.asyncio
+async def test_xmpp_certificate_probe_reports_remaining_and_expired_lifetime(
+    monkeypatch,
+):
+    now = certificate.ssl.cert_time_to_seconds("Jul 22 12:00:00 2026 GMT")
+    monkeypatch.setattr(certificate.time, "time", lambda: now)
+
+    class FakeSSLObject:
+        def __init__(self, not_after):
+            self.not_after = not_after
+
+        def getpeercert(self, binary_form=False):
+            assert binary_form is False
+            return {"notAfter": self.not_after}
+
+    class FakeWriter:
+        def __init__(self, not_after):
+            self.ssl_object = FakeSSLObject(not_after)
+
+        def get_extra_info(self, name):
+            assert name == "ssl_object"
+            return self.ssl_object
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            return None
+
+    open_starttls = AsyncMock(
+        return_value=FakeWriter("Jul 30 12:00:00 2026 GMT"),
+    )
+    monkeypatch.setattr(certificate, "_open_xmpp_starttls_writer", open_starttls)
+
+    assert await certificate._probe_xmpp_server_certificate(
+        "8.8.8.8",
+        certificate.socket.AF_INET,
+        5269,
+        "example.org",
+        "bot.example.org",
+        5.0,
+    ) == (
+        "S2S TLS certificate is valid. "
+        "Valid for another 8d (until 2026-07-30 12:00 UTC)."
+    )
+
+    verification_error = certificate.ssl.SSLCertVerificationError(
+        1,
+        "certificate has expired",
+    )
+    open_starttls.reset_mock()
+    open_starttls.side_effect = [
+        verification_error,
+        FakeWriter("Jul 21 06:00:00 2026 GMT"),
+    ]
+
+    assert await certificate._probe_xmpp_server_certificate(
+        "8.8.8.8",
+        certificate.socket.AF_INET,
+        5269,
+        "example.org",
+        "bot.example.org",
+        5.0,
+    ) == (
+        "S2S TLS certificate has expired. "
+        "Expired 1d 6h ago (on 2026-07-21 06:00 UTC)."
+    )
+    assert open_starttls.await_count == 2
 
 
 @pytest.mark.asyncio
