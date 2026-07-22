@@ -417,3 +417,33 @@ async def test_update_feed_for_post_updates_last_id(make_bot):
         lambda feed: rss._set_last_id_in_feed(feed, "entry-42"),
     ) is True
     assert store[rss.RSS_KEY][url]["last_id"] == "entry-42"
+
+
+@pytest.mark.asyncio
+async def test_post_entry_to_users_sends_exact_direct_messages(make_bot):
+    bot = make_bot()
+    users = ["alice@example.org", "bob@example.org"]
+    message = "[RSS] exact message"
+
+    assert await rss_formatting._post_entry_to_users(bot, [], message) is False
+    assert bot.replies == []
+
+    assert await rss_formatting._post_entry_to_users(bot, users, message) is True
+    assert len(bot.replies) == 2
+    assert [reply[0]["from"].bare for reply in bot.replies] == users
+    assert [reply[0]["type"] for reply in bot.replies] == ["chat", "chat"]
+    assert [reply[1] for reply in bot.replies] == [message, message]
+    assert [reply[2] for reply in bot.replies] == [
+        {
+            "mention": False,
+            "thread": False,
+            "rate_limit": False,
+            "ephemeral": False,
+        },
+        {
+            "mention": False,
+            "thread": False,
+            "rate_limit": False,
+            "ephemeral": False,
+        },
+    ]

@@ -977,3 +977,15 @@ async def test_doctor_and_on_load(monkeypatch):
     assert "enabled" in room_lines[0]
     assert "default_from=auto" in room_lines[0]
     assert "default_to=none" in room_lines[0]
+
+
+@pytest.mark.asyncio
+async def test_get_translate_store_uses_exact_plugin_namespace():
+    store = object()
+    plugin = Mock(return_value=store)
+    bot = SimpleNamespace(
+        db=SimpleNamespace(users=SimpleNamespace(plugin=plugin)),
+    )
+
+    assert await translate.get_translate_store(bot) is store
+    plugin.assert_called_once_with("translate")

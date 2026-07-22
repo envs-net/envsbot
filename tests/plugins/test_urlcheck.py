@@ -414,3 +414,16 @@ def test_urlcheck_small_helpers_and_on_load(fake_bot):
     import asyncio
     asyncio.run(run())
     assert registered and registered[0][0:2] == ("urlcheck", "groupchat_message")
+
+
+@pytest.mark.asyncio
+async def test_get_urlcheck_store_uses_exact_plugin_namespace():
+    store = object()
+    bot = types.SimpleNamespace(
+        db=types.SimpleNamespace(
+            users=types.SimpleNamespace(plugin=MagicMock(return_value=store)),
+        ),
+    )
+
+    assert await urlcheck.get_urlcheck_store(bot) is store
+    bot.db.users.plugin.assert_called_once_with("urlcheck")

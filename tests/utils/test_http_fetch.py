@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
+from utils import http_fetch
 from utils.http_fetch import (
     _response_content_type,
     fetch_bytes,
@@ -13,7 +14,7 @@ from utils.http_fetch import (
     fetch_preview,
     passthrough_validator,
 )
-from utils.url_safety import UnsafeFetchURL
+from utils.url_safety import UnsafeFetchURL, ValidatedFetchTarget
 
 
 class FakeResponse:
@@ -267,3 +268,28 @@ async def test_validated_hop_builds_pinned_connector_for_real_aiohttp(monkeypatc
 
     assert url == target.url
     assert resolved_connector is connector
+
+
+def test_pinned_connector_uses_only_validated_resolver_and_no_cache(monkeypatch):
+    target = ValidatedFetchTarget(
+        url="https://example.org/feed",
+        hostname="example.org",
+        port=443,
+        addresses=("203.0.113.10", "2001:db8::10"),
+    )
+    connector = object()
+    factory = Mock(return_value=connector)
+    monkeypatch.setattr(http_fetch.aiohttp, "TCPConnector", factory)
+
+    assert http_fetch._pinned_connector(target) is connector
+    factory.assert_called_once()
+    assert factory.call_args.kwargs["use_dns_cache"] is False
+    assert factory.call_args.kwargs["force_close"] is True
+    resolver = factory.call_args.kwargs["resolver"]
+    assert isinstance(resolver, http_fetch._PinnedResolver)
+    assert resolver.target is target
+    assert set(factory.call_args.kwargs) == {
+        "resolver",
+        "use_dns_cache",
+        "force_close",
+    }

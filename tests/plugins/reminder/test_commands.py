@@ -14,6 +14,7 @@ from utils.command import Role
 from plugins.reminder import runtime as reminder_runtime
 from plugins.reminder import commands as reminder_commands
 from plugins.reminder import parsing as reminder_parsing
+from plugins.reminder import events as reminder_events
 
 
 @pytest.mark.asyncio
@@ -380,3 +381,14 @@ async def test_remind_command_reports_past_absolute_time(dummy_bot, dummy_msg, m
     assert "Reminder time must be in the future" in reply
     assert "Parsed target: 2026-07-11 09:30 +03:00" in reply
     assert "Current time: 2026-07-11 10:30 +03:00" in reply
+
+
+@pytest.mark.asyncio
+async def test_private_reply_fallback_wrapper_uses_direct_context(monkeypatch):
+    redispatch = AsyncMock()
+    monkeypatch.setattr(reminder_events, "_redispatch_reply_fallback", redispatch)
+    bot = object()
+    msg = object()
+
+    assert await reminder_events._on_private_message(bot, msg) is None
+    redispatch.assert_awaited_once_with(bot, msg, is_room=False)

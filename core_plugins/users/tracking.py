@@ -88,7 +88,13 @@ def _is_muc_private_message(bot, msg) -> bool:
             log.debug("[USERS] Could not classify private message", exc_info=True)
 
     try:
-        sender_bare = str(JID(msg["from"]).bare)
+        sender = msg["from"]
+    except Exception:
+        sender = getattr(msg, "from", None)
+    if sender is None:
+        return False
+    try:
+        sender_bare = str(JID(sender).bare)
     except Exception:
         return False
     presence = getattr(bot, "presence", None)
@@ -98,13 +104,21 @@ def _is_muc_private_message(bot, msg) -> bool:
 
 async def on_private_message(bot, msg):
     """Register and refresh users who contact the bot in a direct 1:1 chat."""
-    if str(msg.get("type") or "") not in {"chat", "normal"}:
+    try:
+        msg_type = msg["type"]
+    except Exception:
+        msg_type = getattr(msg, "type", "")
+    if str(msg_type or "").strip().lower() not in {"chat", "normal"}:
         return
     if _is_muc_private_message(bot, msg):
         return
 
     try:
-        real_jid = _parse_user_jid(msg["from"])
+        sender = msg["from"]
+    except Exception:
+        sender = getattr(msg, "from", None)
+    try:
+        real_jid = _parse_user_jid(sender)
     except Exception:
         real_jid = None
     if not real_jid:

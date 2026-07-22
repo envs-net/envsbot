@@ -658,3 +658,51 @@ async def test_cmd_xmpp_check_denied_missing_and_invalid(bot, msg):
     bot.reply.reset_mock()
     await xmpp.cmd_xmpp_check(bot, "jid", "nick", ["not-a-domain"], m, False)
     assert "Invalid target" in bot.reply.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_get_xmpp_store_uses_exact_plugin_namespace():
+    store = object()
+    plugin = MagicMock(return_value=store)
+    fake_bot = SimpleNamespace(
+        db=SimpleNamespace(users=SimpleNamespace(plugin=plugin)),
+    )
+
+    assert await xmpp.get_xmpp_store(fake_bot) is store
+    plugin.assert_called_once_with("xmpp")
+
+
+@pytest.mark.asyncio
+async def test_diagnose_xmpp_certificate_applies_plugin_configuration(monkeypatch):
+    marker = object()
+    diagnose = AsyncMock(return_value=marker)
+    source_domain = MagicMock(return_value="bot.example.org")
+    monkeypatch.setattr(xmpp, "diagnose_xmpp_server_certificate", diagnose)
+    monkeypatch.setattr(xmpp, "source_domain_from_jid", source_domain)
+    monkeypatch.setattr(xmpp, "config", {"jid": "bot@example.org/resource"})
+    monkeypatch.setattr(xmpp, "XMPP_CERTIFICATE_PROBE_TIMEOUT_SECONDS", 7.25)
+
+    result = await xmpp._diagnose_xmpp_server_certificate(
+        "target.example.org"
+    )
+    assert result is marker
+    source_domain.assert_called_once_with("bot@example.org/resource")
+    diagnose.assert_awaited_once_with(
+        "target.example.org",
+        source_domain="bot.example.org",
+        timeout_seconds=7.25,
+    )
+
+    source_domain.reset_mock()
+    diagnose.reset_mock()
+    monkeypatch.setattr(xmpp, "config", {})
+
+    assert await xmpp._diagnose_xmpp_server_certificate(
+        "fallback.example.org"
+    ) is marker
+    source_domain.assert_called_once_with("")
+    diagnose.assert_awaited_once_with(
+        "fallback.example.org",
+        source_domain="bot.example.org",
+        timeout_seconds=7.25,
+    )

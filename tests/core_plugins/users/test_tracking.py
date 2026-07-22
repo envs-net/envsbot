@@ -230,3 +230,41 @@ async def test_presence_and_message_skip_branches(mock_bot, mock_msg):
     await users_mod.on_groupchat_message(mock_bot, mock_msg)
     mock_bot.plugin = {"xep_0045": types.SimpleNamespace(get_jid_property=lambda *a: "self@example.org")}
     await users_mod.on_groupchat_message(mock_bot, mock_msg)
+
+
+@pytest.mark.asyncio
+async def test_on_private_message_accepts_stanzas_without_get(mock_bot):
+    """Direct sender tracking must work for index-only and attribute stanzas."""
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot._is_muc_private_message = MagicMock(return_value=False)
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    mock_bot.db.users.create = AsyncMock()
+
+    class IndexOnlyMessage:
+        def __init__(self):
+            self.values = {
+                "type": "chat",
+                "from": "indexed@example.org/desktop",
+            }
+
+        def __getitem__(self, key):
+            return self.values[key]
+
+    attribute_message = types.SimpleNamespace(type="normal")
+    setattr(attribute_message, "from", "attribute@example.org/mobile")
+
+    with patch(
+        "core_plugins.users.tracking.update_last_seen",
+        new=AsyncMock(),
+    ) as last_seen:
+        await users_mod.on_private_message(mock_bot, IndexOnlyMessage())
+        await users_mod.on_private_message(mock_bot, attribute_message)
+
+    assert [call.args for call in mock_bot.db.users.create.await_args_list] == [
+        ("indexed@example.org",),
+        ("attribute@example.org",),
+    ]
+    assert [call.args for call in last_seen.await_args_list] == [
+        (mock_bot, "indexed@example.org"),
+        (mock_bot, "attribute@example.org"),
+    ]

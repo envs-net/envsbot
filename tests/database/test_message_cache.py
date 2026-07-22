@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from database.manager import DatabaseManager
+from database.message_cache import MessageCacheStore
 from utils.message_cache import MessageCache
 
 
@@ -37,3 +41,26 @@ async def test_message_cache_survives_restart_and_prunes_per_conversation(tmp_db
 
     await second.close()
     await db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rowcount", "expected"),
+    [(3, 3), (0, 0), (None, 0), (-4, 0)],
+)
+async def test_clear_conversation_uses_exact_delete_and_normalizes_count(
+    rowcount,
+    expected,
+):
+    execute = AsyncMock(return_value=SimpleNamespace(rowcount=rowcount))
+    store = MessageCacheStore(SimpleNamespace(execute=execute))
+
+    class Conversation:
+        def __str__(self):
+            return "room@example.org/resource"
+
+    assert await store.clear_conversation(Conversation()) == expected
+    execute.assert_awaited_once_with(
+        "DELETE FROM message_cache WHERE conversation = ?",
+        ("room@example.org/resource",),
+    )

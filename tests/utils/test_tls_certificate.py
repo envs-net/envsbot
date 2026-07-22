@@ -1,5 +1,6 @@
+import builtins
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -360,3 +361,123 @@ async def test_xmpp_diagnosis_tries_next_endpoint_and_address(monkeypatch):
     )
     assert result == certificate.VALID_XMPP_CERTIFICATE_MESSAGE
     assert probe.await_count == 2
+
+
+def test_xmpp_server_endpoints_orders_srv_records_and_uses_exact_query(monkeypatch):
+    records = [
+        SimpleNamespace(
+            priority=20, weight=1, target="later.example.org.", port=5270
+        ),
+        SimpleNamespace(
+            priority=10, weight=1, target="light.example.org.", port=5268
+        ),
+        SimpleNamespace(
+            priority=10, weight=9, target="heavy.example.org.", port=5269
+        ),
+        SimpleNamespace(priority=0, weight=100, target=".", port=9999),
+        SimpleNamespace(priority=0, weight=100, target="", port=9998),
+    ]
+    resolver = SimpleNamespace(resolve=Mock(return_value=records))
+    make_resolver = Mock(return_value=resolver)
+    monkeypatch.setattr(certificate, "make_srv_resolver", make_resolver)
+
+    assert certificate._xmpp_server_endpoints("example.org", 4.5) == [
+        ("heavy.example.org", 5269),
+        ("light.example.org", 5268),
+        ("later.example.org", 5270),
+    ]
+    import dns.resolver
+
+    make_resolver.assert_called_once_with(dns.resolver, 4.5)
+    resolver.resolve.assert_called_once_with(
+        "_xmpp-server._tcp.example.org",
+        "SRV",
+        raise_on_no_answer=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [
+        None,
+        [],
+        [
+            SimpleNamespace(
+                priority="invalid",
+                weight=1,
+                target="broken.example.org.",
+                port=5269,
+            )
+        ],
+    ],
+)
+def test_xmpp_server_endpoints_falls_back_for_empty_or_invalid_answers(
+    monkeypatch,
+    answers,
+):
+    resolver = SimpleNamespace(resolve=Mock(return_value=answers))
+    monkeypatch.setattr(
+        certificate,
+        "make_srv_resolver",
+        Mock(return_value=resolver),
+    )
+
+    assert certificate._xmpp_server_endpoints("fallback.example.org", 3.0) == [
+        ("fallback.example.org", 5269),
+    ]
+
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("network failed"),
+        TypeError("invalid record"),
+        ValueError("invalid number"),
+    ],
+)
+def test_xmpp_server_endpoints_falls_back_on_resolver_errors(
+    monkeypatch,
+    error,
+):
+    resolver = SimpleNamespace(resolve=Mock(side_effect=error))
+    monkeypatch.setattr(
+        certificate,
+        "make_srv_resolver",
+        Mock(return_value=resolver),
+    )
+
+    assert certificate._xmpp_server_endpoints("error.example.org", 2.0) == [
+        ("error.example.org", 5269),
+    ]
+
+
+def test_xmpp_server_endpoints_falls_back_on_dns_error(monkeypatch):
+    import dns.exception
+
+    resolver = SimpleNamespace(resolve=Mock(side_effect=dns.exception.Timeout()))
+    monkeypatch.setattr(
+        certificate,
+        "make_srv_resolver",
+        Mock(return_value=resolver),
+    )
+
+    assert certificate._xmpp_server_endpoints("timeout.example.org", 2.0) == [
+        ("timeout.example.org", 5269),
+    ]
+
+
+
+def test_xmpp_server_endpoints_falls_back_without_dnspython(monkeypatch):
+    original_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name in {"dns.exception", "dns.resolver"}:
+            raise ImportError("dnspython unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+    assert certificate._xmpp_server_endpoints("nodns.example.org", 1.0) == [
+        ("nodns.example.org", 5269),
+    ]
