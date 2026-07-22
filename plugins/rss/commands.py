@@ -34,6 +34,7 @@ from .formatting import (
     _filter_feeds_for_room,
     _format_feed_list,
     _normalize_rss_template_input,
+    _normalize_direct_user_jid,
     _rss_list_page,
     _rss_template_usage,
     _rss_template_variables_text,
@@ -530,6 +531,7 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             continue
         active_rooms = _feed_active_rooms(feed)
         total_rooms = len(feed.get("rooms", []) if isinstance(feed.get("rooms"), list) else [])
+        direct_users = len(_direct_subscriptions(feed))
         paused_rooms = sorted(_feed_paused_rooms(feed))
         last_error = str(feed.get("last_error") or "none")
         if len(last_error) > 120:
@@ -546,7 +548,9 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             f"{status_display}: {feed.get('title') or url} — {url}\n"
             f"   rooms: {len(active_rooms)}/{total_rooms} active"
             f"{f' · paused: {len(paused_rooms)}' if paused_rooms else ''}; "
-            f"errors: {error_count}; last success: {_format_rss_timestamp(feed.get('last_success'))}; "
+            f"direct users: {direct_users}; errors: {error_count}; "
+            f"last success: {_format_rss_timestamp(feed.get('last_success'))}; "
+            f"last post: {_format_rss_timestamp(feed.get('last_posted'))}; "
             f"last error: {last_error}"
         )
     return rows
@@ -1073,7 +1077,10 @@ async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
             bot.reply(msg, f"Failed to fetch or parse feed: {_format_feed_fetch_error(url, exc)}")
             return
     users = _direct_subscriptions(feeds[url])
-    key = _normalize_room_jid(owner)
+    key = _normalize_direct_user_jid(owner)
+    if not key:
+        bot.reply(msg, f"🔴 Invalid direct subscriber JID: {owner}")
+        return
     if key in users:
         bot.reply(msg, f"ℹ️ Feed already added for you: {url}")
         return

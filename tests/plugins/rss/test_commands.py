@@ -942,9 +942,11 @@ def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
         "https://ok.example/feed": {
             "title": "OK",
             "rooms": ["room@conf"],
+            "users": {"alice@example.org": {"role": "trusted"}},
             "error_count": 0,
             "next_retry": 0,
             "last_success": now - 60,
+            "last_posted": now - 30,
         },
         "https://paused.example/feed": {
             "title": "Paused",
@@ -975,6 +977,8 @@ def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
     assert "⏸️ paused: Paused" in joined
     assert "🟡 backoff: Backoff" in joined
     assert "rooms: 1/2 active · paused: 1" in joined
+    assert "direct users: 1" in joined
+    assert "last post: " + rss._format_rss_timestamp(now - 30) in joined
     assert "last error: " + ("x" * 117) + "..." in joined
 
     broken = rss._rss_health_lines(feeds, broken_only=True, now=now)
@@ -1107,6 +1111,33 @@ async def test_trusted_user_can_add_and_remove_own_direct_feed(monkeypatch, make
 
     await rss.rss_command(bot, "trusted@example.org", "trusted", ["remove", url], msg, False)
     assert url not in bot.plugin_store[rss.RSS_KEY]
+
+
+@pytest.mark.asyncio
+async def test_add_direct_feed_rejects_invalid_subscriber_jid(make_bot):
+    bot = make_bot()
+    url = "https://example.org/direct.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Direct feed",
+            "period": 300,
+            "rooms": [],
+            "users": {},
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
+
+    await rss_commands._add_direct_feed(
+        bot,
+        msg,
+        url,
+        bot.plugin_store,
+        "not a jid",
+        Role.ADMIN,
+    )
+
+    assert bot.replies[-1][1] == "🔴 Invalid direct subscriber JID: not a jid"
+    assert bot.plugin_store[rss.RSS_KEY][url]["users"] == {}
 
 
 @pytest.mark.asyncio

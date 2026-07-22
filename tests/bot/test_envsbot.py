@@ -105,13 +105,13 @@ def bot(monkeypatch):
 async def test_safe_send_message_sync_and_async(bot):
     msg = MagicMock()
     msg.send.return_value = None
-    await bot._safe_send_message(msg)
+    assert await bot._safe_send_message(msg) is True
     msg.send.assert_called_once()
 
     msg = MagicMock()
     coro = AsyncMock()
     msg.send.return_value = coro()
-    await bot._safe_send_message(msg)
+    assert await bot._safe_send_message(msg) is True
     assert msg.send.call_count >= 1
 
     msg = MagicMock()
@@ -119,7 +119,7 @@ async def test_safe_send_message_sync_and_async(bot):
     def raise_exc():
         raise Exception("fail")
     msg.send.side_effect = raise_exc
-    await bot._safe_send_message(msg)
+    assert await bot._safe_send_message(msg) is False
 
 
 @pytest.mark.asyncio

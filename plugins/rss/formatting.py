@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from string import Template
+
+from slixmpp import JID
 
 from utils.config import config
 from utils.formatting import page_size_for, parse_page_args
@@ -207,9 +210,27 @@ async def _post_new_entries(bot, store, url, feed_title,
             bot, store, active_rooms, url, context
         )
         direct_users = sorted((feed or {}).get("users", {}))
+        direct_delivered = 0
+        direct_attempted = 0
         if direct_users:
             direct_msg = _build_rss_message_from_context(context)
-            posted = await _post_entry_to_users(bot, direct_users, direct_msg) or posted
+            direct_delivered, direct_attempted = await _post_entry_to_users(
+                bot,
+                direct_users,
+                direct_msg,
+            )
+            posted = direct_delivered > 0 or posted
+
+        if direct_attempted and direct_delivered < direct_attempted:
+            log.warning(
+                "[RSS] Direct delivery incomplete for %s entry=%s "
+                "delivered=%s/%s; retaining last_id for retry",
+                url,
+                entry_id,
+                direct_delivered,
+                direct_attempted,
+            )
+            break
 
         def mutator(feed_data):
             changed = _set_last_id_in_feed(feed_data, entry_id)
@@ -296,23 +317,64 @@ async def _post_entry_to_rooms(bot, rooms, msg):
             posted = True
     return posted
 
-async def _post_entry_to_users(bot, users, msg):
-    """Post one RSS entry to bare-JID direct subscribers."""
-    posted = False
-    for user_jid in users:
-        bot.reply(
-            {
-                "from": type("F", (), {"bare": user_jid})(),
-                "type": "chat",
-            },
-            msg,
-            mention=False,
-            thread=False,
-            rate_limit=False,
-            ephemeral=False,
+def _normalize_direct_user_jid(value) -> str | None:
+    """Return a valid bare user JID for a direct RSS subscriber."""
+    try:
+        jid = JID(str(value or "").strip())
+    except Exception:
+        return None
+    if not jid.user or not jid.domain:
+        return None
+    return str(jid.bare).lower()
+
+
+async def _send_direct_rss_message(bot, user_jid: str, body: str) -> bool:
+    """Send one direct RSS message and report whether sending succeeded."""
+    try:
+        message = bot.make_message(
+            mto=user_jid,
+            mbody=body,
+            mtype="chat",
         )
-        posted = True
-    return posted
+        safe_send = getattr(bot, "_safe_send_message", None)
+        if callable(safe_send):
+            result = safe_send(message)
+            if inspect.isawaitable(result):
+                result = await result
+            return result is not False
+
+        result = message.send()
+        if inspect.isawaitable(result):
+            await result
+        return True
+    except Exception:
+        log.exception("[RSS] Failed direct delivery to %s", user_jid)
+        return False
+
+
+async def _post_entry_to_users(bot, users, msg) -> tuple[int, int]:
+    """Post one RSS entry to bare-JID direct subscribers.
+
+    Return ``(delivered, attempted)`` so the polling loop can retain the
+    previous entry cursor when at least one subscriber did not receive the
+    stanza.  This provides at-least-once retry semantics instead of silently
+    losing an entry after a transport failure.
+    """
+    delivered = 0
+    attempted = 0
+    for raw_user_jid in users:
+        attempted += 1
+        user_jid = _normalize_direct_user_jid(raw_user_jid)
+        if not user_jid:
+            log.error(
+                "[RSS] Skipping invalid direct subscriber JID: %r",
+                raw_user_jid,
+            )
+            continue
+        if await _send_direct_rss_message(bot, user_jid, msg):
+            delivered += 1
+            log.debug("[RSS] Direct delivery accepted for %s", user_jid)
+    return delivered, attempted
 
 def _format_feed_list_item(feed_url: str, data: dict, now=None) -> str:
     """Format one RSS feed entry for ``rss list`` output."""

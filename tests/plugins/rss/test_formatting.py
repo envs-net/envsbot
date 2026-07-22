@@ -91,6 +91,7 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
             "link": url,
             "period": 1,
             "rooms": [room],
+            "users": {"alice@example.org": {"role": "trusted"}},
             "last_id": "http://f.com/a1",
             "error_count": 0,
             "next_retry": 0,
@@ -147,6 +148,13 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
     assert len(posts) == 1
     assert "ET2" in posts[0][1]
     assert "http://f.com/a2" in posts[0][1]
+    assert bot.sent_messages == [
+        {
+            "mto": "alice@example.org",
+            "mbody": "[RSS] (Feed) ET2 - ED2\nhttp://f.com/a2",
+            "mtype": "chat",
+        }
+    ]
     assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a2"
 
 
@@ -425,25 +433,174 @@ async def test_post_entry_to_users_sends_exact_direct_messages(make_bot):
     users = ["alice@example.org", "bob@example.org"]
     message = "[RSS] exact message"
 
-    assert await rss_formatting._post_entry_to_users(bot, [], message) is False
+    assert await rss_formatting._post_entry_to_users(bot, [], message) == (0, 0)
     assert bot.replies == []
+    assert bot.sent_messages == []
 
-    assert await rss_formatting._post_entry_to_users(bot, users, message) is True
-    assert len(bot.replies) == 2
-    assert [reply[0]["from"].bare for reply in bot.replies] == users
-    assert [reply[0]["type"] for reply in bot.replies] == ["chat", "chat"]
-    assert [reply[1] for reply in bot.replies] == [message, message]
-    assert [reply[2] for reply in bot.replies] == [
+    assert await rss_formatting._post_entry_to_users(
+        bot,
+        users,
+        message,
+    ) == (2, 2)
+    assert bot.replies == []
+    assert bot.sent_messages == [
         {
-            "mention": False,
-            "thread": False,
-            "rate_limit": False,
-            "ephemeral": False,
+            "mto": "alice@example.org",
+            "mbody": message,
+            "mtype": "chat",
         },
         {
-            "mention": False,
-            "thread": False,
-            "rate_limit": False,
-            "ephemeral": False,
+            "mto": "bob@example.org",
+            "mbody": message,
+            "mtype": "chat",
         },
     ]
+
+
+def test_normalize_direct_user_jid_accepts_users_and_rejects_invalid_targets():
+    assert rss_formatting._normalize_direct_user_jid(
+        " Alice@Example.ORG/Phone "
+    ) == "alice@example.org"
+    assert rss_formatting._normalize_direct_user_jid("example.org") is None
+    assert rss_formatting._normalize_direct_user_jid("not a jid") is None
+    assert rss_formatting._normalize_direct_user_jid("") is None
+
+
+@pytest.mark.asyncio
+async def test_post_entry_to_users_continues_after_invalid_or_failed_target(
+    make_bot,
+):
+    bot = make_bot()
+    attempted_targets = []
+
+    async def selective_send(message):
+        attempted_targets.append(message["mto"])
+        if message["mto"] == "bob@example.org":
+            return False
+        bot.sent_messages.append(message)
+        return True
+
+    bot._safe_send_message = selective_send
+
+    result = await rss_formatting._post_entry_to_users(
+        bot,
+        ["alice@example.org", "not a jid", "bob@example.org"],
+        "[RSS] entry",
+    )
+
+    assert result == (1, 3)
+    assert attempted_targets == ["alice@example.org", "bob@example.org"]
+    assert [message["mto"] for message in bot.sent_messages] == [
+        "alice@example.org"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_direct_rss_message_supports_send_fallback_and_errors():
+    sent = []
+
+    class Message:
+        async def send(self):
+            sent.append(True)
+
+    class FallbackBot:
+        def make_message(self, *, mto, mbody, mtype):
+            assert (mto, mbody, mtype) == (
+                "alice@example.org",
+                "[RSS] entry",
+                "chat",
+            )
+            return Message()
+
+    assert await rss_formatting._send_direct_rss_message(
+        FallbackBot(),
+        "alice@example.org",
+        "[RSS] entry",
+    ) is True
+    assert sent == [True]
+
+    class BrokenBot:
+        def make_message(self, **_kwargs):
+            raise RuntimeError("cannot build stanza")
+
+    assert await rss_formatting._send_direct_rss_message(
+        BrokenBot(),
+        "alice@example.org",
+        "[RSS] entry",
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_post_new_entries_delivers_direct_feed_and_updates_cursor(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    feed = {
+        "title": "Direct Feed",
+        "link": "https://example.org/",
+        "rooms": [],
+        "users": {"alice@example.org": {"role": "trusted"}},
+        "last_id": "old-entry",
+        "posted_count": 0,
+    }
+    store[rss.RSS_KEY] = {url: feed}
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    assert bot.sent_messages == [
+        {
+            "mto": "alice@example.org",
+            "mbody": "[RSS] (Direct Feed) New entry\nhttps://example.org/new",
+            "mtype": "chat",
+        }
+    ]
+    assert store[rss.RSS_KEY][url]["last_id"] == "new-entry"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 1
+    assert store[rss.RSS_KEY][url]["last_posted"] > 0
+
+
+@pytest.mark.asyncio
+async def test_post_new_entries_retains_cursor_when_direct_delivery_fails(
+    make_bot,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    feed = {
+        "title": "Direct Feed",
+        "link": "https://example.org/",
+        "rooms": [],
+        "users": {"alice@example.org": {"role": "trusted"}},
+        "last_id": "old-entry",
+        "posted_count": 0,
+    }
+    store[rss.RSS_KEY] = {url: feed}
+
+    async def failed_send(_message):
+        return False
+
+    bot._safe_send_message = failed_send
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    assert store[rss.RSS_KEY][url]["last_id"] == "old-entry"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 0
+    assert "last_posted" not in store[rss.RSS_KEY][url]

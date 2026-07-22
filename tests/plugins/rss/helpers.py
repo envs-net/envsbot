@@ -52,6 +52,7 @@ def make_bot():
     class DummyBot:
         def __init__(self):
             self.replies = []
+            self.sent_messages = []
             self.flush_count = 0
 
             async def flush_all():
@@ -70,6 +71,17 @@ def make_bot():
 
         def reply(self, msg, text, **kwargs):
             self.replies.append((msg, text, kwargs))
+
+        def make_message(self, *, mto, mbody, mtype):
+            return {
+                "mto": mto,
+                "mbody": mbody,
+                "mtype": mtype,
+            }
+
+        async def _safe_send_message(self, message):
+            self.sent_messages.append(message)
+            return True
 
     return DummyBot
 

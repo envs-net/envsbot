@@ -41,6 +41,11 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         changed = True
         if remaining:
             feed["rooms"] = remaining
+        elif isinstance(feed.get("users"), dict) and feed.get("users"):
+            # The feed is still required by direct subscribers.  Removing a
+            # room must not silently delete their subscriptions or stop the
+            # polling task.
+            feed["rooms"] = []
         else:
             feeds.pop(url, None)
             removed_urls.append(url)

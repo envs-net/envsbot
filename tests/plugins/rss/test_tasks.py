@@ -471,11 +471,16 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
     bot = make_bot()
     keep_url = "https://example.org/keep.xml"
     drop_url = "https://example.org/drop.xml"
+    direct_url = "https://example.org/direct.xml"
     other_url = "https://example.org/other.xml"
     ignored_url = "https://example.org/ignored.xml"
     bot.plugin_store[rss.RSS_KEY] = {
         keep_url: {"rooms": ["Room@Conference.Example.Org", "other@conf"]},
         drop_url: {"rooms": ["room@conference.example.org"]},
+        direct_url: {
+            "rooms": ["room@conference.example.org"],
+            "users": {"alice@example.org": {"role": "trusted"}},
+        },
         other_url: {"rooms": ["other@conf"]},
         ignored_url: {"title": "missing rooms"},
         "broken": "not a feed",
@@ -501,9 +506,13 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
 
     summary = await rss.cleanup_room_state(bot, "room@conference.example.org")
 
-    assert summary == {"subscriptions": 2, "feeds": 1, "templates": 3}
+    assert summary == {"subscriptions": 3, "feeds": 1, "templates": 3}
     assert bot.plugin_store[rss.RSS_KEY][keep_url]["rooms"] == ["other@conf"]
     assert drop_url not in bot.plugin_store[rss.RSS_KEY]
+    assert bot.plugin_store[rss.RSS_KEY][direct_url] == {
+        "rooms": [],
+        "users": {"alice@example.org": {"role": "trusted"}},
+    }
     assert bot.plugin_store[rss.RSS_KEY][other_url]["rooms"] == ["other@conf"]
     assert cancelled == [drop_url]
     assert bot.plugin_store[rss.RSS_TEMPLATES_KEY] == {"other@conf": "$feed_title"}

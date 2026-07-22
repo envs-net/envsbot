@@ -15,14 +15,22 @@ log = logging.getLogger(__name__)
 class MessageMixin:
     """Common reply and safe-send helpers for the bot."""
 
-    async def _safe_send_message(self, message: Any) -> None:
-        """Safely send a message with sync/async send() support."""
+    async def _safe_send_message(self, message: Any) -> bool:
+        """Safely send a message with sync/async send() support.
+
+        Return ``True`` once the stanza was handed to Slixmpp and ``False``
+        when creating or sending it raised an exception.  Callers that need
+        reliable delivery bookkeeping (for example direct RSS subscriptions)
+        can therefore avoid marking an item as delivered after a failed send.
+        """
         try:
             result = message.send()
             if inspect.iscoroutine(result):
                 await result
+            return True
         except Exception as exc:
             log.exception("[BOT] Failed to send message: %s", exc)
+            return False
 
     def _format_reply_body(self, msg: Any, text: str, mention: bool) -> str:
         """Build the outbound reply body without changing reply semantics."""
