@@ -1127,6 +1127,12 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
                 )
                 return
             if role <= Role.TRUSTED:
+                if compact_section in {"rooms", "mods"}:
+                    bot.reply(
+                        msg,
+                        "🔴 Only global moderators can list room or moderator RSS subscriptions.",
+                    )
+                    return
                 owner = _normalize_room_jid(sender_jid)
                 own = {
                     url: {
@@ -1144,7 +1150,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
                     return
                 bot.reply(
                     msg,
-                    _compact_subscription_lines(own, compact_section),
+                    _compact_subscription_lines(own, "trusted"),
                 )
                 return
         if explicit_room or not is_global_manager:

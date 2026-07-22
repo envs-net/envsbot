@@ -1554,6 +1554,88 @@ async def test_global_moderator_can_filter_compact_rss_list(
 
 
 @pytest.mark.asyncio
+async def test_trusted_user_compact_rss_list_shows_only_own_feeds(make_bot):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/shared.xml": {
+            "title": "Shared",
+            "period": 900,
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                "alice@example.org": {"role": "trusted"},
+                "bob@example.org": {"role": "trusted"},
+                "mod@example.org": {"role": "moderator"},
+            },
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="alice@example.org", resource="phone"),
+        "type": "chat",
+    }
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+
+    await rss.rss_command(
+        bot,
+        "alice@example.org",
+        "alice",
+        ["list"],
+        msg,
+        False,
+    )
+
+    lines = bot.replies[-1][1]
+    assert lines == [
+        "Trusted user feeds (1):",
+        "• Shared | ok | 900s | alice@example.org | https://example.org/shared.xml",
+    ]
+    assert all("bob@example.org" not in line for line in lines)
+    assert all("mod@example.org" not in line for line in lines)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selector", ["rooms", "mods"])
+async def test_trusted_user_cannot_select_global_compact_sections(
+    make_bot,
+    selector,
+):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/direct.xml": {
+            "title": "Direct",
+            "period": 300,
+            "rooms": ["room@conference.example.org"],
+            "users": {"alice@example.org": {"role": "trusted"}},
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="alice@example.org", resource="phone"),
+        "type": "chat",
+    }
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+
+    await rss.rss_command(
+        bot,
+        "alice@example.org",
+        "alice",
+        ["list", selector],
+        msg,
+        False,
+    )
+
+    assert bot.replies[-1][1] == (
+        "🔴 Only global moderators can list room or moderator RSS subscriptions."
+    )
+
+
+@pytest.mark.asyncio
 async def test_compact_rss_list_without_selector_keeps_all_sections(make_bot):
     bot = make_bot()
     bot.plugin_store[rss.RSS_KEY] = {

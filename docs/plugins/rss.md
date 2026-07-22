@@ -134,8 +134,8 @@ Trusted users may remove only their own subscriptions. Owner, superadmin, and ad
 ,rss remove <feed-url> <user-jid>
 ```
 
-In direct chat, `,rss list` uses compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
-Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. Trusted users still see only their own direct subscriptions.
+In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
+Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. For trusted users, `,rss list` shows only their own direct subscriptions without empty room or moderator sections.
 
 ## Commands
 

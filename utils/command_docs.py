@@ -331,8 +331,8 @@ def _rss_notes() -> list[str]:
         f"{PREFIX}rss remove <feed-url> <user-jid>",
         "```",
         "",
-        f"In direct chat, `{PREFIX}rss list` uses compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.",
-        f"Global moderators may select a single section with `{PREFIX}rss list rooms`, `{PREFIX}rss list mods`, or `{PREFIX}rss list trusted`. Trusted users still see only their own direct subscriptions.",
+        f"In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.",
+        f"Global moderators may select a single section with `{PREFIX}rss list rooms`, `{PREFIX}rss list mods`, or `{PREFIX}rss list trusted`. For trusted users, `{PREFIX}rss list` shows only their own direct subscriptions without empty room or moderator sections.",
         "",
     ]
 
