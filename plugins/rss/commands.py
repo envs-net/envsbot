@@ -462,9 +462,6 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
                 )
             return
 
-    if global_default:
-        direct_scope = False
-
     feed = None
     if feed_url:
         feed = await _template_feed_for_room(
