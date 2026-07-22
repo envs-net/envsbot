@@ -5,6 +5,7 @@ from functools import partial
 from datetime import datetime, timezone
 from slixmpp import JID
 
+from .lookup import _parse_user_jid
 from .roles import MAX_ROOM_NICKS, log
 
 
@@ -77,6 +78,51 @@ async def on_groupchat_message(bot, msg):
     await update_last_seen(bot, real_jid)
 
 
+def _is_muc_private_message(bot, msg) -> bool:
+    """Return True when a chat message came from a joined room occupant."""
+    checker = getattr(bot, "_is_muc_private_message", None)
+    if callable(checker):
+        try:
+            return bool(checker(msg))
+        except Exception:
+            log.debug("[USERS] Could not classify private message", exc_info=True)
+
+    try:
+        sender_bare = str(JID(msg["from"]).bare)
+    except Exception:
+        return False
+    presence = getattr(bot, "presence", None)
+    joined_rooms = getattr(presence, "joined_rooms", {}) or {}
+    return sender_bare in joined_rooms
+
+
+async def on_private_message(bot, msg):
+    """Register and refresh users who contact the bot in a direct 1:1 chat."""
+    if str(msg.get("type") or "") not in {"chat", "normal"}:
+        return
+    if _is_muc_private_message(bot, msg):
+        return
+
+    try:
+        real_jid = _parse_user_jid(msg["from"])
+    except Exception:
+        real_jid = None
+    if not real_jid:
+        return
+
+    bound_jid = getattr(bot, "boundjid", None)
+    own_jid = _parse_user_jid(getattr(bound_jid, "bare", bound_jid))
+    if own_jid and real_jid == own_jid:
+        return
+
+    users = bot.db.users
+    if await users.get(real_jid) is None:
+        log.info("[USERS] ✅ Creating direct-message user: '%s'", real_jid)
+        await users.create(real_jid)
+
+    await update_last_seen(bot, real_jid)
+
+
 async def on_load(bot):
     """
     Initialize plugin and register MUC handlers.
@@ -104,6 +150,11 @@ async def on_load(bot):
         "users",
         "groupchat_message",
         partial(on_groupchat_message, bot))
+    bot.bot_plugins.register_runtime_event(
+        "users",
+        "private_message_received",
+        partial(on_private_message, bot),
+    )
 
 
 async def track_room_nick(bot, real_jid: str, room: str, nick: str):

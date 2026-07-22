@@ -26,6 +26,61 @@ async def test_users_role_permission_logic(mock_bot, mock_msg):
 
 
 @pytest.mark.asyncio
+async def test_users_role_creates_unknown_user_after_permission_check(mock_bot, mock_msg):
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    mock_bot.db.users.create = AsyncMock()
+    mock_bot.db.users.set = AsyncMock()
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+
+    await users_mod.users_update(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["new@example.org", "trusted"],
+        mock_msg,
+        False,
+    )
+
+    mock_bot.db.users.create.assert_awaited_once_with("new@example.org")
+    mock_bot.db.users.set.assert_awaited_once_with(
+        "new@example.org",
+        "role",
+        users_mod.Role.TRUSTED.value,
+    )
+    assert "Created user new@example.org with role trusted" in mock_bot.reply.call_args.args[1]
+    mock_bot.audit.assert_awaited_with(
+        "user_role_changed",
+        actor="admin@example.org",
+        target="new@example.org",
+        details={
+            "plugin": "users",
+            "old_role": "user",
+            "new_role": "trusted",
+            "created": True,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_users_role_does_not_create_unknown_user_when_change_is_denied(mock_bot, mock_msg):
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    mock_bot.db.users.create = AsyncMock()
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+
+    await users_mod.users_update(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["new@example.org", "superadmin"],
+        mock_msg,
+        False,
+    )
+
+    mock_bot.db.users.create.assert_not_awaited()
+    assert "Only the owner" in mock_bot.reply.call_args.args[1]
+
+
+@pytest.mark.asyncio
 async def test_role_helper_permission_guard_branches(mock_bot, monkeypatch):
     monkeypatch.setitem(config, "owner", "owner@example.org")
     assert users_mod._parse_user_jid("owner@example.org/resource") == "owner@example.org"

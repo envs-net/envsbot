@@ -633,6 +633,9 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
         "get": lambda key, default=None: default,
     }
     await bot.on_private_message(private_msg)
+    bot.bot_plugins.dispatch_runtime_event.assert_any_await(
+        "private_message_received", private_msg
+    )
     bot.handle_command.assert_awaited_with(
         ",status", private_msg["from"], None, private_msg, False
     )

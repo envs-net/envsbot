@@ -7,8 +7,35 @@ from importlib import import_module
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+_TEST_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout when tests run from mutmut's copy.
+
+    mutmut instruments production files below ``<repo>/mutants`` and copies
+    the tests there.  Static architecture checks must inspect the original
+    source tree rather than mutmut's generated trampoline functions, which
+    intentionally contain incomplete call variants for individual mutants.
+    """
+    if path.name == "mutants":
+        checkout = path.parent
+        if (checkout / "pyproject.toml").exists():
+            return checkout
+    return path
+
+
+ROOT = _checkout_root(_TEST_ROOT)
 PRODUCTION_ROOTS = ("bot", "core_plugins", "database", "plugins", "scripts", "utils")
+
+
+def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    mutants = tmp_path / "mutants"
+    mutants.mkdir()
+
+    assert _checkout_root(mutants) == tmp_path
+    assert _checkout_root(tmp_path) == tmp_path
 
 
 def _production_python_files():

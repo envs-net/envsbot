@@ -233,11 +233,11 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,users delete` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Delete one non-privileged user record and its runtime data. |
 | `,users grant` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Grant room-scoped plugin permissions to a user. |
 | `,users grants` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Show a user's room-scoped plugin permissions. |
-| `,users info` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Show user info by JID or known nickname. |
+| `,users info` | [`users`](plugins/users.md) | `user` | `private chat / MUC PM` | Show your user info, or inspect another user as an admin. |
 | `,users list` | [`users`](plugins/users.md) | `admin` | `private chat only` | List users currently known in one joined room. |
 | `,users permissions` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Diagnose global, room and room-scoped plugin permissions. |
 | `,users revoke` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Revoke room-scoped plugin permissions from a user. |
-| `,users role` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Change a user's global bot role with hierarchy checks. |
+| `,users role` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Create or change a user's global bot role with hierarchy checks. |
 | `,users roles` | [`users`](plugins/users.md) | `admin` | `private chat / MUC PM` | Show available roles and their ordering. |
 
 ### Utility

@@ -75,17 +75,18 @@ Examples:
 
 ### `,users info`
 
-Show user info by JID or known nickname.
+Show your user info, or inspect another user as an admin.
 
-Role: `admin`<br>
+Role: `user`<br>
 Context: `private chat / MUC PM`<br>
 Category: `users`<br>
-Usage: `,users info <jid|nick>`
+Usage: `,users info [jid|nick]`
 
 Aliases: `,user info`
 
 Examples:
 
+- `,users info`
 - `,users info alice@example.org`
 
 ### `,users list`
@@ -138,7 +139,7 @@ Examples:
 
 ### `,users role`
 
-Change a user's global bot role with hierarchy checks.
+Create or change a user's global bot role with hierarchy checks.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>

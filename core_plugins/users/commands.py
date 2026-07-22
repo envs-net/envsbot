@@ -1,6 +1,5 @@
 """Split module for core_plugins/users.py: commands."""
 
-from slixmpp import JID
 from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
 from .formatting import _audit_reason, _send_user_info, _write_user_audit
@@ -21,65 +20,95 @@ from .roles import ROLE_NAMES, _command_prefix, log
 
 @command(
     "users info",
-    role=Role.ADMIN,
+    role=Role.USER,
     aliases=["user info"],
-    short="Show user info by JID or known nickname.",
-    usage="{prefix}users info <jid|nick>",
-    examples=["{prefix}users info alice@example.org"],
+    short="Show your user info, or inspect another user as an admin.",
+    usage="{prefix}users info [jid|nick]",
+    examples=[
+        "{prefix}users info",
+        "{prefix}users info alice@example.org",
+    ],
     category="users",
     context="private chat / MUC PM",
 )
 async def users_info(bot, sender, nick, args, msg, is_room):
     """
-    Show user info by JID or nickname from 'users' database table.
+    Show the caller's user info or, for admins, another user by JID/nickname.
 
     Usage:
-        {prefix}users info <jid|nick>
+        {prefix}users info [jid|nick]
     """
     try:
-        if not args:
-            log.warning("[USERS] 🟡️ users info without args")
-            bot.reply(msg, f"🟡️ Usage: {_command_prefix(bot)}users info <jid|nick>")
+        if is_room:
+            bot.reply(msg, "🟡️ Use this command in a private chat or MUC PM.")
+            return
+        if len(args) > 1:
+            bot.reply(msg, f"🟡️ Usage: {_command_prefix(bot)}users info [jid|nick]")
             return
 
-        query = args[0]
+        actor = _parse_user_jid(sender)
+        if not actor:
+            bot.reply(msg, "🟡️ Could not resolve your user JID.")
+            return
+
+        query = args[0] if args else actor
+        supplied_jid = _parse_user_jid(query)
+        if args and supplied_jid != actor:
+            actor_role = await bot.get_user_role(actor)
+            if actor_role > Role.ADMIN:
+                bot.reply(msg, "⛔ You may only view your own user info.")
+                return
+
         um = bot.db.users
+        target = None
 
-        try:
-            jid_query = str(JID(query).bare)
-            user = await um.get(jid_query)
-        except Exception:
-            user = None
-
+        jid_query = supplied_jid
+        user = await um.get(jid_query) if jid_query else None
         if user:
+            target = jid_query
+
+        if user and target == actor:
             log.info(f"[USERS] 🔎 Info lookup by JID: {jid_query}")
             await _send_user_info(bot, msg, user)
             return
 
-        jids = await find_users_by_nick_safe(bot, query)
-
-        if not jids:
-            log.warning(f"[USERS] 🟡️ No users found for nick: {query}")
-            bot.reply(msg, f"🟡️ No users found for nick: {query}")
+        if not user and jid_query == actor:
+            await um.create(actor)
+            user = await um.get(actor)
+            if user is None:
+                user = {
+                    "jid": actor,
+                    "nickname": None,
+                    "role": Role.USER.value,
+                }
+            await _send_user_info(bot, msg, user)
             return
 
-        if len(jids) > 1:
-            log.info(f"[USERS] 🔎 Multiple users for nick: {query}")
-            lines = [f"🔎 Multiple users found for '{query}':"]
-            for jid in jids:
-                lines.append(f"- {jid}")
-            bot.reply(msg, "\n".join(lines))
-            return
+        if not user:
+            jids = await find_users_by_nick_safe(bot, query)
 
-        jid = next(iter(jids))
-        user = await um.get(jid)
+            if not jids:
+                log.warning(f"[USERS] 🟡️ No users found for nick: {query}")
+                bot.reply(msg, f"🟡️ No users found for nick: {query}")
+                return
 
-        if user is None:
-            log.info(f"[USERS][INFO] 🔴  Unregistered user (jid={jid})")
+            if len(jids) > 1:
+                log.info(f"[USERS] 🔎 Multiple users for nick: {query}")
+                lines = [f"🔎 Multiple users found for '{query}':"]
+                for jid in jids:
+                    lines.append(f"- {jid}")
+                bot.reply(msg, "\n".join(lines))
+                return
+
+            target = next(iter(jids))
+            user = await um.get(target)
+
+        if user is None or not target:
+            log.info(f"[USERS][INFO] 🔴  Unregistered user (jid={target})")
             bot.reply(msg, "🔴  User is not registered.")
             return
 
-        log.info(f"[USERS] 🔎 Info lookup by nick: {query} -> {jid}")
+        log.info(f"[USERS] 🔎 Info lookup: {query} -> {target}")
         await _send_user_info(bot, msg, user)
 
     except Exception:
@@ -215,7 +244,7 @@ async def users_list(bot, sender, nick, args, msg, is_room):
     "users role",
     role=Role.ADMIN,
     aliases=["user role"],
-    short="Change a user's global bot role with hierarchy checks.",
+    short="Create or change a user's global bot role with hierarchy checks.",
     usage="{prefix}users role <jid> <role>",
     examples=["{prefix}users role alice@example.org trusted"],
     category="users",
@@ -257,17 +286,7 @@ async def users_update(bot, sender, nick, args, msg, is_room):
         new_role = ROLE_NAMES[role_name]
         um = bot.db.users
         target_user = await um.get(target)
-        if not target_user:
-            await _write_user_audit(
-                bot,
-                "user_role_change_denied",
-                actor=actor,
-                target=target,
-                details={"reason": "user_not_found", "requested_role": _role_label(new_role)},
-            )
-            bot.reply(msg, f"🟡️ User not found: {target}")
-            return
-
+        created = target_user is None
         old_role = _role_from_user(target_user)
         allowed, reason = await _can_change_role(bot, actor, target, old_role, new_role)
         if not allowed:
@@ -285,15 +304,29 @@ async def users_update(bot, sender, nick, args, msg, is_room):
             bot.reply(msg, reason)
             return
 
+        if created:
+            await um.create(target)
+
         if old_role == new_role:
             await _write_user_audit(
                 bot,
-                "user_role_change_noop",
+                "user_role_changed" if created else "user_role_change_noop",
                 actor=actor,
                 target=target,
-                details={"role": _role_label(new_role)},
+                details=(
+                    {
+                        "old_role": _role_label(old_role),
+                        "new_role": _role_label(new_role),
+                        "created": True,
+                    }
+                    if created
+                    else {"role": _role_label(new_role)}
+                ),
             )
-            bot.reply(msg, f"ℹ️ {target} already has role {_role_label(new_role)}.")
+            if created:
+                bot.reply(msg, f"✅ Created user {target} with role {_role_label(new_role)}.")
+            else:
+                bot.reply(msg, f"ℹ️ {target} already has role {_role_label(new_role)}.")
             return
 
         await um.set(target, "role", new_role.value)
@@ -302,11 +335,18 @@ async def users_update(bot, sender, nick, args, msg, is_room):
             "user_role_changed",
             actor=actor,
             target=target,
-            details={"old_role": _role_label(old_role), "new_role": _role_label(new_role)},
+            details={
+                "old_role": _role_label(old_role),
+                "new_role": _role_label(new_role),
+                **({"created": True} if created else {}),
+            },
         )
 
         log.info("[USERS] 🔄 Role updated")
-        bot.reply(msg, f"🔄 Updated role for {target}: {_role_label(old_role)} → {_role_label(new_role)}")
+        if created:
+            bot.reply(msg, f"✅ Created user {target} with role {_role_label(new_role)}.")
+        else:
+            bot.reply(msg, f"🔄 Updated role for {target}: {_role_label(old_role)} → {_role_label(new_role)}")
 
     except Exception:
         log.exception("[USERS] 🔴 users role failed")

@@ -82,6 +82,66 @@ async def test_on_groupchat_message_skips_own_message(mock_bot, mock_msg):
 
 
 @pytest.mark.asyncio
+async def test_on_private_message_creates_and_tracks_direct_user(mock_bot):
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot._is_muc_private_message = MagicMock(return_value=False)
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    mock_bot.db.users.create = AsyncMock()
+    msg = {
+        "type": "chat",
+        "from": "member@example.org/phone",
+        "get": lambda key, default=None: (
+            "chat" if key == "type" else default
+        ),
+    }
+
+    with patch(
+        "core_plugins.users.tracking.update_last_seen",
+        new=AsyncMock(),
+    ) as last_seen:
+        await users_mod.on_private_message(mock_bot, msg)
+
+    mock_bot.db.users.create.assert_awaited_once_with("member@example.org")
+    last_seen.assert_awaited_once_with(mock_bot, "member@example.org")
+
+
+@pytest.mark.asyncio
+async def test_on_private_message_skips_muc_pm_and_own_messages(mock_bot):
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot.db.users.get = AsyncMock()
+    mock_bot.db.users.create = AsyncMock()
+    msg = {
+        "type": "chat",
+        "from": "room@conference.example.org/member",
+        "get": lambda key, default=None: (
+            "chat" if key == "type" else default
+        ),
+    }
+
+    mock_bot._is_muc_private_message = MagicMock(return_value=True)
+    await users_mod.on_private_message(mock_bot, msg)
+    mock_bot.db.users.get.assert_not_awaited()
+
+    mock_bot._is_muc_private_message = MagicMock(return_value=False)
+    msg["from"] = "bot@example.org/resource"
+    await users_mod.on_private_message(mock_bot, msg)
+    mock_bot.db.users.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_users_on_load_registers_direct_message_runtime_handler(mock_bot):
+    store = AsyncMock()
+    store.get_global = AsyncMock(return_value={})
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
+
+    await users_mod.on_load(mock_bot)
+
+    mock_bot.bot_plugins.register_runtime_event.assert_called_once()
+    args = mock_bot.bot_plugins.register_runtime_event.call_args.args
+    assert args[:2] == ("users", "private_message_received")
+
+
+@pytest.mark.asyncio
 async def test_track_room_nick(build_mock_bot, monkeypatch):
     bot = build_mock_bot()
     plugin_store = AsyncMock()

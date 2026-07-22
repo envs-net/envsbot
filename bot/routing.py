@@ -51,6 +51,16 @@ class MessageRoutingMixin:
         try:
             if msg["type"] in ("chat", "normal"):
                 await self._cache_incoming_message(msg, is_room=False)
+                plugin_manager = getattr(self, "bot_plugins", None)
+                dispatch_runtime_event = getattr(
+                    plugin_manager,
+                    "dispatch_runtime_event",
+                    None,
+                )
+                if callable(dispatch_runtime_event):
+                    result = dispatch_runtime_event("private_message_received", msg)
+                    if inspect.isawaitable(result):
+                        await result
                 await self.handle_command(msg["body"], msg["from"], None, msg, False)
         except Exception as exc:
             log.exception("[BOT] Error in on_private_message: %s", exc)

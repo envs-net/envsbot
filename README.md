@@ -252,7 +252,8 @@ Examples assume the default command prefix `,`.
 | `,rooms disable [<room_jid>] <plugin>` | Disable a room-toggleable plugin for a room |
 | `,users roles` | Show available user roles |
 | `,users admins [all/page/last]` | List privileged users |
-| `,users role <jid> <role>` | Change a user's role |
+| `,users info [jid\|nick]` | Show your own user record; admins may inspect another user |
+| `,users role <jid> <role>` | Create a user record if needed and assign or change its role |
 | `,users grant <jid> <plugin> [plugin ...]` | Grant room-scoped plugin permissions, for example `rss pin poll` |
 | `,users revoke <jid> <plugin> [plugin ...]` | Revoke room-scoped plugin permissions |
 | `,users grants <jid>` | Show room-scoped plugin permissions |
