@@ -17,6 +17,7 @@ from .permissions import (
     set_user_plugin_grants,
 )
 from .roles import ROLE_NAMES, _command_prefix, log
+from .tracking import _clear_user_deleted, _mark_user_deleted
 
 
 @command(
@@ -75,6 +76,7 @@ async def users_info(bot, sender, nick, args, msg, is_room):
 
         if not user and jid_query == actor:
             await um.create(actor)
+            await _clear_user_deleted(bot, actor)
             user = await um.get(actor)
             if user is None:
                 user = {
@@ -243,27 +245,42 @@ def _known_user_sections(bot, users, joined_rooms, scope: str):
     direct_state = _direct_user_state(bot)
     room_state = _room_user_state(joined_rooms)
     historic_room_users = set(getattr(bot.db.users, "_room_users", set()) or set())
+    deleted_users = set(getattr(bot.db.users, "_deleted_users", set()) or set())
+    stored_jids = {jid.casefold() for jid in users_by_jid}
+    suppressed_jids = {
+        str(jid).casefold()
+        for jid in deleted_users
+        if str(jid).casefold() not in stored_jids
+    }
     muc_jids = joined_room_jids(bot, joined_rooms)
 
     direct_state = {
         jid: state
         for jid, state in direct_state.items()
-        if jid.casefold() not in muc_jids
+        if jid.casefold() not in muc_jids and jid.casefold() not in suppressed_jids
     }
     room_state = {
         jid: state
         for jid, state in room_state.items()
-        if jid.casefold() not in muc_jids
+        if jid.casefold() not in muc_jids and jid.casefold() not in suppressed_jids
     }
     historic_room_users = {
-        jid for jid in historic_room_users if str(jid).casefold() not in muc_jids
+        jid
+        for jid in historic_room_users
+        if str(jid).casefold() not in muc_jids
+        and str(jid).casefold() not in suppressed_jids
     }
 
     roster_jids = {
         jid for jid, state in direct_state.items() if state.get("roster")
     }
     all_jids = set(users_by_jid) | roster_jids | set(room_state)
-    all_jids = {jid for jid in all_jids if jid.casefold() not in muc_jids}
+    all_jids = {
+        jid
+        for jid in all_jids
+        if jid.casefold() not in muc_jids
+        and jid.casefold() not in suppressed_jids
+    }
     own_jid = _parse_user_jid(getattr(getattr(bot, "boundjid", None), "bare", ""))
     if own_jid:
         all_jids.discard(own_jid)
@@ -490,6 +507,7 @@ async def users_update(bot, sender, nick, args, msg, is_room):
 
         if created:
             await um.create(target)
+            await _clear_user_deleted(bot, target)
 
         if old_role == new_role:
             await _write_user_audit(
@@ -670,6 +688,7 @@ async def users_delete(bot, sender, nick, args, msg, is_room):
             return
 
         await um.delete(jid)
+        await _mark_user_deleted(bot, jid)
         await _write_user_audit(
             bot,
             "user_deleted",

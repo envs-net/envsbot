@@ -138,9 +138,47 @@ async def test_on_private_message_skips_muc_pm_and_own_messages(mock_bot):
 
 
 @pytest.mark.asyncio
+async def test_direct_activity_restores_deleted_user(mock_bot):
+    target = "member@example.org"
+    values = {
+        "_direct_users": [],
+        "_deleted_users": [target],
+    }
+
+    async def update_global(key, updater, default=None):
+        values[key] = updater(values.get(key, default))
+        return values[key]
+
+    store = types.SimpleNamespace(update_global=AsyncMock(side_effect=update_global))
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
+    mock_bot.db.users._direct_users = set()
+    mock_bot.db.users._deleted_users = {target}
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    mock_bot.db.users.create = AsyncMock()
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot._is_muc_private_message = MagicMock(return_value=False)
+    msg = {"type": "chat", "from": f"{target}/phone"}
+
+    with patch(
+        "core_plugins.users.tracking.update_last_seen",
+        new=AsyncMock(),
+    ):
+        await users_mod.on_private_message(mock_bot, msg)
+
+    assert mock_bot.db.users._deleted_users == set()
+    assert mock_bot.db.users._direct_users == {target}
+    assert values == {
+        "_direct_users": [target],
+        "_deleted_users": [],
+    }
+
+
+@pytest.mark.asyncio
 async def test_users_on_load_registers_direct_message_runtime_handler(mock_bot):
     store = AsyncMock()
-    store.get_global = AsyncMock(side_effect=[{}, ["direct@example.org"], []])
+    store.get_global = AsyncMock(
+        side_effect=[{}, ["direct@example.org"], [], ["deleted@example.org"]]
+    )
     mock_bot.db.users.plugin = MagicMock(return_value=store)
 
     await users_mod.on_load(mock_bot)
@@ -150,6 +188,7 @@ async def test_users_on_load_registers_direct_message_runtime_handler(mock_bot):
     assert args[:2] == ("users", "private_message_received")
     assert mock_bot.db.users._direct_users == {"direct@example.org"}
     assert mock_bot.db.users._room_users == set()
+    assert mock_bot.db.users._deleted_users == {"deleted@example.org"}
 
 
 @pytest.mark.asyncio
@@ -157,6 +196,7 @@ async def test_users_on_load_bootstraps_room_sources_from_nick_index(mock_bot):
     store = AsyncMock()
     store.get_global = AsyncMock(side_effect=[
         {"RoomNick": ["room-user@example.org"]},
+        [],
         [],
         [],
     ])

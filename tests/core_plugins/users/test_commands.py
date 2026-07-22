@@ -281,6 +281,71 @@ async def test_users_list_includes_direct_roster_contacts(mock_bot, mock_msg):
 
 
 @pytest.mark.asyncio
+async def test_users_delete_hides_stale_roster_contact(mock_bot, mock_msg):
+    target = "dan@example.org"
+    values = {
+        "_direct_users": [target],
+        "_room_users": [],
+        "_deleted_users": [],
+    }
+
+    async def update_global(key, updater, default=None):
+        values[key] = updater(values.get(key, default))
+        return values[key]
+
+    store = types.SimpleNamespace(update_global=AsyncMock(side_effect=update_global))
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
+    mock_bot.db.users._direct_users = {target}
+    mock_bot.db.users._room_users = set()
+    mock_bot.db.users._deleted_users = set()
+    mock_bot.db.users.get = AsyncMock(
+        return_value={"jid": target, "role": users_mod.Role.USER.value}
+    )
+    mock_bot.db.users.delete = AsyncMock()
+    mock_bot.db.users.list = AsyncMock(return_value=[])
+    mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot.client_roster = {
+        target: {
+            "subscription": "none",
+            "resources": {},
+        },
+    }
+    mock_bot.bot_plugins.plugins = {
+        "rooms": types.SimpleNamespace(JOINED_ROOMS={}),
+    }
+
+    await users_mod.users_delete(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        [target],
+        mock_msg,
+        False,
+    )
+    await users_mod.users_list(
+        mock_bot,
+        "admin@example.org",
+        "nick",
+        ["active", "all"],
+        mock_msg,
+        False,
+    )
+
+    reply_text = mock_bot.reply.call_args.args[1]
+    assert "Active/direct users (0):" in reply_text
+    assert target not in reply_text
+    assert mock_bot.db.users._direct_users == set()
+    assert mock_bot.db.users._room_users == set()
+    assert mock_bot.db.users._deleted_users == {target}
+    assert values == {
+        "_direct_users": [],
+        "_room_users": [],
+        "_deleted_users": [target],
+    }
+
+
+@pytest.mark.asyncio
 async def test_users_delete_logic(mock_bot, mock_msg):
     with patch.object(users_mod, "prefix", ","):
         mock_bot.db.users.get = AsyncMock(
@@ -288,6 +353,15 @@ async def test_users_delete_logic(mock_bot, mock_msg):
                           "role": users_mod.Role.USER.value})
         mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
         mock_bot.db.users.delete = AsyncMock()
+        mock_bot.db.users._direct_users = set()
+        mock_bot.db.users._room_users = set()
+        mock_bot.db.users._deleted_users = set()
+        store = types.SimpleNamespace(
+            update_global=AsyncMock(
+                side_effect=lambda key, updater, default=None: updater(default)
+            )
+        )
+        mock_bot.db.users.plugin = MagicMock(return_value=store)
         args = ["to@delete"]
         with patch.object(mock_bot, "reply"):
             await users_mod.users_delete(mock_bot, "sender@example.org", "nick", args,
@@ -436,6 +510,15 @@ async def test_users_update_and_delete_command_edge_branches(mock_bot, mock_msg,
 async def test_users_delete_audit_events(mock_bot, mock_msg):
     mock_bot.get_user_role = AsyncMock(return_value=users_mod.Role.ADMIN)
     mock_bot.db.users.delete = AsyncMock()
+    mock_bot.db.users._direct_users = set()
+    mock_bot.db.users._room_users = set()
+    mock_bot.db.users._deleted_users = set()
+    store = types.SimpleNamespace(
+        update_global=AsyncMock(
+            side_effect=lambda key, updater, default=None: updater(default)
+        )
+    )
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
 
     mock_bot.db.users.get = AsyncMock(
         return_value={"jid": "target@example.org", "role": users_mod.Role.USER.value}

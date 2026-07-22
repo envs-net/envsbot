@@ -11,6 +11,7 @@ from .roles import MAX_ROOM_NICKS, log
 
 _DIRECT_USERS_KEY = "_direct_users"
 _ROOM_USERS_KEY = "_room_users"
+_DELETED_USERS_KEY = "_deleted_users"
 
 
 def _normalized_jid_set(value) -> set[str]:
@@ -25,6 +26,81 @@ def _normalized_jid_set(value) -> set[str]:
     return result
 
 
+async def _update_persisted_jid_set(
+    users,
+    *,
+    attr: str,
+    key: str,
+    jid: str,
+    present: bool,
+) -> set[str]:
+    """Add or remove one JID from a persisted plugin-global set."""
+    known = _normalized_jid_set(getattr(users, attr, set()) or set())
+    if (jid in known) == present:
+        return known
+
+    def update(current):
+        updated = _normalized_jid_set(current)
+        if present:
+            updated.add(jid)
+        else:
+            updated.discard(jid)
+        return sorted(updated)
+
+    persisted = await users.plugin("users").update_global(
+        key,
+        update,
+        default=sorted(known),
+    )
+    result = _normalized_jid_set(persisted)
+    setattr(users, attr, result)
+    return result
+
+
+async def _clear_user_deleted(bot, real_jid: str) -> None:
+    """Allow a previously deleted user to reappear after new activity."""
+    jid = _parse_user_jid(real_jid)
+    if not jid:
+        return
+    await _update_persisted_jid_set(
+        bot.db.users,
+        attr="_deleted_users",
+        key=_DELETED_USERS_KEY,
+        jid=jid,
+        present=False,
+    )
+
+
+async def _mark_user_deleted(bot, real_jid: str) -> None:
+    """Forget source metadata and suppress stale roster/room observations."""
+    jid = _parse_user_jid(real_jid)
+    if not jid:
+        return
+
+    users = bot.db.users
+    await _update_persisted_jid_set(
+        users,
+        attr="_direct_users",
+        key=_DIRECT_USERS_KEY,
+        jid=jid,
+        present=False,
+    )
+    await _update_persisted_jid_set(
+        users,
+        attr="_room_users",
+        key=_ROOM_USERS_KEY,
+        jid=jid,
+        present=False,
+    )
+    await _update_persisted_jid_set(
+        users,
+        attr="_deleted_users",
+        key=_DELETED_USERS_KEY,
+        jid=jid,
+        present=True,
+    )
+
+
 async def _remember_user_source(bot, real_jid: str, source: str) -> None:
     """Persist whether a user was learned directly or from a room."""
     if source == "direct":
@@ -37,21 +113,14 @@ async def _remember_user_source(bot, real_jid: str, source: str) -> None:
         raise ValueError(f"Unsupported user source: {source}")
 
     users = bot.db.users
-    known = set(getattr(users, attr, set()) or set())
-    if real_jid in known:
-        return
-
-    def add_jid(current):
-        updated = _normalized_jid_set(current)
-        updated.add(real_jid)
-        return sorted(updated)
-
-    persisted = await users.plugin("users").update_global(
-        key,
-        add_jid,
-        default=sorted(known),
+    await _clear_user_deleted(bot, real_jid)
+    await _update_persisted_jid_set(
+        users,
+        attr=attr,
+        key=key,
+        jid=real_jid,
+        present=True,
     )
-    setattr(users, attr, set(persisted))
 
 
 async def on_muc_presence(bot, pres):
@@ -211,6 +280,9 @@ async def on_load(bot):
         for jids in bot.db.users._nick_index.values():
             room_users.update(_normalized_jid_set(jids))
     bot.db.users._room_users = room_users
+    bot.db.users._deleted_users = _normalized_jid_set(
+        await store.get_global(_DELETED_USERS_KEY, [])
+    )
 
     # --- add event handlers ---
     bot.bot_plugins.register_event(
