@@ -84,6 +84,7 @@ def fake_bot():
     bot.db = MagicMock()
     bot.db.rooms = MagicMock()
     bot.db.rooms.get = AsyncMock(return_value=(ROOM_JID, BOT_NICK, True, None))
+    bot.db.rooms.list = AsyncMock(return_value=[])
     bot.db.users = MagicMock()
     bot.get_user_role = AsyncMock(return_value=Role.MODERATOR)
     bot.prefix = "!"
