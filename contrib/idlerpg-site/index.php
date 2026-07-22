@@ -390,6 +390,15 @@ foreach ($players as $player) {
 $view = idlerpg_current_view();
 $render_map = false;
 $quest = is_array($map_payload['quest'] ?? null) ? $map_payload['quest'] : null;
+$active_quest_type = '';
+if ($quest) {
+    $active_quest_type = strtolower((string) ($quest['type'] ?? ''));
+    if ($active_quest_type !== 'time' && $active_quest_type !== 'grid') {
+        $active_quest_type = !empty($quest['route']) ? 'grid' : 'time';
+    }
+}
+$quest_route = $quest && is_array($quest['route'] ?? null) ? $quest['route'] : [];
+$has_quest_route = count($quest_route) > 0;
 $quest_player_lookup = idlerpg_quest_player_lookup($quest);
 $map_width = max(1, (int) ($map_payload['width'] ?? $map_payload['map_x'] ?? 500));
 $map_height = max(1, (int) ($map_payload['height'] ?? $map_payload['map_y'] ?? 500));
@@ -560,10 +569,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                 <h2>Current Quest</h2>
                 <?php if ($quest): ?>
                     <?php
-                    $quest_type = strtolower((string) ($quest['type'] ?? ''));
-                    if ($quest_type !== 'time' && $quest_type !== 'grid') {
-                        $quest_type = !empty($quest['route']) ? 'grid' : 'time';
-                    }
+                    $quest_type = $active_quest_type;
                     $quest_remaining = max(0, ((int) ($quest['complete_at'] ?? 0)) - time());
                     ?>
                     <p><strong>Quest:</strong> <?php echo h($quest['text'] ?? $quest['description'] ?? 'adventure'); ?></p>
@@ -591,7 +597,19 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 
             <?php if ($render_map || $view === 'map'): ?>
                 <h2><?php echo $view === 'map' ? 'World Map' : 'Quest Map'; ?></h2>
-                <p class="muted">Blue circles = online, red circles = offline, orange circles = active quest participants. Orange squares and lines show a grid-quest route. Labels are staggered when players stand close together; hover a marker for exact details.</p>
+                <p class="muted">
+                    Blue circles = online, red circles = offline, orange circles = active quest participants.
+                    <?php if ($has_quest_route): ?>
+                        The current grid-quest route is shown as orange squares connected by an orange line.
+                    <?php elseif ($quest && $active_quest_type === 'time'): ?>
+                        The current quest is time-based, so no route is drawn on the map.
+                    <?php elseif ($quest && $active_quest_type === 'grid'): ?>
+                        The current quest is grid-based, but no route coordinates are available in the export yet.
+                    <?php else: ?>
+                        Grid-quest routes appear as orange squares connected by an orange line when one is active.
+                    <?php endif; ?>
+                    Labels are staggered when players stand close together; hover a marker for exact details.
+                </p>
                 <?php if (count($map_players) > 0): ?>
                     <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
                         <defs><pattern id="noise" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/></pattern></defs>
@@ -603,10 +621,10 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                         <path d="M270,45 C315,20 365,28 388,74 C362,116 315,136 270,115 C245,85 246,58 270,45 Z" fill="#a57937" opacity=".42"/>
                         <path d="M292,230 C330,208 371,218 395,254 C365,285 316,293 282,265 C272,250 276,238 292,230 Z" fill="#7d4d1b" opacity=".55"/>
                         <text class="map-label" x="27" y="36">Debmark</text><text class="map-label" x="286" y="42">Mountains of Qwok</text><text class="map-label" x="365" y="218">Velbragh</text><text class="map-label" x="270" y="390">Tower of Anh-Allor</text>
-                        <?php if ($quest && is_array($quest['route'] ?? null) && count($quest['route']) > 0): ?>
-                            <?php $route_points = []; foreach ($quest['route'] as $point) { $route_points[] = (int) idlerpg_point_coord($point, 'x') . ',' . (int) idlerpg_point_coord($point, 'y'); } ?>
+                        <?php if ($has_quest_route): ?>
+                            <?php $route_points = []; foreach ($quest_route as $point) { $route_points[] = (int) idlerpg_point_coord($point, 'x') . ',' . (int) idlerpg_point_coord($point, 'y'); } ?>
                             <polyline class="quest-line" points="<?php echo h(implode(' ', $route_points)); ?>"/>
-                            <?php foreach ($quest['route'] as $idx => $point): $qx = idlerpg_point_coord($point, 'x'); $qy = idlerpg_point_coord($point, 'y'); ?>
+                            <?php foreach ($quest_route as $idx => $point): $qx = idlerpg_point_coord($point, 'x'); $qy = idlerpg_point_coord($point, 'y'); ?>
                                 <rect class="quest-point" x="<?php echo h($qx - 5); ?>" y="<?php echo h($qy - 5); ?>" width="10" height="10"/>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -653,7 +671,17 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
         <aside>
             <div class="card"><h2>Quick start</h2><ul><li><code>,idlerpg register &lt;name&gt; &lt;class&gt;</code></li><li><code>,idlerpg login</code></li><li><code>,idlerpg status</code></li><li><code>,idlerpg top</code></li></ul></div>
             <div class="card"><h2>Data setup</h2><p class="muted">Put JSON exports in <code>data/&lt;room-slug&gt;/</code> or set <code>IDLERPG_DATA_DIR</code>. Open <code>?debug=1</code> to check readable paths.</p></div>
-            <div class="card"><h2>Map legend</h2><p class="muted">Blue circles = online, red circles = offline, orange circles = active quest participants. Orange squares and lines show a grid-quest route. <code>[293,133] lv.16</code> means x=293, y=133 and level 16.</p></div>
+            <div class="card"><h2>Map legend</h2><p class="muted">
+                Blue circles = online, red circles = offline, orange circles = active quest participants.
+                <?php if ($has_quest_route): ?>
+                    Orange squares and lines show the current grid-quest route.
+                <?php elseif ($quest && $active_quest_type === 'time'): ?>
+                    The current quest is time-based and therefore has no map route.
+                <?php else: ?>
+                    Orange squares and lines appear when a grid quest with route data is active.
+                <?php endif; ?>
+                <code>[293,133] lv.16</code> means x=293, y=133 and level 16.
+            </p></div>
         </aside>
     </div>
 </div>
