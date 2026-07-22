@@ -84,6 +84,11 @@ async def users_info(bot, sender, nick, args, msg, is_room):
             await _send_user_info(bot, msg, user)
             return
 
+        if not user and jid_query:
+            log.warning(f"[USERS] 🟡️ User not found by JID: {jid_query}")
+            bot.reply(msg, f"🟡️ User not found: {jid_query}")
+            return
+
         if not user:
             jids = await find_users_by_nick_safe(bot, query)
 

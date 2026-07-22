@@ -85,7 +85,12 @@ async def users_permissions(bot, sender, nick, args, msg, is_room):
         return
 
     user = await bot.db.users.get(target)
-    role = Role.OWNER if _is_config_owner(target) else _role_from_user(user)
+    is_owner = _is_config_owner(target)
+    if user is None and not is_owner:
+        bot.reply(msg, f"🟡️ User not found: {target}")
+        return
+
+    role = Role.OWNER if is_owner else _role_from_user(user)
     grants = await get_user_plugin_grants(bot, target)
     grants_text = ", ".join(grants) if grants else "none"
 

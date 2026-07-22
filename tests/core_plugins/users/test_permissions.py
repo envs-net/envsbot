@@ -425,6 +425,54 @@ async def test_room_plugin_grant_falls_back_to_cache_on_partial_query_failure():
 
 
 @pytest.mark.asyncio
+async def test_users_permissions_rejects_unknown_jid(mock_msg):
+    bot = MagicMock()
+    bot.db.users.get = AsyncMock(return_value=None)
+    bot.db.users.plugin = MagicMock()
+    bot.reply = MagicMock()
+
+    await users_mod.users_permissions(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["missing@example.org"],
+        mock_msg,
+        False,
+    )
+
+    assert bot.reply.call_args.args[1] == "🟡️ User not found: missing@example.org"
+    bot.db.users.plugin.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_users_permissions_allows_unstored_config_owner(mock_msg, monkeypatch):
+    class Store:
+        async def get(self, jid, key):
+            assert jid == "owner@example.org"
+            assert key == users_mod.GRANTS_FIELD
+            return []
+
+    monkeypatch.setitem(config, "owner", "owner@example.org/resource")
+    bot = MagicMock()
+    bot.db.users.get = AsyncMock(return_value=None)
+    bot.db.users.plugin.return_value = Store()
+    bot.reply = MagicMock()
+
+    await users_mod.users_permissions(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["owner@example.org"],
+        mock_msg,
+        False,
+    )
+
+    reply = bot.reply.call_args.args[1]
+    assert "Permission diagnostics" in reply
+    assert "Bot role: owner" in reply
+
+
+@pytest.mark.asyncio
 async def test_users_permissions_reports_role_grants_and_room_access(mock_msg):
     class Store:
         async def get(self, jid, key):

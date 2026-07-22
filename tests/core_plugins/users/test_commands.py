@@ -49,7 +49,7 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
             await users_mod.users_info(mock_bot, "admin@example.com", "n", ["ghost"],
                                        mock_msg, False)
             assert "not registered" in bot_reply.call_args.args[1].lower()
-        # 5. Edge: user not found
+        # 5. Edge: unknown nick
         mock_bot.db.users.get = AsyncMock(return_value=None)
         with patch("core_plugins.users.commands.find_users_by_nick_safe",
                    new=AsyncMock(return_value=[])), \
@@ -57,6 +57,19 @@ async def test_users_info_jid_and_nick(mock_bot, mock_msg):
             await users_mod.users_info(mock_bot, "admin@example.com", "n",
                                        ["zzznotfound"], mock_msg, False)
             assert "no users found" in bot_reply.call_args.args[1].lower()
+
+        # 6. A valid but unknown JID must not be treated as a nickname.
+        mock_bot.db.users.get = AsyncMock(return_value=None)
+        find_by_nick = AsyncMock(return_value=["unexpected@example.com"])
+        with patch("core_plugins.users.commands.find_users_by_nick_safe",
+                   new=find_by_nick), \
+                patch.object(mock_bot, "reply") as bot_reply:
+            await users_mod.users_info(mock_bot, "admin@example.com", "n",
+                                       ["missing@example.com"], mock_msg, False)
+            assert bot_reply.call_args.args[1] == (
+                "🟡️ User not found: missing@example.com"
+            )
+        find_by_nick.assert_not_awaited()
 
 
 @pytest.mark.asyncio
