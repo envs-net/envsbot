@@ -13,7 +13,7 @@ RSS/Atom feed watcher and poster
 
 ## RSS templates
 
-RSS posts can use a global default, a room-wide template or a feed-specific template. The priority is: feed-specific template, room template, global default, built-in default.
+RSS posts can use a global default, a destination-wide template or a feed-specific template. A destination may be a room or a direct subscriber. The priority is: feed-specific template, destination template, global default, built-in default.
 
 ### Template variables
 
@@ -53,7 +53,7 @@ Do not add an accidental space after `\n` unless the following line should be in
 
 ### Global default template
 
-Global moderators can set one persistent default for every room that has no room- or feed-specific override:
+Global moderators can set one persistent default for every room or direct subscriber that has no destination- or feed-specific override:
 
 ```text
 ,rss template show default
@@ -81,6 +81,19 @@ From a normal private chat, pass the room JID explicitly:
 ,rss template set room@conference.example.org 📰 $title\n$link\n\n
 ```
 
+### Personal direct-chat templates
+
+Trusted users and higher can set a persistent template for their own 1:1 RSS subscriptions. In a normal direct chat, omit the room JID:
+
+```text
+,rss template
+,rss template set 📰 $feed_title: $title\n$link\n\n
+,rss template test
+,rss template unset
+```
+
+This personal template is independent of room templates and applies only to feeds delivered directly to that user's bare JID.
+
 ### Feed-specific templates
 
 Inside a subscribed room, place the feed URL before the template:
@@ -92,15 +105,25 @@ Inside a subscribed room, place the feed URL before the template:
 ,rss template unset https://example.org/feed.xml
 ```
 
-From a normal private chat, pass both the room JID and feed URL:
+From a normal private chat, pass both the room JID and feed URL to manage a room feed:
 
 ```text
 ,rss template set room@conference.example.org https://example.org/feed.xml 📰 $title\n$link\n\n
 ```
 
+For a personal direct subscription, omit the room JID and place the subscribed feed URL before the template:
+
+```text
+,rss template set https://example.org/feed.xml DIRECT $title\n$link\n\n
+,rss template show https://example.org/feed.xml
+,rss template unset https://example.org/feed.xml
+```
+
 ## Direct subscriptions
 
 Trusted users and higher may subscribe to feeds in a direct chat. Trusted users are limited by `RSS_TRUSTED_MAX_FEEDS` (default: 10); moderators and higher are unlimited.
+
+Use `,rss template set ...` in the same direct chat to customize all personal deliveries, or include a subscribed feed URL for a feed-specific personal template.
 
 Trusted users may remove only their own subscriptions. Owner, superadmin, and admin users may remove a trusted user's subscription explicitly:
 
@@ -115,7 +138,7 @@ Global moderators may select a single section with `,rss list rooms`, `,rss list
 
 ### `,rss`
 
-Manage RSS feed subscriptions for rooms.
+Manage RSS feed subscriptions for rooms and direct users.
 
 Role: `user`<br>
 Context: `any`<br>

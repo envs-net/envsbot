@@ -569,6 +569,61 @@ async def test_post_new_entries_delivers_direct_feed_and_updates_cursor(make_bot
 
 
 @pytest.mark.asyncio
+async def test_post_new_entries_uses_personal_direct_templates(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    feed = {
+        "title": "Direct Feed",
+        "link": "https://example.org/",
+        "rooms": [],
+        "users": {
+            "alice@example.org": {"role": "trusted"},
+            "bob@example.org": {"role": "trusted"},
+            "carol@example.org": {"role": "moderator"},
+        },
+        "last_id": "old-entry",
+    }
+    store[rss.RSS_KEY] = {url: feed}
+    store[rss.RSS_FEED_TEMPLATES_KEY] = {
+        "alice@example.org": {url: "ALICE FEED $title"},
+    }
+    store[rss.RSS_TEMPLATES_KEY] = {
+        "bob@example.org": "BOB PERSONAL $feed_title :: $title",
+    }
+    store[rss.RSS_DEFAULT_TEMPLATE_KEY] = "GLOBAL $title"
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    assert bot.sent_messages == [
+        {
+            "mto": "alice@example.org",
+            "mbody": "ALICE FEED New entry",
+            "mtype": "chat",
+        },
+        {
+            "mto": "bob@example.org",
+            "mbody": "BOB PERSONAL Direct Feed :: New entry",
+            "mtype": "chat",
+        },
+        {
+            "mto": "carol@example.org",
+            "mbody": "GLOBAL New entry",
+            "mtype": "chat",
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_post_new_entries_retains_cursor_when_direct_delivery_fails(
     make_bot,
 ):

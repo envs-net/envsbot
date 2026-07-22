@@ -223,7 +223,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms set_plugin_defaults` | [`rooms`](plugins/rooms.md) | `user` | `room / MUC PM / private chat with <room_jid>` | Restore room plugin toggles for a room; requires room admin/owner or bot moderator. |
 | `,rooms sync` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Synchronize joined rooms with stored autojoin settings. |
 | `,rooms update` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Update one field of a stored room. |
-| `,rss` | [`rss`](plugins/rss.md) | `user` | `any` | Manage RSS feed subscriptions for rooms. |
+| `,rss` | [`rss`](plugins/rss.md) | `user` | `any` | Manage RSS feed subscriptions for rooms and direct users. |
 
 ### Users
 

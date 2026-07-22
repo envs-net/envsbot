@@ -280,36 +280,85 @@ async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=
 def _looks_like_feed_arg(value) -> bool:
     """Best-effort test for feed URL arguments."""
     return "://" in str(value or "")
-def _split_template_scope_args(msg, is_room: bool, args: list[str]):
-    """Return ``(room, feed_url, rest)`` for RSS template subcommands.
+def _split_template_scope_args(
+    msg,
+    is_room: bool,
+    args: list[str],
+    sender_jid: str | None = None,
+):
+    """Return ``(destination, feed_url, rest)`` for template subcommands.
 
     Scope syntax is intentionally compact:
 
     * ``[room_jid]`` targets a room template.
     * ``[room_jid] <feed_url>`` targets a feed template in that room.
     * In a public room/MUC PM, ``<feed_url>`` is enough for a feed template.
+    * In a normal direct chat, an omitted room targets the sender's direct
+      subscriptions.
     """
     rest = list(args)
     explicit_room = None
     if rest and _looks_like_room_arg(rest[0]):
         explicit_room = rest.pop(0)
-    room = _room_for_feed_command(msg, is_room, explicit_room=explicit_room)
+    destination = _room_for_feed_command(
+        msg,
+        is_room,
+        explicit_room=explicit_room,
+    )
+    if (
+        destination is None
+        and explicit_room is None
+        and sender_jid
+        and msg.get("type") in ("chat", "normal")
+    ):
+        destination = _normalize_room_jid(sender_jid)
 
     feed_url = None
     if rest and _looks_like_feed_arg(rest[0]):
         feed_url = _normalize_url(rest.pop(0))
 
-    return room, feed_url, rest
-async def _template_feed_for_room(store, room: str, feed_url: str):
-    """Return feed metadata when the feed is subscribed in the room."""
+    return destination, feed_url, rest
+
+
+def _is_personal_template_scope(
+    msg,
+    is_room: bool,
+    sender_jid: str,
+    destination: str | None,
+) -> bool:
+    """Return True for the sender's direct-subscription template scope."""
+    if not destination or msg.get("type") not in ("chat", "normal"):
+        return False
+    if _room_for_feed_command(msg, is_room) is not None:
+        return False
+    return _normalize_room_jid(destination) == _normalize_room_jid(sender_jid)
+
+
+async def _template_feed_for_room(
+    store,
+    room: str,
+    feed_url: str,
+    *,
+    direct: bool = False,
+):
+    """Return feed metadata when subscribed at the requested destination."""
     feeds = await get_feeds(store)
     feed = feeds.get(_normalize_url(feed_url))
     if not isinstance(feed, dict):
         return None
+    target = _normalize_room_jid(room)
+    if direct:
+        users = _direct_subscriptions(feed)
+        if target not in {
+            _normalize_room_jid(item)
+            for item in users
+        }:
+            return None
+        return feed
+
     rooms = feed.get("rooms")
     if not isinstance(rooms, list):
         return None
-    target = _normalize_room_jid(room)
     if not any(_normalize_room_jid(item) == target for item in rooms):
         return None
     return feed
@@ -335,11 +384,17 @@ def _join_template_args(parts: list[str]) -> str:
     """Build a template string from command arguments."""
     return _normalize_rss_template_input(" ".join(str(part) for part in parts))
 async def _sender_can_manage_template(
-    bot, sender_jid: str, room: str | None
+    bot,
+    sender_jid: str,
+    room: str | None,
+    *,
+    direct: bool = False,
 ) -> bool:
-    """Return True when sender may view or change a room RSS template."""
+    """Return True when sender may manage an RSS destination template."""
     if not room:
         return False
+    if direct:
+        return await _sender_role(bot, sender_jid) <= Role.TRUSTED
     return await _sender_can_manage_rss_room(bot, sender_jid, room)
 async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
     """Handle global-, room-, and feed-scoped RSS template commands."""
@@ -372,30 +427,75 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
             )
             return
     else:
-        room, feed_url, rest = _split_template_scope_args(msg, is_room, rest)
+        room, feed_url, rest = _split_template_scope_args(
+            msg,
+            is_room,
+            rest,
+            sender_jid=sender_jid,
+        )
         if not room:
             bot.reply(msg, _rss_template_usage(bot))
             return
 
-        if not await _sender_can_manage_template(bot, sender_jid, room):
-            bot.reply(
-                msg,
-                "🔴 You need a global moderator role, or an RSS plugin grant "
-                f"and owner/admin affiliation in {room}.",
-            )
+        direct_scope = _is_personal_template_scope(
+            msg,
+            is_room,
+            sender_jid,
+            room,
+        )
+        if not await _sender_can_manage_template(
+            bot,
+            sender_jid,
+            room,
+            direct=direct_scope,
+        ):
+            if direct_scope:
+                bot.reply(
+                    msg,
+                    "🔴 Direct RSS templates require trusted role or higher.",
+                )
+            else:
+                bot.reply(
+                    msg,
+                    "🔴 You need a global moderator role, or an RSS plugin "
+                    f"grant and owner/admin affiliation in {room}.",
+                )
             return
+
+    if global_default:
+        direct_scope = False
 
     feed = None
     if feed_url:
-        feed = await _template_feed_for_room(store, room, feed_url)
+        feed = await _template_feed_for_room(
+            store,
+            room,
+            feed_url,
+            direct=direct_scope,
+        )
         if feed is None:
-            bot.reply(msg, f"🔴 Feed is not configured for {room}: {feed_url}")
+            destination_label = (
+                f"direct user {room}" if direct_scope else room
+            )
+            bot.reply(
+                msg,
+                f"🔴 Feed is not configured for {destination_label}: "
+                f"{feed_url}",
+            )
             return
 
     scope = (
         "global default"
         if global_default
-        else f"{room} / {feed_url}" if feed_url else room
+        else (
+            f"direct user {room} / {feed_url}"
+            if direct_scope and feed_url
+            else f"direct user {room}"
+            if direct_scope
+            else f"{room} / {feed_url}"
+            if feed_url
+            else room
+        )
     )
 
     if action == "show":
@@ -414,7 +514,7 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
                 source = "feed custom"
                 template = feed_template
             elif room_template:
-                source = "room custom"
+                source = "personal custom" if direct_scope else "room custom"
                 template = room_template
             elif default_template:
                 source = "global default"
@@ -425,7 +525,7 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         else:
             template = await get_room_template(store, room)
             if template:
-                source = "custom"
+                source = "personal custom" if direct_scope else "custom"
             else:
                 template = await get_default_template(store)
                 source = "global default" if template else "built-in default"
@@ -450,12 +550,17 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
             removed = await unset_feed_template(store, room, feed_url)
             event_type = "rss_feed_template_unset"
             success = f"✅ RSS feed template reset for {scope}."
-            unchanged = f"ℹ️ {scope} already uses the room/default RSS template."
+            fallback_name = "personal/default" if direct_scope else "room/default"
+            unchanged = f"ℹ️ {scope} already uses the {fallback_name} RSS template."
         else:
             removed = await unset_room_template(store, room)
             event_type = "rss_template_unset"
-            success = f"✅ RSS template reset to default for {room}."
-            unchanged = f"ℹ️ {room} already uses the default RSS template."
+            if direct_scope:
+                success = f"✅ Personal RSS template reset to default for {room}."
+                unchanged = f"ℹ️ {room} already uses the default RSS template."
+            else:
+                success = f"✅ RSS template reset to default for {room}."
+                unchanged = f"ℹ️ {room} already uses the default RSS template."
         if removed:
             bot.reply(msg, success)
             await audit_event(
@@ -493,7 +598,7 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         if global_default:
             await set_default_template(store, template)
             event_type = "rss_default_template_set"
-            success = "✅ Global default RSS template set for all rooms."
+            success = "✅ Global default RSS template set for all destinations."
         elif feed_url:
             await set_feed_template(store, room, feed_url, template)
             event_type = "rss_feed_template_set"
@@ -501,7 +606,11 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
         else:
             await set_room_template(store, room, template)
             event_type = "rss_template_set"
-            success = f"✅ RSS template set for {room}."
+            success = (
+                f"✅ Personal RSS template set for {room}."
+                if direct_scope
+                else f"✅ RSS template set for {room}."
+            )
         bot.reply(
             msg,
             f"{success}\nPreview:\n"
@@ -627,7 +736,7 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
 @command(
     "rss",
     role=Role.USER,
-    short="Manage RSS feed subscriptions for rooms.",
+    short="Manage RSS feed subscriptions for rooms and direct users.",
     usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
     examples=[
         "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
@@ -671,6 +780,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [rooms|mods|trusted|room_jid] [page|all|last]
     {prefix}rss template [show|set|unset|test] [default|room_jid] [feedurl] [template]
+    In direct chat, omit room_jid to manage your personal template.
     """
     store = bot.db.users.plugin("rss")
 
@@ -1110,6 +1220,7 @@ async def _delete_direct_feed_target(bot, msg, url, store, target: str):
         await _cancel_feed_task(bot, url)
     else:
         feed["users"] = users
+        await unset_feed_template(store, target, url)
     await save_feeds(store, feeds)
     bot.reply(msg, f"🗑 Removed direct RSS subscription for {target}: {url}")
 

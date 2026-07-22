@@ -1,8 +1,5 @@
 import logging
 
-from slixmpp.stanza.presence import Presence
-from slixmpp.xmlstream import ET
-
 # === set up logging ===
 log = logging.getLogger(__name__)
 
@@ -56,40 +53,48 @@ class PresenceManager:
             return None
         return str(avatar_hash)
 
-    def _append_avatar_hash(self, presence, avatar_hash):
-        """Append the XEP-0153 vCard avatar hash payload."""
-        x = ET.Element("{vcard-temp:x:update}x")
-        photo = ET.SubElement(x, "photo")
-        photo.text = avatar_hash
-        presence.append(x)
+    @staticmethod
+    def _set_avatar_hash(presence, avatar_hash):
+        """Set one XEP-0153 avatar payload on a stream-bound presence.
+
+        XEP-0153 registers ``vcard_temp_update`` as a stanza plugin. Using the
+        plugin interface lets Slixmpp's outgoing filter update the same XML
+        element instead of appending a second ``<x/>`` payload.
+        """
+        presence["vcard_temp_update"]["photo"] = avatar_hash
 
     def _send_presence(self, pto=None):
-        """
-        Send one presence stanza, including the avatar hash when known.
+        """Create and send one stream-bound presence stanza.
 
-        Slixmpp's convenience send_presence() helper does not let us append the
-        XEP-0153 payload, so we build the stanza manually only when needed.
+        Building ``Presence()`` directly leaves the stanza detached from the
+        active XML stream. Slixmpp may later replay that stanza to a newly
+        subscribed roster contact, which then fails with "Tried to send stanza
+        without a stream". ``make_presence()`` associates it with the bot's
+        stream from the beginning.
         """
         show = self.status.get("show", "online")
         status = self.status.get("status", "")
+        kwargs = {
+            "pshow": None if show == "online" else show,
+            "pstatus": status,
+        }
+        if pto is not None:
+            kwargs["pto"] = pto
+
+        presence = self.bot.make_presence(**kwargs)
         avatar_hash = self._avatar_hash()
+        if avatar_hash:
+            self._set_avatar_hash(presence, avatar_hash)
 
-        if not avatar_hash:
-            kwargs = {"pshow": show, "pstatus": status}
-            if pto is not None:
-                kwargs["pto"] = pto
-            self.bot.send_presence(**kwargs)
-            return
+        if getattr(presence, "stream", None) is None:
+            log.warning(
+                "[PRESENCE] Skipping unbound presence stanza%s",
+                f" to {pto}" if pto else "",
+            )
+            return False
 
-        presence = Presence()
-        if pto:
-            presence["to"] = pto
-        if show and show != "online":
-            presence["show"] = show
-        if status:
-            presence["status"] = status
-        self._append_avatar_hash(presence, avatar_hash)
-        self.bot.send(presence)
+        presence.send()
+        return True
 
     def broadcast(self):
         """

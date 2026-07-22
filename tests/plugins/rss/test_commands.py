@@ -549,7 +549,7 @@ async def test_rss_global_default_template_show_set_test_unset(make_bot):
         msg,
         False,
     )
-    assert "Global default RSS template set for all rooms" in bot.replies[-1][1]
+    assert "Global default RSS template set for all destinations" in bot.replies[-1][1]
     assert bot.plugin_store[rss.RSS_DEFAULT_TEMPLATE_KEY] == "GLOBAL $title\n$link"
 
     await rss.rss_command(
@@ -820,7 +820,8 @@ async def test_rss_template_command_usage_permission_and_error_paths(make_bot):
     msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
 
     await rss.rss_command(bot, "admin@example.org", "admin", ["template"], msg, False)
-    assert "Usage:" in bot.replies[-1][1]
+    assert "RSS template for direct user admin@example.org" in bot.replies[-1][1]
+    assert "built-in default" in bot.replies[-1][1]
 
     bot.get_user_role = AsyncMock(return_value=Role.USER)
     await rss.rss_command(
@@ -925,6 +926,149 @@ async def test_rss_feed_template_command_private_room_and_default_paths(make_bot
         False,
     )
     assert "RSS feed template reset" in bot.replies[-1][1]
+
+@pytest.mark.asyncio
+async def test_rss_personal_template_show_set_test_unset_in_direct_chat(make_bot):
+    bot = make_bot()
+    user = "trusted@example.org"
+    msg = {"from": SimpleNamespace(bare=user), "type": "chat"}
+    bot.get_user_role = AsyncMock(return_value=Role.TRUSTED)
+
+    await rss.rss_command(bot, user, "trusted", ["template"], msg, False)
+    assert f"RSS template for direct user {user}" in bot.replies[-1][1]
+    assert "built-in default" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["template", "set", "DIRECT", "$feed_title", "::", "$title"],
+        msg,
+        False,
+    )
+    assert f"Personal RSS template set for {user}" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_TEMPLATES_KEY][user] == (
+        "DIRECT $feed_title :: $title"
+    )
+
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["template", "test"],
+        msg,
+        False,
+    )
+    assert "DIRECT Example Feed :: Example entry" in bot.replies[-1][1]
+
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["template", "unset"],
+        msg,
+        False,
+    )
+    assert "Personal RSS template reset" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_TEMPLATES_KEY] == {}
+
+
+@pytest.mark.asyncio
+async def test_rss_personal_feed_template_requires_direct_subscription(make_bot):
+    bot = make_bot()
+    user = "trusted@example.org"
+    other = "other@example.org"
+    url = "https://example.org/direct.rss"
+    msg = {"from": SimpleNamespace(bare=user), "type": "chat"}
+    bot.get_user_role = AsyncMock(return_value=Role.TRUSTED)
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Direct Feed",
+            "link": "https://example.org/",
+            "rooms": [],
+            "users": {other: {"role": "trusted"}},
+        }
+    }
+
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["template", "set", url, "DIRECT", "$title"],
+        msg,
+        False,
+    )
+    assert f"Feed is not configured for direct user {user}" in bot.replies[-1][1]
+
+    bot.plugin_store[rss.RSS_KEY][url]["users"][user] = {"role": "trusted"}
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["template", "set", url, "DIRECT", "$title"],
+        msg,
+        False,
+    )
+    assert f"direct user {user} / {url}" in bot.replies[-1][1]
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY][user][url] == (
+        "DIRECT $title"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_personal_template_requires_trusted_role(make_bot):
+    bot = make_bot()
+    user = "user@example.org"
+    msg = {"from": SimpleNamespace(bare=user), "type": "chat"}
+    bot.get_user_role = AsyncMock(return_value=Role.USER)
+
+    await rss.rss_command(
+        bot,
+        user,
+        "user",
+        ["template", "set", "$title"],
+        msg,
+        False,
+    )
+
+    assert "Direct RSS templates require trusted role or higher" in bot.replies[-1][1]
+    assert rss.RSS_TEMPLATES_KEY not in bot.plugin_store
+
+
+@pytest.mark.asyncio
+async def test_direct_feed_delete_cleans_personal_feed_template(make_bot):
+    bot = make_bot()
+    user = "trusted@example.org"
+    other = "other@example.org"
+    url = "https://example.org/direct.rss"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Direct Feed",
+            "rooms": [],
+            "users": {
+                user: {"role": "trusted"},
+                other: {"role": "trusted"},
+            },
+        }
+    }
+    bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] = {
+        user: {url: "USER $title"},
+        other: {url: "OTHER $title"},
+    }
+
+    await rss_commands._delete_direct_feed_target(
+        bot,
+        {"type": "chat"},
+        url,
+        bot.plugin_store,
+        user,
+    )
+
+    assert user not in bot.plugin_store[rss.RSS_KEY][url]["users"]
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] == {
+        other: {url: "OTHER $title"}
+    }
+
 
 @pytest.mark.asyncio
 async def test_save_last_id(monkeypatch):

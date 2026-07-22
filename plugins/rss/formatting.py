@@ -57,7 +57,8 @@ def _rss_template_usage(bot=None) -> str:
         f"       {prefix}rss template set [room_jid] [feedurl] <template>\n"
         f"       {prefix}rss template unset [room_jid] [feedurl]\n"
         f"       {prefix}rss template test [room_jid] [feedurl] [template]\n"
-        f"       {prefix}rss template <show|set|unset|test> default [template]"
+        f"       {prefix}rss template <show|set|unset|test> default [template]\n"
+        "In a direct chat, omit room_jid to manage your personal RSS template."
     )
 def _rss_template_variables_text() -> str:
     """Return the supported template variables as a readable list."""
@@ -212,14 +213,21 @@ async def _post_new_entries(bot, store, url, feed_title,
         direct_users = sorted((feed or {}).get("users", {}))
         direct_delivered = 0
         direct_attempted = 0
-        if direct_users:
-            direct_msg = _build_rss_message_from_context(context)
-            direct_delivered, direct_attempted = await _post_entry_to_users(
+        for direct_user in direct_users:
+            template = await get_effective_template(
+                store,
+                direct_user,
+                url,
+            )
+            direct_msg = _build_rss_message_from_context(context, template)
+            delivered, attempted = await _post_entry_to_users(
                 bot,
-                direct_users,
+                [direct_user],
                 direct_msg,
             )
-            posted = direct_delivered > 0 or posted
+            direct_delivered += delivered
+            direct_attempted += attempted
+        posted = direct_delivered > 0 or posted
 
         if direct_attempted and direct_delivered < direct_attempted:
             log.warning(
