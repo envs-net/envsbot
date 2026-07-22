@@ -74,6 +74,7 @@ class PresenceManager:
         """
         show = self.status.get("show", "online")
         status = self.status.get("status", "")
+        avatar_hash = self._avatar_hash()
         kwargs = {
             "pshow": None if show == "online" else show,
             "pstatus": status,
@@ -81,8 +82,18 @@ class PresenceManager:
         if pto is not None:
             kwargs["pto"] = pto
 
+        # XEP-0153's outgoing presence filter resolves the cached avatar hash
+        # using the stanza sender. Client presences normally omit ``from``,
+        # which can make the filter replace an already attached photo hash
+        # with an empty value. Use the exact bound full JID whenever an avatar
+        # is advertised so the filter resolves the bot's own hash reliably.
+        if avatar_hash:
+            boundjid = getattr(self.bot, "boundjid", None)
+            sender = str(getattr(boundjid, "full", "") or "").strip()
+            if sender:
+                kwargs["pfrom"] = sender
+
         presence = self.bot.make_presence(**kwargs)
-        avatar_hash = self._avatar_hash()
         if avatar_hash:
             self._set_avatar_hash(presence, avatar_hash)
 

@@ -28,6 +28,7 @@ import hashlib
 import logging
 import os
 import importlib.util
+import inspect
 
 from slixmpp.xmlstream import ET
 from utils.config import config
@@ -217,6 +218,31 @@ async def update_vcard(bot):
 # -------------------------------------------------
 # AVATAR UPDATE
 # -------------------------------------------------
+async def _cache_xep0153_hash(bot, image_hash):
+    """Seed Slixmpp's XEP-0153 hash cache for outgoing presence.
+
+    The plugin's outgoing filter rewrites ``vcard_temp_update/photo`` from its
+    internal hash cache. Explicitly seeding the cache removes a startup race
+    between profile loading and the plugin's own session-start vCard lookup.
+    """
+    try:
+        plugin = bot["xep_0153"]
+        api = getattr(plugin, "api", None)
+        if api is None:
+            return False
+        setter = api["set_hash"]
+        result = setter(bot.boundjid, args=image_hash)
+        if inspect.isawaitable(result):
+            await result
+        return True
+    except Exception:
+        log.debug(
+            "[_REG_PROFILE] Could not seed XEP-0153 avatar hash cache",
+            exc_info=True,
+        )
+        return False
+
+
 async def update_avatar(bot):
     """
     Publish the bot's avatar using XMPP avatar protocols.
@@ -272,6 +298,7 @@ async def update_avatar(bot):
 
         if stored_hash == new_hash:
             log.debug("[_REG_PROFILE] Avatar unchanged — skipping upload")
+            await _cache_xep0153_hash(bot, image_hash)
             if hasattr(bot, "presence"):
                 bot.presence.broadcast()
             return
@@ -298,6 +325,7 @@ async def update_avatar(bot):
             avatar=avatar,
             mtype=avatar_type,
         )
+        await _cache_xep0153_hash(bot, image_hash)
 
         write_hash(AVATAR_HASH_FILE, new_hash)
         if hasattr(bot, "presence"):

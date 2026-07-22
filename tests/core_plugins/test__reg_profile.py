@@ -304,6 +304,52 @@ async def test_update_vcard_success(monkeypatch, tmp_path):
 # More: update_avatar setup_profile, on_load, on_ready
 
 @pytest.mark.asyncio
+async def test_cache_xep0153_hash_supports_async_api_and_missing_api():
+    calls = []
+
+    async def set_hash(jid, *, args):
+        calls.append((jid, args))
+
+    boundjid = types.SimpleNamespace(
+        bare="bot@example.org",
+        full="bot@example.org/envsbot",
+    )
+    class AvatarBot(dict):
+        def __init__(self, plugins):
+            super().__init__(plugins)
+            self.boundjid = boundjid
+
+    bot = AvatarBot({
+        "xep_0153": types.SimpleNamespace(api={"set_hash": set_hash}),
+    })
+
+    assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is True
+    assert calls == [(boundjid, "abc123")]
+
+    sync_calls = []
+
+    def set_hash_sync(jid, *, args):
+        sync_calls.append((jid, args))
+        return None
+
+    bot["xep_0153"] = types.SimpleNamespace(
+        api={"set_hash": set_hash_sync},
+    )
+    assert await _reg_profile._cache_xep0153_hash(bot, "def456") is True
+    assert sync_calls == [(boundjid, "def456")]
+
+    bot["xep_0153"] = types.SimpleNamespace()
+    assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is False
+
+    class BrokenAPI:
+        def __getitem__(self, key):
+            raise RuntimeError(key)
+
+    bot["xep_0153"] = types.SimpleNamespace(api=BrokenAPI())
+    assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is False
+
+
+@pytest.mark.asyncio
 async def test_update_avatar_all_paths(monkeypatch, tmp_path):
     # Cover avatar_path missing, not exists, bad type, unchanged,
     # error, success
@@ -401,17 +447,26 @@ async def test_update_avatar_all_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(builtins, "open", open_mock)
     monkeypatch.setattr(_reg_profile, "sha1", lambda d: "hash1")
     monkeypatch.setattr(_reg_profile, "read_hash", lambda p: "v2:hash1")
+    cached_hashes = []
+
+    async def cache_hash(current_bot, image_hash):
+        cached_hashes.append((current_bot, image_hash))
+        return True
+
+    monkeypatch.setattr(_reg_profile, "_cache_xep0153_hash", cache_hash)
     monkeypatch.setattr(
         _reg_profile,
         "log",
         types.SimpleNamespace(
             info=lambda m: None,
+            debug=lambda m: None,
             error=lambda m: None,
         ),
     )
 
     # Exists, unchanged
     await _reg_profile.update_avatar(bot)
+    assert cached_hashes[-1] == (bot, "hash1")
 
     # Exists, bad type
     monkeypatch.setattr(_reg_profile, "read_hash", lambda p: "different")
@@ -483,6 +538,7 @@ async def test_update_avatar_all_paths(monkeypatch, tmp_path):
     ]
     assert wrote
     assert wrote[0][1] == "v2:newhash"
+    assert cached_hashes[-1] == (bot2, "newhash")
 
 
 @pytest.mark.asyncio

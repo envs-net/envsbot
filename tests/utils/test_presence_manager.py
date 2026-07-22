@@ -1,4 +1,5 @@
 import logging
+import types
 from xml.etree import ElementTree as ET
 
 from utils.presence_manager import PresenceManager
@@ -44,6 +45,10 @@ class DummyBot:
         self.calls = []
         self.sent_stanzas = []
         self.bot_plugins = type("Plugins", (), {"plugins": {}})()
+        self.boundjid = types.SimpleNamespace(
+            bare="bot@example.org",
+            full="bot@example.org/envsbot",
+        )
         self.bind_presence = True
 
     def make_presence(self, **kwargs):
@@ -115,6 +120,10 @@ def test_broadcast_with_avatar_hash_uses_single_xep0153_payload():
     assert len(bot.sent_stanzas) == 2
     global_presence, room_presence = bot.sent_stanzas
     assert str(room_presence["to"]) == "room1/BotNick"
+    assert all(
+        call["pfrom"] == "bot@example.org/envsbot"
+        for call in bot.calls
+    )
     for presence in (global_presence, room_presence):
         assert presence.stream is bot
         updates = presence.xml.findall("{vcard-temp:x:update}x")
