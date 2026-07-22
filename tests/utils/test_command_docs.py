@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from utils import command_docs
 from utils.command_docs import (
     _checkout_root,
