@@ -184,14 +184,18 @@ def _format_duration(seconds: int) -> str:
 
     return " ".join(parts[:3])
 async def _post_rss_entry_to_rooms(bot, store, rooms, url, context):
-    """Post one RSS entry to room and direct subscribers."""
-    posted = False
+    """Post one RSS entry to rooms and return ``(delivered, attempted)``."""
+    delivered = 0
+    attempted = 0
     for room in rooms:
         template = await get_effective_template(store, room, url)
         msg = _build_rss_message_from_context(context, template)
-        if await _post_entry_to_rooms(bot, [room], msg):
-            posted = True
-    return posted
+        room_delivered, room_attempted = await _post_entry_to_rooms(
+            bot, [room], msg
+        )
+        delivered += room_delivered
+        attempted += room_attempted
+    return delivered, attempted
 async def _post_new_entries(bot, store, url, feed_title,
                             feed_link, rooms, new_entries, feed: dict | None = None):
     """Post entries using the freshest persisted destination state.
@@ -228,9 +232,10 @@ async def _post_new_entries(bot, store, url, feed_title,
             entry_date=_entry_date(entry),
         )
 
-        posted = await _post_rss_entry_to_rooms(
+        room_delivered, room_attempted = await _post_rss_entry_to_rooms(
             bot, store, active_rooms, url, context
         )
+        posted = room_delivered > 0
         direct_users = sorted(
             current_feed.get("users", {})
             if isinstance(current_feed.get("users"), dict)
@@ -267,6 +272,17 @@ async def _post_new_entries(bot, store, url, feed_title,
             direct_delivered += delivered
             direct_attempted += attempted
         posted = direct_delivered > 0 or posted
+
+        if room_attempted and room_delivered < room_attempted:
+            log.warning(
+                "[RSS] Room delivery incomplete for %s entry=%s "
+                "delivered=%s/%s; retaining last_id for retry",
+                url,
+                entry_id,
+                room_delivered,
+                room_attempted,
+            )
+            break
 
         if direct_attempted and direct_delivered < direct_attempted:
             log.warning(
@@ -346,23 +362,34 @@ def _rss_list_page(args, total: int, page_size: int):
     total_pages = max(1, (total + effective_page_size - 1) // effective_page_size)
     page = total_pages if request.page == -1 else max(1, request.page)
     return page, False, effective_page_size
-async def _post_entry_to_rooms(bot, rooms, msg):
-    posted = False
+async def _post_entry_to_rooms(bot, rooms, msg) -> tuple[int, int]:
+    """Send one RSS body to joined rooms and report delivery counts."""
+    delivered = 0
+    attempted = 0
     for room in rooms:
-        if room in JOINED_ROOMS:
-            bot.reply(
-                {
-                    "from": type("F", (), {"bare": room})(),
-                    "type": "groupchat",
-                },
-                msg,
-                mention=False,
-                thread=True,
-                rate_limit=False,
-                ephemeral=False,
+        if room not in JOINED_ROOMS:
+            continue
+        attempted += 1
+        try:
+            message = bot.make_message(
+                mto=room,
+                mbody=msg,
+                mtype="groupchat",
             )
-            posted = True
-    return posted
+            safe_send = getattr(bot, "_safe_send_message", None)
+            if callable(safe_send):
+                result = safe_send(message)
+                if inspect.isawaitable(result):
+                    result = await result
+            else:
+                result = message.send()
+                if inspect.isawaitable(result):
+                    result = await result
+            if result is not False:
+                delivered += 1
+        except Exception:
+            log.exception("[RSS] Failed room delivery to %s", room)
+    return delivered, attempted
 
 def _normalize_direct_user_jid(value) -> str | None:
     """Return a valid bare user JID for a direct RSS subscriber."""
@@ -392,8 +419,8 @@ async def _send_direct_rss_message(bot, user_jid: str, body: str) -> bool:
 
         result = message.send()
         if inspect.isawaitable(result):
-            await result
-        return True
+            result = await result
+        return result is not False
     except Exception:
         log.exception("[RSS] Failed direct delivery to %s", user_jid)
         return False

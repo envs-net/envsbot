@@ -26,8 +26,8 @@ class MessageMixin:
         try:
             result = message.send()
             if inspect.isawaitable(result):
-                await result
-            return True
+                result = await result
+            return result is not False
         except Exception as exc:
             log.exception("[BOT] Failed to send message: %s", exc)
             return False

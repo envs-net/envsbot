@@ -135,25 +135,20 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
-    posts = []
-
-    def fake_reply(msg, txt, **kwargs):
-        posts.append(("reply", txt, kwargs))
-
-    bot.reply = fake_reply
-
     with pytest.raises(asyncio.CancelledError):
         await rss.rss_check_loop(bot, store, url, 1)
 
-    assert len(posts) == 1
-    assert "ET2" in posts[0][1]
-    assert "http://f.com/a2" in posts[0][1]
     assert bot.sent_messages == [
+        {
+            "mto": room,
+            "mbody": "[RSS] (Feed) ET2 - ED2\nhttp://f.com/a2",
+            "mtype": "groupchat",
+        },
         {
             "mto": "alice@example.org",
             "mbody": "[RSS] (Feed) ET2 - ED2\nhttp://f.com/a2",
             "mtype": "chat",
-        }
+        },
     ]
     assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a2"
 
@@ -254,7 +249,7 @@ async def test_post_new_entries_uses_room_templates(monkeypatch, make_bot):
         [(entry, "entry-1")],
     )
 
-    posted = [reply[1] for reply in bot.replies]
+    posted = [message["mbody"] for message in bot.sent_messages]
     assert "FEED Entry -> https://example.org/feed.xml" in posted
     assert "CUSTOM Feed :: Entry :: https://example.org/a" in posted
     assert "GLOBAL Entry -> https://example.org/a" in posted
@@ -360,7 +355,7 @@ async def test_post_rss_entry_to_rooms_reports_any_success(monkeypatch, make_bot
 
     async def fake_post(_bot, rooms, msg):
         calls.append((rooms, msg))
-        return rooms == ["joined@conference.example.org"]
+        return (1, 1) if rooms == ["joined@conference.example.org"] else (0, 1)
 
     monkeypatch.setattr(rss_formatting, "_post_entry_to_rooms", fake_post)
     store[rss.RSS_TEMPLATES_KEY] = {
@@ -368,7 +363,7 @@ async def test_post_rss_entry_to_rooms_reports_any_success(monkeypatch, make_bot
         "joined@conference.example.org": "JOINED $title",
     }
 
-    posted = await rss._post_rss_entry_to_rooms(
+    delivered, attempted = await rss._post_rss_entry_to_rooms(
         bot,
         store,
         ["silent@conference.example.org", "joined@conference.example.org"],
@@ -376,11 +371,34 @@ async def test_post_rss_entry_to_rooms_reports_any_success(monkeypatch, make_bot
         context,
     )
 
-    assert posted is True
+    assert (delivered, attempted) == (1, 2)
     assert calls == [
         (["silent@conference.example.org"], "SILENT Entry"),
         (["joined@conference.example.org"], "JOINED Entry"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_post_entry_to_rooms_awaits_send_and_reports_counts(
+    monkeypatch, make_bot
+):
+    bot = make_bot()
+    joined = "joined@conference.example.org"
+    failed = "failed@conference.example.org"
+    absent = "absent@conference.example.org"
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, joined, True)
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, failed, True)
+
+    async def selective_send(message):
+        bot.sent_messages.append(message)
+        return message["mto"] != failed
+
+    bot._safe_send_message = selective_send
+
+    assert await rss_formatting._post_entry_to_rooms(
+        bot, [joined, failed, absent], "[RSS] entry"
+    ) == (1, 2)
+    assert [message["mto"] for message in bot.sent_messages] == [joined, failed]
 
 
 @pytest.mark.asyncio
@@ -396,7 +414,7 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
 
     async def fake_post(_bot, _store, rooms, feed_url, context):
         calls.append((rooms, feed_url, context["title"]))
-        return False
+        return 0, 0
 
     async def fake_save(_bot, _store, _url, _entry_id):
         return False
@@ -525,6 +543,20 @@ async def test_send_direct_rss_message_supports_send_fallback_and_errors():
         "[RSS] entry",
     ) is True
     assert sent == [True]
+
+    class RejectedMessage:
+        async def send(self):
+            return False
+
+    class RejectedBot:
+        def make_message(self, **_kwargs):
+            return RejectedMessage()
+
+    assert await rss_formatting._send_direct_rss_message(
+        RejectedBot(),
+        "alice@example.org",
+        "[RSS] entry",
+    ) is False
 
     class BrokenBot:
         def make_message(self, **_kwargs):
@@ -659,6 +691,46 @@ async def test_post_new_entries_retains_cursor_when_direct_delivery_fails(
         feed["title"],
         feed["link"],
         [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    assert store[rss.RSS_KEY][url]["last_id"] == "old-entry"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 0
+    assert "last_posted" not in store[rss.RSS_KEY][url]
+
+
+@pytest.mark.asyncio
+async def test_post_new_entries_retains_cursor_when_room_delivery_fails(
+    monkeypatch, make_bot
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/room.xml"
+    room = "room@conference.example.org"
+    feed = {
+        "title": "Room Feed",
+        "link": "https://example.org/",
+        "rooms": [room],
+        "users": {},
+        "last_id": "old-entry",
+        "posted_count": 0,
+    }
+    store[rss.RSS_KEY] = {url: feed}
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
+
+    async def failed_send(_message):
+        return False
+
+    bot._safe_send_message = failed_send
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [room],
         [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
         feed=feed,
     )

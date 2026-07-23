@@ -122,6 +122,17 @@ async def test_safe_send_message_sync_and_async(bot):
     assert future.done()
 
     msg = MagicMock()
+    msg.send.return_value = False
+    assert await bot._safe_send_message(msg) is False
+
+    msg = MagicMock()
+    failed_future = asyncio.get_running_loop().create_future()
+    asyncio.get_running_loop().call_soon(failed_future.set_result, False)
+    msg.send.return_value = failed_future
+    assert await bot._safe_send_message(msg) is False
+    assert failed_future.done()
+
+    msg = MagicMock()
 
     def raise_exc():
         raise Exception("fail")

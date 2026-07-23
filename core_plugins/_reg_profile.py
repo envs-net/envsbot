@@ -249,8 +249,8 @@ async def _cache_xep0153_hash(bot, image_hash):
         setter = api["set_hash"]
         result = setter(bot.boundjid, args=image_hash)
         if inspect.isawaitable(result):
-            await result
-        return True
+            result = await result
+        return result is not False
     except Exception:
         log.debug(
             "[_REG_PROFILE] Could not seed XEP-0153 avatar hash cache",

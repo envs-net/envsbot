@@ -338,6 +338,15 @@ async def test_cache_xep0153_hash_supports_async_api_and_missing_api():
     assert await _reg_profile._cache_xep0153_hash(bot, "def456") is True
     assert sync_calls == [(boundjid, "def456")]
 
+    async def reject_hash(_jid, *, args):
+        assert args == "rejected"
+        return False
+
+    bot["xep_0153"] = types.SimpleNamespace(
+        api={"set_hash": reject_hash},
+    )
+    assert await _reg_profile._cache_xep0153_hash(bot, "rejected") is False
+
     bot["xep_0153"] = types.SimpleNamespace()
     assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is False
 
