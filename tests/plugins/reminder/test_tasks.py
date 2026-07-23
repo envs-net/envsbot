@@ -27,6 +27,7 @@ async def test_schedule_and_cancel_task(dummy_bot, dummy_msg):
 
     async def fake_send(bot, mto, mbody, mtype):
         called.append((mto, mbody, mtype))
+        return True
     # Patch sender for full coverage
     with patch("plugins.reminder.tasks._send_reminder_message", new=fake_send):
         # Schedule an immediate reminder and wait until the task is done.
@@ -93,3 +94,38 @@ async def test_cancel_active_tasks_for_room_only_cancels_matching_pending(dummy_
     assert 2 not in reminder.ACTIVE_REMINDERS
     assert 3 in reminder.ACTIVE_REMINDERS
     reminder.ACTIVE_REMINDERS.clear()
+
+
+@pytest.mark.asyncio
+async def test_failed_reminder_send_keeps_database_row_pending(dummy_bot, monkeypatch):
+    reminder_runtime.REMINDER_ENABLED = True
+    delete = AsyncMock()
+    monkeypatch.setattr("plugins.reminder.tasks.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr(
+        "plugins.reminder.tasks._send_reminder_message",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr("plugins.reminder.tasks._delete_reminder", delete)
+
+    await reminder.schedule_reminder_task(
+        dummy_bot,
+        77,
+        "alice@example.org",
+        "Alice",
+        "important",
+        0,
+        None,
+    )
+
+    delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancel_room_tasks_ignores_pending_rows_without_runtime_task(dummy_bot):
+    reminder.ACTIVE_REMINDERS.clear()
+    dummy_bot.db.fetch_all = AsyncMock(return_value=[
+        {"id": 404, "room_jid": "room@conf"},
+    ])
+
+    assert await reminder._cancel_active_tasks_for_room(dummy_bot, "room@conf") == 0
+    assert reminder.ACTIVE_REMINDERS == {}

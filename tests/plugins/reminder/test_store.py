@@ -89,13 +89,36 @@ async def test_room_reminder_state_and_send_message(monkeypatch):
             sent.append("fallback")
 
     bot.make_message.return_value = Message()
-    bot._safe_send_message = AsyncMock(side_effect=lambda msg: sent.append("safe"))
-    await reminder._send_reminder_message(bot, "user@example.org", "body", "chat")
+    bot._safe_send_message = AsyncMock(
+        side_effect=lambda msg: sent.append("safe") or True
+    )
+    assert await reminder._send_reminder_message(
+        bot, "user@example.org", "body", "chat"
+    ) is True
     assert sent == ["safe"]
 
+    bot._safe_send_message = AsyncMock(return_value=False)
+    assert await reminder._send_reminder_message(
+        bot, "user@example.org", "body", "chat"
+    ) is False
+
     delattr(bot, "_safe_send_message")
-    await reminder._send_reminder_message(bot, "room@conf", "body", "groupchat")
+    assert await reminder._send_reminder_message(
+        bot, "room@conf", "body", "groupchat"
+    ) is True
     assert sent[-1] == "fallback"
+
+    awaited = []
+
+    class AsyncMessage:
+        async def send(self):
+            awaited.append("async-fallback")
+
+    bot.make_message.return_value = AsyncMessage()
+    assert await reminder._send_reminder_message(
+        bot, "room@conf", "body", "groupchat"
+    ) is True
+    assert awaited == ["async-fallback"]
 
 
 @pytest.mark.asyncio

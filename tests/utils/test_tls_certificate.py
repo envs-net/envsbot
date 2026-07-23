@@ -729,3 +729,21 @@ def test_public_endpoint_addresses_preserve_order_deduplicate_and_cap(monkeypatc
     assert calls == [
         ("example.org", 5269, certificate.socket.AF_UNSPEC, stream)
     ]
+
+
+def test_public_address_from_addrinfo_rejects_malformed_and_private_entries():
+    stream = certificate.socket.SOCK_STREAM
+    ipv4 = certificate.socket.AF_INET
+
+    assert certificate._public_address_from_addrinfo(()) is None
+    assert certificate._public_address_from_addrinfo((ipv4, stream, 6, "", None)) is None
+    assert certificate._public_address_from_addrinfo(
+        (ipv4, stream, 6, "", ("not-an-ip", 443))
+    ) is None
+    assert certificate._public_address_from_addrinfo(
+        (ipv4, stream, 6, "", ("127.0.0.1", 443))
+    ) is None
+    assert certificate._public_address_from_addrinfo(
+        (ipv4, stream, 6, "", ("8.8.8.8", 443))
+    ) == (ipv4, "8.8.8.8")
+    assert certificate.MAX_CERTIFICATE_ENDPOINT_ADDRESSES == 4

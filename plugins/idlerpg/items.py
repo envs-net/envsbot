@@ -107,9 +107,11 @@ def _random_percent_amount(player: dict[str, Any], min_percent: int, max_percent
 
 
 def _roll_weighted_item_level(player_level: int) -> int:
-    max_level = int(max(1, player_level) * 1.5)
-    weights = [1 / (1.4 ** level) for level in range(1, max_level + 1)]
-    return int(random.choices(range(1, max_level + 1), weights=weights, k=1)[0])
+    normalized_level = max(1, int(player_level))
+    max_level = normalized_level + (normalized_level // 2)
+    population = range(1, max_level + 1)
+    weights = [1.4 ** -level for level in population]
+    return int(random.choices(population, weights=weights, k=1)[0])
 
 
 def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:

@@ -386,3 +386,34 @@ def test_check_config_sample_handles_loader_failure_warning_preview_and_empty_sa
         True,
         "config sample: ok (0 keys)",
     )
+
+
+def test_preflight_registry_and_config_checks_contain_malformed_inputs(monkeypatch):
+    monkeypatch.setattr(
+        "utils.command_registry.decorated_command_records",
+        lambda: [("broken",)],
+    )
+    ok, message = preflight._check_command_registry()
+    assert ok is False
+    assert message.startswith("command registry: ValueError:")
+
+    unnamed = SimpleNamespace(name=None, short=" ", usage="x")
+    monkeypatch.setattr(
+        "utils.command_registry.decorated_command_records",
+        lambda: [("plug", {}, unnamed)],
+    )
+    assert preflight._check_command_registry() == (
+        False,
+        "command registry: missing metadata for <unnamed>",
+    )
+
+    monkeypatch.setattr(preflight, "load_default_config_for_diff", lambda: {"a": 1})
+
+    def broken_warnings(_config):
+        raise RuntimeError("token=secret")
+
+    monkeypatch.setattr(preflight, "collect_config_warnings", broken_warnings)
+    ok, message = preflight._check_config_sample({"a": 1})
+    assert ok is False
+    assert message.startswith("config sample: RuntimeError:")
+    assert "secret" not in message

@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import urllib.request
+from urllib.parse import unquote, urlsplit
 from urllib.parse import urlparse
 
 from utils.config import config
@@ -73,7 +74,24 @@ def fetch_latest_release_version_via_github_api_sync(release_url: str) -> str:
     tag = str(payload.get("tag_name", "")).strip()
     if not tag:
         raise ValueError("GitHub API response did not contain tag_name")
-    return tag.lstrip("v")
+    return tag.removeprefix("v")
+
+
+def _release_tag_from_redirect_url(final_url: str) -> str:
+    """Extract one release tag path segment from a redirect URL."""
+    parsed = urlsplit(str(final_url))
+    marker = "/releases/tag/"
+    if marker not in parsed.path:
+        raise ValueError(f"Unexpected release redirect URL: {final_url}")
+
+    raw_tag = parsed.path.split(marker, 1)[1].strip("/")
+    if not raw_tag or "/" in raw_tag:
+        raise ValueError("Could not extract release tag from redirect URL")
+
+    tag = unquote(raw_tag).strip()
+    if not tag:
+        raise ValueError("Could not extract release tag from redirect URL")
+    return tag.removeprefix("v")
 
 
 def fetch_latest_release_version_via_redirect_sync(release_url: str) -> str:
@@ -88,14 +106,7 @@ def fetch_latest_release_version_via_redirect_sync(release_url: str) -> str:
     with urllib.request.urlopen(req, timeout=_timeout()) as response:
         final_url = response.geturl()
 
-    marker = "/releases/tag/"
-    if marker not in final_url:
-        raise ValueError(f"Unexpected release redirect URL: {final_url}")
-
-    tag = final_url.split(marker, 1)[1].strip().strip("/")
-    if not tag:
-        raise ValueError("Could not extract release tag from redirect URL")
-    return tag.lstrip("v")
+    return _release_tag_from_redirect_url(final_url)
 
 
 def fetch_latest_release_version_sync(release_url: str) -> str:
@@ -135,18 +146,23 @@ def _notification_type(bot, target: str) -> str:
     return notification_message_type(bot, target)
 
 
-async def send_update_notification(bot, remote_version: str) -> None:
-    """Send an update notification to the configured target."""
+async def send_update_notification(bot, remote_version: str) -> bool:
+    """Send an update notification to the configured target.
+
+    Return ``True`` only when the message was handed to the XMPP send path.
+    A failed send must not be recorded as notified, otherwise the periodic
+    worker suppresses every later retry for the same release.
+    """
     target = update_notification_target()
     if not target:
         log.debug("Version check found update but no notification target is configured")
-        return
+        return False
 
     message = getattr(bot, "make_message", None)
     safe_send = getattr(bot, "_safe_send_message", None)
     if not callable(message) or not callable(safe_send):
         log.debug("Version check notification skipped: bot send helpers unavailable")
-        return
+        return False
 
     await ensure_notification_target_joined(bot, target)
 
@@ -157,7 +173,7 @@ async def send_update_notification(bot, remote_version: str) -> None:
         f"Release page: {release_url}"
     )
     outbound = message(mto=target, mbody=body, mtype=_notification_type(bot, target))
-    await safe_send(outbound)
+    return await safe_send(outbound) is not False
 
 
 async def check_for_updates_once(
@@ -192,8 +208,8 @@ async def check_for_updates_once(
                 release_url,
             )
             if announce and getattr(bot, "last_update_notified_version", None) != remote_version:
-                await send_update_notification(bot, remote_version)
-                bot.last_update_notified_version = remote_version
+                if await send_update_notification(bot, remote_version):
+                    bot.last_update_notified_version = remote_version
             return True, remote_version, None
 
         return False, remote_version, None

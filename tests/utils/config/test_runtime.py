@@ -142,6 +142,78 @@ def test_idlerpg_runtime_values_include_original_balance_options():
     assert values["LEVEL_BATTLE_CHANCE_AT_25"] == 1.0
 
 
+def test_idlerpg_runtime_values_preserve_zero_chances_and_include_boss_options():
+    values = runtime._idlerpg_values({
+        "idlerpg": {
+            "event_chance": 0,
+            "item_chance": 0,
+            "battle_event_weight": 0,
+            "team_battle_event_weight": 0,
+            "boss_event_weight": 0,
+            "item_event_weight": 0,
+            "item_damage_event_weight": 0,
+            "item_steal_event_weight": 0,
+            "alignment_event_weight": 0,
+            "critical_strike_chance": 0,
+            "critical_strike_chance_good": 0,
+            "critical_strike_chance_evil": 0,
+            "item_drop_chance": 0,
+            "unique_item_chance": 0,
+            "level_battle_chance_below_25": 0,
+            "level_battle_chance_at_25": 0,
+            "boss_min_players": 4,
+            "boss_max_players": 7,
+            "boss_min_level": 20,
+            "boss_reward_percent": 15,
+            "boss_loss_percent": 6,
+            "boss_power_min_factor": 0.8,
+            "boss_power_max_factor": 1.4,
+        }
+    })
+
+    zero_keys = {
+        "EVENT_CHANCE",
+        "ITEM_CHANCE",
+        "BATTLE_EVENT_WEIGHT",
+        "TEAM_BATTLE_EVENT_WEIGHT",
+        "BOSS_EVENT_WEIGHT",
+        "ITEM_EVENT_WEIGHT",
+        "ITEM_DAMAGE_EVENT_WEIGHT",
+        "ITEM_STEAL_EVENT_WEIGHT",
+        "ALIGNMENT_EVENT_WEIGHT",
+        "CRITICAL_STRIKE_CHANCE",
+        "CRITICAL_STRIKE_CHANCE_GOOD",
+        "CRITICAL_STRIKE_CHANCE_EVIL",
+        "ITEM_DROP_CHANCE",
+        "UNIQUE_ITEM_CHANCE",
+        "LEVEL_BATTLE_CHANCE_BELOW_25",
+        "LEVEL_BATTLE_CHANCE_AT_25",
+    }
+    assert {key: values[key] for key in zero_keys} == {
+        key: 0.0 for key in zero_keys
+    }
+    assert values["BOSS_MIN_PLAYERS"] == 4
+    assert values["BOSS_MAX_PLAYERS"] == 7
+    assert values["BOSS_MIN_LEVEL"] == 20
+    assert values["BOSS_REWARD_PERCENT"] == 15
+    assert values["BOSS_LOSS_PERCENT"] == 6
+    assert values["BOSS_POWER_MIN_FACTOR"] == 0.8
+    assert values["BOSS_POWER_MAX_FACTOR"] == 1.4
+
+
+def test_idlerpg_runtime_values_cover_all_reloadable_config_constants():
+    from plugins.idlerpg import config as idlerpg_config
+
+    non_runtime_names = {"ROOM_TASKS"}
+    expected = {
+        name
+        for name in idlerpg_config.__all__
+        if name.isupper() and name not in non_runtime_names
+    }
+
+    assert expected <= runtime._idlerpg_values({}).keys()
+
+
 def test_runtime_refresh_updates_reminder_default_timezone(monkeypatch):
     from plugins import reminder
 

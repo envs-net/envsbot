@@ -282,11 +282,18 @@ def list_backups(*, directory: Path | None = None) -> list[BackupArchive]:
     return items
 
 
-def _parse_archive_created_at(value: str) -> datetime | None:
+def _parse_archive_created_at(value: str | None) -> datetime | None:
     """Parse a manifest timestamp into an aware UTC datetime if possible."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)

@@ -459,10 +459,19 @@ async def _check_user_birthday(bot, user_jid_str: str, nick: str, room_jid):
                 mbody=msg_text,
                 mtype="groupchat",
             )
-            await bot._safe_send_message(msg)
+            sent = await bot._safe_send_message(msg)
         except Exception as exc:
             log.exception("[BIRTHDAY] Failed to send birthday message: %s",
                           exc)
+            return
+
+        if sent is False:
+            log.warning(
+                "[BIRTHDAY] Birthday message for %s in room %s was not sent; "
+                "keeping it eligible for retry",
+                user_jid_str,
+                room_jid_str,
+            )
             return
 
         await _mark_announced(bot, room_jid_str, user_jid_str, today_str)

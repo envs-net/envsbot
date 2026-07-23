@@ -107,13 +107,16 @@ def _known_room_nicks(room_jid: str) -> list[str]:
 
 
 def _canonical_nick(room_jid: str, nick: str) -> str:
-    target_lower = nick.strip().lower()
+    target = str(nick).strip()
+    if not target:
+        return ""
+    target_key = target.casefold()
 
     for known_nick in _known_room_nicks(room_jid):
-        if known_nick.lower() == target_lower:
+        if known_nick.casefold() == target_key:
             return known_nick
 
-    return nick.strip()
+    return target
 
 
 def _normalize_lookup(scores: dict, target: str):

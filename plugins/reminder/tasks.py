@@ -93,7 +93,10 @@ async def _cancel_active_tasks_for_room(bot, room_jid: str) -> int:
     for reminder_id in room_reminder_ids:
         task = runtime.ACTIVE_REMINDERS.pop(reminder_id, None)
 
-        if task and not task.done():
+        if task is None:
+            continue
+
+        if not task.done():
             task.cancel()
             cancelled += 1
 
@@ -154,8 +157,9 @@ async def schedule_reminder_task(
                 reminder_text = f"🔔 {nick}: Reminder: {message}"
         else:
             if overdue_str:
-                reminder_text = f"🔔 Reminder (was due {overdue_str}): {
-                    message}"
+                reminder_text = (
+                    f"🔔 Reminder (was due {overdue_str}): {message}"
+                )
             else:
                 reminder_text = f"🔔 Reminder: {message}"
 
@@ -163,12 +167,20 @@ async def schedule_reminder_task(
             target = msg_mto or (room_jid if room_jid else user_jid)
             message_type = msg_type or ("groupchat" if room_jid else "chat")
 
-            await _send_reminder_message(
+            sent = await _send_reminder_message(
                 bot,
                 mto=target,
                 mbody=reminder_text,
                 mtype=message_type,
             )
+
+            if not sent:
+                log.error(
+                    "[REMINDER] Reminder %s was not accepted for sending;"
+                    " keeping pending",
+                    reminder_id,
+                )
+                return
 
             log.info(
                 "[REMINDER] ✅ Reminder %s sent to %s",

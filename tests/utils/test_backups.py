@@ -300,7 +300,7 @@ async def test_create_backup_returns_verified_archive_when_prune_fails(
 
 
 def test_parse_archive_created_at_normalizes_z_and_cross_day_offsets():
-    zulu = backups._parse_archive_created_at("2026-01-02T03:04:05Z")
+    zulu = backups._parse_archive_created_at(" 2026-01-02T03:04:05Z ")
     assert zulu is not None
     assert zulu.isoformat() == "2026-01-02T03:04:05+00:00"
 
@@ -313,3 +313,6 @@ def test_parse_archive_created_at_normalizes_z_and_cross_day_offsets():
     assert naive.isoformat() == "2026-01-02T03:04:05+00:00"
 
     assert backups._parse_archive_created_at(None) is None
+    assert backups._parse_archive_created_at("") is None
+    assert backups._parse_archive_created_at("   ") is None
+    assert backups._parse_archive_created_at("2026-01-02ZT03:04:05") is None

@@ -337,6 +337,7 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
 
     async def fake_send(msg):
         sent.append(msg)
+        return True
     bot._safe_send_message = fake_send
     await bot._send_restart_notification()
     assert sent, "Should send a message"
@@ -349,6 +350,12 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
     sent.clear()
     await bot._send_restart_notification()
     assert sent, "Should send a private message"
+
+    with open(notif_path, "w") as f:
+        json.dump(notif2, f)
+    bot._safe_send_message = AsyncMock(return_value=False)
+    await bot._send_restart_notification()
+    assert (tmp_path / "restart_notification.json").exists()
 
 
 def test_restart_notification_paths_include_persistent_fallback(tmp_path):
@@ -1206,7 +1213,7 @@ def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
     monkeypatch.setattr(envsbot, "main", fake_main)
     monkeypatch.setattr(envsbot.asyncio, "run", run_success)
 
-    envsbot.cli()
+    assert envsbot.cli([]) == 0
     assert calls == ["copy", "run"]
 
     def run_interrupted(coro):
@@ -1215,7 +1222,7 @@ def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(envsbot.asyncio, "run", run_interrupted)
-    envsbot.cli()
+    assert envsbot.cli([]) == 0
     assert calls[-2:] == ["copy", "run-interrupted"]
 
 def test_configured_rate_limit_bypass_role_edges(monkeypatch):
@@ -1237,8 +1244,6 @@ def test_configured_rate_limit_bypass_role_edges(monkeypatch):
 
 
 def test_cli_check_mode_runs_only_preflight_and_preserves_exit_code(monkeypatch):
-    import sys
-
     calls = []
 
     async def fake_preflight():
@@ -1248,22 +1253,15 @@ def test_cli_check_mode_runs_only_preflight_and_preserves_exit_code(monkeypatch)
     async def unexpected_main():
         raise AssertionError("main must not run in --check mode")
 
-    monkeypatch.setattr(sys, "argv", ["envsbot", "--check"])
     monkeypatch.setattr(envsbot, "copy_initial_chat_slang", lambda: calls.append("copy"))
     monkeypatch.setattr(envsbot, "preflight_check", fake_preflight)
     monkeypatch.setattr(envsbot, "main", unexpected_main)
 
-    with pytest.raises(SystemExit) as exc_info:
-        envsbot.cli()
-
-    assert exc_info.value.code == 7
+    assert envsbot.cli(["--check"]) == 7
     assert calls == ["copy", "preflight"]
 
 
 def test_cli_normal_mode_distinguishes_clean_and_failed_exit_codes(monkeypatch):
-    import sys
-
-    monkeypatch.setattr(sys, "argv", ["envsbot"])
     copied = MagicMock()
     monkeypatch.setattr(envsbot, "copy_initial_chat_slang", copied)
 
@@ -1271,22 +1269,18 @@ def test_cli_normal_mode_distinguishes_clean_and_failed_exit_codes(monkeypatch):
         return 0
 
     monkeypatch.setattr(envsbot, "main", clean_main)
-    assert envsbot.cli() is None
+    assert envsbot.cli([]) == 0
     copied.assert_called_once_with()
 
     async def failed_main():
         return 23
 
     monkeypatch.setattr(envsbot, "main", failed_main)
-    with pytest.raises(SystemExit) as exc_info:
-        envsbot.cli()
-    assert exc_info.value.code == 23
+    assert envsbot.cli([]) == 23
     assert copied.call_count == 2
 
 
 def test_cli_only_accepts_exact_check_flag_and_logs_keyboard_interrupt(monkeypatch):
-    import sys
-
     calls = []
 
     async def fake_main():
@@ -1302,13 +1296,29 @@ def test_cli_only_accepts_exact_check_flag_and_logs_keyboard_interrupt(monkeypat
         raise KeyboardInterrupt
 
     info = MagicMock()
-    monkeypatch.setattr(sys, "argv", ["envsbot", "--check-extra"])
     monkeypatch.setattr(envsbot, "copy_initial_chat_slang", lambda: calls.append("copy"))
     monkeypatch.setattr(envsbot, "main", fake_main)
     monkeypatch.setattr(envsbot, "preflight_check", unexpected_preflight)
     monkeypatch.setattr(envsbot.asyncio, "run", interrupted_run)
     monkeypatch.setattr(envsbot.log, "info", info)
 
-    assert envsbot.cli() is None
+    assert envsbot.cli(["--check-extra"]) == 0
     assert calls == ["copy", "run"]
     info.assert_called_once_with("[INIT] Shutdown requested by keyboard interrupt")
+
+
+def test_cli_uses_sys_argv_when_arguments_are_omitted(monkeypatch):
+    import sys
+
+    calls = []
+
+    async def fake_preflight():
+        calls.append("preflight")
+        return None
+
+    monkeypatch.setattr(sys, "argv", ["envsbot", "--check"])
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", lambda: calls.append("copy"))
+    monkeypatch.setattr(envsbot, "preflight_check", fake_preflight)
+
+    assert envsbot.cli() == 0
+    assert calls == ["copy", "preflight"]

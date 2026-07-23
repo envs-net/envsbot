@@ -16,6 +16,7 @@ from xml.sax.saxutils import quoteattr
 
 VALID_HTTPS_CERTIFICATE_MESSAGE = "TLS certificate is valid."
 VALID_XMPP_CERTIFICATE_MESSAGE = "S2S TLS certificate is valid."
+MAX_CERTIFICATE_ENDPOINT_ADDRESSES = 4
 
 
 def _format_certificate_duration(seconds: float) -> str:
@@ -277,33 +278,46 @@ def _xmpp_server_endpoints(
     return [(domain, 5269)]
 
 
+def _public_address_from_addrinfo(entry: tuple) -> tuple[int, str] | None:
+    """Normalize one ``getaddrinfo`` entry to a public stream endpoint."""
+    try:
+        family, socktype, _proto, _canonname, sockaddr = entry
+        address = str(sockaddr[0])
+    except (IndexError, TypeError, ValueError):
+        return None
+    if socktype != socket.SOCK_STREAM or family not in (
+        socket.AF_INET,
+        socket.AF_INET6,
+    ):
+        return None
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return None
+    if not parsed.is_global:
+        return None
+    return family, address
+
+
 def _public_endpoint_addresses(host: str, port: int) -> list[tuple[int, str]]:
     """Resolve an endpoint and retain only public unicast IP addresses."""
     addresses: list[tuple[int, str]] = []
     seen: set[tuple[int, str]] = set()
-    for family, socktype, _proto, _canonname, sockaddr in socket.getaddrinfo(
+    entries = socket.getaddrinfo(
         host,
         port,
         family=socket.AF_UNSPEC,
         type=socket.SOCK_STREAM,
-    ):
-        if socktype != socket.SOCK_STREAM or family not in (
-            socket.AF_INET,
-            socket.AF_INET6,
-        ):
+    )
+    for entry in entries:
+        item = _public_address_from_addrinfo(entry)
+        if item is None or item in seen:
             continue
-        address = str(sockaddr[0])
-        try:
-            parsed = ipaddress.ip_address(address)
-        except ValueError:
-            continue
-        if not parsed.is_global:
-            continue
-        item = (family, address)
-        if item not in seen:
-            seen.add(item)
-            addresses.append(item)
-    return addresses[:4]
+        seen.add(item)
+        addresses.append(item)
+        if len(addresses) == MAX_CERTIFICATE_ENDPOINT_ADDRESSES:
+            break
+    return addresses
 
 
 async def _read_xmpp_stream_part(

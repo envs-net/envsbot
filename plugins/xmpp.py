@@ -74,6 +74,15 @@ PLUGIN_META = {
     "requires": ["rooms", "_core"],
 }
 
+XMPP_SRV_SERVICES = (
+    "_xmpp-client._tcp",
+    "_xmpp-server._tcp",
+    "_xmpps-client._tcp",
+    "_xmpps-server._tcp",
+)
+SRV_FAILURE_PREFIX = "❌"
+SRV_LEGACY_FAILURE_PREFIXES = ("Not found", "Error")
+
 HELP_TEXT = """
 XMPP Utility Commands:
   {prefix}x help                  - Show this help message
@@ -792,6 +801,15 @@ def _collect_all_srv_records(domain, services, resolver, dns_exception):
     }
 
 
+def _srv_record_is_available(value: object) -> bool:
+    """Return whether a formatted SRV lookup result represents a record."""
+    text = str(value).lstrip()
+    return not (
+        text.startswith(SRV_FAILURE_PREFIX)
+        or text.startswith(SRV_LEGACY_FAILURE_PREFIXES)
+    )
+
+
 async def _diagnose_xmpp_server_certificate(domain: str) -> str | None:
     """Apply the XMPP plugin configuration to the shared certificate probe."""
     return await diagnose_xmpp_server_certificate(
@@ -867,7 +885,7 @@ def _build_xmpp_srv_result(domain, services, srv_records):
 
     for service in services:
         status = srv_records[service]
-        if "Not found" not in status and "Error" not in status:
+        if _srv_record_is_available(status):
             found_any = True
             result += f"\n**{service}:**\n    {status}"
         else:
@@ -1040,19 +1058,22 @@ def _xmpp_check_srv(domain: str) -> tuple[str, str]:
     except ImportError:
         return "ℹ️", "SRV skipped: python-dnspython not installed"
 
-    services = [
-        '_xmpp-client._tcp',
-        '_xmpp-server._tcp',
-        '_xmpps-client._tcp',
-        '_xmpps-server._tcp',
-    ]
     try:
         resolver = _make_srv_resolver(dns.resolver, XMPP_QUERY_TIMEOUT_SECONDS)
-        records = _collect_all_srv_records(domain, services, resolver, dns.exception)
+        records = _collect_all_srv_records(
+            domain,
+            XMPP_SRV_SERVICES,
+            resolver,
+            dns.exception,
+        )
     except Exception as exc:
         return "⚠️", f"SRV lookup failed: {exc}"
 
-    found = [service for service, text in records.items() if "Not found" not in text and "Error" not in text]
+    found = [
+        service
+        for service in XMPP_SRV_SERVICES
+        if service in records and _srv_record_is_available(records[service])
+    ]
     if found:
         return "✅", "SRV records: " + ", ".join(found)
     return "⚠️", "SRV records: none found"

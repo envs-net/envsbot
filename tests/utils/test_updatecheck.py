@@ -206,18 +206,18 @@ async def test_send_update_notification_targets_room_and_skips_missing_helpers(m
         make_message=make_message,
         _safe_send_message=safe_send,
     )
-    await updatecheck.send_update_notification(bot, "9.9.9")
+    assert await updatecheck.send_update_notification(bot, "9.9.9") is True
     assert sent[0]["mto"] == "room@conf.test"
     assert sent[0]["mtype"] == "groupchat"
     assert "9.9.9" in sent[0]["mbody"]
 
     sent.clear()
-    await updatecheck.send_update_notification(SimpleNamespace(), "9.9.9")
+    assert await updatecheck.send_update_notification(SimpleNamespace(), "9.9.9") is False
     assert sent == []
 
     monkeypatch.setitem(updatecheck.config, "version_check_notify_jid", "")
     monkeypatch.setitem(updatecheck.config, "owner", "")
-    await updatecheck.send_update_notification(bot, "9.9.9")
+    assert await updatecheck.send_update_notification(bot, "9.9.9") is False
     assert sent == []
 
 
@@ -231,7 +231,7 @@ async def test_check_for_updates_once_missing_error_and_announce_dedup(monkeypat
     monkeypatch.setattr(updatecheck, "fetch_latest_release_version_sync", lambda url: (_ for _ in ()).throw(RuntimeError("boom")))
     assert await updatecheck.check_for_updates_once(bot) == (False, None, "boom")
 
-    notify = AsyncMock()
+    notify = AsyncMock(return_value=True)
     monkeypatch.setattr(updatecheck, "fetch_latest_release_version_sync", lambda url: "9.9.9")
     monkeypatch.setattr(updatecheck, "send_update_notification", notify)
     available, remote, error = await updatecheck.check_for_updates_once(bot, announce=True)
@@ -242,6 +242,18 @@ async def test_check_for_updates_once_missing_error_and_announce_dedup(monkeypat
     notify.reset_mock()
     await updatecheck.check_for_updates_once(bot, announce=True)
     notify.assert_not_awaited()
+
+    bot.last_update_notified_version = None
+    notify.reset_mock(return_value=True)
+    notify.return_value = False
+    await updatecheck.check_for_updates_once(bot, announce=True)
+    notify.assert_awaited_once_with(bot, "9.9.9")
+    assert bot.last_update_notified_version is None
+
+    notify.reset_mock(return_value=True)
+    notify.return_value = True
+    await updatecheck.check_for_updates_once(bot, announce=True)
+    assert bot.last_update_notified_version == "9.9.9"
 
 
 @pytest.mark.asyncio
@@ -279,7 +291,7 @@ async def test_send_update_notification_joins_muc_target(monkeypatch):
         _safe_send_message=safe_send,
     )
 
-    await updatecheck.send_update_notification(bot, "9.9.9")
+    assert await updatecheck.send_update_notification(bot, "9.9.9") is True
 
     joined.assert_awaited_once_with(bot, "room@conf.test")
     assert sent[0]["mto"] == "room@conf.test"
@@ -302,7 +314,7 @@ def test_redirect_version_fetch_validates_request_and_redirect_shape(monkeypatch
 
     assert updatecheck.fetch_latest_release_version_via_redirect_sync(
         "https://github.com/envs-net/envsbot/releases/latest"
-    ) == "1.7.0"
+    ) == "v1.7.0"
     assert captured == {
         "url": "https://github.com/envs-net/envsbot/releases/latest",
         "user_agent": "envsbot-test-agent",
@@ -331,6 +343,10 @@ def test_redirect_version_fetch_rejects_missing_configuration(value):
             "https://github.com/envs-net/envsbot/releases/tag////",
             "Could not extract release tag from redirect URL",
         ),
+        (
+            "https://github.com/envs-net/envsbot/releases/tag/v1.7.0/notes",
+            "Could not extract release tag from redirect URL",
+        ),
     ],
 )
 def test_redirect_version_fetch_rejects_invalid_final_urls(monkeypatch, final_url, message):
@@ -343,3 +359,17 @@ def test_redirect_version_fetch_rejects_invalid_final_urls(monkeypatch, final_ur
         updatecheck.fetch_latest_release_version_via_redirect_sync(
             "https://github.com/envs-net/envsbot/releases/latest"
         )
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://github.com/o/r/releases/tag/v1.7.0", "1.7.0"),
+        ("https://github.com/o/r/releases/tag/1.7.0/", "1.7.0"),
+        ("https://github.com/o/r/releases/tag/v1.7.0?x=1#fragment", "1.7.0"),
+        ("https://github.com/o/r/releases/tag/release%20candidate", "release candidate"),
+        ("https://github.com/o/r/releases/tag/vv1.7.0", "v1.7.0"),
+    ],
+)
+def test_release_tag_from_redirect_url_uses_one_path_segment(url, expected):
+    assert updatecheck._release_tag_from_redirect_url(url) == expected

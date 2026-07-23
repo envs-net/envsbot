@@ -189,6 +189,31 @@ async def test_check_user_birthday_announce(monkeypatch, bot):
 
 
 @pytest.mark.asyncio
+async def test_check_user_birthday_keeps_failed_send_retryable(monkeypatch, bot):
+    today = datetime.date.today()
+    returned_bday = f"{today.year}-{today.month:02}-{today.day:02}"
+
+    monkeypatch.setattr(
+        birthday_notify,
+        "_get_birthday_cached_or_live",
+        AsyncMock(return_value=returned_bday),
+    )
+    bot._safe_send_message = AsyncMock(return_value=False)
+    mark_announced = AsyncMock()
+    monkeypatch.setattr(birthday_notify, "_mark_announced", mark_announced)
+
+    await birthday_notify._check_user_birthday(
+        bot,
+        "user@x",
+        "Nick",
+        "room@room",
+    )
+
+    bot._safe_send_message.assert_awaited_once()
+    mark_announced.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_check_user_birthday_not_today(monkeypatch, bot):
     async def _get_birthday_cached_or_live(bot, r, u, n): return "2000-01-01"
     monkeypatch.setattr(

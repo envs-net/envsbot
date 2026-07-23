@@ -163,3 +163,49 @@ def test_command_records_without_plugin_remain_plugin_source(monkeypatch):
     assert record["plugin"] == ""
     assert record["source"] == "plugins"
     assert record["is_alias"] is True
+
+
+def test_command_records_normalize_empty_names_and_string_examples(monkeypatch):
+    commands = FakeCommands()
+
+    def handler():
+        return None
+
+    commands[("one", "command")] = SimpleNamespace(
+        name=None,
+        role=Role.USER,
+        handler=handler,
+        short=None,
+        usage=None,
+        examples="{prefix}one command",
+        category="",
+        context=None,
+    )
+    commands.by_plugin = {
+        "first": {("one", "command")},
+        "second": {("one", "command")},
+    }
+    monkeypatch.setattr(registry, "COMMANDS", commands)
+
+    assert registry._plugin_owner_by_tokens() == {
+        ("one", "command"): "first",
+    }
+    assert registry._normalized_examples(None) == ()
+    assert registry._normalized_examples("single") == ("single",)
+    assert registry._normalized_examples([1, "two"]) == ("1", "two")
+    assert registry.command_records() == [
+        {
+            "registered_name": "one command",
+            "primary_name": "one command",
+            "plugin": "first",
+            "source": "plugins",
+            "is_alias": False,
+            "role": Role.USER,
+            "handler": "handler",
+            "short": "",
+            "usage": "",
+            "examples": ["{prefix}one command"],
+            "category": "other",
+            "context": "any",
+        }
+    ]

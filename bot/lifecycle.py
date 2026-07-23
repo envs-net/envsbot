@@ -43,8 +43,8 @@ def _restart_notification_paths(config_obj: Any) -> list[str]:
     return result
 
 
-def _consume_restart_notification(restart_files: list[str]) -> dict[str, Any] | None:
-    """Read and remove queued restart metadata outside the event loop."""
+def _read_restart_notification(restart_files: list[str]) -> dict[str, Any] | None:
+    """Read queued restart metadata outside the event loop."""
     restart_file = next(
         (path for path in restart_files if os.path.exists(path)),
         "",
@@ -53,13 +53,16 @@ def _consume_restart_notification(restart_files: list[str]) -> dict[str, Any] | 
         return None
 
     with open(restart_file, "r", encoding="utf-8") as handle:
-        notification = json.load(handle)
+        return json.load(handle)
+
+
+def _remove_restart_notifications(restart_files: list[str]) -> None:
+    """Remove all queued restart metadata after successful delivery."""
     for path in restart_files:
         try:
             os.remove(path)
         except FileNotFoundError:
             continue
-    return notification
 
 
 def _database_shutdown_timeout(config_obj: Any) -> float:
@@ -103,7 +106,7 @@ class LifecycleMixin:
 
         try:
             notif = await asyncio.to_thread(
-                _consume_restart_notification,
+                _read_restart_notification,
                 restart_files,
             )
             if notif is None:
@@ -116,7 +119,13 @@ class LifecycleMixin:
                     mbody=f"{notif['nick']}: ✅ Bot restart complete!",
                     mtype="groupchat",
                 )
-                await self._safe_send_message(message)
+                sent = await self._safe_send_message(message)
+                if sent is False:
+                    log.warning(
+                        "[ADMIN] event=restart_notification status=send_failed room=%s",
+                        notif["room"],
+                    )
+                    return
                 log.info("[ADMIN] event=restart_notification status=sent room=%s", notif["room"])
             else:
                 message = self.make_message(
@@ -124,8 +133,19 @@ class LifecycleMixin:
                     mbody="✅ Bot restart complete!",
                     mtype="chat",
                 )
-                await self._safe_send_message(message)
+                sent = await self._safe_send_message(message)
+                if sent is False:
+                    log.warning(
+                        "[ADMIN] event=restart_notification status=send_failed target=%s",
+                        notif["sender"],
+                    )
+                    return
                 log.info("[ADMIN] event=restart_notification status=sent target=%s", notif["sender"])
+
+            await asyncio.to_thread(
+                _remove_restart_notifications,
+                restart_files,
+            )
         except FileNotFoundError:
             log.debug("[ADMIN] No restart notification file found")
         except Exception as exc:

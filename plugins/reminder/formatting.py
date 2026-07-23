@@ -1,5 +1,7 @@
 """Split module for plugins/reminder.py: formatting."""
 
+import inspect
+
 from bot.room_state import JOINED_ROOMS
 from core_plugins._core import _is_muc_pm, _normalize_bare_jid
 
@@ -108,7 +110,7 @@ async def _is_reminder_enabled_for_context(bot, msg, is_room: bool) -> bool:
     return await _get_room_reminder_state(bot, room_jid)
 
 
-async def _send_reminder_message(bot, mto: str, mbody: str, mtype: str):
+async def _send_reminder_message(bot, mto: str, mbody: str, mtype: str) -> bool:
     """Send reminder as a fresh message.
 
     Do not use bot.reply() here because delayed reminders should not depend on
@@ -120,7 +122,14 @@ async def _send_reminder_message(bot, mto: str, mbody: str, mtype: str):
         mtype=mtype,
     )
 
-    if hasattr(bot, "_safe_send_message"):
-        await bot._safe_send_message(msg)
-    else:
-        msg.send()
+    safe_send = getattr(bot, "_safe_send_message", None)
+    if callable(safe_send):
+        result = safe_send(msg)
+        if inspect.isawaitable(result):
+            result = await result
+        return result is not False
+
+    result = msg.send()
+    if inspect.isawaitable(result):
+        await result
+    return True

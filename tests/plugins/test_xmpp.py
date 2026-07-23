@@ -751,6 +751,7 @@ def test_xmpp_check_srv_uses_all_service_names_and_filters_failures(monkeypatch)
         "_xmpps-client._tcp",
         "_xmpps-server._tcp",
     ]
+    assert tuple(captured["services"]) == xmpp.XMPP_SRV_SERVICES
     assert captured["resolver"] is resolver
     assert captured["timeout"] == xmpp.XMPP_QUERY_TIMEOUT_SECONDS
     assert captured["resolver_module"].__name__ == "dns.resolver"
@@ -772,3 +773,34 @@ def test_xmpp_check_srv_reports_missing_dnspython(monkeypatch):
         "ℹ️",
         "SRV skipped: python-dnspython not installed",
     )
+
+
+def test_srv_success_detection_uses_status_prefix_not_message_words(monkeypatch):
+    records = {
+        "_xmpp-client._tcp": "error-not-found.example.org:5222",
+        "_xmpp-server._tcp": "❌ Not found",
+        "_xmpps-client._tcp": "   ❌ Error: refused",
+        "_xmpps-server._tcp": "server.example.org:5270",
+    }
+    monkeypatch.setattr(xmpp, "_make_srv_resolver", lambda *_args: object())
+    monkeypatch.setattr(
+        xmpp,
+        "_collect_all_srv_records",
+        lambda *_args: records,
+    )
+
+    assert xmpp._srv_record_is_available("error-not-found.example.org:5222") is True
+    assert xmpp._srv_record_is_available(" ❌ Not found") is False
+    assert xmpp._xmpp_check_srv("example.org") == (
+        "✅",
+        "SRV records: _xmpp-client._tcp, _xmpps-server._tcp",
+    )
+
+    rendered = xmpp._build_xmpp_srv_result(
+        "example.org",
+        xmpp.XMPP_SRV_SERVICES,
+        records,
+    )
+    assert "**_xmpp-client._tcp:**\n    error-not-found.example.org:5222" in rendered
+    assert "**_xmpp-server._tcp:** ❌ Not found" in rendered
+    assert "No SRV records found" not in rendered

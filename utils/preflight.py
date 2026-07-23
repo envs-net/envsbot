@@ -101,11 +101,16 @@ def _check_command_registry() -> tuple[bool, str]:
         from utils.command_registry import decorated_command_records
 
         commands = decorated_command_records()
+        if not commands:
+            return False, "command registry: no decorated commands found"
+        missing = [
+            str(getattr(cmd, "name", "") or "<unnamed>")
+            for _plugin, _meta, cmd in commands
+            if not str(getattr(cmd, "short", "") or "").strip()
+            or not str(getattr(cmd, "usage", "") or "").strip()
+        ]
     except Exception as exc:
         return False, f"command registry: {type(exc).__name__}: {redact_text(exc)}"
-    if not commands:
-        return False, "command registry: no decorated commands found"
-    missing = [cmd.name for _plugin, _meta, cmd in commands if not getattr(cmd, "short", "") or not getattr(cmd, "usage", "")]
     if missing:
         return False, f"command registry: missing metadata for {', '.join(missing[:5])}"
     return True, f"command registry: {len(commands)} decorated commands"
@@ -129,10 +134,10 @@ def _check_command_docs() -> tuple[bool, str]:
 def _check_config_sample(config: Mapping[str, Any]) -> tuple[bool, str]:
     try:
         sample = load_default_config_for_diff()
+        missing = sorted(set(sample) - set(config))
+        warnings = list(collect_config_warnings(config))
     except Exception as exc:
         return False, f"config sample: {type(exc).__name__}: {redact_text(exc)}"
-    missing = sorted(set(sample) - set(config))
-    warnings = collect_config_warnings(config)
     if warnings:
         return False, f"config warnings: {'; '.join(warnings[:3])}"
     if missing:

@@ -5,6 +5,8 @@ from .helpers import (
 )
 import random
 import time
+
+import pytest
 from plugins.idlerpg import config as idlerpg_config
 from plugins.idlerpg import formatting as idlerpg_formatting
 from plugins.idlerpg import items as idlerpg_items
@@ -33,6 +35,22 @@ def test_idlerpg_small_helper_edges(monkeypatch):
     assert idlerpg._ttl_for_level(-10) == idlerpg._ttl_for_level(0)
     monkeypatch.setattr(idlerpg_config, "MAX_PENALTY", 10)
     assert idlerpg._penalty_for(50, 100) == 10
+
+
+def test_idlerpg_config_setting_preserves_explicit_zero(monkeypatch):
+    monkeypatch.setattr(idlerpg_config, "_cfg", {"event_chance": 0})
+    assert idlerpg_config._setting(
+        "event_chance",
+        "idlerpg_event_chance",
+        0.01,
+    ) == 0
+
+    monkeypatch.setattr(idlerpg_config, "_cfg", {"event_chance": None})
+    assert idlerpg_config._setting(
+        "event_chance",
+        "idlerpg_event_chance",
+        0.01,
+    ) == 0.01
 
 
 def test_playtime_formatting_helpers_handle_edges(monkeypatch):
@@ -212,11 +230,16 @@ def test_weighted_item_roll_normalizes_low_levels_and_uses_exact_weights(monkeyp
     assert idlerpg_items._roll_weighted_item_level(-50) == 1
     assert idlerpg_items._roll_weighted_item_level(0) == 1
     assert idlerpg_items._roll_weighted_item_level(2) == 3
+    assert idlerpg_items._roll_weighted_item_level(3) == 4
+    assert idlerpg_items._roll_weighted_item_level(11) == 16
 
-    assert captured[0] == ([1], [1 / (1.4 ** 1)], 1)
-    assert captured[1] == ([1], [1 / (1.4 ** 1)], 1)
-    assert captured[2] == (
+    assert [entry[0] for entry in captured] == [
+        [1],
+        [1],
         [1, 2, 3],
-        [1 / (1.4 ** level) for level in (1, 2, 3)],
-        1,
-    )
+        [1, 2, 3, 4],
+        list(range(1, 17)),
+    ]
+    assert all(entry[2] == 1 for entry in captured)
+    for population, weights, _k in captured:
+        assert weights == pytest.approx([1.4 ** -level for level in population])

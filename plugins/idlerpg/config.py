@@ -12,6 +12,12 @@ log = logging.getLogger(__name__)
 _cfg = config.get("idlerpg", {}) if isinstance(config.get("idlerpg", {}), dict) else {}
 
 
+def _setting(key: str, legacy_key: str, default):
+    """Return one IdleRPG setting while preserving explicit zero values."""
+    value = _cfg[key] if key in _cfg else config.get(legacy_key, default)
+    return default if value is None else value
+
+
 TICK_SECONDS = int(_cfg.get("tick_seconds", config.get("idlerpg_tick_seconds", 60)) or 60)
 
 
@@ -104,57 +110,57 @@ QUEST_TIME_MAX_DURATION = int(
 
 
 EVENT_CHANCE = float(
-    _cfg.get("event_chance", config.get("idlerpg_event_chance", 0.01)) or 0.01
+    _setting("event_chance", "idlerpg_event_chance", 0.01)
 )
 
 
 ITEM_CHANCE = float(
-    _cfg.get("item_chance", config.get("idlerpg_item_chance", 0.20)) or 0.20
+    _setting("item_chance", "idlerpg_item_chance", 0.20)
 )
 
 
 BATTLE_EVENT_WEIGHT = float(
-    _cfg.get("battle_event_weight", config.get("idlerpg_battle_event_weight", 0.55)) or 0.55
+    _setting("battle_event_weight", "idlerpg_battle_event_weight", 0.55)
 )
 
 
 ITEM_EVENT_WEIGHT = float(
-    _cfg.get("item_event_weight", config.get("idlerpg_item_event_weight", 0.15)) or 0.15
+    _setting("item_event_weight", "idlerpg_item_event_weight", 0.15)
 )
 
 
 ALIGNMENT_EVENT_WEIGHT = float(
-    _cfg.get("alignment_event_weight", config.get("idlerpg_alignment_event_weight", 0.10)) or 0.10
+    _setting("alignment_event_weight", "idlerpg_alignment_event_weight", 0.10)
 )
 
 
 CRITICAL_STRIKE_CHANCE = float(
-    _cfg.get("critical_strike_chance", config.get("idlerpg_critical_strike_chance", 1 / 35)) or (1 / 35)
+    _setting("critical_strike_chance", "idlerpg_critical_strike_chance", 1 / 35)
 )
 
 
 CRITICAL_STRIKE_CHANCE_GOOD = float(
-    _cfg.get("critical_strike_chance_good", config.get("idlerpg_critical_strike_chance_good", 1 / 50)) or (1 / 50)
+    _setting("critical_strike_chance_good", "idlerpg_critical_strike_chance_good", 1 / 50)
 )
 
 
 CRITICAL_STRIKE_CHANCE_EVIL = float(
-    _cfg.get("critical_strike_chance_evil", config.get("idlerpg_critical_strike_chance_evil", 1 / 20)) or (1 / 20)
+    _setting("critical_strike_chance_evil", "idlerpg_critical_strike_chance_evil", 1 / 20)
 )
 
 
 ITEM_DROP_CHANCE = float(
-    _cfg.get("item_drop_chance", config.get("idlerpg_item_drop_chance", 0.02)) or 0.02
+    _setting("item_drop_chance", "idlerpg_item_drop_chance", 0.02)
 )
 
 
 TEAM_BATTLE_EVENT_WEIGHT = float(
-    _cfg.get("team_battle_event_weight", config.get("idlerpg_team_battle_event_weight", 0.08)) or 0.08
+    _setting("team_battle_event_weight", "idlerpg_team_battle_event_weight", 0.08)
 )
 
 
 BOSS_EVENT_WEIGHT = float(
-    _cfg.get("boss_event_weight", config.get("idlerpg_boss_event_weight", 0.06)) or 0.06
+    _setting("boss_event_weight", "idlerpg_boss_event_weight", 0.06)
 )
 
 
@@ -264,7 +270,7 @@ UNIQUE_ITEM_MIN_LEVEL = int(
 
 
 UNIQUE_ITEM_CHANCE = float(
-    _cfg.get("unique_item_chance", config.get("idlerpg_unique_item_chance", 0.025)) or 0.025
+    _setting("unique_item_chance", "idlerpg_unique_item_chance", 0.025)
 )
 
 
@@ -387,22 +393,22 @@ TOPIC_CUSTOM_TEXT = str(
 
 
 ITEM_DAMAGE_EVENT_WEIGHT = float(
-    _cfg.get("item_damage_event_weight", config.get("idlerpg_item_damage_event_weight", 0.08)) or 0.08
+    _setting("item_damage_event_weight", "idlerpg_item_damage_event_weight", 0.08)
 )
 
 
 ITEM_STEAL_EVENT_WEIGHT = float(
-    _cfg.get("item_steal_event_weight", config.get("idlerpg_item_steal_event_weight", 0.04)) or 0.04
+    _setting("item_steal_event_weight", "idlerpg_item_steal_event_weight", 0.04)
 )
 
 
 LEVEL_BATTLE_CHANCE_BELOW_25 = float(
-    _cfg.get("level_battle_chance_below_25", config.get("idlerpg_level_battle_chance_below_25", 0.25)) or 0.25
+    _setting("level_battle_chance_below_25", "idlerpg_level_battle_chance_below_25", 0.25)
 )
 
 
 LEVEL_BATTLE_CHANCE_AT_25 = float(
-    _cfg.get("level_battle_chance_at_25", config.get("idlerpg_level_battle_chance_at_25", 1.0)) or 1.0
+    _setting("level_battle_chance_at_25", "idlerpg_level_battle_chance_at_25", 1.0)
 )
 
 

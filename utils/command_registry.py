@@ -101,17 +101,33 @@ def decorated_command_records() -> list[tuple[str, dict[str, Any], Any]]:
     return sorted(result, key=lambda item: (str(item[1].get("category", "")), item[2].name))
 
 
+def _plugin_owner_by_tokens() -> dict[tuple[str, ...], str]:
+    """Return the first registered plugin owner for each command token tuple."""
+    owners: dict[tuple[str, ...], str] = {}
+    for plugin_name, plugin_tokens in COMMANDS.by_plugin.items():
+        for tokens in plugin_tokens:
+            owners.setdefault(tuple(tokens), plugin_name)
+    return owners
+
+
+def _normalized_examples(value: object) -> tuple[str, ...]:
+    """Normalize command examples without splitting a single string."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(item) for item in value)
+
+
 def command_records() -> list[dict[str, Any]]:
     """Return stable command metadata records from the live registry."""
     records: list[dict[str, Any]] = []
+    plugin_owners = _plugin_owner_by_tokens()
     for tokens, cmd in sorted(COMMANDS.items(), key=lambda item: item[0]):
         registered_name = " ".join(tokens)
-        primary_name = getattr(cmd, "name", registered_name)
-        plugin = ""
-        for plugin_name, plugin_tokens in COMMANDS.by_plugin.items():
-            if tokens in plugin_tokens:
-                plugin = plugin_name
-                break
+        primary_name = str(getattr(cmd, "name", "") or registered_name)
+        plugin = plugin_owners.get(tuple(tokens), "")
+        handler = getattr(cmd, "handler", None)
         record = CommandRecord(
             registered_name=registered_name,
             primary_name=primary_name,
@@ -119,12 +135,12 @@ def command_records() -> list[dict[str, Any]]:
             source="core" if plugin.startswith("_") else "plugins",
             is_alias=registered_name != primary_name,
             role=getattr(cmd, "role", Role.NONE),
-            handler=getattr(getattr(cmd, "handler", None), "__name__", "unknown"),
-            short=getattr(cmd, "short", ""),
-            usage=getattr(cmd, "usage", ""),
-            examples=tuple(getattr(cmd, "examples", []) or ()),
-            category=getattr(cmd, "category", "") or "other",
-            context=getattr(cmd, "context", "any") or "any",
+            handler=str(getattr(handler, "__name__", "unknown")),
+            short=str(getattr(cmd, "short", "") or ""),
+            usage=str(getattr(cmd, "usage", "") or ""),
+            examples=_normalized_examples(getattr(cmd, "examples", None)),
+            category=str(getattr(cmd, "category", "") or "other"),
+            context=str(getattr(cmd, "context", "") or "any"),
         )
         records.append(record.as_dict())
     return records

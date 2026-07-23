@@ -299,20 +299,24 @@ def copy_initial_chat_slang(source="init_chat_slang.csv", target="chat_slang.csv
         log.info("[INIT] ✅ Target file %s already exists. Skipping copy.", target)
 
 
-def cli() -> None:
-    """Console-script entrypoint for running envsbot."""
+def cli(argv: list[str] | None = None) -> int:
+    """Console-script entrypoint for running envsbot.
+
+    Returning an integer keeps the function easy to test and lets both the
+    setuptools console-script wrapper and the direct ``__main__`` path apply
+    the exit code consistently.
+    """
     import sys
 
+    arguments = list(sys.argv[1:] if argv is None else argv)
     copy_initial_chat_slang()
-    if "--check" in sys.argv:
-        raise SystemExit(asyncio.run(preflight_check()))
     try:
-        exit_code = asyncio.run(main())
-        if exit_code:
-            raise SystemExit(exit_code)
+        runner = preflight_check if "--check" in arguments else main
+        return int(asyncio.run(runner()) or 0)
     except KeyboardInterrupt:
         log.info("[INIT] Shutdown requested by keyboard interrupt")
+        return 0
 
 
 if __name__ == "__main__":
-    cli()
+    raise SystemExit(cli())
