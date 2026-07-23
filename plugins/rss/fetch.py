@@ -8,7 +8,7 @@ import html
 import logging
 import aiohttp
 from difflib import SequenceMatcher
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 from utils.config import config
@@ -211,6 +211,91 @@ def _normalize_url(url: str) -> str:
         url = "https://" + url
 
     return url
+_VOLATILE_FEED_LINK_QUERY_KEYS = frozenset({
+    "after",
+    "before",
+    "cursor",
+    "max_id",
+    "min_id",
+    "newer_than",
+    "older_than",
+    "since_id",
+    "until_id",
+})
+
+_HTML_FEED_LINK_MEDIA_TYPES = frozenset({
+    "",
+    "application/xhtml+xml",
+    "text/html",
+})
+
+def _clean_feed_display_link(candidate: str, feed_url: str) -> str:
+    """Return a stable HTTP(S) feed homepage/display link.
+
+    Some feed generators expose pagination URLs such as ``?max_id=...`` as
+    their current feed link. Those cursors are volatile and must not leak into
+    ``$feed_link`` or the persisted feed metadata. Permanent query parameters
+    are kept because they may identify a filtered feed or public page.
+    """
+    value = str(candidate or "").strip()
+    if not value:
+        return ""
+
+    try:
+        absolute = urljoin(str(feed_url or ""), value)
+        parsed = urlparse(absolute)
+    except (TypeError, ValueError):
+        return ""
+
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in _VOLATILE_FEED_LINK_QUERY_KEYS
+        ],
+        doseq=True,
+    )
+    return urlunparse(parsed._replace(query=query))
+
+def _extract_feed_link(feed, feed_url: str) -> str:
+    """Choose a stable public page link from parsed feed metadata.
+
+    HTML ``rel=alternate`` links are preferred over self/next RSS links.  This
+    matters for ActivityPub feeds where feedparser may otherwise expose a
+    cursor-bearing ``rel=next`` URL as ``feed.link``.
+    """
+    links = _mapping_value(feed, "links", []) or []
+    preferred = []
+
+    if isinstance(links, (list, tuple)):
+        for link in links:
+            href = _mapping_value(link, "href", "")
+            rel = str(_mapping_value(link, "rel", "") or "").strip().lower()
+            media_type = str(
+                _mapping_value(link, "type", "") or ""
+            ).split(";", 1)[0].strip().lower()
+
+            if not href or rel not in {"", "alternate"}:
+                continue
+            if media_type not in _HTML_FEED_LINK_MEDIA_TYPES:
+                continue
+
+            priority = 0 if rel == "alternate" else 1
+            preferred.append((priority, href))
+
+    preferred.sort(key=lambda item: item[0])
+    candidates = [href for _, href in preferred]
+    candidates.extend([_mapping_value(feed, "link", ""), feed_url])
+
+    for candidate in candidates:
+        cleaned = _clean_feed_display_link(candidate, feed_url)
+        if cleaned:
+            return cleaned
+    return ""
+
 def _resolve_relative_url(base_url: str, relative_url: str) -> str:
     """
     Resolve relative URLs against base URL.
@@ -412,6 +497,9 @@ async def fetch_feed(url):
     if feed is not None:
         _set_mapping_value(feed, "href", url)
         _set_mapping_value(feed, "id", url)
+        feed_link = _extract_feed_link(feed, url)
+        if feed_link:
+            _set_mapping_value(feed, "link", feed_link)
 
     return result
 def _entry_is_new(last_id, entry):

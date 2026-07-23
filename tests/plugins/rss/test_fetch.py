@@ -45,6 +45,53 @@ async def test_fetch_feed_handle_redirect_and_structure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fetch_feed_normalizes_paginated_feed_metadata_link(monkeypatch):
+    feed_url = "https://pleroma.example/users/envs.rss"
+    parsed = SimpleNamespace(
+        feed={
+            "title": "envs",
+            "link": (
+                "https://pleroma.example/users/envs/feed.rss"
+                "?max_id=B80wAMKUcbZQTt6nq4"
+            ),
+            "links": [
+                {
+                    "rel": "alternate",
+                    "type": "text/html",
+                    "href": "https://pleroma.example/users/envs",
+                },
+                {
+                    "rel": "next",
+                    "type": "application/rss+xml",
+                    "href": (
+                        "https://pleroma.example/users/envs/feed.rss"
+                        "?max_id=B80wAMKUcbZQTt6nq4"
+                    ),
+                },
+            ],
+        },
+        entries=[],
+    )
+
+    async def fake_fetch_bytes(url):
+        assert url == feed_url
+        return b"<rss></rss>", url, "application/rss+xml"
+
+    monkeypatch.setattr(rss_fetch, "_fetch_feed_bytes", fake_fetch_bytes)
+    monkeypatch.setattr(
+        rss_fetch,
+        "feedparser",
+        SimpleNamespace(parse=lambda *_args, **_kwargs: parsed),
+    )
+
+    result = await rss.fetch_feed(feed_url)
+
+    assert result.feed["link"] == "https://pleroma.example/users/envs"
+    assert result.feed["href"] == feed_url
+    assert result.feed["id"] == feed_url
+
+
+@pytest.mark.asyncio
 async def test_fetch_feed_rejects_unsafe_feed_url(monkeypatch):
     async def blocked(url, *, allow_private=False):
         assert url == "http://127.0.0.1/feed"
@@ -229,6 +276,49 @@ def test_normalize_and_resolve_url():
     assert rss._resolve_relative_url(
         "https://foo.com/feed", "/bar") == "https://foo.com/bar"
     assert rss._resolve_relative_url(None, "/foo") == "/foo"
+
+
+def test_extract_feed_link_prefers_html_alternate_over_paginated_feed_link():
+    feed_url = "https://pleroma.example/users/envs.rss"
+    feed = {
+        "link": (
+            "https://pleroma.example/users/envs/feed.rss"
+            "?max_id=B80wAMKUcbZQTt6nq4"
+        ),
+        "links": [
+            {
+                "rel": "next",
+                "type": "application/rss+xml",
+                "href": (
+                    "https://pleroma.example/users/envs/feed.rss"
+                    "?max_id=B80wAMKUcbZQTt6nq4"
+                ),
+            },
+            {
+                "rel": "alternate",
+                "type": "text/html; charset=utf-8",
+                "href": "/users/envs",
+            },
+        ],
+    }
+
+    assert rss._extract_feed_link(feed, feed_url) == (
+        "https://pleroma.example/users/envs"
+    )
+
+
+def test_extract_feed_link_removes_only_volatile_cursor_parameters():
+    feed_url = "https://example.org/feed.rss"
+    feed = {
+        "link": (
+            "https://example.org/feed.rss?category=news"
+            "&max_id=cursor-123&since_id=old"
+        ),
+    }
+
+    assert rss._extract_feed_link(feed, feed_url) == (
+        "https://example.org/feed.rss?category=news"
+    )
 
 
 def test_extract_entry_link_variants():
