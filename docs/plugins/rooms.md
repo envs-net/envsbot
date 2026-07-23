@@ -151,7 +151,7 @@ List MUC rooms or direct XMPP contacts.
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `rooms`<br>
-Usage: `,rooms list [muc|dm|1:1] [<page>|last|all]`
+Usage: `,rooms list [muc|dm|1:1|direct|contacts] [<page>|last|all]`
 
 Aliases: `,room list`
 

@@ -82,6 +82,8 @@ def _validate_numeric_ranges(cfg, errors):
         "poll_max_question_len",
         "reminder_max_age_days",
         "rss_global_query_interval",
+        "rss_broken_error_threshold",
+        "rss_list_page_size",
         "rss_max_backoff_time",
         "rss_max_entries_per_poll",
         "rss_max_read_bytes",
@@ -112,7 +114,11 @@ def _validate_numeric_ranges(cfg, errors):
         "xkcd_http_timeout",
         "xkcd_index_request_delay_seconds",
     }
-    zero_or_greater_integer_keys = {"max_new_feed_entries", "message_cache_max_age_days"}
+    zero_or_greater_integer_keys = {
+        "max_new_feed_entries",
+        "message_cache_max_age_days",
+        "rss_trusted_max_feeds",
+    }
     default_pagination = cfg.get("default_pagination")
     if default_pagination is not None:
         if str(default_pagination).strip().lower() != "all":

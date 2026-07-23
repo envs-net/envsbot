@@ -128,7 +128,10 @@ def test_validate_config_rejects_wrong_optional_types():
         "nick": "envsbot",
         "rss_global_query_interval": "1200",
         "max_new_feed_entries": "5",
+        "rss_trusted_max_feeds": "10",
+        "rss_list_page_size": "10",
         "rss_max_entries_per_poll": "10",
+        "rss_template_max_length": "1000",
     }
 
     with pytest.raises(config_mod.ConfigError) as exc:
@@ -137,7 +140,10 @@ def test_validate_config_rejects_wrong_optional_types():
     msg = str(exc.value)
     assert "rss_global_query_interval: expected int" in msg
     assert "max_new_feed_entries: expected int" in msg
+    assert "rss_trusted_max_feeds: expected int" in msg
+    assert "rss_list_page_size: expected int" in msg
     assert "rss_max_entries_per_poll: expected int" in msg
+    assert "rss_template_max_length: expected int" in msg
 
 
 def test_validate_config_accepts_translate_defaults_and_rejects_bad_types():
@@ -403,6 +409,28 @@ def test_validate_config_rejects_non_positive_rss_max_entries_per_poll():
         config_mod.validate_config(cfg, require_required_keys=True)
 
     assert "rss_max_entries_per_poll: must be greater than 0" in str(exc.value)
+
+
+def test_validate_config_checks_rss_list_template_and_trusted_limits():
+    cfg = {
+        "jid": "bot@example.org",
+        "password": "secret",
+        "owner": "owner@example.org",
+        "nick": "envsbot",
+        "rss_trusted_max_feeds": -1,
+        "rss_list_page_size": 0,
+        "rss_template_max_length": 0,
+        "rss_broken_error_threshold": 0,
+    }
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(cfg, require_required_keys=True)
+
+    message = str(exc.value)
+    assert "rss_trusted_max_feeds: must be 0 or greater" in message
+    assert "rss_list_page_size: must be greater than 0" in message
+    assert "rss_template_max_length: must be greater than 0" in message
+    assert "rss_broken_error_threshold: must be greater than 0" in message
 
 
 def test_collect_config_warnings_for_missing_avatar(tmp_path, monkeypatch):

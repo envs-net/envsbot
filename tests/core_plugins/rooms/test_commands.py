@@ -202,10 +202,17 @@ async def test_rooms_list_dm_shows_roster_contacts(fake_bot):
             "subscription": "both",
             "resources": {"BotNick": {}},
         },
+        "stored@conference.test": {
+            "subscription": "both",
+            "resources": {},
+        },
         "removed@example.org": {
             "subscription": "remove",
         },
     }
+    fake_bot.db.rooms.list = AsyncMock(return_value=[
+        ("stored@conference.test", "BotNick", False, None),
+    ])
 
     await rooms.rooms_list(fake_bot, "jid", "nick", ["1:1", "all"], MagicMock(), False)
 
@@ -226,8 +233,9 @@ async def test_rooms_list_dm_shows_roster_contacts(fake_bot):
     )
     assert not any("bot@domain" in line for line in listing)
     assert not any("room@conference.test" in line for line in listing)
+    assert not any("stored@conference.test" in line for line in listing)
     assert not any("removed@example.org" in line for line in listing)
-    fake_bot.db.rooms.list.assert_not_awaited()
+    fake_bot.db.rooms.list.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -245,7 +253,7 @@ async def test_rooms_list_dm_handles_missing_roster_and_bad_args(fake_bot):
     fake_bot.reply.assert_not_called()
     fake_bot.reply_usage.assert_called_once_with(
         msg,
-        "!rooms list [muc|dm|1:1] [<page>|last|all]",
+        "!rooms list [muc|dm|1:1|direct|contacts] [<page>|last|all]",
     )
 
 

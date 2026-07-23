@@ -63,6 +63,12 @@ def fake_bot(monkeypatch):
         def __getitem__(self, k): return getattr(self, k)
         xml = types.SimpleNamespace(findall=lambda self, *a, **k: [])
     bot.make_message = lambda **kwargs: DummyMsg()
+
+    async def safe_send(message):
+        message.send()
+        return True
+
+    bot._safe_send_message = AsyncMock(side_effect=safe_send)
     return bot
 
 

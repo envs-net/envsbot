@@ -162,7 +162,10 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'HTTP_TIMEOUT_SECONDS = 12',
             'XMPP_QUERY_TIMEOUT_SECONDS = 9',
             'URLCHECK_WAIT_SECONDS = 30',
+            'RSS_TRUSTED_MAX_FEEDS = 0',
+            'RSS_LIST_PAGE_SIZE = 25',
             'RSS_MAX_ENTRIES_PER_POLL = 3',
+            'RSS_TEMPLATE_MAX_LENGTH = 1500',
             'RSS_SIMILARITY_THRESHOLD = 0.75',
             'BIRTHDAY_CACHE_TTL_SECONDS = 3600',
             'MESSAGE_CACHE_SIZE = 40',
@@ -185,7 +188,10 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["http_timeout_seconds"] == 12
     assert result["xmpp_query_timeout_seconds"] == 9
     assert result["urlcheck_wait_seconds"] == 30
+    assert result["rss_trusted_max_feeds"] == 0
+    assert result["rss_list_page_size"] == 25
     assert result["rss_max_entries_per_poll"] == 3
+    assert result["rss_template_max_length"] == 1500
     assert result["rss_similarity_threshold"] == 0.75
     assert result["birthday_cache_ttl_seconds"] == 3600
     assert result["message_cache_size"] == 40

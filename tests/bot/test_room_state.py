@@ -42,3 +42,26 @@ def test_joined_room_jids_accepts_iterables_and_ignores_empty_values():
         ["", None, "room@conf.test/resource", BareJID()],
     ) == {"room@conf.test", "object@conf.test"}
     assert room_state.joined_room_jids(None, BrokenRooms()) == set()
+
+
+def test_known_room_jids_adds_stored_row_shapes():
+    stored_rows = [
+        ("Tuple@Conf.Test", "Bot", True, None),
+        {"room_jid": "Mapping@Conf.Test/Resource"},
+        ["List@Conf.Test", "Bot"],
+        "Plain@Conf.Test",
+        (),
+        {},
+    ]
+
+    assert room_state.known_room_jids(
+        None,
+        {"Joined@Conf.Test": {}},
+        stored_rows,
+    ) == {
+        "joined@conf.test",
+        "tuple@conf.test",
+        "mapping@conf.test",
+        "list@conf.test",
+        "plain@conf.test",
+    }

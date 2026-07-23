@@ -20,7 +20,10 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.RSS_FETCH_TIMEOUT_SECONDS == sample.HTTP_TIMEOUT_SECONDS
     assert sample.RSS_MAX_REDIRECTS > 0
     assert sample.RSS_MAX_READ_BYTES > 0
+    assert sample.RSS_TRUSTED_MAX_FEEDS == 10
+    assert sample.RSS_LIST_PAGE_SIZE == 10
     assert sample.RSS_MAX_ENTRIES_PER_POLL == 10
+    assert sample.RSS_TEMPLATE_MAX_LENGTH == 1000
     assert sample.DUCKS["min_messages"] < sample.DUCKS["max_messages"]
     assert sample.PIN_PAGE_SIZE > 0
     assert sample.IDLERPG["tick_seconds"] > 0

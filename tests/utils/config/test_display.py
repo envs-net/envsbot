@@ -1,3 +1,5 @@
+import importlib
+
 from .helpers import config_mod
 
 
@@ -39,6 +41,20 @@ def test_config_display_sections_follow_sample_order_and_names():
     ) in sections
     assert ("URL Check", [("URLCHECK_WAIT_SECONDS", 120)]) in sections
     assert (
+        "RSS / Atom",
+        [
+            ("RSS_TRUSTED_MAX_FEEDS", 0),
+            ("RSS_LIST_PAGE_SIZE", 25),
+            ("RSS_MAX_ENTRIES_PER_POLL", 3),
+            ("RSS_TEMPLATE_MAX_LENGTH", 1500),
+        ],
+    ) in config_mod.get_config_display_sections({
+        "rss_trusted_max_feeds": 0,
+        "rss_list_page_size": 25,
+        "rss_max_entries_per_poll": 3,
+        "rss_template_max_length": 1500,
+    })
+    assert (
         "Translate",
         [("TRANSLATE_FROM", "auto"), ("TRANSLATE_TO", None)],
     ) in config_mod.get_config_display_sections({
@@ -58,6 +74,31 @@ def test_config_display_sections_put_unknown_values_in_other():
     sections = config_mod.get_config_display_sections(cfg)
 
     assert sections[-1] == ("Other", [("CUSTOM_FEATURE", True)])
+
+
+def test_config_sample_keys_are_mapped_and_grouped_for_operator_commands():
+    sample = importlib.import_module("config_sample")
+    sample_keys = {
+        name
+        for name in vars(sample)
+        if name.isupper() and not name.startswith("_")
+    }
+    displayed_keys = {
+        key
+        for _title, keys in config_mod.CONFIG_DISPLAY_SECTIONS
+        for key in keys
+    }
+
+    assert sample_keys <= set(config_mod.PYTHON_CONFIG_KEY_MAP)
+    assert sample_keys <= displayed_keys
+    normalized_sample_keys = {
+        config_mod.PYTHON_CONFIG_KEY_MAP[key]
+        for key in sample_keys
+    }
+    assert normalized_sample_keys <= (
+        set(config_mod.REQUIRED_CONFIG_KEYS)
+        | set(config_mod.OPTIONAL_CONFIG_TYPES)
+    )
 
 
 def test_get_config_diff_sections_groups_differences_by_sample_sections():

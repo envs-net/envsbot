@@ -335,7 +335,7 @@ async def _send_youtube_urlcheck_reply(
         for x in list(message.xml.findall("{urn:xmpp:sn:0}x")):
             message.xml.remove(x)
 
-    message.send()
+    await bot._safe_send_message(message)
 
 
 async def _send_html_urlcheck_reply(
@@ -394,7 +394,7 @@ async def _send_html_urlcheck_reply(
         for x in list(message.xml.findall("{urn:xmpp:sn:0}x")):
             message.xml.remove(x)
 
-    message.send()
+    await bot._safe_send_message(message)
 
 
 def strip_html_tags(text):

@@ -248,6 +248,9 @@ MAX_NEW_FEED_ENTRIES = 5
 # are unlimited. Set to 0 to disable trusted-user DM subscriptions.
 RSS_TRUSTED_MAX_FEEDS = 10
 
+# Number of entries shown on one paginated RSS list page.
+RSS_LIST_PAGE_SIZE = 10
+
 # Maximum number of new entries posted per regular feed poll.
 # If a very active feed publishes more than this between two checks, older
 # unseen entries are skipped and the newest item is remembered as seen.

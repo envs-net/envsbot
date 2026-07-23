@@ -4,7 +4,7 @@ from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
 from utils.room_features import format_room_feature_line, list_room_features
-from bot.room_state import joined_room_jids
+from bot.room_state import known_room_jids
 
 from .defaults import _cleanup_room_plugin_state
 from .presence import (
@@ -99,14 +99,14 @@ def _roster_value(item, key: str, default=None):
         return getattr(item, key, default)
 
 
-def _direct_contact_lines(bot) -> tuple[list[str], int, int]:
+def _direct_contact_lines(bot, stored_rooms=()) -> tuple[list[str], int, int]:
     """Build compact lines for the bot's XMPP roster contacts."""
     roster = getattr(bot, "client_roster", None)
     if roster is None:
         return [], 0, 0
 
     own_jid = str(getattr(getattr(bot, "boundjid", None), "bare", "")).lower()
-    muc_jids = joined_room_jids(bot, _runtime_rooms(bot))
+    muc_jids = known_room_jids(bot, _runtime_rooms(bot), stored_rooms)
     contacts = []
     for roster_jid in roster.keys():
         jid = str(getattr(roster_jid, "bare", roster_jid)).split("/", 1)[0]
@@ -577,7 +577,7 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
     role=Role.ADMIN,
     aliases=["room list"],
     short="List MUC rooms or direct XMPP contacts.",
-    usage="{prefix}rooms list [muc|dm|1:1] [<page>|last|all]",
+    usage="{prefix}rooms list [muc|dm|1:1|direct|contacts] [<page>|last|all]",
     examples=[
         "{prefix}rooms list",
         "{prefix}rooms list all",
@@ -595,13 +595,27 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
     if parsed is None:
         bot.reply_usage(
             msg,
-            f"{bot.prefix}rooms list [muc|dm|1:1] [<page>|last|all]",
+            (
+                f"{bot.prefix}rooms list "
+                "[muc|dm|1:1|direct|contacts] [<page>|last|all]"
+            ),
         )
         return
     scope, page = parsed
 
     if scope == "dm":
-        contact_lines, contact_count, online_count = _direct_contact_lines(bot)
+        try:
+            stored_rooms = await bot.db.rooms.list()
+        except Exception as exc:
+            stored_rooms = []
+            log.warning(
+                "[ROOMS] Could not load stored rooms while listing direct contacts: %s",
+                exc,
+            )
+        contact_lines, contact_count, online_count = _direct_contact_lines(
+            bot,
+            stored_rooms,
+        )
         details = [
             f"Direct contacts ({contact_count}): online={online_count}",
             "1:1 chats are not joined like MUCs; this lists XMPP roster contacts.",

@@ -157,6 +157,49 @@ def test_runtime_refresh_updates_reminder_default_timezone(monkeypatch):
     assert any("plugins.reminder" in line for line in refreshed)
 
 
+def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
+    monkeypatch,
+):
+    from plugins import rss
+    from plugins.rss import commands as rss_commands
+    from plugins.rss import formatting as rss_formatting
+
+    values = runtime._rss_values({
+        "rss_trusted_max_feeds": 0,
+        "rss_list_page_size": 25,
+        "rss_max_entries_per_poll": 4,
+        "rss_broken_error_threshold": 7,
+        "rss_template_max_length": 1500,
+    })
+
+    assert values["RSS_TRUSTED_MAX_FEEDS"] == 0
+    assert values["RSS_LIST_PAGE_SIZE"] == 25
+    assert values["RSS_MAX_ENTRIES_PER_POLL"] == 4
+    assert values["RSS_BROKEN_ERROR_THRESHOLD"] == 7
+    assert values["RSS_TEMPLATE_MAX_LENGTH"] == 1500
+
+    monkeypatch.setattr(rss, "RSS_TRUSTED_MAX_FEEDS", 10)
+    monkeypatch.setattr(rss_commands, "RSS_TRUSTED_MAX_FEEDS", 10)
+    monkeypatch.setattr(rss_commands, "RSS_BROKEN_ERROR_THRESHOLD", 3)
+    monkeypatch.setattr(rss_formatting, "RSS_LIST_PAGE_SIZE", 10)
+    monkeypatch.setattr(rss_formatting, "RSS_TEMPLATE_MAX_LENGTH", 1000)
+
+    refreshed = runtime.refresh_runtime_config_constants({
+        "rss_trusted_max_feeds": 0,
+        "rss_list_page_size": 25,
+        "rss_broken_error_threshold": 7,
+        "rss_template_max_length": 1500,
+    })
+
+    assert rss.RSS_TRUSTED_MAX_FEEDS == 0
+    assert rss_commands.RSS_TRUSTED_MAX_FEEDS == 0
+    assert rss_commands.RSS_BROKEN_ERROR_THRESHOLD == 7
+    assert rss_formatting.RSS_LIST_PAGE_SIZE == 25
+    assert rss_formatting.RSS_TEMPLATE_MAX_LENGTH == 1500
+    assert any("plugins.rss.commands" in line for line in refreshed)
+    assert any("plugins.rss.formatting" in line for line in refreshed)
+
+
 def test_runtime_refresh_updates_translate_defaults(monkeypatch):
     from plugins import translate
 

@@ -1,8 +1,10 @@
 """Split module for core_plugins/users.py: commands."""
 
+import inspect
+
 from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
-from bot.room_state import joined_room_jids
+from bot.room_state import known_room_jids
 from .formatting import _audit_reason, _send_user_info, _write_user_audit
 from .lookup import _parse_user_jid, _valid_plugin_names, find_users_by_nick_safe
 from .permissions import (
@@ -235,7 +237,23 @@ def _known_user_line(user, *, kind: str, direct=None, room=None) -> str:
     return f"• {icon} {jid} | " + " | ".join(fields)
 
 
-def _known_user_sections(bot, users, joined_rooms, scope: str):
+async def _stored_room_rows(bot):
+    """Best-effort load of stored MUC rows for user/contact filtering."""
+    room_store = getattr(getattr(bot, "db", None), "rooms", None)
+    list_rooms = getattr(room_store, "list", None)
+    if not callable(list_rooms):
+        return []
+    try:
+        rows = list_rooms()
+        if inspect.isawaitable(rows):
+            rows = await rows
+        return rows if isinstance(rows, (list, tuple, dict)) else []
+    except Exception as exc:
+        log.warning("[USERS] Could not load stored room JIDs: %s", exc)
+        return []
+
+
+def _known_user_sections(bot, users, joined_rooms, scope: str, stored_rooms=()):
     """Build categorized lines for all users known to the bot."""
     users_by_jid = {
         str(user.get("jid")): {**user, "stored": True}
@@ -252,7 +270,7 @@ def _known_user_sections(bot, users, joined_rooms, scope: str):
         for jid in deleted_users
         if str(jid).casefold() not in stored_jids
     }
-    muc_jids = joined_room_jids(bot, joined_rooms)
+    muc_jids = known_room_jids(bot, joined_rooms, stored_rooms)
 
     direct_state = {
         jid: state
@@ -422,7 +440,14 @@ async def users_list(bot, sender, nick, args, msg, is_room):
         users = await bot.db.users.list()
         rooms_plugin = bot.bot_plugins.plugins.get("rooms")
         joined_rooms = getattr(rooms_plugin, "JOINED_ROOMS", {}) if rooms_plugin else {}
-        lines, _counts = _known_user_sections(bot, users, joined_rooms, scope)
+        stored_rooms = await _stored_room_rows(bot)
+        lines, _counts = _known_user_sections(
+            bot,
+            users,
+            joined_rooms,
+            scope,
+            stored_rooms,
+        )
         command_hint = f"{_command_prefix(bot)}users list"
         if scope != "all":
             command_hint += f" {scope}"

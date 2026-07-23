@@ -11,6 +11,12 @@ def mock_bot():
     bot = MagicMock()
     bot.make_message = MagicMock(return_value=MagicMock())
     bot.reply = MagicMock()
+
+    async def safe_send(message):
+        message.send()
+        return True
+
+    bot._safe_send_message = AsyncMock(side_effect=safe_send)
     return bot
 
 
@@ -160,8 +166,17 @@ async def test_send_url_with_oob_sets_field_and_sends():
     msg_obj.__getitem__.side_effect = getitem
     msg_obj.send = MagicMock()
 
-    await xkcd.send_url_with_oob(bot, "jid@xmpp", "http://test", "chat")
+    async def safe_send(message):
+        message.send()
+        return True
+
+    bot._safe_send_message = AsyncMock(side_effect=safe_send)
+
+    assert await xkcd.send_url_with_oob(
+        bot, "jid@xmpp", "http://test", "chat"
+    ) is True
     msg_obj.send.assert_called()
+    bot._safe_send_message.assert_awaited_once_with(msg_obj)
 
 
 @pytest.mark.asyncio
@@ -171,8 +186,28 @@ async def test_send_url_with_oob_attach_oob_fails():
     bot.make_message.return_value = msg_obj
     msg_obj.__getitem__.side_effect = Exception("No OOB")
     msg_obj.send = MagicMock()
-    await xkcd.send_url_with_oob(bot, "jid@xmpp", "http://test", "chat")
+
+    async def safe_send(message):
+        message.send()
+        return True
+
+    bot._safe_send_message = AsyncMock(side_effect=safe_send)
+    assert await xkcd.send_url_with_oob(
+        bot, "jid@xmpp", "http://test", "chat"
+    ) is True
     msg_obj.send.assert_called()
+    bot._safe_send_message.assert_awaited_once_with(msg_obj)
+
+
+@pytest.mark.asyncio
+async def test_send_url_with_oob_reports_send_failure():
+    bot = MagicMock()
+    bot.make_message.return_value = MagicMock()
+    bot._safe_send_message = AsyncMock(return_value=False)
+
+    assert await xkcd.send_url_with_oob(
+        bot, "jid@xmpp", "http://test", "chat"
+    ) is False
 
 #
 # --- send_xkcd_room / send_xkcd_dm
@@ -207,6 +242,7 @@ async def test_send_xkcd_dm_success(mock_bot):
           as send_oob):
         await xkcd.send_xkcd_dm(mock_bot, "me@xmpp", comic)
         msg_obj.send.assert_called()
+        mock_bot._safe_send_message.assert_awaited_once_with(msg_obj)
         send_oob.assert_awaited()
 
 
@@ -219,6 +255,19 @@ async def test_send_xkcd_dm_no_img(mock_bot):
     with patch("plugins.xkcd.send_url_with_oob", new_callable=AsyncMock):
         await xkcd.send_xkcd_dm(mock_bot, "me@xmpp", comic)
         msg_obj.send.assert_not_called()
+        mock_bot._safe_send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_xkcd_dm_stops_when_info_message_send_fails(mock_bot):
+    comic = {"img": "/comics/bar.png", "num": 85, "title": "bar"}
+    mock_bot._safe_send_message = AsyncMock(return_value=False)
+
+    with patch("plugins.xkcd.send_url_with_oob", new_callable=AsyncMock) as send_oob:
+        await xkcd.send_xkcd_dm(mock_bot, "me@xmpp", comic)
+
+    mock_bot._safe_send_message.assert_awaited_once()
+    send_oob.assert_not_awaited()
 
 
 class DummyXkcdStore:

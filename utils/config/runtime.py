@@ -231,6 +231,7 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
 
 
 def _rss_values(cfg: Mapping[str, object]) -> dict[str, object]:
+    trusted_max_feeds = cfg.get("rss_trusted_max_feeds")
     return {
         "DEFAULT_POLL_INTERVAL": _to_int(cfg.get("rss_global_query_interval") or 1200, 1200),
         "RSS_RETRY_INITIAL_DELAY": max(1, _to_int(cfg.get("rss_retry_initial_delay") or 300, 300)),
@@ -242,7 +243,13 @@ def _rss_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "RSS_MAX_READ_BYTES": max(4096, _to_int(cfg.get("rss_max_read_bytes") or 1048576, 1048576)),
         "ALLOW_PRIVATE_FETCH_URLS": _to_bool(cfg.get("allow_private_fetch_urls"), False),
         "RSS_LIST_PAGE_SIZE": max(1, _to_int(cfg.get("rss_list_page_size") or 10, 10)),
+        "RSS_TRUSTED_MAX_FEEDS": max(
+            0,
+            _to_int(10 if trusted_max_feeds is None else trusted_max_feeds, 10),
+        ),
         "RSS_MAX_ENTRIES_PER_POLL": max(1, _to_int(cfg.get("rss_max_entries_per_poll") or 10, 10)),
+        "RSS_BROKEN_ERROR_THRESHOLD": max(1, _to_int(cfg.get("rss_broken_error_threshold") or 3, 3)),
+        "RSS_TEMPLATE_MAX_LENGTH": max(1, _to_int(cfg.get("rss_template_max_length") or 1000, 1000)),
         "SIMILARITY_THRESHOLD": _to_float(cfg.get("rss_similarity_threshold") or 0.8, 0.8),
     }
 
@@ -295,6 +302,8 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         },
         "plugins.rss.commands": {
             "DEFAULT_POLL_INTERVAL": rss_values["DEFAULT_POLL_INTERVAL"],
+            "RSS_BROKEN_ERROR_THRESHOLD": rss_values["RSS_BROKEN_ERROR_THRESHOLD"],
+            "RSS_TRUSTED_MAX_FEEDS": rss_values["RSS_TRUSTED_MAX_FEEDS"],
         },
         "plugins.rss.store": {
             key: rss_values[key]
@@ -317,6 +326,7 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         },
         "plugins.rss.formatting": {
             "RSS_LIST_PAGE_SIZE": rss_values["RSS_LIST_PAGE_SIZE"],
+            "RSS_TEMPLATE_MAX_LENGTH": rss_values["RSS_TEMPLATE_MAX_LENGTH"],
         },
         "plugins.reminder": reminder_values,
         "plugins.reminder.runtime": {

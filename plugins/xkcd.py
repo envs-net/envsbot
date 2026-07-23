@@ -136,7 +136,7 @@ def normalize_image_url(url: str | None) -> str | None:
     return url
 
 
-async def send_url_with_oob(bot, target, url: str, mtype: str):
+async def send_url_with_oob(bot, target, url: str, mtype: str) -> bool:
     """Send a URL in the message body and include XEP-0066 OOB data."""
     message = bot.make_message(
         mto=target,
@@ -149,7 +149,7 @@ async def send_url_with_oob(bot, target, url: str, mtype: str):
     except Exception as exc:
         log.debug("[XKCD] Could not attach XEP-0066 OOB data: %s", exc)
 
-    message.send()
+    return await bot._safe_send_message(message)
 
 
 async def send_xkcd_room(bot, room_id: str, comic: dict[str, Any] | None):
@@ -184,7 +184,8 @@ async def send_xkcd_room(bot, room_id: str, comic: dict[str, Any] | None):
             comic.get("num"),
             room_id,
         )
-        await send_url_with_oob(bot, room_id, img_url, "groupchat")
+        if not await send_url_with_oob(bot, room_id, img_url, "groupchat"):
+            return
         log.debug("[XKCD] ✅ Comic #%s sent to room", comic.get("num"))
 
     except Exception as exc:
@@ -213,7 +214,8 @@ async def send_xkcd_dm(bot, target_jid: str, comic: dict[str, Any] | None):
             mbody=info_msg,
             mtype="chat",
         )
-        message.send()
+        if not await bot._safe_send_message(message):
+            return
 
         # Ensure the info message lands before the image URL/OOB message.
         await asyncio.sleep(0.2)
@@ -223,7 +225,8 @@ async def send_xkcd_dm(bot, target_jid: str, comic: dict[str, Any] | None):
             comic.get("num"),
             target_jid,
         )
-        await send_url_with_oob(bot, target_jid, img_url, "chat")
+        if not await send_url_with_oob(bot, target_jid, img_url, "chat"):
+            return
         log.debug("[XKCD] ✅ Comic #%s sent to DM", comic.get("num"))
 
     except Exception as exc:

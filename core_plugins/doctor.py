@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import compileall
 import os
 import py_compile
@@ -597,18 +598,38 @@ async def _release_plugin_metadata_line(bot: Any) -> str:
     return _line(True, "Plugin metadata", "ok")
 
 
-async def _release_lines(bot: Any) -> list[str]:
-    """Return release-readiness checks for operators."""
-    return [
-        _local_version_line(bot),
-        await _latest_release_line(bot),
+def _release_sync_lines(bot: Any) -> tuple[str, str, str, str, str, str]:
+    """Run blocking release checks outside the XMPP event loop."""
+    return (
         _command_docs_line(),
         _config_sample_line(),
         _release_permissions_line(bot),
         _release_python_compile_line(),
         _release_git_status_line(),
-        await _release_migration_line(bot),
         _release_backup_line(),
+    )
+
+
+async def _release_lines(bot: Any) -> list[str]:
+    """Return release-readiness checks for operators."""
+    (
+        command_docs,
+        config_sample,
+        permissions,
+        python_compile,
+        git_status,
+        backup,
+    ) = await asyncio.to_thread(_release_sync_lines, bot)
+    return [
+        _local_version_line(bot),
+        await _latest_release_line(bot),
+        command_docs,
+        config_sample,
+        permissions,
+        python_compile,
+        git_status,
+        await _release_migration_line(bot),
+        backup,
         _release_task_line(bot),
         await _release_plugin_metadata_line(bot),
     ]
