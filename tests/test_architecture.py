@@ -284,3 +284,61 @@ def test_add_capable_resource_commands_keep_standard_removal_aliases():
     assert "acronyms add" in info_commands
     assert {"acronyms rm"} <= info_commands["acronyms remove"]
     assert {"acronyms del"} <= info_commands["acronyms delete"]
+
+
+def test_profile_acronym_and_restart_file_io_stays_off_event_loop():
+    """Keep small local-file workflows out of asynchronous XMPP handlers."""
+    targets = {
+        "core_plugins/_reg_profile.py": {
+            "update_vcard": {"_load_vcard_xml", "read_hash", "write_hash", "open", "exists"},
+            "update_avatar": {"_read_binary_file", "read_hash", "write_hash", "open", "exists"},
+        },
+        "plugins/info.py": {
+            "acronyms_cmd": {"_lookup_acronym_descriptions", "open", "exists"},
+            "acronyms_add_cmd": {"_queue_acronym_addition", "open", "exists", "makedirs"},
+            "acronyms_remove_cmd": {"_queue_acronym_removal", "open", "exists", "makedirs"},
+            "acronyms_list_cmd": {"_pending_acronym_lines", "open", "exists"},
+            "acronyms_merge_cmd": {"_merge_pending_acronyms", "open", "exists", "remove"},
+            "acronyms_delete_cmd": {"_delete_pending_acronyms", "open", "exists"},
+            "get_runtime_state": {"_acronym_runtime_counts", "open", "exists"},
+        },
+        "core_plugins/_admin.py": {
+            "bot_restart": {"_write_private_json", "open", "exists", "replace"},
+        },
+        "bot/lifecycle.py": {
+            "_send_restart_notification": {
+                "_consume_restart_notification",
+                "open",
+                "exists",
+                "remove",
+            },
+        },
+    }
+
+    offenders: list[str] = []
+    for relative_path, functions in targets.items():
+        path = ROOT / relative_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        async_functions = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef)
+        }
+        for function_name, disallowed_calls in functions.items():
+            node = async_functions[function_name]
+            for call in (
+                item for item in ast.walk(node) if isinstance(item, ast.Call)
+            ):
+                name = (
+                    call.func.id
+                    if isinstance(call.func, ast.Name)
+                    else call.func.attr
+                    if isinstance(call.func, ast.Attribute)
+                    else ""
+                )
+                if name in disallowed_calls:
+                    offenders.append(
+                        f"{relative_path}:{call.lineno}:{function_name}:{name}"
+                    )
+
+    assert offenders == []

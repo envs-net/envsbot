@@ -24,6 +24,7 @@ The profile setup is executed automatically when the XMPP
 session starts or on plugin reload.
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -80,6 +81,24 @@ def read_hash(path):
             return f.read().strip()
     except Exception:
         return None
+
+
+def _load_vcard_xml(path):
+    """Load the configured vCard XML string from a Python file."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    spec = importlib.util.spec_from_file_location("vcard", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load vCard module from {path}")
+    vcardmod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vcardmod)
+    return vcardmod.VCARD
+
+
+def _read_binary_file(path):
+    """Read a local binary file for an async caller."""
+    with open(path, "rb") as handle:
+        return handle.read()
 
 
 def write_hash(path, value):
@@ -175,28 +194,25 @@ async def update_vcard(bot):
     """
     plugin_dir = os.path.dirname(os.path.abspath(__file__))
     vcard_py_path = os.path.join(os.path.dirname(plugin_dir), "vcard.py")
-    if not os.path.exists(vcard_py_path):
+    try:
+        VCARD = await asyncio.to_thread(_load_vcard_xml, vcard_py_path)
+    except FileNotFoundError:
         log.warning(
             "[_REG_PROFILE] vcard.py does not exist. Skipping vCard update.")
         return
-
-    try:
-        spec = importlib.util.spec_from_file_location("vcard", vcard_py_path)
-        vcardmod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(vcardmod)
-        VCARD = vcardmod.VCARD
-        if not isinstance(VCARD, str):
-            log.error(
-                "[_REG_PROFILE] VCARD variable in vcard.py is not a string!")
-            return
     except Exception as e:
         log.error(f"[_REG_PROFILE] Error importing vcard.py: {e}")
+        return
+
+    if not isinstance(VCARD, str):
+        log.error(
+            "[_REG_PROFILE] VCARD variable in vcard.py is not a string!")
         return
 
     # For hash comparison
     serialized = VCARD.encode("utf-8")
     new_hash = sha1(serialized)
-    stored_hash = read_hash(VCARD_HASH_FILE)
+    stored_hash = await asyncio.to_thread(read_hash, VCARD_HASH_FILE)
     if stored_hash == new_hash:
         log.debug(
             "[_REG_PROFILE] vCard (from vcard.py/XML) unchanged"
@@ -208,7 +224,7 @@ async def update_vcard(bot):
         iq = bot.make_iq_set()
         iq.append(vcard_elem)
         await iq.send()
-        write_hash(VCARD_HASH_FILE, new_hash)
+        await asyncio.to_thread(write_hash, VCARD_HASH_FILE, new_hash)
         log.info("[_REG_PROFILE]✅ vCard (from vcard.py, XML string) updated")
     except Exception as e:
         log.error(
@@ -279,13 +295,12 @@ async def update_avatar(bot):
     if not avatar_path:
         return
 
-    if not os.path.exists(avatar_path):
-        log.warning("[_REG_PROFILE]🟡️ Avatar file not found")
-        return
-
     try:
-        with open(avatar_path, "rb") as f:
-            avatar = f.read()
+        try:
+            avatar = await asyncio.to_thread(_read_binary_file, avatar_path)
+        except FileNotFoundError:
+            log.warning("[_REG_PROFILE]🟡️ Avatar file not found")
+            return
 
         image_hash = sha1(avatar)
         bot.avatar_hash = image_hash
@@ -294,7 +309,7 @@ async def update_avatar(bot):
         # avatar_hash.asc already contains the raw SHA1 from the XEP-0084-only
         # code.
         new_hash = f"v2:{image_hash}"
-        stored_hash = read_hash(AVATAR_HASH_FILE)
+        stored_hash = await asyncio.to_thread(read_hash, AVATAR_HASH_FILE)
 
         if stored_hash == new_hash:
             log.debug("[_REG_PROFILE] Avatar unchanged — skipping upload")
@@ -327,7 +342,7 @@ async def update_avatar(bot):
         )
         await _cache_xep0153_hash(bot, image_hash)
 
-        write_hash(AVATAR_HASH_FILE, new_hash)
+        await asyncio.to_thread(write_hash, AVATAR_HASH_FILE, new_hash)
         if hasattr(bot, "presence"):
             bot.presence.broadcast()
         log.info("[_REG_PROFILE]✅ Avatar updated")

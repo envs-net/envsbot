@@ -577,7 +577,11 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
     for path in _restart_notification_paths(config):
         try:
             notification_path = Path(path)
-            _write_private_json(notification_path, notification_data)
+            await asyncio.to_thread(
+                _write_private_json,
+                notification_path,
+                notification_data,
+            )
             saved_paths.append(str(notification_path))
         except Exception as e:
             log.warning("[ADMIN] Failed to save restart notification to %s: %s", path, e)

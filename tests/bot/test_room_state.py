@@ -65,3 +65,15 @@ def test_known_room_jids_adds_stored_row_shapes():
         "list@conf.test",
         "plain@conf.test",
     }
+
+
+def test_known_room_jids_handles_broken_stored_room_mapping():
+    class BrokenStoredRooms:
+        def keys(self):
+            raise TypeError("broken")
+
+    assert room_state.known_room_jids(
+        None,
+        {"Joined@Conf.Test": {}},
+        BrokenStoredRooms(),
+    ) == {"joined@conf.test"}

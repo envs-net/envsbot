@@ -20,6 +20,7 @@ Commands:
 """
 
 import aiohttp
+import asyncio
 import inspect
 import urllib.parse
 import html
@@ -27,6 +28,7 @@ import logging
 import re
 import csv
 import os
+import threading
 
 from bs4 import BeautifulSoup
 
@@ -459,6 +461,168 @@ def delete_from_csv(filename, matchfunc):
     return removed
 
 
+_ACRONYM_FILE_LOCK = threading.Lock()
+
+
+def _append_csv_row(filename, row):
+    directory = os.path.dirname(filename)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(filename, "a", encoding="utf-8", newline="") as handle:
+        csv.writer(handle).writerow(row)
+
+
+def _lookup_acronym_descriptions(acronym):
+    """Read one acronym definition snapshot under the file lock."""
+    with _ACRONYM_FILE_LOCK:
+        return all_main_descriptions(acronym)
+
+
+def _queue_acronym_addition(acronym, description, proposer):
+    """Validate and append one pending acronym addition."""
+    with _ACRONYM_FILE_LOCK:
+        if description_exists_in_main(acronym, description):
+            return "exists_main"
+        if addition_exists(acronym, description):
+            return "already_pending"
+        _append_csv_row(
+            SLANG_ADDITIONS_CSV,
+            [acronym, description, proposer],
+        )
+    return "queued"
+
+
+def _queue_acronym_removal(acronym, description, proposer):
+    """Validate and append one pending acronym removal."""
+    with _ACRONYM_FILE_LOCK:
+        if not description_exists_in_main(acronym, description):
+            return "missing_main"
+        if removal_exists(acronym, description):
+            return "already_pending"
+        _append_csv_row(
+            SLANG_REMOVALS_CSV,
+            [acronym, description, proposer],
+        )
+    return "queued"
+
+
+def _pending_acronym_lines():
+    """Read pending acronym additions and removals."""
+    addition_lines = []
+    removal_lines = []
+    with _ACRONYM_FILE_LOCK:
+        if os.path.exists(SLANG_ADDITIONS_CSV):
+            with open(SLANG_ADDITIONS_CSV, encoding="utf-8") as handle:
+                for row in csv.reader(handle):
+                    if len(row) >= 3:
+                        addition_lines.append(
+                            f"{row[0].upper()}: {row[1]} (by {row[2]})"
+                        )
+        if os.path.exists(SLANG_REMOVALS_CSV):
+            with open(SLANG_REMOVALS_CSV, encoding="utf-8") as handle:
+                for row in csv.reader(handle):
+                    if len(row) >= 3:
+                        removal_lines.append(
+                            f"{row[0].upper()}: {row[1]} (by {row[2]})"
+                        )
+    return addition_lines, removal_lines
+
+
+def _merge_pending_acronyms():
+    """Apply pending additions/removals and return change counts."""
+    with _ACRONYM_FILE_LOCK:
+        main_entries = []
+        if os.path.exists(SLANG_CSV):
+            with open(SLANG_CSV, encoding="utf-8") as handle:
+                for row in csv.reader(handle):
+                    if len(row) >= 2:
+                        main_entries.append([row[0].strip(), row[1].strip()])
+
+        removals = set()
+        if os.path.exists(SLANG_REMOVALS_CSV):
+            with open(SLANG_REMOVALS_CSV, encoding="utf-8") as handle:
+                for row in csv.reader(handle):
+                    if len(row) >= 2:
+                        removals.add(
+                            (row[0].strip().lower(), row[1].strip().lower())
+                        )
+
+        kept_entries = [
+            row for row in main_entries
+            if (row[0].lower(), row[1].lower()) not in removals
+        ]
+        removed_count = len(main_entries) - len(kept_entries)
+        existing = {
+            (row[0].lower(), row[1].lower())
+            for row in kept_entries
+        }
+
+        new_add_count = 0
+        if os.path.exists(SLANG_ADDITIONS_CSV):
+            with open(SLANG_ADDITIONS_CSV, encoding="utf-8") as handle:
+                for row in csv.reader(handle):
+                    if len(row) < 2:
+                        continue
+                    acro, desc = row[0].strip(), row[1].strip()
+                    key = (acro.lower(), desc.lower())
+                    if key in existing:
+                        continue
+                    kept_entries.append([acro, desc])
+                    existing.add(key)
+                    new_add_count += 1
+                    log.info("[ACRONYMS] Added new slang: %s:%s", acro, desc)
+
+        directory = os.path.dirname(SLANG_CSV)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(SLANG_CSV, "w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerows(kept_entries)
+        for filename in (SLANG_ADDITIONS_CSV, SLANG_REMOVALS_CSV):
+            try:
+                os.remove(filename)
+            except FileNotFoundError:
+                continue
+
+    return new_add_count, removed_count
+
+
+def _delete_pending_acronyms(*, nick=None, acronym=None, description=None):
+    """Delete pending suggestions by proposer or exact definition."""
+    if nick is not None:
+        needle = nick.strip().lower()
+
+        def matchfunc(row):
+            return len(row) >= 3 and row[2].strip().lower() == needle
+    else:
+        abbreviation = str(acronym or "").strip().lower()
+        definition = str(description or "").strip().lower()
+
+        def matchfunc(row):
+            return (
+                len(row) >= 2
+                and row[0].strip().lower() == abbreviation
+                and row[1].strip().lower() == definition
+            )
+
+    with _ACRONYM_FILE_LOCK:
+        return sum(
+            delete_from_csv(filename, matchfunc)
+            for filename in (SLANG_ADDITIONS_CSV, SLANG_REMOVALS_CSV)
+        )
+
+
+def _acronym_runtime_counts():
+    """Return acronym diagnostics using one non-event-loop file snapshot."""
+    with _ACRONYM_FILE_LOCK:
+        definitions = load_main_definitions()
+        return {
+            "acronyms": len(definitions),
+            "definitions": sum(len(items) for items in definitions.values()),
+            "pending_additions": _csv_row_count(SLANG_ADDITIONS_CSV),
+            "pending_removals": _csv_row_count(SLANG_REMOVALS_CSV),
+        }
+
+
 # --- Acronym Commands ---
 
 @command(
@@ -492,7 +656,7 @@ async def acronyms_cmd(bot, sender, nick, args, msg, is_room):
         )
         return None
     query = args[0].strip().lower()
-    definitions = all_main_descriptions(query)
+    definitions = await asyncio.to_thread(_lookup_acronym_descriptions, query)
     if definitions:
         lines = [f"{query.upper()}: {d}" for d in definitions]
         log.info(
@@ -546,7 +710,13 @@ async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
         return None
     abbreviation = args[0].strip()
     description = " ".join(args[1:]).strip()
-    if description_exists_in_main(abbreviation, description):
+    queue_status = await asyncio.to_thread(
+        _queue_acronym_addition,
+        abbreviation,
+        description,
+        nick or sender,
+    )
+    if queue_status == "exists_main":
         log.info(
             f"[ACRONYMS] {sender} tried to queue existing main def: "
             f"{abbreviation}:{description}"
@@ -557,7 +727,7 @@ async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
             f"database."
         )
         return None
-    if addition_exists(abbreviation, description):
+    if queue_status == "already_pending":
         log.info(
             f"[ACRONYMS] {sender} tried to queue existing pending addition: "
             f"{abbreviation}:{description}"
@@ -567,9 +737,6 @@ async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
             "This suggestion is already awaiting admin review."
         )
         return None
-    os.makedirs(os.path.dirname(SLANG_ADDITIONS_CSV), exist_ok=True)
-    with open(SLANG_ADDITIONS_CSV, "a", encoding="utf-8", newline="") as f:
-        csv.writer(f).writerow([abbreviation, description, nick or sender])
     log.info(
         f"[ACRONYMS] Queued new addition by {sender}/{nick}: "
         f"{abbreviation}:{description}"
@@ -621,13 +788,19 @@ async def acronyms_remove_cmd(bot, sender, nick, args, msg, is_room):
         return None
     abbreviation = args[0].strip()
     description = " ".join(args[1:]).strip()
-    if not description_exists_in_main(abbreviation, description):
+    queue_status = await asyncio.to_thread(
+        _queue_acronym_removal,
+        abbreviation,
+        description,
+        nick or sender,
+    )
+    if queue_status == "missing_main":
         bot.reply(
             msg,
             "That definition doesn't exist in the main list."
         )
         return None
-    if removal_exists(abbreviation, description):
+    if queue_status == "already_pending":
         log.info(
             f"[ACRONYMS] {sender} tried to queue existing pending removal: "
             f"{abbreviation}:{description}"
@@ -637,9 +810,6 @@ async def acronyms_remove_cmd(bot, sender, nick, args, msg, is_room):
             "This removal is already awaiting admin review."
         )
         return None
-    os.makedirs(os.path.dirname(SLANG_REMOVALS_CSV), exist_ok=True)
-    with open(SLANG_REMOVALS_CSV, "a", encoding="utf-8", newline="") as f:
-        csv.writer(f).writerow([abbreviation, description, nick or sender])
     log.info(
         f"[ACRONYMS] Queued new removal by {sender}/{nick}: "
         f"{abbreviation}:{description}"
@@ -677,22 +847,9 @@ async def acronyms_list_cmd(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, "ℹ️ Acronyms are disabled in this room.")
         return None
 
-    addition_lines = []
-    removal_lines = []
-    if os.path.exists(SLANG_ADDITIONS_CSV):
-        with open(SLANG_ADDITIONS_CSV, encoding="utf-8") as f:
-            for row in csv.reader(f):
-                if len(row) >= 3:
-                    addition_lines.append(
-                        f"{row[0].upper()}: {row[1]} (by {row[2]})"
-                    )
-    if os.path.exists(SLANG_REMOVALS_CSV):
-        with open(SLANG_REMOVALS_CSV, encoding="utf-8") as f:
-            for row in csv.reader(f):
-                if len(row) >= 3:
-                    removal_lines.append(
-                        f"{row[0].upper()}: {row[1]} (by {row[2]})"
-                    )
+    addition_lines, removal_lines = await asyncio.to_thread(
+        _pending_acronym_lines
+    )
     log.info(
         f"[ACRONYMS] Admin {sender} reviewed {len(addition_lines)} "
         f"additions and {len(removal_lines)} removals."
@@ -746,51 +903,9 @@ async def acronyms_merge_cmd(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, "ℹ️ Acronyms are disabled in this room.")
         return None
 
-    main_entries = []
-    if os.path.exists(SLANG_CSV):
-        with open(SLANG_CSV, encoding="utf-8") as f:
-            for row in csv.reader(f):
-                if len(row) >= 2:
-                    acro = row[0].strip()
-                    desc = row[1].strip()
-                    main_entries.append([acro, desc])
-    # Removals
-    removals = set()
-    if os.path.exists(SLANG_REMOVALS_CSV):
-        with open(SLANG_REMOVALS_CSV, encoding="utf-8") as f:
-            for row in csv.reader(f):
-                if len(row) >= 2:
-                    acro, desc = row[0].strip(), row[1].strip()
-                    removals.add((acro.lower(), desc.lower()))
-    kept_entries = [
-        row for row in main_entries
-        if (row[0].lower(), row[1].lower()) not in removals
-    ]
-    removed_count = len(main_entries) - len(kept_entries)
-    # Additions
-    new_add_count = 0
-    if os.path.exists(SLANG_ADDITIONS_CSV):
-        with open(SLANG_ADDITIONS_CSV, encoding="utf-8") as f:
-            for row in csv.reader(f):
-                if len(row) >= 2:
-                    acro, desc = row[0].strip(), row[1].strip()
-                    key = (acro.lower(), desc.lower())
-                    if key not in {
-                        (row[0].lower(), row[1].lower())
-                        for row in kept_entries
-                    }:
-                        kept_entries.append([acro, desc])
-                        new_add_count += 1
-                        log.info(
-                            f"[ACRONYMS] Added new slang: {acro}:{desc}"
-                        )
-    with open(SLANG_CSV, "w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerows(kept_entries)
-    if os.path.exists(SLANG_ADDITIONS_CSV):
-        os.remove(SLANG_ADDITIONS_CSV)
-    if os.path.exists(SLANG_REMOVALS_CSV):
-        os.remove(SLANG_REMOVALS_CSV)
+    new_add_count, removed_count = await asyncio.to_thread(
+        _merge_pending_acronyms
+    )
     log.info(
         f"[ACRONYMS] Admin {sender} merged: +{new_add_count} additions, "
         f"-{removed_count} removals."
@@ -847,64 +962,60 @@ async def acronyms_delete_cmd(bot, sender, nick, args, msg, is_room):
             f"{_command_prefix(bot)}acronyms delete <nick>"
         )
         return None
-    total_removed = 0
     if len(args) == 1:
-        # Delete all additions/removals made by that nick
-        nick_arg = args[0].strip().lower()
-        for fname in (SLANG_ADDITIONS_CSV, SLANG_REMOVALS_CSV):
-            def matchfunc(row):
-                return len(row) >= 3 and row[2].strip().lower() == nick_arg
-            removed = delete_from_csv(fname, matchfunc)
-            if removed:
-                log.info(
-                    f"[ACRONYMS] Admin {sender} deleted {removed} entries "
-                    f"from {fname} for nick {nick_arg}"
-                )
-            total_removed += removed
+        nick_arg = args[0].strip()
+        total_removed = await asyncio.to_thread(
+            _delete_pending_acronyms,
+            nick=nick_arg,
+        )
         if total_removed:
+            log.info(
+                "[ACRONYMS] Admin %s deleted %s entries for nick %s",
+                sender,
+                total_removed,
+                nick_arg.lower(),
+            )
             bot.reply(
                 msg,
                 f"Deleted {total_removed} entries for nick "
-                f"'{args[0].strip()}' from pending additions/removals."
+                f"'{nick_arg}' from pending additions/removals."
             )
         else:
             bot.reply(
                 msg,
                 f"No pending additions/removals found for nick "
-                f"'{args[0].strip()}'."
+                f"'{nick_arg}'."
             )
         return None
+
+    abbreviation = args[0].strip().lower()
+    description = " ".join(args[1:]).strip().lower()
+    total_removed = await asyncio.to_thread(
+        _delete_pending_acronyms,
+        acronym=abbreviation,
+        description=description,
+    )
+    if total_removed:
+        log.info(
+            "[ACRONYMS] Admin %s deleted %s entries for %s:%s",
+            sender,
+            total_removed,
+            abbreviation,
+            description,
+        )
+        bot.reply(
+            msg,
+            f"Deleted {total_removed} entries for "
+            f"'{abbreviation}: {description}' from pending "
+            f"additions/removals."
+        )
     else:
-        abbreviation = args[0].strip().lower()
-        description = " ".join(args[1:]).strip().lower()
-        for fname in (SLANG_ADDITIONS_CSV, SLANG_REMOVALS_CSV):
-            def matchfunc(row):
-                return (
-                    len(row) >= 2 and
-                    row[0].strip().lower() == abbreviation and
-                    row[1].strip().lower() == description
-                )
-            removed = delete_from_csv(fname, matchfunc)
-            if removed:
-                log.info(
-                    f"[ACRONYMS] Admin {sender} deleted {removed} entries "
-                    f"from {fname} for {abbreviation}:{description}"
-                )
-            total_removed += removed
-        if total_removed:
-            bot.reply(
-                msg,
-                f"Deleted {total_removed} entries for "
-                f"'{abbreviation}: {description}' from pending "
-                f"additions/removals."
-            )
-        else:
-            bot.reply(
-                msg,
-                f"No pending addition/removal found for "
-                f"'{abbreviation}: {description}'."
-            )
-        return None
+        bot.reply(
+            msg,
+            f"No pending addition/removal found for "
+            f"'{abbreviation}: {description}'."
+        )
+    return None
 
 # ----------------- Information Plugin Toggle -----------------
 
@@ -984,13 +1095,10 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int |
     enabled_rooms = await _get_enabled_rooms(
         bot, INFO_KEY, "information", [room_jid] if room_jid else ()
     )
-    definitions = load_main_definitions()
+    acronym_counts = await asyncio.to_thread(_acronym_runtime_counts)
     return {
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
-        "acronyms": len(definitions),
-        "definitions": sum(len(items) for items in definitions.values()),
-        "pending_additions": _csv_row_count(SLANG_ADDITIONS_CSV),
-        "pending_removals": _csv_row_count(SLANG_REMOVALS_CSV),
+        **acronym_counts,
         "timeout": INFO_HTTP_TIMEOUT,
     }
 

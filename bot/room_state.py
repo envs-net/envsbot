@@ -86,7 +86,7 @@ def known_room_jids(
             if key:
                 result.add(key)
     except (AttributeError, TypeError):
-        pass
+        return result
 
     return result
 

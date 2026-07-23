@@ -43,6 +43,25 @@ def _restart_notification_paths(config_obj: Any) -> list[str]:
     return result
 
 
+def _consume_restart_notification(restart_files: list[str]) -> dict[str, Any] | None:
+    """Read and remove queued restart metadata outside the event loop."""
+    restart_file = next(
+        (path for path in restart_files if os.path.exists(path)),
+        "",
+    )
+    if not restart_file:
+        return None
+
+    with open(restart_file, "r", encoding="utf-8") as handle:
+        notification = json.load(handle)
+    for path in restart_files:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            continue
+    return notification
+
+
 def _database_shutdown_timeout(config_obj: Any) -> float:
     """Return the database shutdown timeout in seconds.
 
@@ -81,18 +100,14 @@ class LifecycleMixin:
     async def _send_restart_notification(self) -> None:
         """Send restart completion notification if one was queued."""
         restart_files = _restart_notification_paths(getattr(self, "config", {}))
-        restart_file = next((path for path in restart_files if os.path.exists(path)), "")
-        if not restart_file:
-            return
 
         try:
-            with open(restart_file, "r") as handle:
-                notif = json.load(handle)
-            for path in restart_files:
-                try:
-                    os.remove(path)
-                except FileNotFoundError:
-                    continue
+            notif = await asyncio.to_thread(
+                _consume_restart_notification,
+                restart_files,
+            )
+            if notif is None:
+                return
 
             log.info("[ADMIN] event=restart_notification status=processing data=%s", notif)
             if notif.get("is_room") and notif.get("room"):
