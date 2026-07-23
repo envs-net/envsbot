@@ -22,6 +22,7 @@ import time
 from functools import partial
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from core_plugins._core import (
     _is_muc_pm,
@@ -220,6 +221,30 @@ async def _set_throttle(bot, msg, target_nick: str):
     role=Role.USER,
     short="Show room-local karma scores and rankings.",
     usage="{prefix}karma <on|off|status|top|bottom|nick>",
+    subcommands=[
+        help_subcommand(
+            "top",
+            "{prefix}karma top",
+            "Show the highest room-local karma scores.",
+            examples=[help_example("{prefix}karma top", "List the users with the most karma in this room.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "bottom",
+            "{prefix}karma bottom",
+            "Show the lowest room-local karma scores.",
+            examples=[help_example("{prefix}karma bottom", "List the users with the least karma in this room.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "<nick>",
+            "{prefix}karma <nick>",
+            "Show one nickname's karma score.",
+            examples=[help_example("{prefix}karma xmpp", "Show the karma score for the nickname 'xmpp'.")],
+            context="groupchat",
+        ),
+        *room_toggle_subcommands("karma", "karma tracking"),
+    ],
     examples=[
         "{prefix}karma status",
         "{prefix}karma top",

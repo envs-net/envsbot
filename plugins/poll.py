@@ -36,6 +36,7 @@ import logging
 import time
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.audit import audit_event
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
@@ -877,6 +878,69 @@ async def _poll_handle_manage(
     role=Role.USER,
     short="Create and manage polls.",
     usage="{prefix}poll <on|off|status|create|list|show|result|history|vote|close|cancel|delete> ...",
+    subcommands=[
+        help_subcommand(
+            "create",
+            "{prefix}poll create [duration] | [multi[:max]] | question | option1 | option2 | ...",
+            "Create a single- or multiple-choice poll in the public room.",
+            examples=[
+                help_example("{prefix}poll create Tea? | yes | no", "Create a simple two-option poll."),
+                help_example("{prefix}poll create multi:2 | Lunch? | Pizza | Döner | Falafel", "Create a poll allowing up to two selected options."),
+            ],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "list",
+            "{prefix}poll list [all|page|last]",
+            "List currently open polls in the room.",
+            examples=[help_example("{prefix}poll list", "Show the first page of open polls.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "show",
+            "{prefix}poll show <id>",
+            "Show one poll and its current result.",
+            aliases=("result",),
+            examples=[help_example("{prefix}poll show 3", "Display poll 3 and its current result.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "history",
+            "{prefix}poll history [all|page|last]",
+            "List closed, cancelled and deleted polls.",
+            examples=[help_example("{prefix}poll history", "Show recent completed polls.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "vote",
+            "{prefix}poll vote <id> <option-number>[,<option-number>...]",
+            "Cast or replace your vote in an open poll.",
+            examples=[help_example("{prefix}poll vote 3 2", "Vote for option 2 in poll 3.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "close",
+            "{prefix}poll close <id>",
+            "Close a poll and publish its final result.",
+            examples=[help_example("{prefix}poll close 3", "Close poll 3 and announce the result.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "cancel",
+            "{prefix}poll cancel <id>",
+            "Cancel an open poll without a normal final result.",
+            examples=[help_example("{prefix}poll cancel 3", "Cancel poll 3.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "delete",
+            "{prefix}poll delete <id>",
+            "Delete one poll from the room's stored poll history.",
+            examples=[help_example("{prefix}poll delete 3", "Delete poll 3 from stored history.")],
+            context="groupchat",
+        ),
+        *room_toggle_subcommands("poll", "poll commands"),
+    ],
     examples=[
         "{prefix}poll status",
         "{prefix}poll create Tea? | yes | no",

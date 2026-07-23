@@ -24,15 +24,63 @@ Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|plugin-heal
 
 Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
 
-Examples:
+#### Subcommands
 
-- `,doctor`
-- `,doctor full`
-- `,doctor all`
-- `,doctor rss`
-- `,doctor translate`
-- `,doctor tasks full`
-- `,doctor release`
+- `,doctor config [page|last|all]`
+  - Description: Check configuration validity, defaults and runtime consistency.
+  - Examples:
+    - `,doctor config` — Run configuration-specific diagnostics.
+
+- `,doctor database [page|last|all]`
+  - Description: Check database connectivity, migrations and persistence state.
+  - Examples:
+    - `,doctor database` — Run database-specific diagnostics.
+
+- `,doctor rooms [page|last|all]`
+  - Description: Check stored, joined and configured room state.
+  - Examples:
+    - `,doctor rooms` — Inspect room storage and join state.
+
+- `,doctor plugins [page|last|all]`
+  - Description: Check plugin loading, metadata and command registration.
+  - Examples:
+    - `,doctor plugins` — Inspect loaded plugin metadata and state.
+
+- `,doctor tasks [full] [page|last|all]`
+  - Description: Check supervised background tasks and heartbeat state.
+  - Examples:
+    - `,doctor tasks full` — Show detailed task diagnostics.
+
+- `,doctor backups [page|last|all]`
+  - Description: Check managed backups, retention and latest archive state.
+  - Examples:
+    - `,doctor backups` — Inspect managed backup health.
+
+- `,doctor network [page|last|all]`
+  - Description: Check network and TLS-related runtime prerequisites.
+  - Examples:
+    - `,doctor network` — Run network-related health checks.
+
+- `,doctor plugin-health [page|last|all]`
+  - Description: Run every plugin-provided doctor check.
+  - Examples:
+    - `,doctor plugin-health` — Collect health results from all loaded plugins.
+
+- `,doctor <plugin> [page|last|all]`
+  - Description: Run doctor checks for one named plugin.
+  - Examples:
+    - `,doctor rss` — Run only the RSS plugin diagnostics.
+
+- `,doctor full [page|last|all]`
+  - Description: Run a detailed health sweep across all doctor sections.
+  - Aliases: `,doctor all`, `,doctor details`
+  - Examples:
+    - `,doctor full` — Run the complete detailed health sweep.
+
+- `,doctor release [page|last|all]`
+  - Description: Run release-readiness checks for version, docs, config, syntax, database, backups and tasks.
+  - Examples:
+    - `,doctor release` — Run the release candidate checklist.
 
 ### `,doctor failed`
 
@@ -47,7 +95,7 @@ Aliases: `,bot doctor failed`, `,doctor error`, `,doctor errors`
 
 Examples:
 
-- `,doctor failed`
+- `,doctor failed` — Show only failed doctor checks.
 
 ### `,doctor release`
 
@@ -62,8 +110,8 @@ Aliases: `,bot doctor preflight`, `,bot doctor release`, `,doctor preflight`
 
 Examples:
 
-- `,doctor release`
-- `,doctor release all`
+- `,doctor release` — Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata.
+- `,doctor release all` — Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata.
 
 ### `,doctor warnings`
 
@@ -78,4 +126,4 @@ Aliases: `,bot doctor warnings`, `,doctor warn`, `,doctor warning`
 
 Examples:
 
-- `,doctor warnings`
+- `,doctor warnings` — Show only doctor warning lines.

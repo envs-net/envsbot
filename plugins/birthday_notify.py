@@ -32,6 +32,7 @@ from functools import partial
 from typing import Any
 
 from utils.command import command, Role
+from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from core_plugins._core import (
     handle_room_toggle_command,
@@ -621,6 +622,7 @@ async def on_muc_presence(bot, pres):
     role=Role.USER,
     short="Enable, disable or show birthday notifications for a room.",
     usage="{prefix}birthday_notify <on|off|status>",
+    subcommands=room_toggle_subcommands("birthday_notify", "birthday notifications"),
     examples=["{prefix}birthday_notify status"],
     category="rooms",
     context="room or MUC PM",

@@ -3,6 +3,7 @@
 import datetime
 from core_plugins import _core
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from bot.room_state import JOINED_ROOMS
 from .config import VCARD_KEY, log
@@ -101,6 +102,18 @@ async def _resolve_vcard_target(bot, msg, args, is_room, enabled_rooms):
     aliases=["v"],
     short="Show vCard data or control room access to vCard lookups.",
     usage="{prefix}vcard [on|off|status|nick]",
+    subcommands=[
+        help_subcommand(
+            "<nick>",
+            "{prefix}vcard [nick]",
+            "Show your own vCard or look up a room user's vCard by nickname.",
+            examples=[
+                help_example("{prefix}vcard", "Show your own vCard in a direct chat."),
+                help_example("{prefix}vcard Alice", "Show Alice's vCard in a shared room."),
+            ],
+        ),
+        *room_toggle_subcommands("vcard", "vCard lookups"),
+    ],
     examples=[
         "{prefix}vcard",
         "{prefix}vcard status",

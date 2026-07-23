@@ -39,11 +39,16 @@ import slixmpp
 
 from utils.command import (
     COMMANDS,
+    CommandExample,
+    CommandSubcommand,
     Role,
     check_permission,
     command,
+    command_examples,
+    command_subcommands,
     resolve_command,
 )
+from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
 
 from core_plugins._core import handle_room_toggle_command, _get_enabled_rooms
@@ -54,7 +59,7 @@ HELP_KEY = "HELP"
 
 PLUGIN_META = {
     "name": "help",
-    "version": "0.5.1",
+    "version": "0.6.0",
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
     "requires": ["_core", "rooms"],
@@ -173,9 +178,47 @@ def _command_usage(cmd_obj, prefix: str) -> list[str]:
     return [usage.format(prefix=prefix)] if usage else []
 
 
+def _command_example_entries(cmd_obj, prefix: str) -> list[CommandExample]:
+    """Return normalized, prefix-resolved command examples."""
+    return [
+        CommandExample(
+            example.command.format(prefix=prefix),
+            example.description.format(prefix=prefix),
+        )
+        for example in command_examples(cmd_obj)
+    ]
+
+
 def _command_examples(cmd_obj, prefix: str) -> list[str]:
-    """Return examples from decorator metadata only."""
-    return [str(e).format(prefix=prefix) for e in getattr(cmd_obj, "examples", [])]
+    """Return example commands for compatibility with older callers."""
+    return [example.command for example in _command_example_entries(cmd_obj, prefix)]
+
+
+def _command_subcommand_entries(
+    cmd_obj,
+    prefix: str,
+) -> list[CommandSubcommand]:
+    """Return normalized, prefix-resolved structured subcommands."""
+    result = []
+    for subcommand in command_subcommands(cmd_obj):
+        result.append(
+            CommandSubcommand(
+                name=subcommand.name,
+                usage=subcommand.usage.format(prefix=prefix),
+                short=subcommand.short.format(prefix=prefix),
+                aliases=tuple(subcommand.aliases),
+                examples=tuple(
+                    CommandExample(
+                        example.command.format(prefix=prefix),
+                        example.description.format(prefix=prefix),
+                    )
+                    for example in subcommand.examples
+                ),
+                role=subcommand.role,
+                context=subcommand.context,
+            )
+        )
+    return result
 
 
 def _role_label(role: Role) -> str:
@@ -306,21 +349,113 @@ def _format_command_line(cmd_obj, prefix: str) -> str:
     )
 
 
-def _format_plugin_command_line(cmd_obj, prefix: str) -> str:
-    """Return a plugin-help command line with usage and aliases."""
+def _effective_subcommand_role(cmd_obj, subcommand: CommandSubcommand) -> Role:
+    return subcommand.role if subcommand.role is not None else cmd_obj.role
+
+
+def _effective_subcommand_context(cmd_obj, subcommand: CommandSubcommand) -> str:
+    return subcommand.context or _context_label(cmd_obj)
+
+
+def _visible_subcommands(cmd_obj, role: Role, prefix: str) -> list[CommandSubcommand]:
+    """Return structured subcommands visible to one user role."""
+    return [
+        subcommand
+        for subcommand in _command_subcommand_entries(cmd_obj, prefix)
+        if role <= _effective_subcommand_role(cmd_obj, subcommand)
+    ]
+
+
+def _subcommand_aliases(cmd_obj, subcommand: CommandSubcommand, prefix: str) -> list[str]:
+    """Return full command aliases for one structured subcommand."""
+    root = str(cmd_obj.name)
+    return [f"{prefix}{root} {alias}" for alias in subcommand.aliases]
+
+
+def _format_plugin_command_lines(cmd_obj, prefix: str, role: Role) -> list[str]:
+    """Return readable plugin-help lines for a command or command family."""
+    subcommands = _visible_subcommands(cmd_obj, role, prefix)
+    if subcommands:
+        lines = []
+        for subcommand in subcommands:
+            lines += [f"• {subcommand.usage}", f"  {subcommand.short}"]
+            aliases = _subcommand_aliases(cmd_obj, subcommand, prefix)
+            if aliases:
+                lines.append("  Aliases: " + ", ".join(aliases))
+            effective_role = _effective_subcommand_role(cmd_obj, subcommand)
+            if effective_role != Role.USER:
+                lines.append(f"  Role: {_role_label(effective_role)}")
+            context = _effective_subcommand_context(cmd_obj, subcommand)
+            lines.append(f"  Context: {context}")
+        return lines
+
     aliases = sorted(set(a for a in (cmd_obj.aliases or []) if a != cmd_obj.name))
-    alias_text = ""
+    lines = [
+        f"• {_command_usage(cmd_obj, prefix)[0]}",
+        f"  {_command_short(cmd_obj, prefix)}",
+    ]
     if aliases:
-        alias_text = f" / aliases: {', '.join(prefix + a for a in aliases)}"
+        lines.append("  Aliases: " + ", ".join(prefix + alias for alias in aliases))
+    if cmd_obj.role != Role.USER:
+        lines.append(f"  Role: {_role_label(cmd_obj.role)}")
+    context = _context_label(cmd_obj)
+    lines.append(f"  Context: {context}")
+    return lines
 
-    usage = _command_usage(cmd_obj, prefix)[0]
-    return (
-        f"• {usage} [{_role_label(cmd_obj.role)}] — "
-        f"{_command_short(cmd_obj, prefix)}{alias_text}"
-    )
+
+def _example_description_for_command(
+    cmd_obj,
+    example: CommandExample,
+    prefix: str,
+) -> str:
+    """Return an explicit or subcommand-derived example description."""
+    if example.description:
+        return example.description
+
+    example_tokens = _command_query_tokens(example.command, prefix)
+    for subcommand in _command_subcommand_entries(cmd_obj, prefix):
+        names = [subcommand.name, *subcommand.aliases]
+        for name in names:
+            if not name or name.startswith("<"):
+                continue
+            name_tokens = tuple(name.lower().split())
+            primary_tokens = tuple(str(cmd_obj.name).lower().split())
+            if example_tokens[: len(primary_tokens)] != primary_tokens:
+                continue
+            remaining = example_tokens[len(primary_tokens):]
+            if remaining[: len(name_tokens)] == name_tokens:
+                return subcommand.short
+    return _command_short(cmd_obj, prefix)
 
 
-def _format_command_detail(cmd_obj, prefix: str) -> list[str]:
+def _format_example_lines(
+    cmd_obj,
+    examples: list[CommandExample] | tuple[CommandExample, ...],
+    prefix: str,
+) -> list[str]:
+    """Render examples with a readable explanation below each command."""
+    lines = []
+    for example in examples:
+        lines.append(f"• {example.command}")
+        description = _example_description_for_command(cmd_obj, example, prefix)
+        if description:
+            lines.append(f"  {description}")
+    return lines
+
+
+def _examples_for_plugin_command(
+    cmd_obj,
+    prefix: str,
+    role: Role,
+) -> list[CommandExample]:
+    """Prefer concise structured examples for aggregate commands."""
+    subcommands = _visible_subcommands(cmd_obj, role, prefix)
+    if subcommands:
+        return [example for subcommand in subcommands for example in subcommand.examples]
+    return _command_example_entries(cmd_obj, prefix)
+
+
+def _format_command_detail(cmd_obj, prefix: str, role: Role | None = None) -> list[str]:
     lines = [
         f"📖 Command: {prefix}{cmd_obj.name}",
         f"Role: {_role_label(cmd_obj.role)}",
@@ -335,11 +470,16 @@ def _format_command_detail(cmd_obj, prefix: str) -> list[str]:
     for usage in _command_usage(cmd_obj, prefix):
         lines.append(f"  {usage}")
 
-    examples = _command_examples(cmd_obj, prefix)
+    visible_role = role if role is not None else Role.OWNER
+    subcommands = _visible_subcommands(cmd_obj, visible_role, prefix)
+    if subcommands:
+        lines += ["", "Subcommands:"]
+        lines.extend(_format_plugin_command_lines(cmd_obj, prefix, visible_role))
+
+    examples = _examples_for_plugin_command(cmd_obj, prefix, visible_role)
     if examples:
         lines += ["", "Examples:"]
-        for example in examples:
-            lines.append(f"  {example}")
+        lines.extend(_format_example_lines(cmd_obj, examples, prefix))
 
     return lines
 
@@ -417,6 +557,75 @@ def _exact_primary_command(query: str, prefix: str):
 
     primary_tokens = tuple(str(getattr(cmd, "name", "")).lower().split())
     return cmd if primary_tokens == tokens else None
+
+
+def _structured_subcommand_match(
+    query: str,
+    prefix: str,
+    role: Role,
+) -> tuple[object, CommandSubcommand] | None:
+    """Resolve help for a structured subcommand without registering a handler."""
+    tokens = _command_query_tokens(query, prefix)
+    if len(tokens) < 2:
+        return None
+
+    candidates = []
+    for registered_tokens, cmd in COMMANDS.items():
+        if not command_subcommands(cmd):
+            continue
+        if len(tokens) <= len(registered_tokens):
+            continue
+        if tokens[: len(registered_tokens)] != registered_tokens:
+            continue
+        if not check_permission(role, cmd):
+            continue
+        remainder = tokens[len(registered_tokens):]
+        for subcommand in _visible_subcommands(cmd, role, prefix):
+            names = [subcommand.name, *subcommand.aliases]
+            for name in names:
+                if not name or name.startswith("<"):
+                    continue
+                name_tokens = tuple(name.lower().split())
+                if remainder[: len(name_tokens)] == name_tokens:
+                    candidates.append(
+                        (len(registered_tokens) + len(name_tokens), cmd, subcommand)
+                    )
+    if not candidates:
+        return None
+    _score, cmd, subcommand = max(candidates, key=lambda item: item[0])
+    return cmd, subcommand
+
+
+def _format_structured_subcommand_detail(
+    bot,
+    cmd_obj,
+    subcommand: CommandSubcommand,
+) -> list[str]:
+    """Render focused help for one metadata-only subcommand."""
+    role = _effective_subcommand_role(cmd_obj, subcommand)
+    context = _effective_subcommand_context(cmd_obj, subcommand)
+    lines = [
+        f"📖 Command: {bot.prefix}{cmd_obj.name} {subcommand.name}",
+        f"Role: {_role_label(role)}",
+        f"Context: {context}",
+    ]
+    aliases = _subcommand_aliases(cmd_obj, subcommand, bot.prefix)
+    if aliases:
+        lines.append("Aliases: " + ", ".join(aliases))
+    lines += [
+        "",
+        subcommand.short,
+        "",
+        "Usage:",
+        f"  {subcommand.usage}",
+    ]
+    if subcommand.examples:
+        lines += ["", "Examples:"]
+        lines.extend(_format_example_lines(cmd_obj, subcommand.examples, bot.prefix))
+    plugin = _command_context_plugin(bot, cmd_obj)
+    if plugin is not None:
+        lines.extend(_format_plugin_context_lines(bot, plugin))
+    return lines
 
 
 def _format_command_group(bot, query: str, role: Role) -> list[str] | None:
@@ -512,6 +721,63 @@ async def _sender_role(bot, sender_jid, msg) -> tuple[Role, str | None]:
     aliases=["h"],
     short="Show help for plugins and commands.",
     usage="{prefix}help [all|commands|plugins|roles|categories|category <name>|room settings|<plugin>|{prefix}<command>]",
+    subcommands=[
+        help_subcommand(
+            "<overview>",
+            "{prefix}help",
+            "Show the main help overview and loaded plugins.",
+            examples=[help_example("{prefix}help", "Open the main help page.")],
+        ),
+        help_subcommand(
+            "commands",
+            "{prefix}help commands",
+            "List commands visible to your role, grouped by category.",
+            examples=[help_example("{prefix}help commands", "Show the command overview for your role.")],
+        ),
+        help_subcommand(
+            "plugins",
+            "{prefix}help plugins",
+            "List loaded plugins and their descriptions.",
+            examples=[help_example("{prefix}help plugins", "Show all plugins visible to you.")],
+        ),
+        help_subcommand(
+            "roles",
+            "{prefix}help roles",
+            "Show the bot role hierarchy and command access model.",
+            examples=[help_example("{prefix}help roles", "Show role meanings and privilege order.")],
+        ),
+        help_subcommand(
+            "categories",
+            "{prefix}help categories",
+            "List available help categories.",
+            examples=[help_example("{prefix}help categories", "Show every command category.")],
+        ),
+        help_subcommand(
+            "category",
+            "{prefix}help category <name>",
+            "List commands in one help category.",
+            examples=[help_example("{prefix}help category admin", "Show commands in the admin category.")],
+        ),
+        help_subcommand(
+            "room settings",
+            "{prefix}help room settings",
+            "Show how room-scoped plugins are enabled, disabled and inspected.",
+            aliases=("rooms settings", "room plugins", "rooms plugins"),
+            examples=[help_example("{prefix}help room settings", "Show room plugin toggle guidance.")],
+        ),
+        help_subcommand(
+            "<plugin>",
+            "{prefix}help <plugin>",
+            "Show detailed help for one plugin.",
+            examples=[help_example("{prefix}help rss", "Show the RSS plugin commands, subcommands and examples.")],
+        ),
+        help_subcommand(
+            "<command>",
+            "{prefix}help {prefix}<command>",
+            "Show focused help for one command or structured subcommand.",
+            examples=[help_example("{prefix}help {prefix}rss add", "Show focused help for the RSS add subcommand.")],
+        ),
+    ],
     examples=[
         "{prefix}help",
         "{prefix}help room settings",
@@ -571,6 +837,17 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
     # `config` keep the subcommand overview.
     if query.startswith(bot.prefix):
         command_query = query[len(bot.prefix):].strip()
+        structured_match = _structured_subcommand_match(
+            command_query, bot.prefix, role
+        )
+        if structured_match:
+            cmd_obj, subcommand = structured_match
+            bot.reply(
+                msg,
+                _format_structured_subcommand_detail(bot, cmd_obj, subcommand),
+            )
+            return
+
         exact_command = _exact_primary_command(command_query, bot.prefix)
         if exact_command:
             bot.reply(msg, await _command(bot, exact_command, role))
@@ -590,6 +867,15 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 
     if query_lc in bot.bot_plugins.plugins:
         bot.reply(msg, await _plugin(bot, query, role))
+        return
+
+    structured_match = _structured_subcommand_match(query, bot.prefix, role)
+    if structured_match:
+        cmd_obj, subcommand = structured_match
+        bot.reply(
+            msg,
+            _format_structured_subcommand_detail(bot, cmd_obj, subcommand),
+        )
         return
 
     exact_command = _exact_primary_command(query, bot.prefix)
@@ -698,9 +984,13 @@ async def _room_features(bot, _role: Role) -> list[str]:
         "",
         "Examples:",
         f"• {bot.prefix}rooms enable ducks",
+        "  Enable the ducks feature in the current room or MUC PM.",
         f"• {bot.prefix}rooms disable ducks",
+        "  Disable the ducks feature in the current room or MUC PM.",
         f"• {bot.prefix}rooms enable room@conference.example.org ducks",
+        "  Enable ducks for an explicit room from a normal private chat.",
         f"• {bot.prefix}rooms plugins room@conference.example.org all",
+        "  Show every room feature setting without pagination.",
         "",
         "Notes:",
         "• In a room or MUC PM, <room_jid> can be omitted.",
@@ -788,7 +1078,7 @@ async def _command(
     if not check_permission(role, cmd_obj):
         return ["⛔ You do not have permission to use this command."]
 
-    lines = _format_command_detail(cmd_obj, bot.prefix)
+    lines = _format_command_detail(cmd_obj, bot.prefix, role)
     if include_plugin_context:
         plugin = _command_context_plugin(bot, cmd_obj)
         if plugin is not None:
@@ -828,29 +1118,26 @@ async def _plugin(bot, query: str, role: Role) -> list[str]:
     if not commands:
         lines.append("No commands available for your role.")
     else:
-        for cmd in commands:
-            lines.append(_format_plugin_command_line(cmd, bot.prefix))
+        for index, cmd in enumerate(commands):
+            if index:
+                lines.append("")
+            lines.extend(_format_plugin_command_lines(cmd, bot.prefix, role))
 
-        same_name_command, _matched = resolve_command(plugin)
-        if (
-            same_name_command
-            and same_name_command.name == plugin
-            and check_permission(role, same_name_command)
-        ):
-            lines += ["", "Command details:"]
-            lines.extend(
-                await _command(
-                    bot,
-                    same_name_command,
-                    role,
-                    include_plugin_context=False,
-                )
-            )
-        else:
-            lines += [
-                "",
-                f"Use {bot.prefix}help {bot.prefix}<command> for full examples.",
-            ]
+        example_lines = []
+        for cmd in commands:
+            examples = _examples_for_plugin_command(cmd, bot.prefix, role)
+            if not examples:
+                continue
+            if example_lines:
+                example_lines.append("")
+            example_lines.extend(_format_example_lines(cmd, examples, bot.prefix))
+        if example_lines:
+            lines += ["", "Examples:", *example_lines]
+
+        lines += [
+            "",
+            f"Use {bot.prefix}help {bot.prefix}<command> for focused help.",
+        ]
 
     return lines
 

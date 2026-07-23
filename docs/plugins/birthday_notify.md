@@ -22,6 +22,19 @@ Context: `room or MUC PM`<br>
 Category: `rooms`<br>
 Usage: `,birthday_notify <on|off|status>`
 
-Examples:
+#### Subcommands
+
+- `,birthday_notify on`
+  - Description: Enable birthday notifications in the current room.
+  - Examples:
+    - `,birthday_notify on` — Enable birthday notifications for the current room or MUC PM.
+
+- `,birthday_notify off`
+  - Description: Disable birthday notifications in the current room.
+  - Examples:
+    - `,birthday_notify off` — Disable birthday notifications for the current room or MUC PM.
 
 - `,birthday_notify status`
+  - Description: Show whether birthday notifications is enabled in the current room.
+  - Examples:
+    - `,birthday_notify status` — Inspect the current room setting for birthday notifications.

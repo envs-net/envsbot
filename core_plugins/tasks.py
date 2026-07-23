@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
 from utils.formatting import PageRequest, format_page, parse_page_args, status_icon
 from utils.task_supervisor import TaskInfo
@@ -146,6 +147,24 @@ def _parse_task_args(args: list[str]) -> tuple[bool, str | None, str | None, Pag
     aliases=["bot tasks"],
     short="Show supervised background task status.",
     usage="{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last] | {prefix}tasks restart <plugin>",
+    subcommands=[
+        help_subcommand(
+            "<list>",
+            "{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]",
+            "List supervised tasks with optional detail, plugin and status filters.",
+            examples=[
+                help_example("{prefix}tasks", "Show a compact overview of supervised tasks."),
+                help_example("{prefix}tasks plugin rss", "Show only tasks owned by the RSS plugin."),
+                help_example("{prefix}tasks failed", "Show only failed background tasks."),
+            ],
+        ),
+        help_subcommand(
+            "restart",
+            "{prefix}tasks restart <plugin>",
+            "Cancel and restart supervised tasks owned by one plugin.",
+            examples=[help_example("{prefix}tasks restart rss", "Restart the RSS plugin's supervised tasks.")],
+        ),
+    ],
     examples=[
         "{prefix}tasks",
         "{prefix}tasks full",

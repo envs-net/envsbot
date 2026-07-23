@@ -248,9 +248,156 @@ async def test_plugin_help_happy_path(basic_plugins_and_commands):
     # Command list
     assert "foo" in reply
     assert ",foo [arg]" in reply
-    assert "Command details:" in reply
-    assert "Command: ,foo" in reply
-    assert "Usage:" in reply
+    assert "Foo command docstring" in reply
+    assert "Aliases: ,fooz" in reply
+    assert "Context: room, MUC PM or private chat" in reply
+    assert "Examples:" in reply
+    assert "• ,foo value\n  Foo command docstring" in reply
+    assert "Use ,help ,<command> for focused help." in reply
+
+
+@pytest.mark.asyncio
+async def test_structured_plugin_help_describes_subcommands_examples_and_room_setting(
+        monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def pin_handler(*_args, **_kwargs):
+        return None
+
+    pin_cmd = command_utils.Command(
+        name="pin",
+        handler=pin_handler,
+        role=command_utils.Role.USER,
+        aliases=[],
+        short="Pin and organize important room messages.",
+        usage="{prefix}pin <add|delete> ...",
+        examples=["{prefix}pin add"],
+        subcommands=[
+            help_plugin.help_subcommand(
+                "add",
+                "{prefix}pin add [last [n]]",
+                "Pin the replied-to or recently sent message.",
+                examples=[
+                    help_plugin.help_example(
+                        "{prefix}pin add",
+                        "Pin the message you replied to.",
+                    )
+                ],
+                context="room or MUC PM",
+            ),
+            help_plugin.help_subcommand(
+                "delete",
+                "{prefix}pin delete <id>",
+                "Delete a stored pin.",
+                aliases=("del", "remove", "rm"),
+                examples=[
+                    help_plugin.help_example(
+                        "{prefix}pin delete 42",
+                        "Delete pin 42 from the current room.",
+                    )
+                ],
+                role=command_utils.Role.MODERATOR,
+                context="room or MUC PM",
+            ),
+        ],
+        category="rooms",
+        context="room or MUC PM",
+    )
+    registry.register("pin", pin_cmd, "pin")
+
+    plugins = {
+        "pin": SimpleNamespace(
+            __doc__="Pin plugin",
+            __name__="pin",
+            PLUGIN_META={
+                "name": "pin",
+                "version": "1.0.0",
+                "description": "Pin room messages.",
+                "category": "rooms",
+            },
+        )
+    }
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.MODERATOR)
+
+    await help_plugin.cmd_help(
+        bot,
+        "mod@example.org",
+        "Mod",
+        ["pin"],
+        DummyMsg(",help pin"),
+        True,
+    )
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Room setting:" in reply
+    assert "• ,pin add [last [n]]" in reply
+    assert "  Pin the replied-to or recently sent message." in reply
+    assert "• ,pin delete <id>" in reply
+    assert "Aliases: ,pin del, ,pin remove, ,pin rm" in reply
+    assert "Role: moderator" in reply
+    assert "Context: room or MUC PM" in reply
+    assert "• ,pin add\n  Pin the message you replied to." in reply
+    assert "• ,pin delete 42\n  Delete pin 42 from the current room." in reply
+
+
+@pytest.mark.asyncio
+async def test_focused_help_resolves_metadata_only_subcommand_and_alias(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+    monkeypatch.setattr(command_utils, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    cmd = command_utils.Command(
+        name="rooms invite",
+        handler=handler,
+        role=command_utils.Role.ADMIN,
+        short="Manage room invitations.",
+        usage="{prefix}rooms invite <list|delete> ...",
+        examples=["{prefix}rooms invite list"],
+        subcommands=[
+            help_plugin.help_subcommand(
+                "delete",
+                "{prefix}rooms invite delete <id>",
+                "Delete a pending invitation.",
+                aliases=("del", "remove", "rm"),
+                examples=[
+                    help_plugin.help_example(
+                        "{prefix}rooms invite delete 7",
+                        "Delete pending invitation 7.",
+                    )
+                ],
+            )
+        ],
+        category="admin",
+        context="private chat / MUC PM",
+    )
+    registry.register("rooms invite", cmd, "rooms")
+    plugins = {
+        "rooms": SimpleNamespace(
+            __doc__="Room management",
+            __name__="rooms",
+            PLUGIN_META={"name": "rooms", "description": "Manage rooms."},
+        )
+    }
+    bot = DummyBot(plugins=plugins, role=command_utils.Role.ADMIN)
+
+    await help_plugin.cmd_help(
+        bot,
+        "admin@example.org",
+        "Admin",
+        ["rooms", "invite", "rm"],
+        DummyMsg(",help rooms invite rm", is_room=False),
+        False,
+    )
+
+    reply = flatten_lines(bot.replies[-1])
+    assert "Command: ,rooms invite delete" in reply
+    assert "Aliases: ,rooms invite del, ,rooms invite remove, ,rooms invite rm" in reply
+    assert "• ,rooms invite delete 7\n  Delete pending invitation 7." in reply
 
 
 @pytest.mark.asyncio
@@ -929,7 +1076,7 @@ def test_all_decorated_command_details_include_usage_and_examples():
         detail = "\n".join(help_plugin._format_command_detail(cmd, ","))
         if "Usage:\n  ," not in detail:
             missing.append(f"{plugin}:{cmd.name}: missing rendered usage")
-        if "Examples:\n  ," not in detail:
+        if "Examples:\n• ," not in detail:
             missing.append(f"{plugin}:{cmd.name}: missing rendered examples")
     assert count
     assert not missing
@@ -1008,3 +1155,22 @@ def test_section_lines_extracts_docstring_sections_and_stops_at_next_header():
     assert help_plugin._section_lines(doc, "Examples") == ["      ,demo example"]
     assert help_plugin._section_lines(doc, "Missing") == []
     assert help_plugin._section_lines("", "Usage") == []
+
+
+def test_structured_subcommand_names_and_aliases_are_unique_per_command():
+    duplicates = []
+    count = 0
+    for plugin, _meta, cmd in decorated_command_records():
+        seen = {}
+        for subcommand in command_utils.command_subcommands(cmd):
+            count += 1
+            for name in (subcommand.name, *subcommand.aliases):
+                key = name.casefold()
+                if key in seen:
+                    duplicates.append(
+                        f"{plugin}:{cmd.name}: {name!r} used by "
+                        f"{seen[key]!r} and {subcommand.name!r}"
+                    )
+                seen[key] = subcommand.name
+    assert count
+    assert duplicates == []

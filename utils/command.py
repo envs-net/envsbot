@@ -8,7 +8,7 @@ including role-based permissions and plugin integration.
 from __future__ import annotations
 from enum import IntEnum
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 
 class Role(IntEnum):
@@ -50,6 +50,93 @@ def is_banned(role: Role) -> bool:
     Returns True if the role is BANNED or higher.
     """
     return role >= Role.BANNED
+
+
+@dataclass(frozen=True, slots=True)
+class CommandExample:
+    """One help example with an optional explanatory sentence."""
+
+    command: str
+    description: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CommandSubcommand:
+    """Structured help metadata for a subcommand handled by a parent command."""
+
+    name: str
+    usage: str
+    short: str
+    aliases: Tuple[str, ...] = ()
+    examples: Tuple[CommandExample, ...] = ()
+    role: Role | None = None
+    context: str = ""
+
+
+def normalize_command_example(value: object) -> CommandExample:
+    """Normalize string, pair or mapping example metadata."""
+    if isinstance(value, CommandExample):
+        return value
+    if isinstance(value, str):
+        return CommandExample(value)
+    if isinstance(value, Mapping):
+        command_text = value.get("command", value.get("example", ""))
+        return CommandExample(
+            str(command_text or ""),
+            str(value.get("description", value.get("short", "")) or ""),
+        )
+    if isinstance(value, (tuple, list)) and value:
+        command_text = value[0]
+        description = value[1] if len(value) > 1 else ""
+        return CommandExample(str(command_text), str(description or ""))
+    return CommandExample(str(value))
+
+
+def normalize_command_subcommand(value: object) -> CommandSubcommand:
+    """Normalize mapping or dataclass subcommand metadata."""
+    if isinstance(value, CommandSubcommand):
+        return value
+    if not isinstance(value, Mapping):
+        raise TypeError(f"Unsupported subcommand metadata: {value!r}")
+    examples = tuple(
+        normalize_command_example(example)
+        for example in (value.get("examples", ()) or ())
+    )
+    role = value.get("role")
+    if role is not None and not isinstance(role, Role):
+        if isinstance(role, str) and not role.strip().isdigit():
+            role = Role[role.strip().upper()]
+        else:
+            role = Role(int(role))
+    alias_values = value.get("aliases", ()) or ()
+    if isinstance(alias_values, str):
+        alias_values = (alias_values,)
+    aliases = tuple(str(alias) for alias in alias_values)
+    return CommandSubcommand(
+        name=str(value.get("name", "") or ""),
+        usage=str(value.get("usage", "") or ""),
+        short=str(value.get("short", value.get("description", "")) or ""),
+        aliases=aliases,
+        examples=examples,
+        role=role,
+        context=str(value.get("context", "") or ""),
+    )
+
+
+def command_examples(cmd: object) -> List[CommandExample]:
+    """Return normalized examples from a command-like object."""
+    values = getattr(cmd, "examples", ()) or ()
+    if isinstance(values, (str, Mapping, CommandExample)):
+        values = (values,)
+    return [normalize_command_example(value) for value in values]
+
+
+def command_subcommands(cmd: object) -> List[CommandSubcommand]:
+    """Return normalized structured subcommands from a command-like object."""
+    values = getattr(cmd, "subcommands", ()) or ()
+    if isinstance(values, (Mapping, CommandSubcommand)):
+        values = (values,)
+    return [normalize_command_subcommand(value) for value in values]
 
 
 class CommandRegistry:
@@ -171,16 +258,37 @@ class CommandRegistry:
         for tokens, cmd in self.index.items():
             name = " ".join(tokens)
 
-            data[name] = {
+            entry = {
                 "handler": getattr(cmd.handler, "__name__", str(cmd.handler)),
                 "role": str(cmd.role),
                 "aliases": list(cmd.aliases),
                 "short": cmd.short,
                 "usage": cmd.usage,
-                "examples": list(cmd.examples),
+                "examples": [example.command for example in command_examples(cmd)],
                 "category": cmd.category,
                 "context": cmd.context,
             }
+            subcommands = command_subcommands(cmd)
+            if subcommands:
+                entry["subcommands"] = [
+                    {
+                        "name": subcommand.name,
+                        "usage": subcommand.usage,
+                        "short": subcommand.short,
+                        "aliases": list(subcommand.aliases),
+                        "examples": [
+                            {
+                                "command": example.command,
+                                "description": example.description,
+                            }
+                            for example in subcommand.examples
+                        ],
+                        "role": subcommand.role,
+                        "context": subcommand.context,
+                    }
+                    for subcommand in subcommands
+                ]
+            data[name] = entry
 
         return data
 
@@ -202,7 +310,8 @@ class Command:
     aliases: List[str] = field(default_factory=list)
     short: str = ""
     usage: str = ""
-    examples: List[str] = field(default_factory=list)
+    examples: List[object] = field(default_factory=list)
+    subcommands: List[object] = field(default_factory=list)
     category: str = ""
     context: str = "any"
 
@@ -240,7 +349,8 @@ def command(
     aliases: Optional[List[str]] = None,
     short: str = "",
     usage: str = "",
-    examples: Optional[List[str]] = None,
+    examples: Optional[List[object]] = None,
+    subcommands: Optional[List[object]] = None,
     category: str = "",
     context: str = "any",
 ):
@@ -256,6 +366,8 @@ def command(
         aliases = []
     if examples is None:
         examples = []
+    if subcommands is None:
+        subcommands = []
 
     def decorator(func: Callable):
         """
@@ -270,6 +382,7 @@ def command(
             short=short,
             usage=usage,
             examples=examples,
+            subcommands=subcommands,
             category=category,
             context=context,
         )
@@ -286,6 +399,7 @@ def command(
         func._command_short = short
         func._command_usage = usage
         func._command_examples = examples
+        func._command_subcommands = subcommands
         func._command_category = category
         func._command_context = context
 

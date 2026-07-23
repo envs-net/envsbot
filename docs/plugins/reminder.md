@@ -72,7 +72,7 @@ REMINDER_DEFAULT_TIMEZONE = "UTC"
 Create a reminder.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `utility`<br>
 Usage: `,remind <when> [text or reply]`
 
@@ -80,22 +80,22 @@ Aliases: `,rem`, `,reminder`
 
 Examples:
 
-- `,remind 10m check logs`
-- `Reply to a message with ,remind 1h`
-- `,remind 2026-05-01 14:30 Take a break`
-- `Reply to a message with ,remind 2026-05-01 14:30`
-- `,remind 2026-05-01 14:30 CEST Take a break`
-- `,remind 2026-05-01 14:30 Europe/Berlin Take a break`
-- `,remind 2026-05-01 14:30 +02:00 Take a break`
-- `,timezone set Europe/Berlin`
-- `,rooms enable reminder`
+- `,remind 10m check logs` — Create a reminder.
+- `Reply to a message with ,remind 1h` — Create a reminder.
+- `,remind 2026-05-01 14:30 Take a break` — Create a reminder.
+- `Reply to a message with ,remind 2026-05-01 14:30` — Create a reminder.
+- `,remind 2026-05-01 14:30 CEST Take a break` — Create a reminder.
+- `,remind 2026-05-01 14:30 Europe/Berlin Take a break` — Create a reminder.
+- `,remind 2026-05-01 14:30 +02:00 Take a break` — Create a reminder.
+- `,timezone set Europe/Berlin` — Create a reminder.
+- `,rooms enable reminder` — Create a reminder.
 
 ### `,remind delete`
 
 Delete one reminder.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `utility`<br>
 Usage: `,remind delete <id>`
 
@@ -103,7 +103,7 @@ Aliases: `,remind cancel`, `,remind rm`
 
 Examples:
 
-- `,remind delete 12`
+- `,remind delete 12` — Delete one reminder.
 
 ### `,remind off`
 
@@ -118,8 +118,8 @@ Aliases: `,rem off`, `,reminder off`
 
 Examples:
 
-- `,remind off`
-- `,rooms disable reminder`
+- `,remind off` — Disable reminders globally or for the current room.
+- `,rooms disable reminder` — Disable reminders globally or for the current room.
 
 ### `,remind on`
 
@@ -134,8 +134,8 @@ Aliases: `,rem on`, `,reminder on`
 
 Examples:
 
-- `,remind on`
-- `,rooms enable reminder`
+- `,remind on` — Enable reminders globally or for the current room.
+- `,rooms enable reminder` — Enable reminders globally or for the current room.
 
 ### `,remind status`
 
@@ -150,14 +150,14 @@ Aliases: `,rem status`, `,reminder status`
 
 Examples:
 
-- `,remind status`
+- `,remind status` — Show whether reminders are enabled.
 
 ### `,reminders`
 
 List your reminders.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `utility`<br>
 Usage: `,reminders [all|page|last]`
 
@@ -165,4 +165,4 @@ Aliases: `,remind list`, `,rems`
 
 Examples:
 
-- `,reminders`
+- `,reminders` — List your reminders.

@@ -24,13 +24,19 @@ Usage: `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|
 
 Aliases: `,bot tasks`
 
-Examples:
+#### Subcommands
 
-- `,tasks`
-- `,tasks full`
-- `,tasks plugin rss`
-- `,tasks failed`
-- `,tasks restart rss`
+- `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]`
+  - Description: List supervised tasks with optional detail, plugin and status filters.
+  - Examples:
+    - `,tasks` — Show a compact overview of supervised tasks.
+    - `,tasks plugin rss` — Show only tasks owned by the RSS plugin.
+    - `,tasks failed` — Show only failed background tasks.
+
+- `,tasks restart <plugin>`
+  - Description: Cancel and restart supervised tasks owned by one plugin.
+  - Examples:
+    - `,tasks restart rss` — Restart the RSS plugin's supervised tasks.
 
 ### `,tasks failed`
 
@@ -45,7 +51,7 @@ Aliases: `,task failed`, `,tasks errors`
 
 Examples:
 
-- `,tasks failed`
+- `,tasks failed` — Show failed supervised background tasks.
 
 ### `,tasks list`
 
@@ -60,8 +66,8 @@ Aliases: `,task list`
 
 Examples:
 
-- `,tasks list`
-- `,tasks list all`
+- `,tasks list` — Show supervised background tasks.
+- `,tasks list all` — Show supervised background tasks.
 
 ### `,tasks stale`
 
@@ -76,4 +82,4 @@ Aliases: `,task stale`
 
 Examples:
 
-- `,tasks stale`
+- `,tasks stale` — Show supervised tasks with stale heartbeats.

@@ -33,6 +33,7 @@ import threading
 from bs4 import BeautifulSoup
 
 from utils.command import command, Role
+from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
 from utils.http_fetch import fetch_json, passthrough_validator
@@ -1025,6 +1026,7 @@ async def acronyms_delete_cmd(bot, sender, nick, args, msg, is_room):
     role=Role.MODERATOR,
     short="Enable, disable or show room access to information commands.",
     usage="{prefix}info <on|off|status>",
+    subcommands=room_toggle_subcommands("info", "information commands"),
     examples=["{prefix}info status"],
     category="info",
     context="room or MUC PM",

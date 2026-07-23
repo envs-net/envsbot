@@ -12,11 +12,15 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TypedDict
 
+from utils.command import command_examples, command_subcommands
+
 
 class CommandMetadata(TypedDict, total=False):
     short: str
     usage: str
     examples: list[str]
+    described_examples: list[dict[str, str]]
+    subcommands: list[dict[str, object]]
     context: str
     category: str
 
@@ -34,7 +38,26 @@ def _metadata_map() -> dict[str, CommandMetadata]:
         metadata[name] = {
             "short": str(getattr(cmd, "short", "")),
             "usage": str(getattr(cmd, "usage", "")),
-            "examples": list(getattr(cmd, "examples", []) or []),
+            "examples": [example.command for example in command_examples(cmd)],
+            "described_examples": [
+                {"command": example.command, "description": example.description}
+                for example in command_examples(cmd)
+            ],
+            "subcommands": [
+                {
+                    "name": subcommand.name,
+                    "usage": subcommand.usage,
+                    "short": subcommand.short,
+                    "aliases": list(subcommand.aliases),
+                    "examples": [
+                        {"command": example.command, "description": example.description}
+                        for example in subcommand.examples
+                    ],
+                    "role": subcommand.role,
+                    "context": subcommand.context,
+                }
+                for subcommand in command_subcommands(cmd)
+            ],
             "context": str(getattr(cmd, "context", "any") or "any"),
             "category": str(getattr(cmd, "category", "")),
         }

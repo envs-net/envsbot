@@ -38,10 +38,10 @@ Room-scoped plugin toggles are managed through the `rooms` commands:
 
 Examples:
 
-- `,rooms enable ducks`
-- `,rooms disable ducks`
-- `,rooms enable room@conference.example.org ducks`
-- `,rooms plugins room@conference.example.org all`
+- `,rooms enable ducks` — Enable ducks in the current room or MUC PM.
+- `,rooms disable ducks` — Disable ducks in the current room or MUC PM.
+- `,rooms enable room@conference.example.org ducks` — Enable ducks for an explicit room from a normal private chat.
+- `,rooms plugins room@conference.example.org all` — Show every room feature setting without pagination.
 
 In a room or MUC PM the target room can usually be inferred. In a normal private chat, pass `<room_jid>` explicitly. The sender must be room owner/admin or have a bot moderator/admin role.
 Defaults shown by these commands come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks. Existing per-room overrides stay in the database until `,rooms set_plugin_defaults` is used for that room.
@@ -149,8 +149,8 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,bot version` | [`_admin`](plugins/_admin.md) | `user` | `any` | Show the running EnvsBot version and latest checked release. |
-| `,help` | [`help`](plugins/help.md) | `none` | `any` | Show help for plugins and commands. |
+| `,bot version` | [`_admin`](plugins/_admin.md) | `user` | `room, MUC PM or private chat` | Show the running EnvsBot version and latest checked release. |
+| `,help` | [`help`](plugins/help.md) | `none` | `room, MUC PM or private chat` | Show help for plugins and commands. |
 | `,help inroom` | [`help`](plugins/help.md) | `user` | `room or MUC PM` | Enable, disable or show room help availability. |
 | `,plugin info` | [`plugins`](plugins/plugins.md) | `admin` | `private chat / MUC PM` | Show metadata and source information for one plugin. |
 | `,plugin list` | [`plugins`](plugins/plugins.md) | `admin` | `private chat / MUC PM` | List loaded and available core/optional plugins. |
@@ -162,54 +162,54 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,bef` | [`ducks`](plugins/ducks.md) | `user` | `any` | Befriend the current duck. |
-| `,dice` | [`dice`](plugins/dice.md) | `user` | `any` | Roll dice using common dice notation. |
+| `,bef` | [`ducks`](plugins/ducks.md) | `user` | `room, MUC PM or private chat` | Befriend the current duck. |
+| `,dice` | [`dice`](plugins/dice.md) | `user` | `room, MUC PM or private chat` | Roll dice using common dice notation. |
 | `,duck` | [`ducks`](plugins/ducks.md) | `user` | `room / MUC PM; use rooms enable with <room_jid> from private chat` | Start or interact with the duck game. |
-| `,duckstats` | [`ducks`](plugins/ducks.md) | `user` | `any` | Show duck game stats. |
+| `,duckstats` | [`ducks`](plugins/ducks.md) | `user` | `room, MUC PM or private chat` | Show duck game stats. |
 | `,idlerpg` | [`idlerpg`](plugins/idlerpg.md) | `user` | `groupchat / MUC PM` | Play IdleRPG in a MUC |
-| `,karma` | [`karma`](plugins/karma.md) | `user` | `any` | Show room-local karma scores and rankings. |
-| `,trap` | [`ducks`](plugins/ducks.md) | `user` | `any` | Set a trap in the duck game. |
-| `,xkcd` | [`xkcd`](plugins/xkcd.md) | `user` | `any` | Show an XKCD comic or control room access to XKCD. |
+| `,karma` | [`karma`](plugins/karma.md) | `user` | `room, MUC PM or private chat` | Show room-local karma scores and rankings. |
+| `,trap` | [`ducks`](plugins/ducks.md) | `user` | `room, MUC PM or private chat` | Set a trap in the duck game. |
+| `,xkcd` | [`xkcd`](plugins/xkcd.md) | `user` | `room, MUC PM or private chat` | Show an XKCD comic or control room access to XKCD. |
 
 ### Info
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,acronyms` | [`info`](plugins/info.md) | `user` | `any` | Look up stored acronym definitions. |
-| `,acronyms add` | [`info`](plugins/info.md) | `user` | `any` | Suggest a new acronym definition for admin review. |
-| `,acronyms delete` | [`info`](plugins/info.md) | `admin` | `any` | Delete pending acronym suggestions by nick or definition. |
-| `,acronyms list` | [`info`](plugins/info.md) | `admin` | `any` | List pending acronym additions and removals. |
-| `,acronyms merge` | [`info`](plugins/info.md) | `admin` | `any` | Apply pending acronym additions and removals. |
-| `,acronyms remove` | [`info`](plugins/info.md) | `user` | `any` | Suggest removing one acronym definition for admin review. |
-| `,fediverse` | [`info`](plugins/info.md) | `user` | `any` | Show the latest public post from a Fediverse account. |
+| `,acronyms` | [`info`](plugins/info.md) | `user` | `room, MUC PM or private chat` | Look up stored acronym definitions. |
+| `,acronyms add` | [`info`](plugins/info.md) | `user` | `room, MUC PM or private chat` | Suggest a new acronym definition for admin review. |
+| `,acronyms delete` | [`info`](plugins/info.md) | `admin` | `private chat / MUC PM` | Delete pending acronym suggestions by nick or definition. |
+| `,acronyms list` | [`info`](plugins/info.md) | `admin` | `private chat / MUC PM` | List pending acronym additions and removals. |
+| `,acronyms merge` | [`info`](plugins/info.md) | `admin` | `private chat / MUC PM` | Apply pending acronym additions and removals. |
+| `,acronyms remove` | [`info`](plugins/info.md) | `user` | `room, MUC PM or private chat` | Suggest removing one acronym definition for admin review. |
+| `,fediverse` | [`info`](plugins/info.md) | `user` | `room, MUC PM or private chat` | Show the latest public post from a Fediverse account. |
 | `,info` | [`info`](plugins/info.md) | `moderator` | `room or MUC PM` | Enable, disable or show room access to information commands. |
-| `,presence` | [`presence`](plugins/presence.md) | `none` | `any` | Show or control per-room access to presence lookup. |
+| `,presence` | [`presence`](plugins/presence.md) | `none` | `room, MUC PM or private chat` | Show or control per-room access to presence lookup. |
 | `,presence set` | [`presence`](plugins/presence.md) | `admin` | `private chat / MUC PM` | Set the bot presence state and status text. |
-| `,udict` | [`info`](plugins/info.md) | `user` | `any` | Search Urban Dictionary. |
-| `,wikipedia` | [`info`](plugins/info.md) | `user` | `any` | Search Wikipedia. |
+| `,udict` | [`info`](plugins/info.md) | `user` | `room, MUC PM or private chat` | Search Urban Dictionary. |
+| `,wikipedia` | [`info`](plugins/info.md) | `user` | `room, MUC PM or private chat` | Search Wikipedia. |
 
 ### Profile
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,birthday` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show birthday data from a user's vCard. |
-| `,emails` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show email addresses from a user's vCard. |
-| `,fullname` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show the full name from a user's vCard. |
-| `,nicknames` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show nicknames from a user's vCard. |
-| `,notes` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show notes from a user's vCard. |
-| `,organisations` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show organisations from a user's vCard. |
-| `,timezone` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show your configured timezone. |
-| `,timezone set` | [`vcard`](plugins/vcard.md) | `user` | `any` | Set your timezone in the bot profile. |
-| `,urls` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show URLs from a user's vCard. |
-| `,vcard` | [`vcard`](plugins/vcard.md) | `user` | `any` | Show vCard data or control room access to vCard lookups. |
+| `,birthday` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show birthday data from a user's vCard. |
+| `,emails` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show email addresses from a user's vCard. |
+| `,fullname` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show the full name from a user's vCard. |
+| `,nicknames` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show nicknames from a user's vCard. |
+| `,notes` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show notes from a user's vCard. |
+| `,organisations` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show organisations from a user's vCard. |
+| `,timezone` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show your configured timezone. |
+| `,timezone set` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Set your timezone in the bot profile. |
+| `,urls` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show URLs from a user's vCard. |
+| `,vcard` | [`vcard`](plugins/vcard.md) | `user` | `room, MUC PM or private chat` | Show vCard data or control room access to vCard lookups. |
 
 ### Rooms
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
 | `,birthday_notify` | [`birthday_notify`](plugins/birthday_notify.md) | `user` | `room or MUC PM` | Enable, disable or show birthday notifications for a room. |
-| `,pin` | [`pin`](plugins/pin.md) | `user` | `any` | Pin, list, search, mark important, edit, tag or delete room pins. |
-| `,poll` | [`poll`](plugins/poll.md) | `user` | `any` | Create and manage polls. |
+| `,pin` | [`pin`](plugins/pin.md) | `user` | `room, MUC PM or private chat` | Pin, list, search, mark important, edit, tag or delete room pins. |
+| `,poll` | [`poll`](plugins/poll.md) | `user` | `room, MUC PM or private chat` | Create and manage polls. |
 | `,rooms add` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Add or update a stored room configuration. |
 | `,rooms delete` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Remove a stored room and leave it if currently joined. |
 | `,rooms diagnose` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Show operational diagnostics for one room. |
@@ -223,7 +223,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,rooms set_plugin_defaults` | [`rooms`](plugins/rooms.md) | `user` | `room / MUC PM / private chat with <room_jid>` | Restore room plugin toggles for a room; requires room admin/owner or bot moderator. |
 | `,rooms sync` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Synchronize joined rooms with stored autojoin settings. |
 | `,rooms update` | [`rooms`](plugins/rooms.md) | `admin` | `private chat / MUC PM` | Update one field of a stored room. |
-| `,rss` | [`rss`](plugins/rss.md) | `user` | `any` | Manage RSS feed subscriptions for rooms and direct users. |
+| `,rss` | [`rss`](plugins/rss.md) | `user` | `room, MUC PM or private chat` | Manage RSS feed subscriptions for rooms and direct users. |
 
 ### Users
 
@@ -244,43 +244,43 @@ Lower role values have more privileges. A command is visible when your role is s
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
-| `,cert` | [`tools`](plugins/tools.md) | `user` | `any` | Check an HTTPS TLS certificate and its remaining lifetime. |
-| `,date` | [`tools`](plugins/tools.md) | `user` | `any` | Show the current date from a stored profile timezone. |
-| `,echo` | [`tools`](plugins/tools.md) | `user` | `any` | Echo text back to you. |
-| `,ping` | [`tools`](plugins/tools.md) | `user` | `any` | Check whether the bot is alive. |
-| `,remind` | [`reminder`](plugins/reminder.md) | `user` | `any` | Create a reminder. |
-| `,remind delete` | [`reminder`](plugins/reminder.md) | `user` | `any` | Delete one reminder. |
+| `,cert` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Check an HTTPS TLS certificate and its remaining lifetime. |
+| `,date` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Show the current date from a stored profile timezone. |
+| `,echo` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Echo text back to you. |
+| `,ping` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Check whether the bot is alive. |
+| `,remind` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Create a reminder. |
+| `,remind delete` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Delete one reminder. |
 | `,remind off` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Disable reminders globally or for the current room. |
 | `,remind on` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Enable reminders globally or for the current room. |
 | `,remind status` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | Show whether reminders are enabled. |
-| `,reminders` | [`reminder`](plugins/reminder.md) | `user` | `any` | List your reminders. |
-| `,sed` | [`sed`](plugins/sed.md) | `user` | `any` | Apply sed-style corrections or control room access to sed. |
-| `,seen` | [`tools`](plugins/tools.md) | `user` | `any` | Show when a user was last seen. |
-| `,tell` | [`tell`](plugins/tell.md) | `user` | `any` | Leave a message for another user. |
-| `,time` | [`tools`](plugins/tools.md) | `user` | `any` | Show the current time from a stored profile timezone. |
+| `,reminders` | [`reminder`](plugins/reminder.md) | `user` | `room, MUC PM or private chat` | List your reminders. |
+| `,sed` | [`sed`](plugins/sed.md) | `user` | `room, MUC PM or private chat` | Apply sed-style corrections or control room access to sed. |
+| `,seen` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Show when a user was last seen. |
+| `,tell` | [`tell`](plugins/tell.md) | `user` | `room, MUC PM or private chat` | Leave a message for another user. |
+| `,time` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Show the current time from a stored profile timezone. |
 | `,tools` | [`tools`](plugins/tools.md) | `moderator` | `room or MUC PM` | Enable, disable or show room access to utility commands. |
-| `,translate` | [`translate`](plugins/translate.md) | `user` | `any` | Translate text or a replied-to message. |
-| `,ts` | [`tools`](plugins/tools.md) | `user` | `any` | Convert a Unix timestamp to your configured timezone. |
+| `,translate` | [`translate`](plugins/translate.md) | `user` | `room, MUC PM or private chat` | Translate text or a replied-to message. |
+| `,ts` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Convert a Unix timestamp to your configured timezone. |
 | `,urlcheck` | [`urlcheck`](plugins/urlcheck.md) | `user` | `room or MUC PM` | Enable, disable or show automatic URL checks in a room. |
-| `,utc` | [`tools`](plugins/tools.md) | `user` | `any` | Show current UTC time. |
-| `,weather` | [`weather`](plugins/weather.md) | `user` | `any` | Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code; or control room access. |
+| `,utc` | [`tools`](plugins/tools.md) | `user` | `room, MUC PM or private chat` | Show current UTC time. |
+| `,weather` | [`weather`](plugins/weather.md) | `user` | `room, MUC PM or private chat` | Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code; or control room access. |
 
 ### Xmpp
 
 | Command | Plugin | Role | Context | Description |
 | --- | --- | --- | --- | --- |
 | `,xmpp` | [`xmpp`](plugins/xmpp.md) | `user` | `room or MUC PM` | Enable, disable or show room access to XMPP lookup commands. |
-| `,xmpp cert` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Check an XMPP server-to-server TLS certificate. |
-| `,xmpp check` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Run combined XMPP service and S2S TLS diagnostics. |
-| `,xmpp compliance` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Check XMPP compliance features via disco. |
-| `,xmpp contact` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Show contact addresses from service discovery. |
-| `,xmpp help` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Show help for XMPP lookup subcommands. |
-| `,xmpp info` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Show service discovery identity/features. |
-| `,xmpp items` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | List service discovery items. |
-| `,xmpp ping` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Ping an XMPP entity. |
-| `,xmpp srv` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Look up XMPP DNS SRV records. |
-| `,xmpp uptime` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Query XMPP entity uptime. |
-| `,xmpp version` | [`xmpp`](plugins/xmpp.md) | `user` | `any` | Query XMPP software version and diagnose S2S TLS failures. |
+| `,xmpp cert` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Check an XMPP server-to-server TLS certificate. |
+| `,xmpp check` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Run combined XMPP service and S2S TLS diagnostics. |
+| `,xmpp compliance` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Check XMPP compliance features via disco. |
+| `,xmpp contact` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Show contact addresses from service discovery. |
+| `,xmpp help` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Show help for XMPP lookup subcommands. |
+| `,xmpp info` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Show service discovery identity/features. |
+| `,xmpp items` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | List service discovery items. |
+| `,xmpp ping` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Ping an XMPP entity. |
+| `,xmpp srv` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Look up XMPP DNS SRV records. |
+| `,xmpp uptime` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Query XMPP entity uptime. |
+| `,xmpp version` | [`xmpp`](plugins/xmpp.md) | `user` | `room, MUC PM or private chat` | Query XMPP software version and diagnose S2S TLS failures. |
 
 ## Detailed plugin docs
 

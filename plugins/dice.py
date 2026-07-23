@@ -19,6 +19,7 @@ Examples:
 import re
 import random
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from core_plugins._core import (
     _is_muc_pm,
@@ -80,6 +81,24 @@ async def make_roll(bot, msg, expr) -> list | None:
     aliases=["roll", "r"],
     short="Roll dice using common dice notation.",
     usage="{prefix}dice <on|off|status|NdM [modifier] [operator] [target]>",
+    subcommands=[
+        help_subcommand(
+            "<dice>",
+            "{prefix}dice <NdM> [modifier] [operator] [target]",
+            "Roll one or more dice with an optional modifier and success test.",
+            examples=[
+                help_example(
+                    "{prefix}dice 2d6",
+                    "Roll two six-sided dice.",
+                ),
+                help_example(
+                    "{prefix}dice 3d20 -5 >= 30",
+                    "Roll three d20, subtract five and compare the total with 30.",
+                ),
+            ],
+        ),
+        *room_toggle_subcommands("dice", "dice rolling"),
+    ],
     examples=[
         "{prefix}dice status",
         "{prefix}dice 2d6",

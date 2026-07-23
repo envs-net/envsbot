@@ -18,14 +18,34 @@ Bot presence and status management
 Show or control per-room access to presence lookup.
 
 Role: `none`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,presence [on|off|status]`
 
-Examples:
+#### Subcommands
 
 - `,presence`
+  - Description: Show the bot's current presence state and status message.
+  - Examples:
+    - `,presence` — Display the current presence state and status text.
+
+- `,presence on`
+  - Description: Enable presence lookup in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,presence on` — Enable presence lookup for the current room or MUC PM.
+
+- `,presence off`
+  - Description: Disable presence lookup in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,presence off` — Disable presence lookup for the current room or MUC PM.
+
 - `,presence status`
+  - Description: Show whether presence lookup is enabled in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,presence status` — Inspect the current room setting for presence lookup.
 
 ### `,presence set`
 
@@ -38,4 +58,4 @@ Usage: `,presence set <online|chat|away|xa|dnd> [message]`
 
 Examples:
 
-- `,presence set away maintenance`
+- `,presence set away maintenance` — Set the bot presence state and status text.

@@ -26,9 +26,9 @@ Aliases: `,bot updatecheck`, `,checkupdate`, `,updatecheck`
 
 Examples:
 
-- `,bot checkupdate`
-- `,checkupdate`
-- `,updatecheck`
+- `,bot checkupdate` — Check whether a newer EnvsBot release is available.
+- `,checkupdate` — Check whether a newer EnvsBot release is available.
+- `,updatecheck` — Check whether a newer EnvsBot release is available.
 
 ### `,bot restart`
 
@@ -43,7 +43,7 @@ Aliases: `,restart`
 
 Examples:
 
-- `,bot restart`
+- `,bot restart` — Restart the bot process gracefully.
 
 ### `,bot shutdown`
 
@@ -58,7 +58,7 @@ Aliases: `,shutdown`
 
 Examples:
 
-- `,bot shutdown`
+- `,bot shutdown` — Stop the bot gracefully, optionally using a configured command.
 
 ### `,bot status`
 
@@ -73,16 +73,16 @@ Aliases: `,bot info`, `,status`
 
 Examples:
 
-- `,bot status`
-- `,status`
-- `,bot status full`
+- `,bot status` — Show bot, runtime, XMPP, plugin and database status.
+- `,status` — Show bot, runtime, XMPP, plugin and database status.
+- `,bot status full` — Show bot, runtime, XMPP, plugin and database status.
 
 ### `,bot version`
 
 Show the running EnvsBot version and latest checked release.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `core`<br>
 Usage: `,bot version`
 
@@ -90,5 +90,5 @@ Aliases: `,version`
 
 Examples:
 
-- `,bot version`
-- `,version`
+- `,bot version` — Show the running EnvsBot version and latest checked release.
+- `,version` — Show the running EnvsBot version and latest checked release.

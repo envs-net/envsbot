@@ -18,12 +18,31 @@ Message correction using sed-like syntax
 Apply sed-style corrections or control room access to sed.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `utility`<br>
 Usage: `,s/old/new/ or ,sed <on|off|status>`
 
-Examples:
+#### Subcommands
 
-- `,s/teh/the/`
+- `,s/old/new/[flags]`
+  - Description: Correct your most recent matching message with sed-style syntax.
+  - Examples:
+    - `,s/teh/the/` — Replace 'teh' with 'the' in your latest matching message.
+
+- `,sed on`
+  - Description: Enable sed corrections in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,sed on` — Enable sed corrections for the current room or MUC PM.
+
+- `,sed off`
+  - Description: Disable sed corrections in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,sed off` — Disable sed corrections for the current room or MUC PM.
+
 - `,sed status`
-- `,rooms enable sed`
+  - Description: Show whether sed corrections is enabled in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,sed status` — Inspect the current room setting for sed corrections.

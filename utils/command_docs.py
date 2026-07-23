@@ -21,7 +21,7 @@ def _checkout_root(path: Path) -> Path:
 
 ROOT = _checkout_root(Path(__file__).resolve().parents[1])
 
-from utils.command import Role
+from utils.command import Role, command_examples, command_subcommands
 from utils.config import config
 from utils.command_registry import (
     decorated_commands_from_module,
@@ -37,15 +37,48 @@ def _metadata(cmd):
     """Return docs metadata from the command decorator only."""
     short = str(getattr(cmd, "short", ""))
     usage = str(getattr(cmd, "usage", ""))
-    examples = list(getattr(cmd, "examples", []) or [])
     context = str(getattr(cmd, "context", "any") or "any")
+    role = getattr(cmd, "role", Role.NONE)
+    if context == "any":
+        context = (
+            "private chat / MUC PM"
+            if role <= Role.MODERATOR
+            else "room, MUC PM or private chat"
+        )
     category = str(getattr(cmd, "category", "") or "other")
+    examples = [
+        {
+            "command": example.command.replace("{prefix}", PREFIX),
+            "description": example.description.replace("{prefix}", PREFIX),
+        }
+        for example in command_examples(cmd)
+    ]
+    subcommands = []
+    for subcommand in command_subcommands(cmd):
+        subcommands.append(
+            {
+                "name": subcommand.name,
+                "usage": subcommand.usage.replace("{prefix}", PREFIX),
+                "short": subcommand.short.replace("{prefix}", PREFIX),
+                "aliases": list(subcommand.aliases),
+                "examples": [
+                    {
+                        "command": example.command.replace("{prefix}", PREFIX),
+                        "description": example.description.replace("{prefix}", PREFIX),
+                    }
+                    for example in subcommand.examples
+                ],
+                "role": subcommand.role,
+                "context": subcommand.context,
+            }
+        )
     return {
         "short": short.replace("{prefix}", PREFIX),
         "usage": usage.replace("{prefix}", PREFIX),
-        "examples": [str(e).replace("{prefix}", PREFIX) for e in examples],
+        "examples": examples,
+        "subcommands": subcommands,
         "context": context,
-        "role": getattr(cmd, "role", Role.NONE),
+        "role": role,
         "category": category.strip().lower() or "other",
     }
 
@@ -111,10 +144,10 @@ def _room_feature_section() -> list[str]:
         "",
         "Examples:",
         "",
-        f"- `{PREFIX}rooms enable ducks`",
-        f"- `{PREFIX}rooms disable ducks`",
-        f"- `{PREFIX}rooms enable room@conference.example.org ducks`",
-        f"- `{PREFIX}rooms plugins room@conference.example.org all`",
+        f"- `{PREFIX}rooms enable ducks` — Enable ducks in the current room or MUC PM.",
+        f"- `{PREFIX}rooms disable ducks` — Disable ducks in the current room or MUC PM.",
+        f"- `{PREFIX}rooms enable room@conference.example.org ducks` — Enable ducks for an explicit room from a normal private chat.",
+        f"- `{PREFIX}rooms plugins room@conference.example.org all` — Show every room feature setting without pagination.",
         "",
         "In a room or MUC PM the target room can usually be inferred. In a normal private chat, pass `<room_jid>` explicitly. The sender must be room owner/admin or have a bot moderator/admin role.",
         f"Defaults shown by these commands come from `ROOM_PLUGIN_DEFAULTS` in `config.py` merged with internal fallbacks. Existing per-room overrides stay in the database until `{PREFIX}rooms set_plugin_defaults` is used for that room.",
@@ -425,6 +458,56 @@ def _plugin_extra_notes(name: str) -> list[str]:
     return []
 
 
+def _example_description(data: dict, example: dict) -> str:
+    """Return explicit or command-level fallback text for one example."""
+    return str(example.get("description") or data.get("short") or "Example usage.")
+
+
+def _append_examples(lines: list[str], data: dict, examples: list[dict]) -> None:
+    """Append Markdown examples with one explanation per command."""
+    if not examples:
+        return
+    lines += ["Examples:", ""]
+    for example in examples:
+        description = _example_description(data, example)
+        lines.append(
+            f"- `{_inline_code(example['command'])}` — {description}"
+        )
+    lines.append("")
+
+
+def _append_subcommands(lines: list[str], cmd, data: dict) -> None:
+    """Append structured subcommand documentation."""
+    if not data["subcommands"]:
+        return
+    lines += ["#### Subcommands", ""]
+    for subcommand in data["subcommands"]:
+        lines.append(f"- `{_inline_code(subcommand['usage'])}`")
+        lines.append(f"  - Description: {subcommand['short']}")
+        aliases = subcommand["aliases"]
+        if aliases:
+            root = str(cmd.name)
+            rendered = ", ".join(
+                f"`{PREFIX}{root} {alias}`" for alias in aliases
+            )
+            lines.append(f"  - Aliases: {rendered}")
+        effective_role = subcommand["role"] or data["role"]
+        if effective_role != data["role"]:
+            lines.append(f"  - Role: `{effective_role}`")
+        effective_context = subcommand["context"] or data["context"]
+        if effective_context != data["context"]:
+            lines.append(f"  - Context: `{effective_context}`")
+        examples = subcommand["examples"]
+        if examples:
+            lines.append("  - Examples:")
+            for example in examples:
+                description = _example_description(data, example)
+                lines.append(
+                    "    - "
+                    f"`{_inline_code(example['command'])}` — {description}"
+                )
+        lines.append("")
+
 def generate_plugin_doc(name: str, meta: dict, plugin_commands: list[object]) -> str:
     """Generate one detailed plugin documentation page."""
     title = str(meta.get("name") or name)
@@ -462,12 +545,17 @@ def generate_plugin_doc(name: str, meta: dict, plugin_commands: list[object]) ->
         ]
         if aliases:
             lines += ["Aliases: " + ", ".join(f"`{PREFIX}{alias}`" for alias in aliases), ""]
-        if data["examples"]:
-            lines.append("Examples:")
-            lines.append("")
-            for example in data["examples"]:
-                lines.append(f"- `{_inline_code(example)}`")
-            lines.append("")
+        _append_subcommands(lines, cmd, data)
+        if data["subcommands"]:
+            structured_examples = [
+                example
+                for subcommand in data["subcommands"]
+                for example in subcommand["examples"]
+            ]
+            if not structured_examples:
+                _append_examples(lines, data, data["examples"])
+        else:
+            _append_examples(lines, data, data["examples"])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -653,6 +741,21 @@ def validate_command_docs(
                 errors.append(f"{plugin}:{name}: missing {field}")
         if not list(getattr(cmd, "examples", []) or []):
             errors.append(f"{plugin}:{name}: missing examples")
+        for subcommand in command_subcommands(cmd):
+            label = f"{plugin}:{name}:{subcommand.name}"
+            if not subcommand.name.strip():
+                errors.append(f"{label}: missing name")
+            if not subcommand.usage.strip():
+                errors.append(f"{label}: missing usage")
+            if not subcommand.short.strip():
+                errors.append(f"{label}: missing short")
+            if not subcommand.examples:
+                errors.append(f"{label}: missing examples")
+            for example in subcommand.examples:
+                if not example.command.strip():
+                    errors.append(f"{label}: empty example command")
+                if not example.description.strip():
+                    errors.append(f"{label}: missing example description")
         if docs_text and f"`,{name}`" not in docs_text:
             errors.append(f"docs/commands.md: missing primary command {name!r}")
         plugin_doc_name = f"{plugin.replace('/', '_')}.md"

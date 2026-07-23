@@ -27,6 +27,7 @@ import slixmpp
 from datetime import datetime
 from datetime import timezone as dt_timezone
 from utils.command import command, Role
+from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.tls_certificate import (
     VALID_HTTPS_CERTIFICATE_MESSAGE,
@@ -66,6 +67,7 @@ PLUGIN_META = {
     role=Role.MODERATOR,
     short="Enable, disable or show room access to utility commands.",
     usage="{prefix}tools <on|off|status>",
+    subcommands=room_toggle_subcommands("tools", "utility commands"),
     examples=["{prefix}tools status"],
     category="utility",
     context="room or MUC PM",

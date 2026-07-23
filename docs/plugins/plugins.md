@@ -26,7 +26,7 @@ Aliases: `,plugins diagnose`
 
 Examples:
 
-- `,plugin diagnose rss`
+- `,plugin diagnose rss` — Show diagnostics for one plugin, including hooks, commands and tasks.
 
 ### `,plugin info`
 
@@ -41,7 +41,7 @@ Aliases: `,plugins info`
 
 Examples:
 
-- `,plugin info rooms`
+- `,plugin info rooms` — Show metadata and source information for one plugin.
 
 ### `,plugin list`
 
@@ -56,9 +56,9 @@ Aliases: `,plugin health`, `,plugins`, `,plugins health`, `,plugins list`
 
 Examples:
 
-- `,plugins`
-- `,plugins health all`
-- `,plugins list`
+- `,plugins` — List loaded and available core/optional plugins.
+- `,plugins health all` — List loaded and available core/optional plugins.
+- `,plugins list` — List loaded and available core/optional plugins.
 
 ### `,plugin load`
 
@@ -73,7 +73,7 @@ Aliases: `,plugins load`
 
 Examples:
 
-- `,plugin load weather`
+- `,plugin load weather` — Load one plugin or all plugins.
 
 ### `,plugin reload`
 
@@ -88,8 +88,8 @@ Aliases: `,plugins reload`
 
 Examples:
 
-- `,plugin reload help`
-- `,plugin reload all auto`
+- `,plugin reload help` — Reload one plugin or all plugins.
+- `,plugin reload all auto` — Reload one plugin or all plugins.
 
 ### `,plugin state`
 
@@ -104,8 +104,8 @@ Aliases: `,plugins state`
 
 Examples:
 
-- `,plugin state rss`
-- `,plugin state poll room@conference.example.org`
+- `,plugin state rss` — Show plugin-provided runtime state counters.
+- `,plugin state poll room@conference.example.org` — Show plugin-provided runtime state counters.
 
 ### `,plugin unload`
 
@@ -120,4 +120,4 @@ Aliases: `,plugins unload`
 
 Examples:
 
-- `,plugin unload weather`
+- `,plugin unload weather` — Unload one optional plugin; core plugins are protected.

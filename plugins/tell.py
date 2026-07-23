@@ -22,6 +22,7 @@ import asyncio
 from functools import partial
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from core_plugins._core import (
     handle_room_toggle_command,
@@ -85,6 +86,21 @@ async def tell_fetch(bot, recv_jid):
     role=Role.USER,
     short="Leave a message for another user.",
     usage="{prefix}tell <on|off|status|nick: message>",
+    subcommands=[
+        help_subcommand(
+            "<nick>:",
+            "{prefix}tell <nick>: <message>",
+            "Store a message and deliver it when that user returns to the room.",
+            examples=[
+                help_example(
+                    "{prefix}tell alice: I fixed it",
+                    "Leave a message for Alice to receive when she returns.",
+                ),
+            ],
+            context="groupchat",
+        ),
+        *room_toggle_subcommands("tell", "Tell message delivery"),
+    ],
     examples=[
         "{prefix}tell status",
         "{prefix}tell alice: I fixed it",

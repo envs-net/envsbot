@@ -144,32 +144,63 @@ Global moderators may select a single section with `,rss list rooms`, `,rss list
 Manage RSS feed subscriptions for rooms and direct users.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `rooms`<br>
 Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...`
 
-Examples:
+#### Subcommands
 
-- `,rss add https://example.org/feed.rss room@conference.example.org`
-- `,rss add https://example.org/feed.rss`
-- `,rss list room@conference.example.org`
-- `,rss list rooms`
-- `,rss list mods`
-- `,rss list trusted`
-- `,rss list 2`
-- `,rss list all`
-- `,rss retry all`
-- `,rss health`
-- `,rss broken`
-- `,rss pause https://example.org/feed.rss`
-- `,rss resume https://example.org/feed.rss`
-- `,rss reset all`
-- `,rss retry https://example.org/feed.rss room@conference.example.org`
-- `,rss template`
-- `,rss template set default 📰 $feed_title: $title\n$link`
-- `,rss template set 📰 $feed_title: $title\n$link`
-- `,rss template set https://example.org/feed.rss 📰 $title\n$link`
-- `,rss template test [$feed_title] $title`
-- `,rss template unset`
-- `,rss delete https://example.org/feed.rss`
-- `,rss remove https://example.org/feed.rss old@conference.example.org`
+- `,rss add <feed_url> [room_jid]`
+  - Description: Subscribe a room or your direct chat to an RSS/Atom feed.
+  - Examples:
+    - `,rss add https://example.org/feed.rss` — Subscribe the current 1:1 chat to a feed.
+    - `,rss add https://example.org/feed.rss room@conference.example.org` — Subscribe an explicitly named room to a feed.
+
+- `,rss list [rooms|mods|trusted|room_jid] [page|all|last]`
+  - Description: List RSS subscriptions visible to you.
+  - Examples:
+    - `,rss list` — Show your direct subscriptions or the full moderator overview.
+    - `,rss list trusted` — Show trusted-user direct subscriptions permitted for your role.
+
+- `,rss delete <feed_url> [room_jid|jid|all]`
+  - Description: Remove a room or direct-user subscription.
+  - Aliases: `,rss del`, `,rss remove`, `,rss rm`
+  - Examples:
+    - `,rss delete https://example.org/feed.rss` — Remove the feed from the current room or your direct subscriptions.
+
+- `,rss retry <feed_url|all> [room_jid]`
+  - Description: Clear retry/backoff state and schedule another feed attempt.
+  - Aliases: `,rss reset`
+  - Role: `moderator`
+  - Examples:
+    - `,rss retry https://example.org/feed.rss room@conference.example.org` — Retry one room feed immediately.
+
+- `,rss pause <feed_url> [room_jid|all]`
+  - Description: Pause feed delivery without deleting the subscription.
+  - Role: `moderator`
+  - Examples:
+    - `,rss pause https://example.org/feed.rss` — Pause the feed for the current room.
+
+- `,rss resume <feed_url> [room_jid|all]`
+  - Description: Resume a paused RSS subscription.
+  - Role: `moderator`
+  - Examples:
+    - `,rss resume https://example.org/feed.rss` — Resume delivery for the current room.
+
+- `,rss health [room_jid] [page|all|last]`
+  - Description: Show feed status, retries, errors and last successful delivery.
+  - Role: `moderator`
+  - Examples:
+    - `,rss health` — Inspect the health of feeds visible in the current context.
+
+- `,rss broken [room_jid] [page|all|last]`
+  - Description: List only feeds that currently exceed the error threshold.
+  - Role: `moderator`
+  - Examples:
+    - `,rss broken` — Show only broken feeds visible in the current context.
+
+- `,rss template [show|set|unset|test] [default|direct|room_jid] [feed_url] [template]`
+  - Description: Show, test or configure global, room and personal RSS templates.
+  - Examples:
+    - `,rss template` — Show the effective template for the current destination.
+    - `,rss template set 📰 $feed_title: $title\n$link` — Set the default template for the current room or direct user.

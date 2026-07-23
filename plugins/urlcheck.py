@@ -35,6 +35,7 @@ from datetime import datetime
 from functools import partial
 
 from utils.command import command, Role
+from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_preview, fetch_json, passthrough_validator
 from utils.urlcheck_extraction import extract_urls_from_message_text
@@ -132,6 +133,7 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     role=Role.USER,
     short="Enable, disable or show automatic URL checks in a room.",
     usage="{prefix}urlcheck <on|off|status>",
+    subcommands=room_toggle_subcommands("urlcheck", "automatic URL checks"),
     examples=[
         "{prefix}urlcheck status",
         "{prefix}rooms enable urlcheck",

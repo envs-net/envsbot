@@ -26,7 +26,7 @@ Aliases: `,user admin`, `,user admins`, `,users admin`
 
 Examples:
 
-- `,users admins`
+- `,users admins` — List users with admin-level roles.
 
 ### `,users delete`
 
@@ -41,7 +41,7 @@ Aliases: `,user del`, `,user delete`, `,user remove`, `,user rm`, `,users del`, 
 
 Examples:
 
-- `,users delete alice@example.org`
+- `,users delete alice@example.org` — Delete one non-privileged user record and its runtime data.
 
 ### `,users grant`
 
@@ -56,7 +56,7 @@ Aliases: `,user grant`, `,user plugin grant`, `,users plugin grant`
 
 Examples:
 
-- `,users grant alice@example.org rss pin poll`
+- `,users grant alice@example.org rss pin poll` — Grant room-scoped plugin permissions to a user.
 
 ### `,users grants`
 
@@ -71,7 +71,7 @@ Aliases: `,user grants`, `,user plugin grants`, `,users plugin grants`
 
 Examples:
 
-- `,users grants alice@example.org`
+- `,users grants alice@example.org` — Show a user's room-scoped plugin permissions.
 
 ### `,users info`
 
@@ -86,8 +86,8 @@ Aliases: `,user info`
 
 Examples:
 
-- `,users info`
-- `,users info alice@example.org`
+- `,users info` — Show your user info, or inspect another user as an admin.
+- `,users info alice@example.org` — Show your user info, or inspect another user as an admin.
 
 ### `,users list`
 
@@ -102,10 +102,10 @@ Aliases: `,user list`
 
 Examples:
 
-- `,users list`
-- `,users list active`
-- `,users list passive all`
-- `,users list test@conference.example.org 2`
+- `,users list` — List known users by direct, room-observed or stored-only source.
+- `,users list active` — List known users by direct, room-observed or stored-only source.
+- `,users list passive all` — List known users by direct, room-observed or stored-only source.
+- `,users list test@conference.example.org 2` — List known users by direct, room-observed or stored-only source.
 
 ### `,users permissions`
 
@@ -120,9 +120,9 @@ Aliases: `,user permissions`, `,user perms`, `,users perms`
 
 Examples:
 
-- `,users permissions alice@example.org`
-- `,users permissions alice@example.org room@conference.example.org`
-- `,users perms alice room@conference.example.org`
+- `,users permissions alice@example.org` — Diagnose global, room and room-scoped plugin permissions.
+- `,users permissions alice@example.org room@conference.example.org` — Diagnose global, room and room-scoped plugin permissions.
+- `,users perms alice room@conference.example.org` — Diagnose global, room and room-scoped plugin permissions.
 
 ### `,users revoke`
 
@@ -137,7 +137,7 @@ Aliases: `,user plugin revoke`, `,user revoke`, `,users plugin revoke`
 
 Examples:
 
-- `,users revoke alice@example.org rss`
+- `,users revoke alice@example.org rss` — Revoke room-scoped plugin permissions from a user.
 
 ### `,users role`
 
@@ -152,7 +152,7 @@ Aliases: `,user role`
 
 Examples:
 
-- `,users role alice@example.org trusted`
+- `,users role alice@example.org trusted` — Create or change a user's global bot role with hierarchy checks.
 
 ### `,users roles`
 
@@ -167,4 +167,4 @@ Aliases: `,user roles`
 
 Examples:
 
-- `,users roles`
+- `,users roles` — Show available roles and their ordering.

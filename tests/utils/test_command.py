@@ -204,3 +204,129 @@ def test_registry_remove_accepts_space_separated_name_and_tokens():
     assert reg.by_handler == {}
     assert reg.by_plugin == {}
     assert reg.by_prefix == {}
+
+
+def test_structured_help_metadata_normalizes_examples_subcommands_and_roles():
+    example = command_mod.normalize_command_example(
+        {"command": "{prefix}demo add", "description": "Add a demo."}
+    )
+    assert example == command_mod.CommandExample(
+        "{prefix}demo add",
+        "Add a demo.",
+    )
+    assert command_mod.normalize_command_example(
+        ("{prefix}demo list", "List demos.")
+    ) == command_mod.CommandExample("{prefix}demo list", "List demos.")
+
+    subcommand = command_mod.normalize_command_subcommand(
+        {
+            "name": "delete",
+            "usage": "{prefix}demo delete <id>",
+            "description": "Delete one demo.",
+            "aliases": ["del", "remove", "rm"],
+            "examples": [
+                {
+                    "command": "{prefix}demo delete 7",
+                    "description": "Delete demo 7.",
+                }
+            ],
+            "role": int(Role.MODERATOR),
+            "context": "private chat / MUC PM",
+        }
+    )
+
+    assert subcommand.name == "delete"
+    assert subcommand.short == "Delete one demo."
+    assert subcommand.aliases == ("del", "remove", "rm")
+    assert subcommand.examples == (
+        command_mod.CommandExample(
+            "{prefix}demo delete 7",
+            "Delete demo 7.",
+        ),
+    )
+    assert subcommand.role is Role.MODERATOR
+    assert subcommand.context == "private chat / MUC PM"
+
+    string_metadata = command_mod.normalize_command_subcommand(
+        {
+            "name": "remove",
+            "usage": "{prefix}demo remove <id>",
+            "short": "Remove one demo.",
+            "aliases": "rm",
+            "role": "moderator",
+        }
+    )
+    assert string_metadata.aliases == ("rm",)
+    assert string_metadata.role is Role.MODERATOR
+
+
+def test_command_decorator_exposes_structured_help_metadata(monkeypatch):
+    registry = CommandRegistry()
+    monkeypatch.setattr(command_mod, "COMMANDS", registry)
+    subcommands = [
+        {
+            "name": "add",
+            "usage": "{prefix}demo add <value>",
+            "short": "Add one value.",
+            "examples": [
+                {
+                    "command": "{prefix}demo add value",
+                    "description": "Add the value named value.",
+                }
+            ],
+        }
+    ]
+
+    @command_mod.command(
+        "demo",
+        role=Role.USER,
+        short="Manage demos.",
+        usage="{prefix}demo <add>",
+        examples=["{prefix}demo add value"],
+        subcommands=subcommands,
+        category="tests",
+        context="any",
+    )
+    def handler():
+        return None
+
+    cmd = handler.__commands__[0][1]
+    assert handler._command_subcommands is subcommands
+    assert command_mod.command_subcommands(cmd) == [
+        command_mod.CommandSubcommand(
+            name="add",
+            usage="{prefix}demo add <value>",
+            short="Add one value.",
+            examples=(
+                command_mod.CommandExample(
+                    "{prefix}demo add value",
+                    "Add the value named value.",
+                ),
+            ),
+        )
+    ]
+
+
+def test_room_toggle_subcommands_support_custom_status_name():
+    from utils.command_metadata import room_toggle_subcommands
+
+    holder = type(
+        "Holder",
+        (),
+        {
+            "subcommands": room_toggle_subcommands(
+                "idlerpg",
+                "IdleRPG",
+                status_name="enabled",
+            )
+        },
+    )()
+    subcommands = command_mod.command_subcommands(holder)
+
+    assert [subcommand.name for subcommand in subcommands] == [
+        "on",
+        "off",
+        "enabled",
+    ]
+    assert subcommands[-1].usage == "{prefix}idlerpg enabled"
+    assert subcommands[-1].examples[0].description

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
 from utils.audit import audit_event
 from bot.room_state import JOINED_ROOMS
@@ -766,6 +767,126 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
     role=Role.USER,
     short="Manage RSS feed subscriptions for rooms and direct users.",
     usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
+    subcommands=[
+        help_subcommand(
+            "add",
+            "{prefix}rss add <feed_url> [room_jid]",
+            "Subscribe a room or your direct chat to an RSS/Atom feed.",
+            examples=[
+                help_example(
+                    "{prefix}rss add https://example.org/feed.rss",
+                    "Subscribe the current 1:1 chat to a feed.",
+                ),
+                help_example(
+                    "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
+                    "Subscribe an explicitly named room to a feed.",
+                ),
+            ],
+        ),
+        help_subcommand(
+            "list",
+            "{prefix}rss list [rooms|mods|trusted|room_jid] [page|all|last]",
+            "List RSS subscriptions visible to you.",
+            examples=[
+                help_example(
+                    "{prefix}rss list",
+                    "Show your direct subscriptions or the full moderator overview.",
+                ),
+                help_example(
+                    "{prefix}rss list trusted",
+                    "Show trusted-user direct subscriptions permitted for your role.",
+                ),
+            ],
+        ),
+        help_subcommand(
+            "delete",
+            "{prefix}rss delete <feed_url> [room_jid|jid|all]",
+            "Remove a room or direct-user subscription.",
+            aliases=("del", "remove", "rm"),
+            examples=[
+                help_example(
+                    "{prefix}rss delete https://example.org/feed.rss",
+                    "Remove the feed from the current room or your direct subscriptions.",
+                ),
+            ],
+        ),
+        help_subcommand(
+            "retry",
+            "{prefix}rss retry <feed_url|all> [room_jid]",
+            "Clear retry/backoff state and schedule another feed attempt.",
+            aliases=("reset",),
+            examples=[
+                help_example(
+                    "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
+                    "Retry one room feed immediately.",
+                ),
+            ],
+            role=Role.MODERATOR,
+        ),
+        help_subcommand(
+            "pause",
+            "{prefix}rss pause <feed_url> [room_jid|all]",
+            "Pause feed delivery without deleting the subscription.",
+            examples=[
+                help_example(
+                    "{prefix}rss pause https://example.org/feed.rss",
+                    "Pause the feed for the current room.",
+                ),
+            ],
+            role=Role.MODERATOR,
+        ),
+        help_subcommand(
+            "resume",
+            "{prefix}rss resume <feed_url> [room_jid|all]",
+            "Resume a paused RSS subscription.",
+            examples=[
+                help_example(
+                    "{prefix}rss resume https://example.org/feed.rss",
+                    "Resume delivery for the current room.",
+                ),
+            ],
+            role=Role.MODERATOR,
+        ),
+        help_subcommand(
+            "health",
+            "{prefix}rss health [room_jid] [page|all|last]",
+            "Show feed status, retries, errors and last successful delivery.",
+            examples=[
+                help_example(
+                    "{prefix}rss health",
+                    "Inspect the health of feeds visible in the current context.",
+                ),
+            ],
+            role=Role.MODERATOR,
+        ),
+        help_subcommand(
+            "broken",
+            "{prefix}rss broken [room_jid] [page|all|last]",
+            "List only feeds that currently exceed the error threshold.",
+            examples=[
+                help_example(
+                    "{prefix}rss broken",
+                    "Show only broken feeds visible in the current context.",
+                ),
+            ],
+            role=Role.MODERATOR,
+        ),
+        help_subcommand(
+            "template",
+            "{prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feed_url] [template]",
+            "Show, test or configure global, room and personal RSS templates.",
+            examples=[
+                help_example(
+                    "{prefix}rss template",
+                    "Show the effective template for the current destination.",
+                ),
+                help_example(
+                    "{prefix}rss template set 📰 $feed_title: $title\\n$link",
+                    "Set the default template for the current room or direct user.",
+                ),
+            ],
+        ),
+    ],
     examples=[
         "{prefix}rss add https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss add https://example.org/feed.rss",
@@ -784,7 +905,7 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
         "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss template",
         "{prefix}rss template set default 📰 $feed_title: $title\n$link",
-        "{prefix}rss template set 📰 $feed_title: $title\n$link",
+        "{prefix}rss template set 📰 $feed_title: $title\\n$link",
         "{prefix}rss template set https://example.org/feed.rss 📰 $title\n$link",
         "{prefix}rss template test [$feed_title] $title",
         "{prefix}rss template unset",

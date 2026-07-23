@@ -28,6 +28,7 @@ import shlex
 from functools import partial
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from utils import message_cache
 from core_plugins import _core
@@ -556,6 +557,20 @@ async def process_sed_correction(
     role=Role.USER,
     short="Apply sed-style corrections or control room access to sed.",
     usage="{prefix}s/old/new/ or {prefix}sed <on|off|status>",
+    subcommands=[
+        help_subcommand(
+            "<correction>",
+            "{prefix}s/old/new/[flags]",
+            "Correct your most recent matching message with sed-style syntax.",
+            examples=[
+                help_example(
+                    "{prefix}s/teh/the/",
+                    "Replace 'teh' with 'the' in your latest matching message.",
+                )
+            ],
+        ),
+        *room_toggle_subcommands("sed", "sed corrections"),
+    ],
     examples=[
         "{prefix}s/teh/the/",
         "{prefix}sed status",

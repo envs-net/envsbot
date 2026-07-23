@@ -26,7 +26,7 @@ Aliases: `,audit event`, `,audits action`, `,audits event`
 
 Examples:
 
-- `,audit action room_feature_changed`
+- `,audit action room_feature_changed` — Show recent audit events for one action/event type.
 
 ### `,audit errors`
 
@@ -41,8 +41,8 @@ Aliases: `,audit failed`, `,audits errors`, `,audits failed`
 
 Examples:
 
-- `,audit errors`
-- `,audit errors all`
+- `,audit errors` — Show audit events that look like errors or failures.
+- `,audit errors all` — Show audit events that look like errors or failures.
 
 ### `,audit export`
 
@@ -57,8 +57,8 @@ Aliases: `,audits export`
 
 Examples:
 
-- `,audit export`
-- `,audit export 100`
+- `,audit export` — Export recent audit events as JSON Lines.
+- `,audit export 100` — Export recent audit events as JSON Lines.
 
 ### `,audit last`
 
@@ -73,9 +73,9 @@ Aliases: `,audit`, `,audits last`
 
 Examples:
 
-- `,audit last`
-- `,audit last 2`
-- `,audit last limit 50`
+- `,audit last` — Show recent admin audit events.
+- `,audit last 2` — Show recent admin audit events.
+- `,audit last limit 50` — Show recent admin audit events.
 
 ### `,audit prune`
 
@@ -90,8 +90,8 @@ Aliases: `,audits prune`
 
 Examples:
 
-- `,audit prune 90 dry-run`
-- `,audit prune 90 confirm`
+- `,audit prune 90 dry-run` — Prune old audit events after confirmation.
+- `,audit prune 90 confirm` — Prune old audit events after confirmation.
 
 ### `,audit summary`
 
@@ -106,8 +106,8 @@ Aliases: `,audit stats`, `,audits stats`, `,audits summary`
 
 Examples:
 
-- `,audit summary`
-- `,audit summary 7d`
+- `,audit summary` — Summarize audit activity for the last 24h or 7d.
+- `,audit summary 7d` — Summarize audit activity for the last 24h or 7d.
 
 ### `,audit target`
 
@@ -122,7 +122,7 @@ Aliases: `,audit room`, `,audits room`, `,audits target`
 
 Examples:
 
-- `,audit target room@conference.example.org`
+- `,audit target room@conference.example.org` — Show recent audit events for one target value.
 
 ### `,audit user`
 
@@ -137,4 +137,4 @@ Aliases: `,audits user`
 
 Examples:
 
-- `,audit user admin@example.org`
+- `,audit user admin@example.org` — Show recent audit events for one actor JID.

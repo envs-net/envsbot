@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from utils import command_docs
+from utils.command import Role
 from utils.command_docs import (
     _checkout_root,
+    generate_plugin_doc,
     generate_plugin_docs,
     validate_command_docs,
 )
@@ -94,3 +98,46 @@ def test_write_generated_docs_creates_nested_plugin_directory(monkeypatch, tmp_p
         plugin_docs / "only.md",
     ]
     assert (plugin_docs / "only.md").read_text(encoding="utf-8") == "plugin\n"
+
+
+def test_generate_plugin_doc_renders_structured_help_and_described_examples():
+    cmd = SimpleNamespace(
+        name="rooms invite",
+        role=Role.ADMIN,
+        aliases=[],
+        short="Manage pending room invitations.",
+        usage="{prefix}rooms invite <list|delete>",
+        examples=["{prefix}rooms invite list"],
+        subcommands=[
+            {
+                "name": "delete",
+                "usage": "{prefix}rooms invite delete <id>",
+                "short": "Delete a pending invitation.",
+                "aliases": ["del", "remove", "rm"],
+                "examples": [
+                    {
+                        "command": "{prefix}rooms invite delete 7",
+                        "description": "Delete pending invitation 7.",
+                    }
+                ],
+                "role": Role.ADMIN,
+                "context": "private chat / MUC PM",
+            }
+        ],
+        category="admin",
+        context="private chat / MUC PM",
+    )
+    meta = {
+        "name": "rooms",
+        "source": "core",
+        "category": "core",
+        "description": "Manage rooms.",
+    }
+
+    generated = generate_plugin_doc("rooms", meta, [cmd])
+
+    assert "#### Subcommands" in generated
+    assert "- `,rooms invite delete <id>`" in generated
+    assert "Description: Delete a pending invitation." in generated
+    assert "Aliases: `,rooms invite del`, `,rooms invite remove`, `,rooms invite rm`" in generated
+    assert "`,rooms invite delete 7` — Delete pending invitation 7." in generated

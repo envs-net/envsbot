@@ -13,6 +13,7 @@ from typing import Any
 
 from utils.backups import backup_dir, backup_keep, backup_retention_days, list_backups
 from utils.command import COMMANDS, Role, command
+from utils.command_metadata import help_example, help_subcommand
 from utils.config import (
     collect_config_warnings,
     config,
@@ -772,6 +773,75 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
     aliases=["bot doctor", "healthcheck", "bot health"],
     short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness.",
     usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]",
+    subcommands=[
+        help_subcommand(
+            "config",
+            "{prefix}doctor config [page|last|all]",
+            "Check configuration validity, defaults and runtime consistency.",
+            examples=[help_example("{prefix}doctor config", "Run configuration-specific diagnostics.")],
+        ),
+        help_subcommand(
+            "database",
+            "{prefix}doctor database [page|last|all]",
+            "Check database connectivity, migrations and persistence state.",
+            examples=[help_example("{prefix}doctor database", "Run database-specific diagnostics.")],
+        ),
+        help_subcommand(
+            "rooms",
+            "{prefix}doctor rooms [page|last|all]",
+            "Check stored, joined and configured room state.",
+            examples=[help_example("{prefix}doctor rooms", "Inspect room storage and join state.")],
+        ),
+        help_subcommand(
+            "plugins",
+            "{prefix}doctor plugins [page|last|all]",
+            "Check plugin loading, metadata and command registration.",
+            examples=[help_example("{prefix}doctor plugins", "Inspect loaded plugin metadata and state.")],
+        ),
+        help_subcommand(
+            "tasks",
+            "{prefix}doctor tasks [full] [page|last|all]",
+            "Check supervised background tasks and heartbeat state.",
+            examples=[help_example("{prefix}doctor tasks full", "Show detailed task diagnostics.")],
+        ),
+        help_subcommand(
+            "backups",
+            "{prefix}doctor backups [page|last|all]",
+            "Check managed backups, retention and latest archive state.",
+            examples=[help_example("{prefix}doctor backups", "Inspect managed backup health.")],
+        ),
+        help_subcommand(
+            "network",
+            "{prefix}doctor network [page|last|all]",
+            "Check network and TLS-related runtime prerequisites.",
+            examples=[help_example("{prefix}doctor network", "Run network-related health checks.")],
+        ),
+        help_subcommand(
+            "plugin-health",
+            "{prefix}doctor plugin-health [page|last|all]",
+            "Run every plugin-provided doctor check.",
+            examples=[help_example("{prefix}doctor plugin-health", "Collect health results from all loaded plugins.")],
+        ),
+        help_subcommand(
+            "<plugin>",
+            "{prefix}doctor <plugin> [page|last|all]",
+            "Run doctor checks for one named plugin.",
+            examples=[help_example("{prefix}doctor rss", "Run only the RSS plugin diagnostics.")],
+        ),
+        help_subcommand(
+            "full",
+            "{prefix}doctor full [page|last|all]",
+            "Run a detailed health sweep across all doctor sections.",
+            aliases=("all", "details"),
+            examples=[help_example("{prefix}doctor full", "Run the complete detailed health sweep.")],
+        ),
+        help_subcommand(
+            "release",
+            "{prefix}doctor release [page|last|all]",
+            "Run release-readiness checks for version, docs, config, syntax, database, backups and tasks.",
+            examples=[help_example("{prefix}doctor release", "Run the release candidate checklist.")],
+        ),
+    ],
     examples=[
         "{prefix}doctor",
         "{prefix}doctor full",

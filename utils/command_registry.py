@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
 
-from utils.command import COMMANDS, Role
+from utils.command import COMMANDS, Role, command_examples, command_subcommands
 
 PLUGIN_SOURCES = (("core_plugins", "core"), ("plugins", "plugins"))
 
@@ -28,11 +28,12 @@ class CommandRecord:
     short: str
     usage: str
     examples: tuple[str, ...]
+    subcommands: tuple[dict[str, Any], ...]
     category: str
     context: str
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "registered_name": self.registered_name,
             "primary_name": self.primary_name,
             "plugin": self.plugin,
@@ -46,6 +47,9 @@ class CommandRecord:
             "category": self.category,
             "context": self.context,
         }
+        if self.subcommands:
+            result["subcommands"] = list(self.subcommands)
+        return result
 
 
 def discover_command_modules() -> list[tuple[str, ModuleType, str]]:
@@ -111,12 +115,34 @@ def _plugin_owner_by_tokens() -> dict[tuple[str, ...], str]:
 
 
 def _normalized_examples(value: object) -> tuple[str, ...]:
-    """Normalize command examples without splitting a single string."""
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        return (value,)
-    return tuple(str(item) for item in value)
+    """Normalize examples without splitting a single string."""
+    holder = type("ExampleHolder", (), {"examples": value or ()})()
+    return tuple(example.command for example in command_examples(holder))
+
+
+def _normalized_subcommands(value: object) -> tuple[dict[str, Any], ...]:
+    """Normalize structured subcommand metadata for registry consumers."""
+    holder = type("SubcommandHolder", (), {"subcommands": value or ()})()
+    result = []
+    for subcommand in command_subcommands(holder):
+        result.append(
+            {
+                "name": subcommand.name,
+                "usage": subcommand.usage,
+                "short": subcommand.short,
+                "aliases": list(subcommand.aliases),
+                "examples": [
+                    {
+                        "command": example.command,
+                        "description": example.description,
+                    }
+                    for example in subcommand.examples
+                ],
+                "role": subcommand.role,
+                "context": subcommand.context,
+            }
+        )
+    return tuple(result)
 
 
 def command_records() -> list[dict[str, Any]]:
@@ -139,6 +165,7 @@ def command_records() -> list[dict[str, Any]]:
             short=str(getattr(cmd, "short", "") or ""),
             usage=str(getattr(cmd, "usage", "") or ""),
             examples=_normalized_examples(getattr(cmd, "examples", None)),
+            subcommands=_normalized_subcommands(getattr(cmd, "subcommands", None)),
             category=str(getattr(cmd, "category", "") or "other"),
             context=str(getattr(cmd, "context", "") or "any"),
         )

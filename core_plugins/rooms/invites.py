@@ -3,6 +3,7 @@
 import time
 from xml.etree import ElementTree as ET
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
@@ -510,6 +511,36 @@ async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
     aliases=["room invite"],
     short="List, accept, decline or clean up pending room invites.",
     usage="{prefix}rooms invite list [all|page|last] | {prefix}rooms invite accept <id> | {prefix}rooms invite decline <id> | {prefix}rooms invite cleanup [all|expired]",
+    subcommands=[
+        help_subcommand(
+            "list",
+            "{prefix}rooms invite list [all|page|last]",
+            "List pending room invitations waiting for an admin decision.",
+            aliases=("ls",),
+            examples=[help_example("{prefix}rooms invite list", "Show the first page of pending invitations.")],
+        ),
+        help_subcommand(
+            "accept",
+            "{prefix}rooms invite accept <id>",
+            "Accept one pending invitation and join/store the room.",
+            examples=[help_example("{prefix}rooms invite accept 1", "Accept pending invitation 1.")],
+        ),
+        help_subcommand(
+            "decline",
+            "{prefix}rooms invite decline <id>",
+            "Decline and remove one pending room invitation.",
+            examples=[help_example("{prefix}rooms invite decline 1", "Decline pending invitation 1.")],
+        ),
+        help_subcommand(
+            "cleanup",
+            "{prefix}rooms invite cleanup [all|expired]",
+            "Remove all pending invites or only expired entries.",
+            examples=[
+                help_example("{prefix}rooms invite cleanup expired", "Delete only expired pending invitations."),
+                help_example("{prefix}rooms invite cleanup all", "Delete every pending invitation."),
+            ],
+        ),
+    ],
     examples=[
         "{prefix}rooms invite list",
         "{prefix}rooms invite list all",

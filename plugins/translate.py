@@ -34,6 +34,7 @@ import aiohttp
 
 from core_plugins import _core
 from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
 from utils import message_cache
@@ -472,6 +473,24 @@ async def _handle_room_toggle_command(bot, msg, is_room: bool, args: list[str]) 
     aliases=["tr"],
     short="Translate text or a replied-to message.",
     usage="{prefix}tr [from] [to] [text or reply]",
+    subcommands=[
+        help_subcommand(
+            "<languages>",
+            "{prefix}tr [from] [to] <text>",
+            "Translate provided text with explicit or configured language defaults.",
+            examples=[
+                help_example("{prefix}tr en uk Hello, world!", "Translate English text into Ukrainian."),
+                help_example("{prefix}tr auto pl Guten Morgen", "Detect the source language automatically and translate into Polish."),
+            ],
+        ),
+        help_subcommand(
+            "<reply>",
+            "Reply to a message with {prefix}tr [from] [to]",
+            "Translate the replied-to message without copying its text into the command.",
+            examples=[help_example("Reply with {prefix}tr en uk", "Translate the replied-to message from English into Ukrainian.")],
+        ),
+        *room_toggle_subcommands("translate", "translation commands"),
+    ],
     examples=[
         "{prefix}tr en uk Hello, world!",
         "{prefix}tr uk Hallo Welt!",

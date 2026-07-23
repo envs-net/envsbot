@@ -18,6 +18,7 @@ import urllib.parse
 from core_plugins import _core
 from plugins import vcard
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 # Intentionally exposed for tests and runtime settings.
 from utils.config import config
 from utils.http_fetch import fetch_text, passthrough_validator
@@ -103,6 +104,19 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     aliases=["w"],
     short="Show weather from a user's vCard location, a room nick, or an explicit city/ZIP code; or control room access.",
     usage="{prefix}weather [on|off|status|nick|city|zip]",
+    subcommands=[
+        help_subcommand(
+            "<location>",
+            "{prefix}weather [nick|city|zip]",
+            "Show weather for your vCard location, a room nickname or an explicit place.",
+            examples=[
+                help_example("{prefix}weather", "Show weather for your own stored vCard location."),
+                help_example("{prefix}weather Alice", "Show weather for Alice's vCard location in a shared room."),
+                help_example("{prefix}weather Berlin", "Show weather for an explicitly named city."),
+            ],
+        ),
+        *room_toggle_subcommands("weather", "weather lookups"),
+    ],
     examples=[
         "{prefix}weather status",
         "{prefix}weather Alice",

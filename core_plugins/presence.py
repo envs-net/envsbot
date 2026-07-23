@@ -21,6 +21,7 @@ Available <show> statuses for setting the status:
 """
 import logging
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from core_plugins._core import (
     handle_room_toggle_command,
     _is_muc_pm,
@@ -43,6 +44,20 @@ PLUGIN_META = {
     "presence",
     short="Show or control per-room access to presence lookup.",
     usage="{prefix}presence [on|off|status]",
+    subcommands=[
+        help_subcommand(
+            "<show>",
+            "{prefix}presence",
+            "Show the bot's current presence state and status message.",
+            examples=[
+                help_example(
+                    "{prefix}presence",
+                    "Display the current presence state and status text.",
+                )
+            ],
+        ),
+        *room_toggle_subcommands("presence", "presence lookup"),
+    ],
     examples=[
         "{prefix}presence",
         "{prefix}presence status",

@@ -24,8 +24,8 @@ Usage: `,config diff [all|page|last]`
 
 Examples:
 
-- `,config diff`
-- `,config diff all`
+- `,config diff` — Show config values that differ from config_sample.py defaults.
+- `,config diff all` — Show config values that differ from config_sample.py defaults.
 
 ### `,config reload`
 
@@ -38,7 +38,7 @@ Usage: `,config reload`
 
 Examples:
 
-- `,config reload`
+- `,config reload` — Reload config.py into the running bot where possible.
 
 ### `,config search`
 
@@ -53,8 +53,8 @@ Aliases: `,config find`
 
 Examples:
 
-- `,config search rss`
-- `,config find timeout`
+- `,config search rss` — Search visible config keys and values.
+- `,config find timeout` — Search visible config keys and values.
 
 ### `,config set`
 
@@ -67,7 +67,7 @@ Usage: `,config set <KEY> <value>`
 
 Examples:
 
-- `,config set LOG_LEVEL DEBUG`
+- `,config set LOG_LEVEL DEBUG` — Persist and apply one runtime-writable config value.
 
 ### `,config show`
 
@@ -82,8 +82,8 @@ Aliases: `,config`
 
 Examples:
 
-- `,config show`
-- `,config show all`
+- `,config show` — Show the effective config grouped like config_sample.py, with secrets redacted.
+- `,config show all` — Show the effective config grouped like config_sample.py, with secrets redacted.
 
 ### `,config unset`
 
@@ -96,7 +96,7 @@ Usage: `,config unset <KEY>`
 
 Examples:
 
-- `,config unset LOG_LEVEL`
+- `,config unset LOG_LEVEL` — Reset one runtime-writable config value to the config_sample.py default.
 
 ### `,config validate`
 
@@ -109,4 +109,4 @@ Usage: `,config validate`
 
 Examples:
 
-- `,config validate`
+- `,config validate` — Validate the current config.py file.

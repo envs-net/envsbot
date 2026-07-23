@@ -209,3 +209,56 @@ def test_command_records_normalize_empty_names_and_string_examples(monkeypatch):
             "context": "any",
         }
     ]
+
+
+def test_command_records_include_structured_subcommands(monkeypatch):
+    commands = FakeCommands()
+
+    def handler():
+        return None
+
+    commands[("demo",)] = SimpleNamespace(
+        name="demo",
+        role=Role.USER,
+        handler=handler,
+        short="Manage demos.",
+        usage="{prefix}demo <add>",
+        examples=["{prefix}demo add value"],
+        subcommands=[
+            {
+                "name": "add",
+                "usage": "{prefix}demo add <value>",
+                "short": "Add a value.",
+                "aliases": ["create"],
+                "examples": [
+                    {
+                        "command": "{prefix}demo add value",
+                        "description": "Add the value named value.",
+                    }
+                ],
+                "role": Role.TRUSTED,
+                "context": "private chat / MUC PM",
+            }
+        ],
+        category="tests",
+        context="any",
+    )
+    commands.by_plugin = {"demo": {("demo",)}}
+    monkeypatch.setattr(registry, "COMMANDS", commands)
+
+    assert registry.command_records()[0]["subcommands"] == [
+        {
+            "name": "add",
+            "usage": "{prefix}demo add <value>",
+            "short": "Add a value.",
+            "aliases": ["create"],
+            "examples": [
+                {
+                    "command": "{prefix}demo add value",
+                    "description": "Add the value named value.",
+                }
+            ],
+            "role": Role.TRUSTED,
+            "context": "private chat / MUC PM",
+        }
+    ]

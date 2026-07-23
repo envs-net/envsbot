@@ -36,6 +36,7 @@ from functools import partial
 
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from core_plugins._core import (
     _is_muc_pm,
@@ -640,6 +641,52 @@ async def _subcommand(bot, msg, sub, args, room_jid):
     role=Role.USER,
     short="Start or interact with the duck game.",
     usage="{prefix}duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickname]>",
+    subcommands=[
+        help_subcommand(
+            "befriend",
+            "{prefix}duck befriend",
+            "Befriend the active duck before it leaves.",
+            aliases=("bef",),
+            examples=[help_example("{prefix}duck befriend", "Attempt to befriend the current room duck.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "trap",
+            "{prefix}duck trap",
+            "Set a trap for the active duck.",
+            examples=[help_example("{prefix}duck trap", "Attempt to trap the current room duck.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "friends",
+            "{prefix}duck friends",
+            "List the room's most successful duck friends.",
+            examples=[help_example("{prefix}duck friends", "Show the duck-friend leaderboard.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "top",
+            "{prefix}duck top",
+            "Show the combined duck game leaderboard.",
+            examples=[help_example("{prefix}duck top", "Show the best duck players in the room.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "enemies",
+            "{prefix}duck enemies",
+            "List the room's most successful duck trappers.",
+            examples=[help_example("{prefix}duck enemies", "Show the duck-enemy leaderboard.")],
+            context="groupchat",
+        ),
+        help_subcommand(
+            "stats",
+            "{prefix}duck stats [jid|nickname]",
+            "Show duck game statistics for yourself or another player.",
+            examples=[help_example("{prefix}duck stats", "Show your duck game statistics.")],
+            context="groupchat",
+        ),
+        *room_toggle_subcommands("duck", "the duck game"),
+    ],
     examples=[
         "{prefix}duck status",
         "{prefix}duck on",

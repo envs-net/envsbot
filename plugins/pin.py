@@ -33,6 +33,7 @@ from functools import partial
 from typing import Any
 
 from utils.command import command, Role
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.audit import audit_event
 from utils.config import config
 from utils.formatting import page_size_for, parse_page_args
@@ -607,6 +608,117 @@ async def _on_groupchat_message(bot, msg):
         "{prefix}pin <add|list|important|search|find|show|edit|tags|"
         "delete|del|remove|rm|on|off|status> ..."
     ),
+    subcommands=[
+        help_subcommand(
+            "add",
+            "{prefix}pin add [last [n]]",
+            "Pin the replied-to message or a recent room message.",
+            examples=[
+                help_example(
+                    "{prefix}pin add",
+                    "Pin the message you replied to.",
+                ),
+                help_example(
+                    "{prefix}pin add last 2",
+                    "Pin the second most recent eligible room message.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "list",
+            "{prefix}pin list [page|last|all]",
+            "List stored pins for the current room.",
+            examples=[
+                help_example(
+                    "{prefix}pin list",
+                    "Show the first page of pins for the room.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "search",
+            "{prefix}pin search <query> [page|last|all]",
+            "Search pin text, tags, authors and metadata.",
+            aliases=("find",),
+            examples=[
+                help_example(
+                    "{prefix}pin search ssh key",
+                    "Find room pins containing the words 'ssh key'.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "show",
+            "{prefix}pin show <id>",
+            "Show one pin with its complete metadata.",
+            examples=[
+                help_example(
+                    "{prefix}pin show 3",
+                    "Display pin number 3.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "edit",
+            "{prefix}pin edit <id> <text>",
+            "Replace the stored text of a pin.",
+            examples=[
+                help_example(
+                    "{prefix}pin edit 3 Updated room info",
+                    "Replace pin 3 with updated text.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "tags",
+            "{prefix}pin tags <id> [tag ...]",
+            "Set or clear searchable tags on a pin.",
+            aliases=("tag",),
+            examples=[
+                help_example(
+                    "{prefix}pin tags 3 mail support",
+                    "Set the tags 'mail' and 'support' on pin 3.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "important",
+            "{prefix}pin important [list|<id> on|off]",
+            "List important pins or change a pin's important flag.",
+            aliases=("star", "unstar"),
+            examples=[
+                help_example(
+                    "{prefix}pin important 3 on",
+                    "Mark pin 3 as important.",
+                ),
+                help_example(
+                    "{prefix}pin important list",
+                    "List only important room pins.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        help_subcommand(
+            "delete",
+            "{prefix}pin delete <id>",
+            "Delete one stored room pin.",
+            aliases=("del", "remove", "rm"),
+            examples=[
+                help_example(
+                    "{prefix}pin delete 3",
+                    "Delete pin number 3.",
+                ),
+            ],
+            context="room or MUC PM",
+        ),
+        *room_toggle_subcommands("pin", "the pin plugin"),
+    ],
     examples=[
         "{prefix}pin status",
         "{prefix}pin list",

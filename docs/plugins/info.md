@@ -18,7 +18,7 @@ Wikipedia, Fediverse, Urban Dictionary and acronym lookup.
 Look up stored acronym definitions.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,acronyms <acronym>`
 
@@ -26,14 +26,14 @@ Aliases: `,acro`, `,acronym`
 
 Examples:
 
-- `,acro XMPP`
+- `,acro XMPP` — Look up stored acronym definitions.
 
 ### `,acronyms add`
 
 Suggest a new acronym definition for admin review.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,acronyms add <acronym> <description>`
 
@@ -41,14 +41,14 @@ Aliases: `,acro add`, `,acronym add`
 
 Examples:
 
-- `,acro add XMPP Extensible Messaging and Presence Protocol`
+- `,acro add XMPP Extensible Messaging and Presence Protocol` — Suggest a new acronym definition for admin review.
 
 ### `,acronyms delete`
 
 Delete pending acronym suggestions by nick or definition.
 
 Role: `admin`<br>
-Context: `any`<br>
+Context: `private chat / MUC PM`<br>
 Category: `info`<br>
 Usage: `,acronyms delete <nick|acronym description>`
 
@@ -56,15 +56,15 @@ Aliases: `,acro del`, `,acro delete`, `,acronym del`, `,acronym delete`, `,acron
 
 Examples:
 
-- `,acro delete Alice`
-- `,acro delete XMPP old definition`
+- `,acro delete Alice` — Delete pending acronym suggestions by nick or definition.
+- `,acro delete XMPP old definition` — Delete pending acronym suggestions by nick or definition.
 
 ### `,acronyms list`
 
 List pending acronym additions and removals.
 
 Role: `admin`<br>
-Context: `any`<br>
+Context: `private chat / MUC PM`<br>
 Category: `info`<br>
 Usage: `,acronyms list [all|page|last]`
 
@@ -72,15 +72,15 @@ Aliases: `,acro list`, `,acronym list`
 
 Examples:
 
-- `,acro list`
-- `,acro list 2`
+- `,acro list` — List pending acronym additions and removals.
+- `,acro list 2` — List pending acronym additions and removals.
 
 ### `,acronyms merge`
 
 Apply pending acronym additions and removals.
 
 Role: `admin`<br>
-Context: `any`<br>
+Context: `private chat / MUC PM`<br>
 Category: `info`<br>
 Usage: `,acronyms merge`
 
@@ -88,14 +88,14 @@ Aliases: `,acro merge`, `,acronym merge`
 
 Examples:
 
-- `,acro merge`
+- `,acro merge` — Apply pending acronym additions and removals.
 
 ### `,acronyms remove`
 
 Suggest removing one acronym definition for admin review.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,acronyms remove <acronym> <description>`
 
@@ -103,14 +103,14 @@ Aliases: `,acro remove`, `,acro rm`, `,acronym remove`, `,acronym rm`, `,acronym
 
 Examples:
 
-- `,acro remove XMPP old definition`
+- `,acro remove XMPP old definition` — Suggest removing one acronym definition for admin review.
 
 ### `,fediverse`
 
 Show the latest public post from a Fediverse account.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,fediverse <@user@instance>`
 
@@ -118,7 +118,7 @@ Aliases: `,fedi`
 
 Examples:
 
-- `,fedi @user@example.org`
+- `,fedi @user@example.org` — Show the latest public post from a Fediverse account.
 
 ### `,info`
 
@@ -129,16 +129,29 @@ Context: `room or MUC PM`<br>
 Category: `info`<br>
 Usage: `,info <on|off|status>`
 
-Examples:
+#### Subcommands
+
+- `,info on`
+  - Description: Enable information commands in the current room.
+  - Examples:
+    - `,info on` — Enable information commands for the current room or MUC PM.
+
+- `,info off`
+  - Description: Disable information commands in the current room.
+  - Examples:
+    - `,info off` — Disable information commands for the current room or MUC PM.
 
 - `,info status`
+  - Description: Show whether information commands is enabled in the current room.
+  - Examples:
+    - `,info status` — Inspect the current room setting for information commands.
 
 ### `,udict`
 
 Search Urban Dictionary.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,udict <term>`
 
@@ -146,14 +159,14 @@ Aliases: `,ud`
 
 Examples:
 
-- `,ud xmpp`
+- `,ud xmpp` — Search Urban Dictionary.
 
 ### `,wikipedia`
 
 Search Wikipedia.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
 Usage: `,wikipedia <term>`
 
@@ -161,4 +174,4 @@ Aliases: `,wiki`
 
 Examples:
 
-- `,wiki XMPP`
+- `,wiki XMPP` — Search Wikipedia.

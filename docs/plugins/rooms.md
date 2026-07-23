@@ -26,7 +26,7 @@ Aliases: `,room add`
 
 Examples:
 
-- `,rooms add test@conference.example.org EnvsBot true`
+- `,rooms add test@conference.example.org EnvsBot true` — Add or update a stored room configuration.
 
 ### `,rooms delete`
 
@@ -41,7 +41,7 @@ Aliases: `,room del`, `,room delete`, `,room remove`, `,room rm`, `,rooms del`, 
 
 Examples:
 
-- `,rooms delete test@conference.example.org`
+- `,rooms delete test@conference.example.org` — Remove a stored room and leave it if currently joined.
 
 ### `,rooms diagnose`
 
@@ -56,7 +56,7 @@ Aliases: `,room debug`, `,room diagnose`, `,rooms debug`
 
 Examples:
 
-- `,rooms diagnose room@conference.example.org`
+- `,rooms diagnose room@conference.example.org` — Show operational diagnostics for one room.
 
 ### `,rooms disable`
 
@@ -71,9 +71,9 @@ Aliases: `,room disable`, `,room feature disable`, `,rooms feature disable`
 
 Examples:
 
-- `,rooms disable ducks`
-- `,rooms disable room@conference.example.org ducks`
-- `,rooms disable xkcd`
+- `,rooms disable ducks` — Disable a room plugin toggle; requires room admin/owner or bot moderator.
+- `,rooms disable room@conference.example.org ducks` — Disable a room plugin toggle; requires room admin/owner or bot moderator.
+- `,rooms disable xkcd` — Disable a room plugin toggle; requires room admin/owner or bot moderator.
 
 ### `,rooms enable`
 
@@ -88,10 +88,10 @@ Aliases: `,room enable`, `,room feature enable`, `,rooms feature enable`
 
 Examples:
 
-- `,rooms enable ducks`
-- `,rooms enable room@conference.example.org ducks`
-- `,rooms enable weather`
-- `,help room settings`
+- `,rooms enable ducks` — Enable a room plugin toggle; requires room admin/owner or bot moderator.
+- `,rooms enable room@conference.example.org ducks` — Enable a room plugin toggle; requires room admin/owner or bot moderator.
+- `,rooms enable weather` — Enable a room plugin toggle; requires room admin/owner or bot moderator.
+- `,help room settings` — Enable a room plugin toggle; requires room admin/owner or bot moderator.
 
 ### `,rooms invite`
 
@@ -104,15 +104,29 @@ Usage: `,rooms invite list [all|page|last] | ,rooms invite accept <id> | ,rooms 
 
 Aliases: `,room invite`
 
-Examples:
+#### Subcommands
 
-- `,rooms invite list`
-- `,rooms invite list all`
-- `,rooms invite accept 1`
-- `,rooms invite decline 1`
-- `,rooms invite cleanup`
-- `,rooms invite cleanup all`
-- `,rooms invite cleanup expired`
+- `,rooms invite list [all|page|last]`
+  - Description: List pending room invitations waiting for an admin decision.
+  - Aliases: `,rooms invite ls`
+  - Examples:
+    - `,rooms invite list` — Show the first page of pending invitations.
+
+- `,rooms invite accept <id>`
+  - Description: Accept one pending invitation and join/store the room.
+  - Examples:
+    - `,rooms invite accept 1` — Accept pending invitation 1.
+
+- `,rooms invite decline <id>`
+  - Description: Decline and remove one pending room invitation.
+  - Examples:
+    - `,rooms invite decline 1` — Decline pending invitation 1.
+
+- `,rooms invite cleanup [all|expired]`
+  - Description: Remove all pending invites or only expired entries.
+  - Examples:
+    - `,rooms invite cleanup expired` — Delete only expired pending invitations.
+    - `,rooms invite cleanup all` — Delete every pending invitation.
 
 ### `,rooms join`
 
@@ -127,7 +141,7 @@ Aliases: `,room join`
 
 Examples:
 
-- `,rooms join test@conference.example.org`
+- `,rooms join test@conference.example.org` — Join a room immediately and store it if needed.
 
 ### `,rooms leave`
 
@@ -142,7 +156,7 @@ Aliases: `,room leave`
 
 Examples:
 
-- `,rooms leave test@conference.example.org`
+- `,rooms leave test@conference.example.org` — Leave a room without deleting its stored configuration.
 
 ### `,rooms list`
 
@@ -157,12 +171,12 @@ Aliases: `,room list`
 
 Examples:
 
-- `,rooms list`
-- `,rooms list all`
-- `,rooms list dm`
-- `,rooms list 1:1 all`
-- `,rooms list direct`
-- `,rooms list contacts all`
+- `,rooms list` — List MUC rooms or direct XMPP contacts.
+- `,rooms list all` — List MUC rooms or direct XMPP contacts.
+- `,rooms list dm` — List MUC rooms or direct XMPP contacts.
+- `,rooms list 1:1 all` — List MUC rooms or direct XMPP contacts.
+- `,rooms list direct` — List MUC rooms or direct XMPP contacts.
+- `,rooms list contacts all` — List MUC rooms or direct XMPP contacts.
 
 ### `,rooms plugins`
 
@@ -177,11 +191,11 @@ Aliases: `,room feature list`, `,room features`, `,room features list`, `,room p
 
 Examples:
 
-- `,rooms plugins`
-- `,rooms plugins all`
-- `,rooms plugins room@conference.example.org all`
-- `,help room settings`
-- `,help rooms settings`
+- `,rooms plugins` — Show room plugin toggles; requires room admin/owner or bot moderator.
+- `,rooms plugins all` — Show room plugin toggles; requires room admin/owner or bot moderator.
+- `,rooms plugins room@conference.example.org all` — Show room plugin toggles; requires room admin/owner or bot moderator.
+- `,help room settings` — Show room plugin toggles; requires room admin/owner or bot moderator.
+- `,help rooms settings` — Show room plugin toggles; requires room admin/owner or bot moderator.
 
 ### `,rooms set_plugin_defaults`
 
@@ -196,9 +210,9 @@ Aliases: `,room set_plugin_defaults`, `,room spd`, `,rooms spd`
 
 Examples:
 
-- `,rooms set_plugin_defaults`
-- `,rooms spd`
-- `,rooms set_plugin_defaults room@conference.example.org`
+- `,rooms set_plugin_defaults` — Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
+- `,rooms spd` — Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
+- `,rooms set_plugin_defaults room@conference.example.org` — Restore room plugin toggles for a room; requires room admin/owner or bot moderator.
 
 ### `,rooms sync`
 
@@ -213,7 +227,7 @@ Aliases: `,room sync`
 
 Examples:
 
-- `,rooms sync`
+- `,rooms sync` — Synchronize joined rooms with stored autojoin settings.
 
 ### `,rooms update`
 
@@ -228,4 +242,4 @@ Aliases: `,room update`
 
 Examples:
 
-- `,rooms update test@conference.example.org autojoin true`
+- `,rooms update test@conference.example.org autojoin true` — Update one field of a stored room.

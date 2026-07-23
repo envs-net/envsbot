@@ -26,6 +26,7 @@ import aiohttp
 from core_plugins import _core
 from bot.room_state import JOINED_ROOMS
 from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
 from utils.formatting import page_size_for, parse_page_args
@@ -557,6 +558,33 @@ async def xkcd_check_loop(bot):
     role=Role.USER,
     short="Show an XKCD comic or control room access to XKCD.",
     usage="{prefix}xkcd [on|off|status|random|number|search <term> [page]]",
+    subcommands=[
+        help_subcommand(
+            "<latest>",
+            "{prefix}xkcd",
+            "Show the latest XKCD comic.",
+            examples=[help_example("{prefix}xkcd", "Post the newest XKCD comic.")],
+        ),
+        help_subcommand(
+            "random",
+            "{prefix}xkcd random",
+            "Show a randomly selected XKCD comic.",
+            examples=[help_example("{prefix}xkcd random", "Post a random comic from the XKCD archive.")],
+        ),
+        help_subcommand(
+            "<number>",
+            "{prefix}xkcd <number>",
+            "Show one XKCD comic by its numeric ID.",
+            examples=[help_example("{prefix}xkcd 353", "Post XKCD comic number 353.")],
+        ),
+        help_subcommand(
+            "search",
+            "{prefix}xkcd search <term> [page]",
+            "Search XKCD titles, alt text and transcripts.",
+            examples=[help_example("{prefix}xkcd search python 2", "Show page 2 of XKCD search results for 'python'.")],
+        ),
+        *room_toggle_subcommands("xkcd", "XKCD posting"),
+    ],
     examples=[
         "{prefix}xkcd",
         "{prefix}xkcd random",

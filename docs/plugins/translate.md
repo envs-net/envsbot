@@ -91,21 +91,39 @@ Direct translation in a normal private chat does not depend on a room toggle.
 Translate text or a replied-to message.
 
 Role: `user`<br>
-Context: `any`<br>
+Context: `room, MUC PM or private chat`<br>
 Category: `utility`<br>
 Usage: `,tr [from] [to] [text or reply]`
 
 Aliases: `,tr`
 
-Examples:
+#### Subcommands
 
-- `,tr en uk Hello, world!`
-- `,tr uk Hallo Welt!`
-- `,tr auto pl Guten Morgen`
-- `With TRANSLATE_TO configured: ,tr Hello, world!`
-- `With TRANSLATE_TO configured: ,tr auto`
-- `With TRANSLATE_TO configured, reply with ,tr`
-- `Reply in a room, MUC PM or private chat with ,tr en uk`
-- `Reply in a room, MUC PM or private chat with ,tr uk`
+- `,tr [from] [to] <text>`
+  - Description: Translate provided text with explicit or configured language defaults.
+  - Examples:
+    - `,tr en uk Hello, world!` — Translate English text into Ukrainian.
+    - `,tr auto pl Guten Morgen` — Detect the source language automatically and translate into Polish.
+
+- `Reply to a message with ,tr [from] [to]`
+  - Description: Translate the replied-to message without copying its text into the command.
+  - Examples:
+    - `Reply with ,tr en uk` — Translate the replied-to message from English into Ukrainian.
+
+- `,translate on`
+  - Description: Enable translation commands in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,translate on` — Enable translation commands for the current room or MUC PM.
+
+- `,translate off`
+  - Description: Disable translation commands in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,translate off` — Disable translation commands for the current room or MUC PM.
+
 - `,translate status`
-- `,rooms enable translate`
+  - Description: Show whether translation commands is enabled in the current room.
+  - Context: `room or MUC PM`
+  - Examples:
+    - `,translate status` — Inspect the current room setting for translation commands.

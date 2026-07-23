@@ -26,9 +26,9 @@ Aliases: `,backup`
 
 Examples:
 
-- `,backup create`
-- `,backup create before config change`
-- `,backup`
+- `,backup create` — Create a managed ZIP backup archive.
+- `,backup create before config change` — Create a managed ZIP backup archive.
+- `,backup` — Create a managed ZIP backup archive.
 
 ### `,backup list`
 
@@ -43,8 +43,8 @@ Aliases: `,backup ls`, `,backups`
 
 Examples:
 
-- `,backup list`
-- `,backup list all`
+- `,backup list` — List managed backup archives.
+- `,backup list all` — List managed backup archives.
 
 ### `,backup prune`
 
@@ -57,8 +57,8 @@ Usage: `,backup prune [dry-run] [keep <n>] [days <n>]`
 
 Examples:
 
-- `,backup prune dry-run`
-- `,backup prune keep 20 days 30`
+- `,backup prune dry-run` — Prune managed backup archives, with optional dry-run.
+- `,backup prune keep 20 days 30` — Prune managed backup archives, with optional dry-run.
 
 ### `,backup restore-plan`
 
@@ -73,7 +73,7 @@ Aliases: `,backup restore dry-run`, `,restore dry-run`
 
 Examples:
 
-- `,backup restore-plan last`
+- `,backup restore-plan last` — Show what a restore would overwrite without writing files.
 
 ### `,backup show`
 
@@ -86,7 +86,7 @@ Usage: `,backup show <archive|last>`
 
 Examples:
 
-- `,backup show last`
+- `,backup show last` — Show manifest details for one managed backup archive.
 
 ### `,backup verify`
 
@@ -99,7 +99,7 @@ Usage: `,backup verify <archive|last>`
 
 Examples:
 
-- `,backup verify last`
+- `,backup verify last` — Verify one managed backup archive.
 
 ### `,restore`
 
@@ -114,4 +114,4 @@ Aliases: `,backup restore`
 
 Examples:
 
-- `,restore last confirm`
+- `,restore last confirm` — Restore a managed backup after explicit confirmation.
