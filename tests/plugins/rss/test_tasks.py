@@ -87,20 +87,15 @@ async def test_rss_check_loop_limits_entries_per_poll_and_skips_backlog(
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
 
-    posts = []
-
-    def fake_reply(msg, txt, **kwargs):
-        posts.append(("reply", txt, kwargs))
-
-    bot.reply = fake_reply
-
     with pytest.raises(asyncio.CancelledError):
         await rss.rss_check_loop(bot, store, url, 1)
 
-    assert len(posts) == 2
-    assert "ET3" in posts[0][1]
-    assert "ET4" in posts[1][1]
-    assert all("ET2" not in post[1] for post in posts)
+    assert len(bot.sent_messages) == 2
+    assert "ET3" in bot.sent_messages[0]["mbody"]
+    assert "ET4" in bot.sent_messages[1]["mbody"]
+    assert all("ET2" not in message["mbody"] for message in bot.sent_messages)
+    assert all(message["mto"] == room for message in bot.sent_messages)
+    assert all(message["mtype"] == "groupchat" for message in bot.sent_messages)
     assert store[rss.RSS_KEY][url]["last_id"] == "http://f.com/a4"
 
 
