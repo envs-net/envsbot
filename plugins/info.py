@@ -585,7 +585,13 @@ async def acronyms_add_cmd(bot, sender, nick, args, msg, is_room):
 @command(
     "acronyms remove",
     role=Role.USER,
-    aliases=["acro remove", "acronym remove"],
+    aliases=[
+        "acro remove",
+        "acronym remove",
+        "acronyms rm",
+        "acro rm",
+        "acronym rm",
+    ],
     short="Suggest removing one acronym definition for admin review.",
     usage="{prefix}acronyms remove <acronym> <description>",
     examples=["{prefix}acro remove XMPP old definition"],
@@ -800,7 +806,13 @@ async def acronyms_merge_cmd(bot, sender, nick, args, msg, is_room):
 @command(
     "acronyms delete",
     role=Role.ADMIN,
-    aliases=["acro delete", "acronym delete"],
+    aliases=[
+        "acro delete",
+        "acronym delete",
+        "acronyms del",
+        "acro del",
+        "acronym del",
+    ],
     short="Delete pending acronym suggestions by nick or definition.",
     usage="{prefix}acronyms delete <nick|acronym description>",
     examples=[

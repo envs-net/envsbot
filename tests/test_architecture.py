@@ -160,3 +160,127 @@ def test_room_toggle_commands_declare_registered_plugin_name():
                     )
 
     assert offenders == []
+
+
+def _decorated_command_aliases(path: Path) -> dict[str, set[str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    commands: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            func = decorator.func
+            func_name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else ""
+            )
+            if func_name != "command" or not decorator.args:
+                continue
+            primary = decorator.args[0]
+            if not isinstance(primary, ast.Constant) or not isinstance(
+                primary.value, str
+            ):
+                continue
+            aliases: set[str] = set()
+            for keyword in decorator.keywords:
+                if keyword.arg != "aliases" or not isinstance(
+                    keyword.value, (ast.List, ast.Tuple)
+                ):
+                    continue
+                aliases.update(
+                    item.value
+                    for item in keyword.value.elts
+                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
+                )
+            commands[primary.value] = aliases
+    return commands
+
+
+def _string_membership_sets(path: Path, variable_name: str) -> list[set[str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    values: list[set[str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+            continue
+        if not isinstance(node.left, ast.Name) or node.left.id != variable_name:
+            continue
+        if not isinstance(node.ops[0], ast.In) or len(node.comparators) != 1:
+            continue
+        comparator = node.comparators[0]
+        if not isinstance(comparator, (ast.Set, ast.List, ast.Tuple)):
+            continue
+        literals = {
+            item.value
+            for item in comparator.elts
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        }
+        values.append(literals)
+    return values
+
+
+def test_add_capable_resource_commands_keep_standard_removal_aliases():
+    removal_words = {"delete", "del", "remove", "rm"}
+
+    decorated_add_commands: set[str] = set()
+    for package in ("core_plugins", "plugins"):
+        for path in (ROOT / package).rglob("*.py"):
+            decorated_add_commands.update(
+                name
+                for name in _decorated_command_aliases(path)
+                if name.split()[-1:] == ["add"]
+            )
+    assert decorated_add_commands == {"rooms add", "acronyms add"}
+
+    add_subcommand_comparisons: set[tuple[str, str]] = set()
+    for package in ("core_plugins", "plugins"):
+        for path in (ROOT / package).rglob("*.py"):
+            tree = ast.parse(
+                path.read_text(encoding="utf-8"), filename=str(path)
+            )
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                values = [node.left, *node.comparators]
+                if not any(
+                    isinstance(value, ast.Constant) and value.value == "add"
+                    for value in values
+                ):
+                    continue
+                if isinstance(node.left, ast.Name):
+                    add_subcommand_comparisons.add(
+                        (str(path.relative_to(ROOT)), node.left.id)
+                    )
+    assert add_subcommand_comparisons == {
+        ("plugins/pin.py", "subcmd"),
+        ("plugins/rss/commands.py", "sub"),
+    }
+
+    room_commands = _decorated_command_aliases(
+        ROOT / "core_plugins" / "rooms" / "commands.py"
+    )
+    assert {
+        "rooms delete",
+        "rooms del",
+        "rooms remove",
+        "rooms rm",
+    } <= ({"rooms delete"} | room_commands["rooms delete"])
+
+    assert removal_words in _string_membership_sets(
+        ROOT / "plugins" / "rss" / "commands.py", "sub"
+    )
+    assert removal_words in _string_membership_sets(
+        ROOT / "plugins" / "pin.py", "subcmd"
+    )
+
+    # Acronym additions use a moderated two-stage workflow: `remove` queues a
+    # removal request while admin-only `delete` removes pending queue entries.
+    # They are intentionally separate commands rather than aliases.
+    info_commands = _decorated_command_aliases(ROOT / "plugins" / "info.py")
+    assert "acronyms add" in info_commands
+    assert {"acronyms rm"} <= info_commands["acronyms remove"]
+    assert {"acronyms del"} <= info_commands["acronyms delete"]

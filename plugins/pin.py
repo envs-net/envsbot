@@ -603,7 +603,10 @@ async def _on_groupchat_message(bot, msg):
     "pin",
     role=Role.USER,
     short="Pin, list, search, mark important, edit, tag or delete room pins.",
-    usage="{prefix}pin <add|list|important|search|find|show|edit|tags|delete|on|off|status> ...",
+    usage=(
+        "{prefix}pin <add|list|important|search|find|show|edit|tags|"
+        "delete|del|remove|rm|on|off|status> ..."
+    ),
     examples=[
         "{prefix}pin status",
         "{prefix}pin list",
@@ -630,7 +633,8 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
                 f"{_prefix()}pin edit <id> <text> | "
                 f"{_prefix()}pin tags <id> [tag ...] | "
                 f"{_prefix()}pin important [list|<id> on|off] | "
-                f"{_prefix()}pin delete <id> | {_prefix()}pin on|off|status"
+                f"{_prefix()}pin delete|del|remove|rm <id> | "
+                f"{_prefix()}pin on|off|status"
             ),
             mention=False,
         )
@@ -685,7 +689,7 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
         await _pin_command_important(bot, msg, room, args)
         return
 
-    if subcmd == "delete":
+    if subcmd in {"delete", "del", "remove", "rm"}:
         await _pin_command_delete(bot, msg, room, args)
         return
 
@@ -694,7 +698,8 @@ async def pin_command(bot, sender_jid, nick, args, msg, is_room):
             msg,
             (
                 f"Unknown subcommand '{subcmd}'. "
-                f"Use {_prefix()}pin add|list|important|search|show|edit|tags|delete|on|off|status"
+                f"Use {_prefix()}pin add|list|important|search|show|edit|tags|"
+                "delete|del|remove|rm|on|off|status"
             ),
             mention=False,
         )

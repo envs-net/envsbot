@@ -1667,3 +1667,37 @@ async def test_compact_rss_list_without_selector_keeps_all_sections(make_bot):
     assert "Room feeds (1):" in text
     assert "Moderator feeds (1):" in text
     assert "Trusted user feeds (1):" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subcommand", ["delete", "del", "remove", "rm"])
+async def test_rss_delete_subcommand_aliases_dispatch_identically(
+    monkeypatch, make_bot, subcommand
+):
+    bot = make_bot()
+    url = "https://example.org/direct-feed"
+    owner = "trusted@example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Direct feed",
+            "link": url,
+            "period": 1200,
+            "rooms": [],
+            "users": {owner: {"added_at": 1}},
+        }
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.TRUSTED)
+    msg = {
+        "from": SimpleNamespace(bare=owner, resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot, owner, "trusted", [subcommand, url], msg, False
+    )
+
+    assert bot.plugin_store[rss.RSS_KEY] == {}
+    assert any(
+        "Removed direct RSS subscription" in _reply_text(reply)
+        for reply in bot.replies
+    )

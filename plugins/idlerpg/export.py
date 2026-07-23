@@ -77,7 +77,7 @@ def _public_url(*parts: str) -> str:
 
 def _website_url(view: str = "", **params: str) -> str:
     """Return a public IdleRPG website URL instead of a raw JSON endpoint."""
-    base = str(getattr(_dep_config, "WEBSITE_PUBLIC_BASE_URL", "") or "").rstrip("/")
+    base = str(_dep_config.WEBSITE_PUBLIC_BASE_URL or "").rstrip("/")
     if not base:
         return ""
     query = {"view": str(view)} if view else {}

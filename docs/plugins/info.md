@@ -52,7 +52,7 @@ Context: `any`<br>
 Category: `info`<br>
 Usage: `,acronyms delete <nick|acronym description>`
 
-Aliases: `,acro delete`, `,acronym delete`
+Aliases: `,acro del`, `,acro delete`, `,acronym del`, `,acronym delete`, `,acronyms del`
 
 Examples:
 
@@ -99,7 +99,7 @@ Context: `any`<br>
 Category: `info`<br>
 Usage: `,acronyms remove <acronym> <description>`
 
-Aliases: `,acro remove`, `,acronym remove`
+Aliases: `,acro remove`, `,acro rm`, `,acronym remove`, `,acronym rm`, `,acronyms rm`
 
 Examples:
 

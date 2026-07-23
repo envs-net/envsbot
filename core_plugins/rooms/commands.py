@@ -455,7 +455,15 @@ async def rooms_update(bot, sender_jid, nick, args, msg, is_room):
 @command(
     "rooms delete",
     role=Role.ADMIN,
-    aliases=["room delete"],
+    aliases=[
+        "room delete",
+        "rooms del",
+        "room del",
+        "rooms remove",
+        "room remove",
+        "rooms rm",
+        "room rm",
+    ],
     short="Remove a stored room and leave it if currently joined.",
     usage="{prefix}rooms delete <room_jid>",
     examples=["{prefix}rooms delete test@conference.example.org"],

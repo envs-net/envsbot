@@ -115,3 +115,10 @@ def test_active_quest_export_omits_stale_private_jids(tmp_path):
     assert payload["quest"]["questers"] == ["Alice"]
     assert "alice@example.org" not in exported
     assert "stale@example.org" not in exported
+
+
+def test_website_public_base_url_is_exported_by_config_module():
+    from plugins.idlerpg import config as idlerpg_config
+
+    assert "WEBSITE_PUBLIC_BASE_URL" in idlerpg_config.__all__
+    assert hasattr(idlerpg_config, "WEBSITE_PUBLIC_BASE_URL")

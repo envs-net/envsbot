@@ -37,7 +37,7 @@ Context: `private chat / MUC PM`<br>
 Category: `rooms`<br>
 Usage: `,rooms delete <room_jid>`
 
-Aliases: `,room delete`
+Aliases: `,room del`, `,room delete`, `,room remove`, `,room rm`, `,rooms del`, `,rooms remove`, `,rooms rm`
 
 Examples:
 

@@ -20,7 +20,7 @@ Pin, list, search, mark important, edit, tag or delete room pins.
 Role: `user`<br>
 Context: `any`<br>
 Category: `rooms`<br>
-Usage: `,pin <add|list|important|search|find|show|edit|tags|delete|on|off|status> ...`
+Usage: `,pin <add|list|important|search|find|show|edit|tags|delete|del|remove|rm|on|off|status> ...`
 
 Examples:
 

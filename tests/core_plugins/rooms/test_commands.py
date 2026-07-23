@@ -15,6 +15,21 @@ from core_plugins.rooms import state as state_module
 from utils.command import Role
 
 
+def test_rooms_delete_registers_all_standard_removal_aliases():
+    registered_names = {name for name, _cmd in rooms.rooms_delete.__commands__}
+
+    assert {
+        "rooms delete",
+        "room delete",
+        "rooms del",
+        "room del",
+        "rooms remove",
+        "room remove",
+        "rooms rm",
+        "room rm",
+    } <= registered_names
+
+
 @pytest.mark.asyncio
 async def test_room_status_helpers(fake_bot):
     fake_bot.db.rooms.status_get = AsyncMock(return_value={"a": 1})

@@ -484,3 +484,15 @@ async def test_info_store_getter_uses_information_store():
     bot.db.users.plugin.return_value = marker
     assert await info_plugin.get_info_store(bot) is marker
     bot.db.users.plugin.assert_called_once_with("information")
+
+
+def test_acronym_removal_short_aliases_preserve_two_stage_workflow():
+    remove_names = {
+        name for name, _cmd in info_plugin.acronyms_remove_cmd.__commands__
+    }
+    delete_names = {
+        name for name, _cmd in info_plugin.acronyms_delete_cmd.__commands__
+    }
+
+    assert {"acronyms remove", "acronyms rm"} <= remove_names
+    assert {"acronyms delete", "acronyms del"} <= delete_names

@@ -1200,7 +1200,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     else:
         bot.reply(
             msg,
-            "Unknown subcommand. Use add, delete, remove, retry, "
+            "Unknown subcommand. Use add, delete, del, remove, rm, retry, "
             "reset, pause, resume, health, broken, list, or template.",
         )
 async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):

@@ -760,3 +760,30 @@ async def test_pin_important_usage_permission_and_not_found(bot, make_msg, monke
     bot.reply.reset_mock()
     await pin._pin_command_important(bot, msg, room_jid, ["important", "1", "maybe"])
     assert "Usage" in bot.reply.call_args[0][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subcommand", ["delete", "del", "remove", "rm"])
+async def test_pin_delete_subcommand_aliases_dispatch_identically(
+    bot, make_msg, monkeypatch, room_jid, subcommand
+):
+    msg = make_msg(is_room=True, resource="alice")
+    monkeypatch.setattr(
+        pin, "handle_room_toggle_command", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(pin, "_room_key_from_msg", lambda *_args: room_jid)
+    delete_handler = AsyncMock()
+    monkeypatch.setattr(pin, "_pin_command_delete", delete_handler)
+
+    await pin.pin_command(
+        bot,
+        "alice@example.com",
+        "Alice",
+        [subcommand, "7"],
+        msg,
+        True,
+    )
+
+    delete_handler.assert_awaited_once_with(
+        bot, msg, room_jid, [subcommand, "7"]
+    )

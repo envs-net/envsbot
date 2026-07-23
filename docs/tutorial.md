@@ -87,6 +87,9 @@ Show or change stored rooms later:
 ,rooms update room@conference.example.org nick EnvsBot
 ,rooms leave room@conference.example.org
 ,rooms delete room@conference.example.org
+,rooms del room@conference.example.org
+,rooms remove room@conference.example.org
+,rooms rm room@conference.example.org
 ```
 
 `,rooms list` merges stored and currently joined MUCs into one compact list.
@@ -212,6 +215,9 @@ Common maintenance commands:
 ,rss retry all
 ,rss reset all
 ,rss delete https://example.org/feed.rss room@conference.example.org
+,rss del https://example.org/feed.rss room@conference.example.org
+,rss remove https://example.org/feed.rss room@conference.example.org
+,rss rm https://example.org/feed.rss room@conference.example.org
 ```
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
@@ -232,6 +238,16 @@ Global moderators can set a persistent default RSS template for all rooms. Room 
 ```
 
 In a normal 1:1 chat, these commands automatically manage the sender’s personal RSS templates. The optional word `direct` may be placed before or after a feed URL, but it is not required and is never stored as part of the template.
+
+Pin entries use the same destructive aliases:
+
+```text
+,pin add last
+,pin delete 3
+,pin del 3
+,pin remove 3
+,pin rm 3
+```
 
 ## 8. Room-scoped plugin grants
 
