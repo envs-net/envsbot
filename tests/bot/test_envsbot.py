@@ -166,6 +166,44 @@ async def test_reply_groupchat_and_private(monkeypatch, bot):
     assert bot._replies
 
 
+
+
+@pytest.mark.asyncio
+async def test_reply_tasks_are_tracked_and_drained(bot, monkeypatch):
+    release = asyncio.Event()
+
+    async def delayed_send(_message):
+        await release.wait()
+
+    monkeypatch.setattr(bot, "_reply_send_wrapper", delayed_send)
+    task = bot._schedule_reply_send("message")
+
+    assert task in bot._reply_tasks
+    release.set()
+    completed, cancelled = await bot._drain_reply_tasks(timeout=1.0)
+
+    assert (completed, cancelled) == (1, 0)
+    assert task.done()
+    assert not bot._reply_tasks
+
+
+@pytest.mark.asyncio
+async def test_reply_task_drain_cancels_sends_after_timeout(bot, monkeypatch):
+    blocker = asyncio.Event()
+
+    async def blocked_send(_message):
+        await blocker.wait()
+
+    monkeypatch.setattr(bot, "_reply_send_wrapper", blocked_send)
+    task = bot._schedule_reply_send("message")
+
+    completed, cancelled = await bot._drain_reply_tasks(timeout=0)
+
+    assert (completed, cancelled) == (0, 1)
+    assert task.cancelled()
+    assert not bot._reply_tasks
+
+
 @pytest.mark.asyncio
 async def test_handle_command_no_body_or_prefix(bot):
     m = {

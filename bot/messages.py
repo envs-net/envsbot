@@ -99,6 +99,64 @@ class MessageMixin:
         """Send a command usage reply."""
         self.reply_warn(msg, f"Usage: {usage}", **kwargs)
 
+    def _schedule_reply_send(self, message: Any) -> asyncio.Task[Any]:
+        """Track one short-lived reply task until it finishes or shutdown drains it."""
+        task = asyncio.create_task(self._reply_send_wrapper(message))
+        tasks = getattr(self, "_reply_tasks", None)
+        if tasks is None:
+            tasks = set()
+            self._reply_tasks = tasks
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return task
+
+    async def _drain_reply_tasks(self, *, timeout: float = 3.0) -> tuple[int, int]:
+        """Let pending replies finish, then cancel anything left after *timeout*."""
+        tasks = getattr(self, "_reply_tasks", None)
+        if not tasks:
+            return 0, 0
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(0.0, float(timeout))
+        completed = 0
+        cancelled = 0
+
+        # Existing command handlers may schedule their final reply immediately
+        # after shutdown stops accepting new commands. Re-check the tracked set
+        # until it stays empty or the shared deadline is reached.
+        while True:
+            active = {task for task in tuple(tasks) if not task.done()}
+            if not active:
+                await asyncio.sleep(0)
+                active = {task for task in tuple(tasks) if not task.done()}
+                if not active:
+                    tasks.clear()
+                    break
+
+            remaining = max(0.0, deadline - loop.time())
+            done, pending = await asyncio.wait(active, timeout=remaining)
+            completed += len(done)
+            tasks.difference_update(done)
+
+            if pending:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                cancelled += len(pending)
+                tasks.difference_update(pending)
+
+            if loop.time() >= deadline:
+                late = {task for task in tuple(tasks) if not task.done()}
+                for task in late:
+                    task.cancel()
+                if late:
+                    await asyncio.gather(*late, return_exceptions=True)
+                    cancelled += len(late)
+                    tasks.difference_update(late)
+                break
+
+        return completed, cancelled
+
     def reply(
         self,
         msg: Any,
@@ -113,7 +171,7 @@ class MessageMixin:
         del rate_limit  # legacy parameter; command rate limiting happens in dispatch
         try:
             message, _body = self._build_reply_message(msg, text, mention, thread, ephemeral, no_store)
-            asyncio.create_task(self._reply_send_wrapper(message))
+            self._schedule_reply_send(message)
             self._record_test_reply(msg, text if not isinstance(text, list) else "\n".join(text))
         except Exception as exc:
             msg_type = msg.get("type", "chat")

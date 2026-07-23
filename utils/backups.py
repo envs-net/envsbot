@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -128,8 +129,8 @@ async def _flush_database(bot: Any) -> None:
         await _maybe_await(flush())
 
 
-async def _write_database_snapshot(bot: Any, source_path: Path, archive: zipfile.ZipFile) -> dict[str, Any]:
-    """Write a consistent database snapshot to ``archive`` as ``bot.db``."""
+async def _create_database_snapshot(bot: Any, source_path: Path, target_path: Path) -> None:
+    """Create a consistent database snapshot before archive compression."""
     if not source_path.exists():
         raise FileNotFoundError(source_path)
 
@@ -138,34 +139,79 @@ async def _write_database_snapshot(bot: Any, source_path: Path, archive: zipfile
     conn = getattr(db, "conn", None)
     backup_method = getattr(conn, "backup", None)
 
-    with tempfile.TemporaryDirectory(prefix="envsbot-backup-") as tmpdir:
-        tmp_db = Path(tmpdir) / "bot.db"
-        if callable(backup_method):
-            target = sqlite3.connect(tmp_db)
-            try:
-                await _maybe_await(backup_method(target))
-            finally:
-                target.close()
-        else:
-            shutil.copy2(source_path, tmp_db)
-
-        archive.write(tmp_db, "bot.db")
-        return {
-            "name": "bot.db",
-            "source": str(source_path),
-            "size": tmp_db.stat().st_size,
-            "sha256": _sha256(tmp_db),
-        }
+    if callable(backup_method):
+        target = sqlite3.connect(target_path)
+        try:
+            await _maybe_await(backup_method(target))
+        finally:
+            target.close()
+    else:
+        await asyncio.to_thread(shutil.copy2, source_path, target_path)
 
 
-def _write_file(path: Path, arcname: str, archive: zipfile.ZipFile) -> dict[str, Any]:
+def _write_file(
+    path: Path,
+    arcname: str,
+    archive: zipfile.ZipFile,
+    *,
+    source_path: Path | None = None,
+) -> dict[str, Any]:
+    """Compress and hash one file inside the backup worker thread."""
     archive.write(path, arcname)
     return {
         "name": arcname,
-        "source": str(path),
+        "source": str(source_path or path),
         "size": path.stat().st_size,
         "sha256": _sha256(path),
     }
+
+
+def _build_backup_archive(
+    tmp_path: Path,
+    archive_path: Path,
+    directory: Path,
+    manifest: dict[str, Any],
+    source_items: list[tuple[str, Path, Path]],
+) -> None:
+    """Build, verify and publish an archive outside the XMPP event loop."""
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for arcname, archive_source, original_source in source_items:
+                try:
+                    if not archive_source.exists():
+                        raise FileNotFoundError(original_source)
+                    item = _write_file(
+                        archive_source,
+                        arcname,
+                        archive,
+                        source_path=original_source,
+                    )
+                    manifest["files"].append(item)
+                except FileNotFoundError:
+                    manifest["missing"].append(
+                        {"name": arcname, "source": str(original_source)}
+                    )
+
+            archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2, sort_keys=True))
+
+        with zipfile.ZipFile(tmp_path) as archive:
+            if archive.testzip() is not None:
+                raise BackupError("new backup archive failed CRC verification")
+            if MANIFEST_NAME not in archive.namelist():
+                raise BackupError("new backup archive has no manifest")
+        with tmp_path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, archive_path)
+        ensure_private_file(archive_path)
+        with suppress(OSError):
+            dir_fd = os.open(directory, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 async def create_backup(bot: Any, *, reason: str = "manual", prune: bool = True) -> Path:
@@ -192,43 +238,35 @@ async def create_backup(bot: Any, *, reason: str = "manual", prune: bool = True)
     }
 
     try:
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for arcname, source_path in _source_items(db_path):
-                try:
-                    if arcname == "bot.db":
-                        item = await _write_database_snapshot(bot, source_path, archive)
-                    else:
-                        if not source_path.exists():
-                            raise FileNotFoundError(source_path)
-                        item = _write_file(source_path, arcname, archive)
-                    manifest["files"].append(item)
-                except FileNotFoundError:
-                    manifest["missing"].append({"name": arcname, "source": str(source_path)})
+        with tempfile.TemporaryDirectory(prefix="envsbot-backup-") as tmpdir:
+            db_snapshot = Path(tmpdir) / "bot.db"
+            if db_path.exists():
+                await _create_database_snapshot(bot, db_path, db_snapshot)
 
-            archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2, sort_keys=True))
+            archive_sources: list[tuple[str, Path, Path]] = []
+            for arcname, original_source in _source_items(db_path):
+                archive_source = db_snapshot if arcname == "bot.db" else original_source
+                archive_sources.append((arcname, archive_source, original_source))
 
-        with zipfile.ZipFile(tmp_path) as archive:
-            if archive.testzip() is not None:
-                raise BackupError("new backup archive failed CRC verification")
-            if MANIFEST_NAME not in archive.namelist():
-                raise BackupError("new backup archive has no manifest")
-        with tmp_path.open("rb") as handle:
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, archive_path)
-        ensure_private_file(archive_path)
-        with suppress(OSError):
-            dir_fd = os.open(directory, os.O_DIRECTORY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+            await asyncio.to_thread(
+                _build_backup_archive,
+                tmp_path,
+                archive_path,
+                directory,
+                manifest,
+                archive_sources,
+            )
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
 
     if prune:
         try:
-            prune_old_backups(directory=directory, keep=backup_keep())
+            await asyncio.to_thread(
+                prune_old_backups,
+                directory=directory,
+                keep=backup_keep(),
+            )
         except Exception:
             log.exception(
                 "[BACKUP] archive=%s status=created prune_status=failed",
@@ -442,10 +480,23 @@ async def _connect_database(bot: Any) -> None:
         await _maybe_await(connect())
 
 
+def _restore_archive_entries(archive_path: Path, targets: dict[str, Path]) -> list[str]:
+    """Extract managed restore entries in a worker thread."""
+    restored: list[str] = []
+    with zipfile.ZipFile(archive_path) as archive:
+        members = _safe_members(archive)
+        for entry in RESTORE_ENTRIES:
+            if entry not in members:
+                continue
+            _restore_entry(archive, entry, targets[entry])
+            restored.append(entry)
+    return restored
+
+
 async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
     """Restore managed backup entries and reconnect the database when possible."""
     archive_path = archive_path.resolve()
-    manifest = _read_manifest(archive_path)
+    manifest = await asyncio.to_thread(_read_manifest, archive_path)
     # Do not prune while the selected archive is still needed for restore.
     safety_backup = await create_backup(bot, reason="restore-safety", prune=False)
 
@@ -454,16 +505,15 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
     try:
         closed_db = await _close_database(bot)
         targets = _target_paths()
-        with zipfile.ZipFile(archive_path) as archive:
-            members = _safe_members(archive)
-            for entry in RESTORE_ENTRIES:
-                if entry not in members:
-                    continue
-                _restore_entry(archive, entry, targets[entry])
-                restored.append(entry)
+        restored = await asyncio.to_thread(
+            _restore_archive_entries,
+            archive_path,
+            targets,
+        )
         if closed_db:
             await _connect_database(bot)
-        prune_old_backups()
+            closed_db = False
+        await asyncio.to_thread(prune_old_backups)
     except Exception:
         if closed_db:
             try:
@@ -478,6 +528,15 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
         "restored": restored,
         "safety_backup": safety_backup.name,
     }
+
+
+def _archive_member_sha256(archive: zipfile.ZipFile, name: str) -> str:
+    """Hash one archive member without loading a large database into memory."""
+    digest = hashlib.sha256()
+    with archive.open(name) as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def verify_backup(path: Path) -> dict[str, Any]:
@@ -501,7 +560,7 @@ def verify_backup(path: Path) -> dict[str, Any]:
                 errors.append(f"missing archive member: {name}")
                 continue
             if expected:
-                digest = hashlib.sha256(archive.read(name)).hexdigest()
+                digest = _archive_member_sha256(archive, name)
                 if digest != expected:
                     errors.append(f"checksum mismatch: {name}")
     return {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from utils.audit import audit_event
@@ -128,7 +129,7 @@ async def backup_create(bot, sender, nick, args, msg, is_room):
 async def backup_list(bot, sender, nick, args, msg, is_room):
     """List managed ZIP backups."""
     page_request = parse_page_args(args)
-    backups = list_backups()
+    backups = await asyncio.to_thread(list_backups)
     lines = [_backup_list_line(idx, backup) for idx, backup in enumerate(backups, start=1)]
     if not lines:
         lines = ["No backups found."]
@@ -160,7 +161,7 @@ async def backup_show(bot, sender, nick, args, msg, is_room):
         return
     try:
         path = resolve_backup(args[0])
-        details = backup_details(path)
+        details = await asyncio.to_thread(backup_details, path)
     except BackupError as exc:
         bot.reply_error(msg, str(exc))
         return
@@ -211,7 +212,7 @@ async def backup_prune(bot, sender, nick, args, msg, is_room):
         )
         return
 
-    planned = plan_backup_prune(keep=keep, days=days)
+    planned = await asyncio.to_thread(plan_backup_prune, keep=keep, days=days)
     if dry_run:
         lines = [
             "📦 Backup prune dry-run",
@@ -223,7 +224,7 @@ async def backup_prune(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, lines)
         return
 
-    removed = prune_old_backups(keep=keep, days=days)
+    removed = await asyncio.to_thread(prune_old_backups, keep=keep, days=days)
     await audit_event(
         bot,
         "backup_pruned",
@@ -262,7 +263,8 @@ async def backup_verify(bot, sender, nick, args, msg, is_room):
         bot.reply_usage(msg, f"{bot.prefix}backup verify <archive|last>")
         return
     try:
-        result = verify_backup(resolve_backup(args[0]))
+        archive = resolve_backup(args[0])
+        result = await asyncio.to_thread(verify_backup, archive)
     except BackupError as exc:
         bot.reply_error(msg, str(exc))
         return
@@ -303,7 +305,8 @@ async def backup_restore_plan(bot, sender, nick, args, msg, is_room):
         bot.reply_usage(msg, f"{bot.prefix}backup restore-plan <archive|last>")
         return
     try:
-        plan = restore_plan(resolve_backup(args[0]))
+        archive = resolve_backup(args[0])
+        plan = await asyncio.to_thread(restore_plan, archive)
     except BackupError as exc:
         bot.reply_error(msg, str(exc))
         return
@@ -340,7 +343,8 @@ async def backup_restore(bot, sender, nick, args, msg, is_room):
     """Restore a managed ZIP backup after explicit confirmation."""
     if len(args) == 2 and args[1].lower() in {"dry-run", "dryrun", "check", "plan"}:
         try:
-            plan = restore_plan(resolve_backup(args[0]))
+            archive = resolve_backup(args[0])
+            plan = await asyncio.to_thread(restore_plan, archive)
         except BackupError as exc:
             bot.reply_error(msg, str(exc))
             return

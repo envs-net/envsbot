@@ -372,34 +372,89 @@ def _subcommand_aliases(cmd_obj, subcommand: CommandSubcommand, prefix: str) -> 
     return [f"{prefix}{root} {alias}" for alias in subcommand.aliases]
 
 
-def _format_plugin_command_lines(cmd_obj, prefix: str, role: Role) -> list[str]:
-    """Return readable plugin-help lines for a command or command family."""
+def _access_summary(role: Role, context: str) -> str:
+    """Return one compact role/context line for focused help output."""
+    return f"Role: {_role_label(role)} · Context: {context}"
+
+
+def _access_label(role: Role, context: str) -> str:
+    """Return a short access label suitable for one command line."""
+    return f"{_role_label(role)} · {context}"
+
+
+def _command_access_profiles(
+    cmd_obj,
+    prefix: str,
+    role: Role,
+) -> list[tuple[Role, str]]:
+    """Return visible role/context pairs represented by one command family."""
+    subcommands = _visible_subcommands(cmd_obj, role, prefix)
+    if subcommands:
+        return [
+            (
+                _effective_subcommand_role(cmd_obj, subcommand),
+                _effective_subcommand_context(cmd_obj, subcommand),
+            )
+            for subcommand in subcommands
+        ]
+    return [(cmd_obj.role, _context_label(cmd_obj))]
+
+
+def _common_plugin_access(
+    commands: list,
+    prefix: str,
+    role: Role,
+) -> tuple[Role, str] | None:
+    """Return a shared access profile when every visible command uses it."""
+    profiles = {
+        profile
+        for cmd_obj in commands
+        for profile in _command_access_profiles(cmd_obj, prefix, role)
+    }
+    return next(iter(profiles)) if len(profiles) == 1 else None
+
+
+def _format_plugin_command_lines(
+    cmd_obj,
+    prefix: str,
+    role: Role,
+    *,
+    common_access: tuple[Role, str] | None = None,
+) -> list[str]:
+    """Return compact, consistently spaced plugin-help command lines."""
     subcommands = _visible_subcommands(cmd_obj, role, prefix)
     if subcommands:
         lines = []
         for subcommand in subcommands:
-            lines += [f"• {subcommand.usage}", f"  {subcommand.short}"]
+            effective_role = _effective_subcommand_role(cmd_obj, subcommand)
+            context = _effective_subcommand_context(cmd_obj, subcommand)
+            access = (effective_role, context)
+            access_suffix = (
+                ""
+                if common_access == access
+                else f" [{_access_label(effective_role, context)}]"
+            )
+            lines.append(
+                f"• {subcommand.usage} — {subcommand.short}{access_suffix}"
+            )
             aliases = _subcommand_aliases(cmd_obj, subcommand, prefix)
             if aliases:
                 lines.append("  Aliases: " + ", ".join(aliases))
-            effective_role = _effective_subcommand_role(cmd_obj, subcommand)
-            if effective_role != Role.USER:
-                lines.append(f"  Role: {_role_label(effective_role)}")
-            context = _effective_subcommand_context(cmd_obj, subcommand)
-            lines.append(f"  Context: {context}")
         return lines
 
     aliases = sorted(set(a for a in (cmd_obj.aliases or []) if a != cmd_obj.name))
+    access = (cmd_obj.role, _context_label(cmd_obj))
+    access_suffix = (
+        ""
+        if common_access == access
+        else f" [{_access_label(*access)}]"
+    )
     lines = [
-        f"• {_command_usage(cmd_obj, prefix)[0]}",
-        f"  {_command_short(cmd_obj, prefix)}",
+        f"• {_command_usage(cmd_obj, prefix)[0]} — "
+        f"{_command_short(cmd_obj, prefix)}{access_suffix}",
     ]
     if aliases:
         lines.append("  Aliases: " + ", ".join(prefix + alias for alias in aliases))
-    if cmd_obj.role != Role.USER:
-        lines.append(f"  Role: {_role_label(cmd_obj.role)}")
-    context = _context_label(cmd_obj)
-    lines.append(f"  Context: {context}")
     return lines
 
 
@@ -433,13 +488,12 @@ def _format_example_lines(
     examples: list[CommandExample] | tuple[CommandExample, ...],
     prefix: str,
 ) -> list[str]:
-    """Render examples with a readable explanation below each command."""
+    """Render every example and its description on one compact line."""
     lines = []
     for example in examples:
-        lines.append(f"• {example.command}")
         description = _example_description_for_command(cmd_obj, example, prefix)
-        if description:
-            lines.append(f"  {description}")
+        suffix = f" — {description}" if description else ""
+        lines.append(f"• {example.command}{suffix}")
     return lines
 
 
@@ -458,8 +512,7 @@ def _examples_for_plugin_command(
 def _format_command_detail(cmd_obj, prefix: str, role: Role | None = None) -> list[str]:
     lines = [
         f"📖 Command: {prefix}{cmd_obj.name}",
-        f"Role: {_role_label(cmd_obj.role)}",
-        f"Context: {_context_label(cmd_obj)}",
+        _access_summary(cmd_obj.role, _context_label(cmd_obj)),
     ]
 
     aliases = sorted(set(a for a in (cmd_obj.aliases or []) if a != cmd_obj.name))
@@ -606,8 +659,7 @@ def _format_structured_subcommand_detail(
     context = _effective_subcommand_context(cmd_obj, subcommand)
     lines = [
         f"📖 Command: {bot.prefix}{cmd_obj.name} {subcommand.name}",
-        f"Role: {_role_label(role)}",
-        f"Context: {context}",
+        _access_summary(role, context),
     ]
     aliases = _subcommand_aliases(cmd_obj, subcommand, bot.prefix)
     if aliases:
@@ -1118,18 +1170,24 @@ async def _plugin(bot, query: str, role: Role) -> list[str]:
     if not commands:
         lines.append("No commands available for your role.")
     else:
-        for index, cmd in enumerate(commands):
-            if index:
-                lines.append("")
-            lines.extend(_format_plugin_command_lines(cmd, bot.prefix, role))
+        common_access = _common_plugin_access(commands, bot.prefix, role)
+        if common_access is not None:
+            lines.append("Access: " + _access_label(*common_access))
+        for cmd in commands:
+            lines.extend(
+                _format_plugin_command_lines(
+                    cmd,
+                    bot.prefix,
+                    role,
+                    common_access=common_access,
+                )
+            )
 
         example_lines = []
         for cmd in commands:
             examples = _examples_for_plugin_command(cmd, bot.prefix, role)
             if not examples:
                 continue
-            if example_lines:
-                example_lines.append("")
             example_lines.extend(_format_example_lines(cmd, examples, bot.prefix))
         if example_lines:
             lines += ["", "Examples:", *example_lines]

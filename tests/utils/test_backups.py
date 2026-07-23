@@ -77,6 +77,27 @@ async def test_create_backup_contains_runtime_files_and_manifest(backup_env):
     }
 
 
+
+
+@pytest.mark.asyncio
+async def test_create_backup_offloads_archive_work_and_pruning(backup_env, monkeypatch):
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    calls: list[str] = []
+
+    async def run_in_thread(func, *args, **kwargs):
+        calls.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(backups.asyncio, "to_thread", run_in_thread)
+
+    archive = await backups.create_backup(bot, reason="threaded")
+
+    assert archive.exists()
+    assert "_build_backup_archive" in calls
+    assert "prune_old_backups" in calls
+    assert "copy2" in calls
+
+
 @pytest.mark.asyncio
 async def test_restore_backup_restores_files_and_reconnects_database(backup_env):
     bot = SimpleNamespace(db=FakeDB(backup_env.db_path))

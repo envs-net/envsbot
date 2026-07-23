@@ -250,9 +250,9 @@ async def test_plugin_help_happy_path(basic_plugins_and_commands):
     assert ",foo [arg]" in reply
     assert "Foo command docstring" in reply
     assert "Aliases: ,fooz" in reply
-    assert "Context: room, MUC PM or private chat" in reply
+    assert "Access: user · room, MUC PM or private chat" in reply
     assert "Examples:" in reply
-    assert "• ,foo value\n  Foo command docstring" in reply
+    assert "• ,foo value — Foo command docstring" in reply
     assert "Use ,help ,<command> for focused help." in reply
 
 
@@ -333,13 +333,14 @@ async def test_structured_plugin_help_describes_subcommands_examples_and_room_se
     reply = flatten_lines(bot.replies[-1])
     assert "Room setting:" in reply
     assert "• ,pin add [last [n]]" in reply
-    assert "  Pin the replied-to or recently sent message." in reply
+    assert "• ,pin add [last [n]] — Pin the replied-to or recently sent message." in reply
     assert "• ,pin delete <id>" in reply
     assert "Aliases: ,pin del, ,pin remove, ,pin rm" in reply
-    assert "Role: moderator" in reply
-    assert "Context: room or MUC PM" in reply
-    assert "• ,pin add\n  Pin the message you replied to." in reply
-    assert "• ,pin delete 42\n  Delete pin 42 from the current room." in reply
+    assert "[moderator · room or MUC PM]" in reply
+    assert "• ,pin add — Pin the message you replied to." in reply
+    assert "• ,pin delete 42 — Delete pin 42 from the current room." in reply
+    command_section = reply.split("Commands:", 1)[1].split("Examples:", 1)[0]
+    assert "\n\n• " not in command_section
 
 
 @pytest.mark.asyncio
@@ -397,7 +398,7 @@ async def test_focused_help_resolves_metadata_only_subcommand_and_alias(monkeypa
     reply = flatten_lines(bot.replies[-1])
     assert "Command: ,rooms invite delete" in reply
     assert "Aliases: ,rooms invite del, ,rooms invite remove, ,rooms invite rm" in reply
-    assert "• ,rooms invite delete 7\n  Delete pending invitation 7." in reply
+    assert "• ,rooms invite delete 7 — Delete pending invitation 7." in reply
 
 
 @pytest.mark.asyncio
@@ -954,7 +955,7 @@ async def test_translate_help_includes_complete_context_and_room_controls(monkey
 
     reply = flatten_lines(bot.replies[-1])
     assert "Plugin: translate" in reply
-    assert "Context: room, MUC PM or private chat" in reply
+    assert "Access: user · room, MUC PM or private chat" in reply
     assert "Aliases: ,tr" in reply
     assert "Reply in a room, MUC PM or private chat with ,tr de" in reply
     assert "Room setting:" in reply

@@ -62,6 +62,7 @@ class DummyLifecycle(lifecycle.LifecycleMixin):
         close_cache=None,
         close=None,
         config=None,
+        drain_replies=None,
     ):
         self.accepting_commands = True
         self.config = config or {}
@@ -73,6 +74,8 @@ class DummyLifecycle(lifecycle.LifecycleMixin):
             else SimpleNamespace()
         )
         self.db = SimpleNamespace(close=close or AsyncMock())
+        if drain_replies is not None:
+            self._drain_reply_tasks = drain_replies
 
 
 @pytest.mark.asyncio
@@ -104,6 +107,42 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
 
     assert bot.accepting_commands is False
     assert events == ["plugins", "tasks:10.0", "cache", "db"]
+
+
+
+
+@pytest.mark.asyncio
+async def test_shutdown_runtime_drains_reply_tasks_before_plugins():
+    events: list[str] = []
+
+    async def drain_replies(*, timeout):
+        events.append(f"replies:{timeout}")
+        return 2, 1
+
+    async def unload_all():
+        events.append("plugins")
+
+    async def cancel_all(timeout):
+        events.append(f"tasks:{timeout}")
+        return 0
+
+    async def close_cache():
+        events.append("cache")
+
+    async def close():
+        events.append("db")
+
+    bot = DummyLifecycle(
+        drain_replies=drain_replies,
+        unload=unload_all,
+        cancel_all=cancel_all,
+        close_cache=close_cache,
+        close=close,
+    )
+
+    await bot.shutdown_runtime()
+
+    assert events == ["replies:3.0", "plugins", "tasks:10.0", "cache", "db"]
 
 
 @pytest.mark.asyncio

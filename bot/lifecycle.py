@@ -229,6 +229,30 @@ class LifecycleMixin:
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self.accepting_commands = False
 
+        reply_status = "skipped"
+        reply_completed = 0
+        reply_cancelled = 0
+        try:
+            drain_replies = getattr(self, "_drain_reply_tasks", None)
+            if callable(drain_replies):
+                reply_completed, reply_cancelled = await asyncio.wait_for(
+                    drain_replies(timeout=3.0),
+                    timeout=4.0,
+                )
+                reply_status = "ok"
+        except Exception:
+            reply_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=replies status=failed")
+        else:
+            log.info(
+                "[LIFECYCLE] event=shutdown phase=replies %s",
+                kv(
+                    status=reply_status,
+                    completed=reply_completed,
+                    cancelled=reply_cancelled,
+                ),
+            )
+
         plugin_status = "skipped"
         try:
             unload = getattr(self.bot_plugins, "unload_all", None)
@@ -292,4 +316,14 @@ class LifecycleMixin:
             log.exception("[LIFECYCLE] event=shutdown phase=db status=failed error=%s", exc)
         else:
             log.info("[LIFECYCLE] event=shutdown phase=db status=closed")
-        log.info("[LIFECYCLE] event=shutdown phase=done %s", kv(status="ok" if db_status == "ok" else "partial", plugins=plugin_status, tasks=task_status, message_cache=cache_status, db=db_status))
+        log.info(
+            "[LIFECYCLE] event=shutdown phase=done %s",
+            kv(
+                status="ok" if db_status == "ok" else "partial",
+                replies=reply_status,
+                plugins=plugin_status,
+                tasks=task_status,
+                message_cache=cache_status,
+                db=db_status,
+            ),
+        )
