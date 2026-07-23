@@ -7,6 +7,7 @@ import random
 import time
 from plugins.idlerpg import config as idlerpg_config
 from plugins.idlerpg import formatting as idlerpg_formatting
+from plugins.idlerpg import items as idlerpg_items
 
 
 def test_duration_clock_and_next_level_line():
@@ -196,3 +197,26 @@ def test_quest_target_helpers_validate_route_and_online_state():
     JOINED_ROOMS["room@conf"] = {"nicks": {}}
     assert idlerpg._questers_at_target(room_players, quest, room_jid="room@conf") is False
     assert idlerpg._active_quest_target({"active": False, "route": [[1, 2]]}) is None
+
+
+def test_weighted_item_roll_normalizes_low_levels_and_uses_exact_weights(monkeypatch):
+    captured = []
+
+    def fake_choices(population, *, weights, k):
+        snapshot = (list(population), list(weights), k)
+        captured.append(snapshot)
+        return [snapshot[0][-1]]
+
+    monkeypatch.setattr(idlerpg_items.random, "choices", fake_choices)
+
+    assert idlerpg_items._roll_weighted_item_level(-50) == 1
+    assert idlerpg_items._roll_weighted_item_level(0) == 1
+    assert idlerpg_items._roll_weighted_item_level(2) == 3
+
+    assert captured[0] == ([1], [1 / (1.4 ** 1)], 1)
+    assert captured[1] == ([1], [1 / (1.4 ** 1)], 1)
+    assert captured[2] == (
+        [1, 2, 3],
+        [1 / (1.4 ** level) for level in (1, 2, 3)],
+        1,
+    )

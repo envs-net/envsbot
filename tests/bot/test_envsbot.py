@@ -1234,3 +1234,81 @@ def test_configured_rate_limit_bypass_role_edges(monkeypatch):
 
     monkeypatch.setattr(envsbot, "config", {})
     assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.MODERATOR
+
+
+def test_cli_check_mode_runs_only_preflight_and_preserves_exit_code(monkeypatch):
+    import sys
+
+    calls = []
+
+    async def fake_preflight():
+        calls.append("preflight")
+        return 7
+
+    async def unexpected_main():
+        raise AssertionError("main must not run in --check mode")
+
+    monkeypatch.setattr(sys, "argv", ["envsbot", "--check"])
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", lambda: calls.append("copy"))
+    monkeypatch.setattr(envsbot, "preflight_check", fake_preflight)
+    monkeypatch.setattr(envsbot, "main", unexpected_main)
+
+    with pytest.raises(SystemExit) as exc_info:
+        envsbot.cli()
+
+    assert exc_info.value.code == 7
+    assert calls == ["copy", "preflight"]
+
+
+def test_cli_normal_mode_distinguishes_clean_and_failed_exit_codes(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["envsbot"])
+    copied = MagicMock()
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", copied)
+
+    async def clean_main():
+        return 0
+
+    monkeypatch.setattr(envsbot, "main", clean_main)
+    assert envsbot.cli() is None
+    copied.assert_called_once_with()
+
+    async def failed_main():
+        return 23
+
+    monkeypatch.setattr(envsbot, "main", failed_main)
+    with pytest.raises(SystemExit) as exc_info:
+        envsbot.cli()
+    assert exc_info.value.code == 23
+    assert copied.call_count == 2
+
+
+def test_cli_only_accepts_exact_check_flag_and_logs_keyboard_interrupt(monkeypatch):
+    import sys
+
+    calls = []
+
+    async def fake_main():
+        calls.append("main-created")
+        return 0
+
+    async def unexpected_preflight():
+        raise AssertionError("--check-extra must not select preflight mode")
+
+    def interrupted_run(coro):
+        calls.append("run")
+        coro.close()
+        raise KeyboardInterrupt
+
+    info = MagicMock()
+    monkeypatch.setattr(sys, "argv", ["envsbot", "--check-extra"])
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", lambda: calls.append("copy"))
+    monkeypatch.setattr(envsbot, "main", fake_main)
+    monkeypatch.setattr(envsbot, "preflight_check", unexpected_preflight)
+    monkeypatch.setattr(envsbot.asyncio, "run", interrupted_run)
+    monkeypatch.setattr(envsbot.log, "info", info)
+
+    assert envsbot.cli() is None
+    assert calls == ["copy", "run"]
+    info.assert_called_once_with("[INIT] Shutdown requested by keyboard interrupt")

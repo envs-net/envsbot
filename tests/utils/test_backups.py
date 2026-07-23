@@ -297,3 +297,19 @@ async def test_create_backup_returns_verified_archive_when_prune_fails(
     with zipfile.ZipFile(archive) as handle:
         assert handle.testzip() is None
         assert backups.MANIFEST_NAME in handle.namelist()
+
+
+def test_parse_archive_created_at_normalizes_z_and_cross_day_offsets():
+    zulu = backups._parse_archive_created_at("2026-01-02T03:04:05Z")
+    assert zulu is not None
+    assert zulu.isoformat() == "2026-01-02T03:04:05+00:00"
+
+    crossing = backups._parse_archive_created_at("2026-01-02T00:30:00+02:00")
+    assert crossing is not None
+    assert crossing.isoformat() == "2026-01-01T22:30:00+00:00"
+
+    naive = backups._parse_archive_created_at("2026-01-02T03:04:05")
+    assert naive is not None
+    assert naive.isoformat() == "2026-01-02T03:04:05+00:00"
+
+    assert backups._parse_archive_created_at(None) is None

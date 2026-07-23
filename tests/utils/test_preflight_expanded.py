@@ -319,3 +319,70 @@ def test_sensitive_permission_check_includes_database_sidecars_and_archives(
     assert ok is False
     assert "database WAL=0644" in message
     assert "backup envsbot-backup-test.zip=0640" in message
+
+
+def test_check_command_registry_handles_import_failure_and_all_metadata_fields(monkeypatch):
+    def fail_records():
+        raise RuntimeError("secret-token=abc")
+
+    monkeypatch.setattr("utils.command_registry.decorated_command_records", fail_records)
+    ok, message = preflight._check_command_registry()
+    assert ok is False
+    assert message.startswith("command registry: RuntimeError:")
+    assert "abc" not in message
+
+    commands = [
+        SimpleNamespace(name="missing-short", short="", usage="{prefix}one"),
+        SimpleNamespace(name="missing-usage", short="Two", usage=""),
+        SimpleNamespace(name="missing-both", short="", usage=""),
+        SimpleNamespace(name="missing-four", short="", usage="x"),
+        SimpleNamespace(name="missing-five", short="x", usage=""),
+        SimpleNamespace(name="missing-six", short="", usage="x"),
+    ]
+    monkeypatch.setattr(
+        "utils.command_registry.decorated_command_records",
+        lambda: [("plug", {}, command) for command in commands],
+    )
+    assert preflight._check_command_registry() == (
+        False,
+        "command registry: missing metadata for missing-short, missing-usage, "
+        "missing-both, missing-four, missing-five",
+    )
+
+
+def test_check_config_sample_handles_loader_failure_warning_preview_and_empty_sample(monkeypatch):
+    def fail_load():
+        raise RuntimeError("password=super-secret")
+
+    monkeypatch.setattr(preflight, "load_default_config_for_diff", fail_load)
+    ok, message = preflight._check_config_sample({})
+    assert ok is False
+    assert message.startswith("config sample: RuntimeError:")
+    assert "super-secret" not in message
+
+    monkeypatch.setattr(
+        preflight,
+        "load_default_config_for_diff",
+        lambda: {"a": 1, "b": 2, "c": 3},
+    )
+    monkeypatch.setattr(
+        preflight,
+        "collect_config_warnings",
+        lambda _config: ["one", "two", "three", "four"],
+    )
+    assert preflight._check_config_sample({}) == (
+        False,
+        "config warnings: one; two; three",
+    )
+
+    monkeypatch.setattr(preflight, "collect_config_warnings", lambda _config: [])
+    assert preflight._check_config_sample({"a": 1, "extra": 9}) == (
+        False,
+        "config sample: 2 sample key(s) absent from runtime defaults",
+    )
+
+    monkeypatch.setattr(preflight, "load_default_config_for_diff", lambda: {})
+    assert preflight._check_config_sample({"extra": 9}) == (
+        True,
+        "config sample: ok (0 keys)",
+    )

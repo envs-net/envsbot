@@ -283,3 +283,63 @@ async def test_send_update_notification_joins_muc_target(monkeypatch):
 
     joined.assert_awaited_once_with(bot, "room@conf.test")
     assert sent[0]["mto"] == "room@conf.test"
+
+
+def test_redirect_version_fetch_validates_request_and_redirect_shape(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["user_agent"] = req.get_header("User-agent")
+        captured["timeout"] = timeout
+        return FakeResponse(
+            final_url="https://github.com/envs-net/envsbot/releases/tag/vv1.7.0/"
+        )
+
+    monkeypatch.setattr(updatecheck, "_user_agent", lambda: "envsbot-test-agent")
+    monkeypatch.setattr(updatecheck, "_timeout", lambda: 12.5)
+    monkeypatch.setattr(updatecheck.urllib.request, "urlopen", fake_urlopen)
+
+    assert updatecheck.fetch_latest_release_version_via_redirect_sync(
+        "https://github.com/envs-net/envsbot/releases/latest"
+    ) == "1.7.0"
+    assert captured == {
+        "url": "https://github.com/envs-net/envsbot/releases/latest",
+        "user_agent": "envsbot-test-agent",
+        "timeout": 12.5,
+    }
+
+
+@pytest.mark.parametrize("value", ["", None])
+def test_redirect_version_fetch_rejects_missing_configuration(value):
+    with pytest.raises(ValueError, match="^version_check_url is not configured$"):
+        updatecheck.fetch_latest_release_version_via_redirect_sync(value)
+
+
+@pytest.mark.parametrize(
+    ("final_url", "message"),
+    [
+        (
+            "https://github.com/envs-net/envsbot/releases/latest",
+            "Unexpected release redirect URL",
+        ),
+        (
+            "https://github.com/envs-net/envsbot/releases/tag/",
+            "Could not extract release tag from redirect URL",
+        ),
+        (
+            "https://github.com/envs-net/envsbot/releases/tag////",
+            "Could not extract release tag from redirect URL",
+        ),
+    ],
+)
+def test_redirect_version_fetch_rejects_invalid_final_urls(monkeypatch, final_url, message):
+    monkeypatch.setattr(
+        updatecheck.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: FakeResponse(final_url=final_url),
+    )
+    with pytest.raises(ValueError, match=message):
+        updatecheck.fetch_latest_release_version_via_redirect_sync(
+            "https://github.com/envs-net/envsbot/releases/latest"
+        )

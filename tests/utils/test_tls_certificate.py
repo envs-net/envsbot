@@ -693,3 +693,39 @@ def test_xmpp_server_endpoints_falls_back_without_dnspython(monkeypatch):
     assert certificate._xmpp_server_endpoints("nodns.example.org", 1.0) == [
         ("nodns.example.org", 5269),
     ]
+
+
+def test_public_endpoint_addresses_preserve_order_deduplicate_and_cap(monkeypatch):
+    calls = []
+    stream = certificate.socket.SOCK_STREAM
+    datagram = certificate.socket.SOCK_DGRAM
+    ipv4 = certificate.socket.AF_INET
+    ipv6 = certificate.socket.AF_INET6
+
+    def fake_getaddrinfo(host, port, *, family, type):
+        calls.append((host, port, family, type))
+        return [
+            (ipv4, stream, 6, "", ("8.8.8.8", port)),
+            (ipv4, stream, 6, "", ("8.8.8.8", port)),  # duplicate
+            (ipv4, datagram, 17, "", ("1.1.1.1", port)),  # wrong socket type
+            (9999, stream, 6, "", ("9.9.9.9", port)),  # unsupported family
+            (ipv4, stream, 6, "", ("not-an-ip", port)),
+            (ipv4, stream, 6, "", ("10.0.0.1", port)),
+            (ipv4, stream, 6, "", ("1.1.1.1", port)),
+            (ipv6, stream, 6, "", ("2001:4860:4860::8888", port, 0, 0)),
+            (ipv4, stream, 6, "", ("9.9.9.9", port)),
+            (ipv4, stream, 6, "", ("208.67.222.222", port)),
+            (ipv4, stream, 6, "", ("64.6.64.6", port)),
+        ]
+
+    monkeypatch.setattr(certificate.socket, "getaddrinfo", fake_getaddrinfo)
+
+    assert certificate._public_endpoint_addresses("example.org", 5269) == [
+        (ipv4, "8.8.8.8"),
+        (ipv4, "1.1.1.1"),
+        (ipv6, "2001:4860:4860::8888"),
+        (ipv4, "9.9.9.9"),
+    ]
+    assert calls == [
+        ("example.org", 5269, certificate.socket.AF_UNSPEC, stream)
+    ]

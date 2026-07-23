@@ -714,3 +714,61 @@ async def test_diagnose_xmpp_certificate_applies_plugin_configuration(monkeypatc
         source_domain="bot.example.org",
         timeout_seconds=7.25,
     )
+
+
+def test_xmpp_check_srv_uses_all_service_names_and_filters_failures(monkeypatch):
+    captured = {}
+    resolver = object()
+
+    def fake_make_srv_resolver(module, timeout):
+        captured["resolver_module"] = module
+        captured["timeout"] = timeout
+        return resolver
+
+    def fake_collect(domain, services, actual_resolver, exception_module):
+        captured["domain"] = domain
+        captured["services"] = list(services)
+        captured["resolver"] = actual_resolver
+        captured["exception_module"] = exception_module
+        return {
+            "_xmpp-client._tcp": "client.example.org:5222",
+            "_xmpp-server._tcp": "server.example.org:5269",
+            "_xmpps-client._tcp": "Not found",
+            "_xmpps-server._tcp": "Error: refused",
+        }
+
+    monkeypatch.setattr(xmpp, "_make_srv_resolver", fake_make_srv_resolver)
+    monkeypatch.setattr(xmpp, "_collect_all_srv_records", fake_collect)
+
+    assert xmpp._xmpp_check_srv("Example.ORG") == (
+        "✅",
+        "SRV records: _xmpp-client._tcp, _xmpp-server._tcp",
+    )
+    assert captured["domain"] == "Example.ORG"
+    assert captured["services"] == [
+        "_xmpp-client._tcp",
+        "_xmpp-server._tcp",
+        "_xmpps-client._tcp",
+        "_xmpps-server._tcp",
+    ]
+    assert captured["resolver"] is resolver
+    assert captured["timeout"] == xmpp.XMPP_QUERY_TIMEOUT_SECONDS
+    assert captured["resolver_module"].__name__ == "dns.resolver"
+    assert captured["exception_module"].__name__ == "dns.exception"
+
+
+def test_xmpp_check_srv_reports_missing_dnspython(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "dns.resolver" or name == "dns.exception":
+            raise ImportError("dnspython unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    assert xmpp._xmpp_check_srv("example.org") == (
+        "ℹ️",
+        "SRV skipped: python-dnspython not installed",
+    )

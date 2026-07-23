@@ -110,3 +110,56 @@ def test_primary_command_records_filters_aliases(monkeypatch):
     )
 
     assert registry.primary_command_records() == [{"registered_name": "primary", "is_alias": False}]
+
+
+def test_command_records_preserve_multiword_fallbacks_and_first_plugin_owner(monkeypatch):
+    commands = FakeCommands()
+
+    def custom_handler():
+        return None
+
+    fallback = SimpleNamespace(
+        role=Role.USER,
+        handler=custom_handler,
+        examples=None,
+        category=None,
+        context="",
+        short="Fallback command",
+        usage="{prefix}two words",
+    )
+    commands[("two", "words")] = fallback
+    commands.by_plugin = {
+        "_first": {("two", "words")},
+        "second": {("two", "words")},
+    }
+    monkeypatch.setattr(registry, "COMMANDS", commands)
+
+    assert registry.command_records() == [
+        {
+            "registered_name": "two words",
+            "primary_name": "two words",
+            "plugin": "_first",
+            "source": "core",
+            "is_alias": False,
+            "role": Role.USER,
+            "handler": "custom_handler",
+            "short": "Fallback command",
+            "usage": "{prefix}two words",
+            "examples": [],
+            "category": "other",
+            "context": "any",
+        }
+    ]
+
+
+def test_command_records_without_plugin_remain_plugin_source(monkeypatch):
+    commands = FakeCommands()
+    commands[("orphan",)] = SimpleNamespace(name="primary")
+    monkeypatch.setattr(registry, "COMMANDS", commands)
+
+    record = registry.command_records()[0]
+    assert record["registered_name"] == "orphan"
+    assert record["primary_name"] == "primary"
+    assert record["plugin"] == ""
+    assert record["source"] == "plugins"
+    assert record["is_alias"] is True

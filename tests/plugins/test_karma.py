@@ -321,3 +321,13 @@ async def test_on_load_registers_groupchat_event(fake_bot):
     fake_bot.bot_plugins.register_event.assert_called_once()
     assert fake_bot.bot_plugins.register_event.call_args.args[0] == "karma"
     assert fake_bot.bot_plugins.register_event.call_args.args[1] == "groupchat_message"
+
+
+def test_canonical_nick_is_exact_case_insensitive_and_trims_fallback(monkeypatch):
+    monkeypatch.setattr(karma, "_known_room_nicks", lambda _room: ["bob", "Bob", "Alice"])
+
+    # The first canonical spelling from the room snapshot wins deterministically.
+    assert karma._canonical_nick("room@example", "  BOB  ") == "bob"
+    assert karma._canonical_nick("room@example", "alice") == "Alice"
+    assert karma._canonical_nick("room@example", "  Unknown User  ") == "Unknown User"
+    assert karma._canonical_nick("room@example", "   ") == ""
