@@ -736,6 +736,7 @@ def test_public_address_from_addrinfo_rejects_malformed_and_private_entries():
     ipv4 = certificate.socket.AF_INET
 
     assert certificate._public_address_from_addrinfo(()) is None
+    assert certificate._public_address_from_addrinfo((ipv4, stream, 6, "")) is None
     assert certificate._public_address_from_addrinfo((ipv4, stream, 6, "", None)) is None
     assert certificate._public_address_from_addrinfo(
         (ipv4, stream, 6, "", ("not-an-ip", 443))

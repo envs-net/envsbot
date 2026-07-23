@@ -131,5 +131,5 @@ async def _send_reminder_message(bot, mto: str, mbody: str, mtype: str) -> bool:
 
     result = msg.send()
     if inspect.isawaitable(result):
-        await result
-    return True
+        result = await result
+    return result is not False

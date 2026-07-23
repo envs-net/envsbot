@@ -120,6 +120,24 @@ async def test_room_reminder_state_and_send_message(monkeypatch):
     ) is True
     assert awaited == ["async-fallback"]
 
+    class FailedSyncMessage:
+        def send(self):
+            return False
+
+    bot.make_message.return_value = FailedSyncMessage()
+    assert await reminder._send_reminder_message(
+        bot, "room@conf", "body", "groupchat"
+    ) is False
+
+    class FailedAsyncMessage:
+        async def send(self):
+            return False
+
+    bot.make_message.return_value = FailedAsyncMessage()
+    assert await reminder._send_reminder_message(
+        bot, "room@conf", "body", "groupchat"
+    ) is False
+
 
 @pytest.mark.asyncio
 async def test_reminder_store_getter_uses_plugin_store():

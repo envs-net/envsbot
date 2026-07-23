@@ -281,7 +281,9 @@ def _xmpp_server_endpoints(
 def _public_address_from_addrinfo(entry: tuple) -> tuple[int, str] | None:
     """Normalize one ``getaddrinfo`` entry to a public stream endpoint."""
     try:
-        family, socktype, _proto, _canonname, sockaddr = entry
+        family = entry[0]
+        socktype = entry[1]
+        sockaddr = entry[4]
         address = str(sockaddr[0])
     except (IndexError, TypeError, ValueError):
         return None
