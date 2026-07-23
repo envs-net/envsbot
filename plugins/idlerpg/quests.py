@@ -282,7 +282,7 @@ def _start_time_quest(
         "complete_at": now + duration,
     }
     names = _quester_names(room, questers)
-    quest_url = _dep_export._public_url(_dep_formatting._room_slug(room_jid), "map.json")
+    quest_url = _dep_export._website_url("quest")
     url_part = f" See {quest_url} to monitor the quest." if quest_url else ""
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
@@ -319,7 +319,7 @@ def _start_grid_quest(
     names = _quester_names(room, questers)
     first_region = _dep_map._map_region_name(route[0][0], route[0][1])
     second_region = _dep_map._map_region_name(route[1][0], route[1][1])
-    quest_url = _dep_export._public_url(_dep_formatting._room_slug(room_jid), "map.json")
+    quest_url = _dep_export._website_url("quest")
     url_part = f" See {quest_url} to monitor their journey." if quest_url else ""
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "

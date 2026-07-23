@@ -15,6 +15,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 from utils.config import BASE_DIR
 
 
@@ -72,6 +73,17 @@ def _public_url(*parts: str) -> str:
     if not _dep_config.EXPORT_PUBLIC_BASE_URL:
         return ""
     return "/".join([_dep_config.EXPORT_PUBLIC_BASE_URL, *[part.strip("/") for part in parts if part]])
+
+
+def _website_url(view: str = "", **params: str) -> str:
+    """Return a public IdleRPG website URL instead of a raw JSON endpoint."""
+    base = str(getattr(_dep_config, "WEBSITE_PUBLIC_BASE_URL", "") or "").rstrip("/")
+    if not base:
+        return ""
+    query = {"view": str(view)} if view else {}
+    query.update({key: str(value) for key, value in params.items() if value not in (None, "")})
+    suffix = f"?{urlencode(query)}" if query else ""
+    return f"{base}/{suffix}"
 
 
 def _safe_event_kind(kind: str) -> str:
@@ -190,7 +202,11 @@ def _room_events(room: dict[str, Any], *, limit: int | None = None) -> list[dict
 
 
 def _profile_url(room_jid: str, player: dict[str, Any]) -> str:
-    return _public_url(_dep_formatting._room_slug(room_jid), "profiles", f"{_dep_formatting._slug(_dep_formatting._display_player(player))}.json")
+    del room_jid  # The website selects its configured room export itself.
+    return _website_url(
+        "players",
+        character=_dep_formatting._display_player(player),
+    )
 
 
 def _public_rules() -> dict[str, Any]:

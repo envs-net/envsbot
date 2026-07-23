@@ -68,6 +68,26 @@ def test_apply_runtime_config_replaces_limiter_when_rate_limit_changes():
     assert any("rate limiter" in note for note in notes)
 
 
+
+
+def test_idlerpg_runtime_values_derive_or_override_website_url():
+    derived = runtime._idlerpg_values({
+        "idlerpg": {
+            "export_public_base_url": "https://envs.net/idlerpg/data/",
+        }
+    })
+    assert derived["EXPORT_PUBLIC_BASE_URL"] == "https://envs.net/idlerpg/data"
+    assert derived["WEBSITE_PUBLIC_BASE_URL"] == "https://envs.net/idlerpg"
+
+    explicit = runtime._idlerpg_values({
+        "idlerpg": {
+            "export_public_base_url": "https://cdn.example.org/game",
+            "website_public_base_url": "https://example.org/idlerpg/",
+        }
+    })
+    assert explicit["WEBSITE_PUBLIC_BASE_URL"] == "https://example.org/idlerpg"
+
+
 def test_idlerpg_runtime_values_include_original_grid_options():
     values = runtime._idlerpg_values({
         "idlerpg": {

@@ -25,7 +25,7 @@ class MessageMixin:
         """
         try:
             result = message.send()
-            if inspect.iscoroutine(result):
+            if inspect.isawaitable(result):
                 await result
             return True
         except Exception as exc:

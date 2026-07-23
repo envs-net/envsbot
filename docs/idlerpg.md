@@ -391,6 +391,7 @@ IDLERPG = {
     "export_enabled": True,
     "export_path": "data/idlerpg",
     "export_public_base_url": "",
+    "website_public_base_url": "",
     "export_top_limit": 50,
 }
 ```
@@ -399,8 +400,11 @@ IDLERPG = {
 | --- | ---: | --- |
 | `export_enabled` | `True` | Writes public JSON files after game-state changes. Disable this when no website/status export is wanted. |
 | `export_path` | `"data/idlerpg"` | Base directory for JSON exports. Relative paths are resolved from the bot checkout/base directory. Room-specific data is written below `<export_path>/<room-slug>/`. |
-| `export_public_base_url` | `""` | Optional public URL for the export base. When set, commands such as `,idlerpg profile` and `,idlerpg map` can include public JSON links. |
+| `export_public_base_url` | `""` | Optional public URL for the JSON export base. This is used inside exported metadata and for raw data access. |
+| `website_public_base_url` | `""` | Optional human-facing IdleRPG website root used in chat output. When empty and `export_public_base_url` ends in `/data`, the parent URL is derived automatically. |
 | `export_top_limit` | `50` | Maximum number of players in exported leaderboard files. `players.json` still contains all exported players. |
+
+Chat output now links to website views such as `?view=quest`, `?view=map` and `?view=players&character=...` instead of exposing raw JSON files.
 
 ### Generic website example
 
@@ -431,6 +435,7 @@ IDLERPG = {
     "export_enabled": True,
     "export_path": "/var/www/envs.net/idlerpg/data",
     "export_public_base_url": "https://envs.net/idlerpg/data",
+    "website_public_base_url": "https://envs.net/idlerpg",
 }
 ```
 
@@ -673,7 +678,7 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 ### Export, map and seasons
 
 These options are documented in the sections above: `export_enabled`,
-`export_path`, `export_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
+`export_path`, `export_public_base_url`, `website_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
 `map_step_per_second`, `map_step_per_tick`, `grid_battle_enabled`,
 `quest_grid_step_seconds`, `quest_min_online_seconds`, `quest_grid_enabled`, `quest_grid_weight`,
 `quest_time_enabled`, `quest_time_weight`, `quest_time_min_duration`, `quest_time_max_duration`,

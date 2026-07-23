@@ -37,7 +37,7 @@ Context: `private chat / MUC PM`<br>
 Category: `users`<br>
 Usage: `,users delete <jid>`
 
-Aliases: `,user delete`
+Aliases: `,user del`, `,user delete`, `,user remove`, `,user rm`, `,users del`, `,users remove`, `,users rm`
 
 Examples:
 

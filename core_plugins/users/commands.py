@@ -613,7 +613,15 @@ async def users_revoke(bot, sender, nick, args, msg, is_room):
 @command(
     "users delete",
     role=Role.ADMIN,
-    aliases=["user delete"],
+    aliases=[
+        "user delete",
+        "users del",
+        "user del",
+        "users remove",
+        "user remove",
+        "users rm",
+        "user rm",
+    ],
     short="Delete one non-privileged user record and its runtime data.",
     usage="{prefix}users delete <jid>",
     examples=["{prefix}users delete alice@example.org"],

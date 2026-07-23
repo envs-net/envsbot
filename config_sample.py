@@ -505,6 +505,10 @@ IDLERPG = {
     "export_enabled": True,
     "export_path": "data/idlerpg",
     "export_public_base_url": "",
+    # Human-facing website root used in chat output, for example
+    # https://example.org/idlerpg. When empty and export_public_base_url ends
+    # in /data, the parent URL is derived automatically.
+    "website_public_base_url": "",
     "export_top_limit": 50,
 
     # Seasons and Hall of Fame. Automatic season rollover is disabled by

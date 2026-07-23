@@ -26,6 +26,7 @@ IDLERPG = {
     "export_enabled": True,
     "export_path": "/path/to/public/idlerpg/data",
     "export_public_base_url": "https://example.org/idlerpg/data",
+    "website_public_base_url": "https://example.org/idlerpg",
 }
 ```
 

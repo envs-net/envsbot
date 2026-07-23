@@ -456,12 +456,13 @@ async def test_title_command_sets_founder():
 
 
 @pytest.mark.asyncio
-async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
+async def test_profile_command_includes_website_link(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
     monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
     monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
-    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg/data")
+    monkeypatch.setattr(idlerpg_config, "WEBSITE_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
     await _register_alice(bot, msg)
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
     room["players"]["alice@envs.net"]["created_at"] = 1_000_000
@@ -473,23 +474,24 @@ async def test_profile_command_includes_public_json(tmp_path, monkeypatch):
     assert "Playing since:" in bot.replies[-1][0]
     assert "Playing for: 1 days, 01:01:01" in bot.replies[-1][0]
     assert "Idled online:" in bot.replies[-1][0]
-    assert "Profile JSON: https://envs.net/idlerpg/room_at_conf/profiles/Alice.json" in bot.replies[-1][0]
+    assert "Website: https://envs.net/idlerpg/?view=players&character=Alice" in bot.replies[-1][0]
     assert "alice@envs.net" not in bot.replies[-1][0]
 
 
 @pytest.mark.asyncio
-async def test_map_command_includes_public_json(tmp_path, monkeypatch):
+async def test_map_command_includes_website_link(tmp_path, monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
     monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
     monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
-    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://envs.net/idlerpg/data")
+    monkeypatch.setattr(idlerpg_config, "WEBSITE_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
     await _register_alice(bot, msg)
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["map"], msg, True)
 
     assert "IdleRPG map for room@conf" in bot.replies[-1][0]
-    assert "Map JSON: https://envs.net/idlerpg/room_at_conf/map.json" in bot.replies[-1][0]
+    assert "World map: https://envs.net/idlerpg/?view=map" in bot.replies[-1][0]
 
 
 @pytest.mark.asyncio

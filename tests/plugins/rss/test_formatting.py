@@ -389,6 +389,9 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
     store = bot.plugin_store
     url = "https://example.org/feed.xml"
     room = "room@conference.example.org"
+    store[rss.RSS_KEY] = {
+        url: {"rooms": [room], "users": {}, "last_id": "old-entry"}
+    }
     calls = []
 
     async def fake_post(_bot, _store, rooms, feed_url, context):
@@ -492,7 +495,7 @@ async def test_post_entry_to_users_continues_after_invalid_or_failed_target(
         "[RSS] entry",
     )
 
-    assert result == (1, 3)
+    assert result == (1, 2)
     assert attempted_targets == ["alice@example.org", "bob@example.org"]
     assert [message["mto"] for message in bot.sent_messages] == [
         "alice@example.org"
@@ -663,3 +666,74 @@ async def test_post_new_entries_retains_cursor_when_direct_delivery_fails(
     assert store[rss.RSS_KEY][url]["last_id"] == "old-entry"
     assert store[rss.RSS_KEY][url]["posted_count"] == 0
     assert "last_posted" not in store[rss.RSS_KEY][url]
+
+
+@pytest.mark.asyncio
+async def test_post_new_entries_reloads_direct_subscribers_after_fetch(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    current_feed = {
+        "title": "Direct Feed",
+        "link": "https://example.org/",
+        "rooms": [],
+        "users": {"alice@example.org": {"role": "trusted"}},
+        "last_id": "old-entry",
+    }
+    store[rss.RSS_KEY] = {url: current_feed}
+    stale_snapshot = dict(current_feed)
+    stale_snapshot["users"] = {}
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        current_feed["title"],
+        current_feed["link"],
+        [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=stale_snapshot,
+    )
+
+    assert [message["mto"] for message in bot.sent_messages] == [
+        "alice@example.org"
+    ]
+    assert store[rss.RSS_KEY][url]["last_id"] == "new-entry"
+
+
+@pytest.mark.asyncio
+async def test_post_new_entries_falls_back_when_direct_template_lookup_fails(
+    monkeypatch, make_bot,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    feed = {
+        "title": "Direct Feed",
+        "link": "https://example.org/",
+        "rooms": [],
+        "users": {"alice@example.org": {"role": "trusted"}},
+        "last_id": "old-entry",
+    }
+    store[rss.RSS_KEY] = {url: feed}
+
+    async def broken_template(*_args, **_kwargs):
+        raise RuntimeError("template store unavailable")
+
+    monkeypatch.setattr(rss_formatting, "get_effective_template", broken_template)
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    assert bot.sent_messages[0]["mbody"] == (
+        "[RSS] (Direct Feed) New entry\nhttps://example.org/new"
+    )
+    assert store[rss.RSS_KEY][url]["last_id"] == "new-entry"

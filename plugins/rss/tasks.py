@@ -77,9 +77,15 @@ async def rss_check_loop(bot, store, url, period):
             continue
 
         new_entries = _collect_new_entries(parsed, last_id)
-        await _post_new_entries(
-            bot, store, url, feed_title, feed_link, rooms, new_entries, feed=feed
-        )
+        try:
+            await _post_new_entries(
+                bot, store, url, feed_title, feed_link, rooms, new_entries, feed=feed
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await _handle_post_error(bot, store, url, period, now, exc)
+            continue
 
         await asyncio.sleep(period)
 async def ensure_task(bot, store, url, period):
@@ -128,6 +134,33 @@ async def on_unload(bot):
             log.exception("[RSS] Error cancelling task for %s: %s", url, e)
 
     log.info("[RSS] ✅ All RSS tasks cleaned up")
+async def _handle_post_error(bot, store, url, period, now, exc):
+    """Keep one rendering or delivery failure from killing the feed worker."""
+    log.exception("Failed to process or post RSS feed %s: %s", url, exc)
+    feeds = await get_feeds(store)
+    feed = feeds.get(url)
+    current_errors = (
+        int(feed.get("error_count", 0) or 0)
+        if isinstance(feed, dict)
+        else 0
+    )
+    error_count = current_errors + 1
+    retry_delay = _retry_delay(period, error_count)
+    next_retry = now + retry_delay
+
+    def mutator(feed_data):
+        changed = _apply_retry_state(feed_data, error_count, next_retry)
+        return _record_feed_check(
+            feed_data,
+            now=now,
+            success=False,
+            error=f"post: {exc}",
+        ) or changed
+
+    await _update_feed(bot, store, url, mutator)
+    await asyncio.sleep(retry_delay)
+
+
 async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
     log.warning("Failed to fetch RSS feed %s: %s", url, exc)
 

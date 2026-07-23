@@ -464,11 +464,13 @@ async def _handle_quest(bot, msg, is_room: bool) -> None:
     else:
         target = _dep_map._active_quest_target(quest)
         detail = f"Current target: [{target[0]},{target[1]}]." if target else "No active route target."
+    quest_url = _dep_export._website_url("quest")
     _dep_formatting._reply(
         bot,
         msg,
         f"🧭 {', '.join(names)} are on a quest ({quest_kind}-based) to {quest.get('text', 'adventure')}. "
-        f"Completes in {remaining}. {detail}",
+        f"Completes in {remaining}. {detail}"
+        + (f" See {quest_url} for details." if quest_url else ""),
     )
 
 
@@ -503,7 +505,7 @@ async def _handle_profile(bot, sender_jid: str, args: list[str], msg, is_room: b
     ]
     url = _dep_export._profile_url(room_jid, player)
     if url:
-        lines.append(f"Profile JSON: {url}")
+        lines.append(f"Website: {url}")
     _dep_formatting._reply(bot, msg, "\n".join(lines))
 
 
@@ -652,9 +654,9 @@ async def _handle_map(bot, msg, is_room: bool) -> None:
     players = _dep_state._ranked_players(room)
     quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
     lines = _dep_map._render_ascii_map(room_jid, players, quest)
-    url = _dep_export._public_url(_dep_formatting._room_slug(room_jid), "map.json")
+    url = _dep_export._website_url("map")
     if url:
-        lines.append(f"Map JSON: {url}")
+        lines.append(f"World map: {url}")
     _dep_formatting._reply(bot, msg, "\n".join(lines))
 
 

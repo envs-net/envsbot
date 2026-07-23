@@ -585,7 +585,18 @@ def test_users_split_commands_preserve_command_metadata():
             "users revoke",
             ["user revoke", "users plugin revoke", "user plugin revoke"],
         ),
-        users_mod.users_delete: ("users delete", ["user delete"]),
+        users_mod.users_delete: (
+            "users delete",
+            [
+                "user delete",
+                "users del",
+                "user del",
+                "users remove",
+                "user remove",
+                "users rm",
+                "user rm",
+            ],
+        ),
         users_mod.users_roles: ("users roles", ["user roles"]),
         users_mod.users_permissions: (
             "users permissions",

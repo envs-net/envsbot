@@ -289,12 +289,14 @@ def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
     questers = list(players)
     messages: list[str] = []
 
+    monkeypatch.setattr(idlerpg_config, "WEBSITE_PUBLIC_BASE_URL", "https://envs.net/idlerpg")
     monkeypatch.setattr(quests.random, "randint", lambda low, high: low)
     quests._start_time_quest(room, "room@conf", questers, "save the realm", 100, messages)
 
     assert room["quest"]["type"] == "time"
     assert room["quest"]["complete_at"] == 100 + idlerpg.QUEST_TIME_MIN_DURATION
     assert "time-based quest" in messages[0]
+    assert "https://envs.net/idlerpg/?view=quest" in messages[0]
 
     values = iter([11, 12, 13, 14])
     monkeypatch.setattr(quests.random, "randint", lambda low, high: next(values) if high == idlerpg.MAP_X or high == idlerpg.MAP_Y else low)
@@ -304,3 +306,4 @@ def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
     assert room["quest"]["type"] == "grid"
     assert room["quest"]["route"] == [[11, 12], [13, 14]]
     assert "grid-based quest" in messages[0]
+    assert "https://envs.net/idlerpg/?view=quest" in messages[0]

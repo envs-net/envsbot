@@ -286,6 +286,9 @@ Change or inspect a user:
 ,users info alice@example.org
 ,users role alice@example.org moderator
 ,users delete alice@example.org
+,users del alice@example.org
+,users remove alice@example.org
+,users rm alice@example.org
 ```
 
 Role changes are guarded. Lower roles cannot modify equal or higher roles, and the configured owner remains protected.

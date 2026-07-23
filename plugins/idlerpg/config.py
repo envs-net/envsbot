@@ -292,6 +292,21 @@ EXPORT_PATH = str(_cfg.get("export_path", config.get("idlerpg_export_path", "dat
 EXPORT_PUBLIC_BASE_URL = str(_cfg.get("export_public_base_url", config.get("idlerpg_export_public_base_url", "")) or "").rstrip("/")
 
 
+def _derived_website_public_base_url(export_base_url: str) -> str:
+    """Derive the website root from the conventional ``.../data`` export URL."""
+    value = str(export_base_url or "").rstrip("/")
+    return value[:-5] if value.lower().endswith("/data") else ""
+
+
+WEBSITE_PUBLIC_BASE_URL = str(
+    _cfg.get(
+        "website_public_base_url",
+        config.get("idlerpg_website_public_base_url", ""),
+    )
+    or _derived_website_public_base_url(EXPORT_PUBLIC_BASE_URL)
+).rstrip("/")
+
+
 EXPORT_TOP_LIMIT = int(_cfg.get("export_top_limit", config.get("idlerpg_export_top_limit", 50)) or 50)
 
 

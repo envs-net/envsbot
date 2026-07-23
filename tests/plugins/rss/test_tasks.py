@@ -566,3 +566,45 @@ async def test_rss_restart_tasks_restarts_plugin_lifecycle(monkeypatch, make_bot
     await rss.restart_tasks(bot)
 
     assert calls == ["unload", "load"]
+
+
+@pytest.mark.asyncio
+async def test_post_error_records_backoff_without_killing_worker(
+    monkeypatch, make_bot,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    await rss.save_feeds(
+        store,
+        {
+            url: {
+                "rooms": [],
+                "users": {"alice@example.org": {"role": "trusted"}},
+                "error_count": 0,
+                "next_retry": 0,
+            }
+        },
+    )
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(rss_store, "RSS_RETRY_INITIAL_DELAY", 30)
+
+    await rss_tasks._handle_post_error(
+        bot,
+        store,
+        url,
+        1200,
+        1000,
+        RuntimeError("direct render failed"),
+    )
+
+    feed = store[rss.RSS_KEY][url]
+    assert feed["error_count"] == 1
+    assert feed["next_retry"] == 1030
+    assert feed["last_error"] == "post: direct render failed"
+    assert sleeps == [30]

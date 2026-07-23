@@ -194,8 +194,20 @@ async def _post_rss_entry_to_rooms(bot, store, rooms, url, context):
     return posted
 async def _post_new_entries(bot, store, url, feed_title,
                             feed_link, rooms, new_entries, feed: dict | None = None):
-    active_rooms = _feed_active_rooms(feed or {"rooms": rooms})
+    """Post entries using the freshest persisted destination state.
+
+    RSS workers keep a local feed snapshot while fetching. Direct subscriptions
+    and room destinations may change during that network request, so reloading
+    before every entry avoids skipping a newly added 1:1 subscriber for an
+    entire polling interval.
+    """
     for entry, entry_id in reversed(new_entries):
+        current_feeds = await get_feeds(store)
+        current_feed = current_feeds.get(url)
+        if not isinstance(current_feed, dict):
+            log.warning("Feed %s was deleted before posting", url)
+            break
+        active_rooms = _feed_active_rooms(current_feed)
         entry_link = _normalize_url(
             _resolve_relative_url(feed_link, _extract_entry_link(entry))
         )
@@ -219,19 +231,37 @@ async def _post_new_entries(bot, store, url, feed_title,
         posted = await _post_rss_entry_to_rooms(
             bot, store, active_rooms, url, context
         )
-        direct_users = sorted((feed or {}).get("users", {}))
+        direct_users = sorted(
+            current_feed.get("users", {})
+            if isinstance(current_feed.get("users"), dict)
+            else {}
+        )
         direct_delivered = 0
         direct_attempted = 0
         for direct_user in direct_users:
-            template = await get_effective_template(
-                store,
-                direct_user,
-                url,
-            )
+            normalized_user = _normalize_direct_user_jid(direct_user)
+            if not normalized_user:
+                log.error(
+                    "[RSS] Ignoring invalid stored direct subscriber JID: %r",
+                    direct_user,
+                )
+                continue
+            try:
+                template = await get_effective_template(
+                    store,
+                    normalized_user,
+                    url,
+                )
+            except Exception:
+                log.exception(
+                    "[RSS] Failed to load direct template for %s; using default",
+                    normalized_user,
+                )
+                template = None
             direct_msg = _build_rss_message_from_context(context, template)
             delivered, attempted = await _post_entry_to_users(
                 bot,
-                [direct_user],
+                [normalized_user],
                 direct_msg,
             )
             direct_delivered += delivered
@@ -380,7 +410,6 @@ async def _post_entry_to_users(bot, users, msg) -> tuple[int, int]:
     delivered = 0
     attempted = 0
     for raw_user_jid in users:
-        attempted += 1
         user_jid = _normalize_direct_user_jid(raw_user_jid)
         if not user_jid:
             log.error(
@@ -388,6 +417,7 @@ async def _post_entry_to_users(bot, users, msg) -> tuple[int, int]:
                 raw_user_jid,
             )
             continue
+        attempted += 1
         if await _send_direct_rss_message(bot, user_jid, msg):
             delivered += 1
             log.debug("[RSS] Direct delivery accepted for %s", user_jid)

@@ -129,10 +129,20 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         item("export_public_base_url", "idlerpg_export_public_base_url", ""),
         "",
     ).rstrip("/")
+    website_public_base_url = _to_str(
+        item(
+            "website_public_base_url",
+            "idlerpg_website_public_base_url",
+            "",
+        ),
+        "",
+    ).rstrip("/")
+    if not website_public_base_url and export_public_base_url.lower().endswith("/data"):
+        website_public_base_url = export_public_base_url[:-5]
     topic_custom_text = _to_str(
         item("topic_custom_text", "idlerpg_topic_custom_text", ""),
         "",
-    ) or export_public_base_url or "IdleRPG"
+    ) or website_public_base_url or export_public_base_url or "IdleRPG"
     map_step_per_second = item(
         "map_step_per_second",
         "idlerpg_map_step_per_second",
@@ -192,6 +202,7 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "EXPORT_ENABLED": _to_bool(item("export_enabled", "idlerpg_export_enabled", True), True),
         "EXPORT_PATH": _to_str(item("export_path", "idlerpg_export_path", "data/idlerpg") or "data/idlerpg", "data/idlerpg"),
         "EXPORT_PUBLIC_BASE_URL": export_public_base_url,
+        "WEBSITE_PUBLIC_BASE_URL": website_public_base_url,
         "EXPORT_TOP_LIMIT": _to_int(item("export_top_limit", "idlerpg_export_top_limit", 50) or 50, 50),
         "SEASON_ENABLED": _to_bool(item("season_enabled", "idlerpg_season_enabled", False), False),
         "SEASON_DURATION_DAYS": _to_int(item("season_duration_days", "idlerpg_season_duration_days", 90) or 0, 0),
