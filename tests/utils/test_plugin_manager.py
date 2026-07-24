@@ -303,32 +303,16 @@ def test_source_discovery_precedence_and_fallback(monkeypatch):
     assert single._source_info("custom") == {"package": "missing", "core": False}
 
 
-def test_dependency_validation_and_topological_sort(monkeypatch):
+def test_topological_sort_orders_dependencies_first():
     bot = FakeBot()
     pm = PluginManager(bot, package="fakepkg")
     pm.meta = {
         "base": {"name": "base", "requires": []},
         "mid": {"name": "mid", "requires": ["base"]},
         "leaf": {"name": "leaf", "requires": ["mid"]},
-        "missingdep": {"name": "missingdep", "requires": ["nope"]},
-        "cycle": {"name": "cycle", "requires": ["cycle"]},
     }
-    monkeypatch.setattr(pm, "discover", lambda: ["base", "mid", "leaf", "missingdep", "cycle"])
 
     assert pm._topological_sort(["leaf", "base", "mid"]) == ["base", "mid", "leaf"]
-    assert pm._validate_dependencies("leaf") == (True, "")
-    assert pm._validate_dependencies("missingdep") == (
-        False,
-        "Plugin missingdep requires nope, which is not available",
-    )
-    valid, msg = pm._validate_dependencies("cycle")
-    assert valid is False
-    assert "Circular dependency" in msg
-
-    monkeypatch.setattr(plugin_manager.importlib, "import_module", lambda _name: (_ for _ in ()).throw(ImportError("boom")))
-    valid, msg = pm._validate_dependencies("external")
-    assert valid is False
-    assert "Cannot load external" in msg
 
 
 @pytest.mark.asyncio

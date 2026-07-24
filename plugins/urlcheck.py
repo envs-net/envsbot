@@ -399,10 +399,6 @@ async def _send_html_urlcheck_reply(
     await bot._safe_send_message(message)
 
 
-def strip_html_tags(text):
-    return re.sub(r"<[^>]+>", "", text or "")
-
-
 def is_youtube_url(url):
     return "youtube.com/watch" in url or "youtu.be/" in url
 

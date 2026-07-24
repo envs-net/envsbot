@@ -44,36 +44,6 @@ WTTR_HEADERS = {
 }
 
 
-async def get_display_name(bot, jid):
-    store = bot.db.users.plugin("users")
-    display_name = "unknown"
-    try:
-        roomnicks = await store.get(jid, "roomnicks")
-        if isinstance(roomnicks, dict):
-            for nick_values in roomnicks.values():
-                if nick_values:
-                    display_name = nick_values[0]
-                    break
-    except Exception as e:
-        log.warning(
-            "[PROFILE] 🔴  Failed to get roomnicks for %s: %s",
-            jid, e
-        )
-    log.debug(
-        "[PROFILE] 👤 Profile lookup for self: %s",
-        display_name
-    )
-    return display_name
-
-
-def get_pm_target(sender_jid, nick):
-    if hasattr(sender_jid, "bare"):
-        bare_jid = sender_jid.bare
-    else:
-        bare_jid = str(sender_jid).split('/')[0]
-    return bare_jid, nick
-
-
 async def get_weather_store(bot):
     return bot.db.users.plugin("weather")
 

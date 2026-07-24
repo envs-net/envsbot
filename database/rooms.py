@@ -1,7 +1,5 @@
 import json
 
-DEFAULT_STATUS = json.dumps({})
-
 
 class Rooms:
     """

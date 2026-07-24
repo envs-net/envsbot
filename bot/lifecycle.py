@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from utils.logging_helpers import kv
 
@@ -80,21 +80,6 @@ def _database_shutdown_timeout(config_obj: Any) -> float:
     except Exception:
         timeout = 15.0
     return max(6.0, timeout)
-
-
-async def call_with_timeout(label: str, func: Callable[[], Awaitable[Any]], timeout: float) -> Any:
-    """Run one lifecycle step with logging and an optional timeout."""
-    log.debug("[LIFECYCLE] step=%s status=start", label)
-    try:
-        if timeout and timeout > 0:
-            result = await asyncio.wait_for(func(), timeout=timeout)
-        else:
-            result = await func()
-        log.debug("[LIFECYCLE] step=%s status=ok", label)
-        return result
-    except Exception:
-        log.exception("[LIFECYCLE] step=%s status=error", label)
-        raise
 
 
 class LifecycleMixin:

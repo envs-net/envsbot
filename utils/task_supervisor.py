@@ -13,20 +13,6 @@ from typing import Any, Awaitable, Protocol
 log = logging.getLogger(__name__)
 
 
-class PluginTaskCreator(Protocol):
-    """Callable shape exposed by PluginManager.create_task."""
-
-    def __call__(
-        self,
-        plugin: str,
-        coro: Awaitable[Any],
-        *,
-        name: str | None = None,
-    ) -> asyncio.Task[Any]:
-        """Create and return a supervised plugin task."""
-        raise NotImplementedError
-
-
 class BotLike(Protocol):
     """Minimal bot shape required for plugin task creation."""
 

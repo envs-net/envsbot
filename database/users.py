@@ -93,19 +93,6 @@ class PluginRuntimeStore:
             return
         self.um._dirty_runtime.add(jid)
 
-    def _ensure_cache(self, jid: str):
-        """
-        Ensure runtime cache structure exists for the given jid and plugin.
-        """
-        if jid not in self.um._runtime_cache:
-            self.um._runtime_cache[jid] = {"plugins": {}}
-
-        if "plugins" not in self.um._runtime_cache[jid]:
-            self.um._runtime_cache[jid]["plugins"] = {}
-
-        if self.plugin_name not in self.um._runtime_cache[jid]["plugins"]:
-            self.um._runtime_cache[jid]["plugins"][self.plugin_name] = {}
-
     # ------------------------------------------------------------------
     # PUBLIC API
     # ------------------------------------------------------------------

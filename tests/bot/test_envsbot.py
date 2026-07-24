@@ -6,6 +6,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import envsbot
 import bot.lifecycle as lifecycle
+import bot.connection as connection
+import bot.permissions as bot_permissions
 
 
 def noop(self):
@@ -957,7 +959,7 @@ def test_get_configured_resource_strips_empty_values(monkeypatch):
     assert envsbot._get_configured_resource() is None
 
 
-def test_connect_kwargs_supports_host_port_direct_tls(monkeypatch):
+def test_connect_kwargs_supports_host_port_direct_tls():
     class FakeXMPP:
         def connect(
             self,
@@ -968,14 +970,14 @@ def test_connect_kwargs_supports_host_port_direct_tls(monkeypatch):
         ):
             return True
 
-    monkeypatch.setattr(envsbot, "config", {
+    cfg = {
         "jid": "bot@example.org",
         "host": "xmpp.example.org",
         "port": 5223,
         "direct_tls": True,
-    })
+    }
 
-    assert envsbot._connect_kwargs(FakeXMPP()) == {
+    assert connection.connect_kwargs(FakeXMPP(), cfg) == {
         "host": "xmpp.example.org",
         "port": 5223,
         "use_ssl": True,
@@ -983,38 +985,38 @@ def test_connect_kwargs_supports_host_port_direct_tls(monkeypatch):
     }
 
 
-def test_connect_kwargs_uses_configured_jid_domain_and_starttls(monkeypatch):
+def test_connect_kwargs_uses_configured_jid_domain_and_starttls():
     class FakeXMPP:
         def connect(self, host=None, port=None, use_ssl=False):
             return True
 
-    monkeypatch.setattr(envsbot, "config", {
+    cfg = {
         "jid": "bot@example.org/service",
         "host": None,
         "port": 5222,
         "direct_tls": False,
-    })
+    }
 
-    assert envsbot._connect_kwargs(FakeXMPP()) == {
+    assert connection.connect_kwargs(FakeXMPP(), cfg) == {
         "host": "example.org",
         "port": 5222,
         "use_ssl": False,
     }
 
 
-def test_connect_kwargs_uses_address_only_when_supported(monkeypatch):
+def test_connect_kwargs_uses_address_only_when_supported():
     class FakeXMPP:
         def connect(self, address=None, use_ssl=False, force_starttls=True):
             return True
 
-    monkeypatch.setattr(envsbot, "config", {
+    cfg = {
         "jid": "bot@example.org",
         "host": None,
         "port": 5223,
         "direct_tls": True,
-    })
+    }
 
-    assert envsbot._connect_kwargs(FakeXMPP()) == {
+    assert connection.connect_kwargs(FakeXMPP(), cfg) == {
         "address": ("example.org", 5223),
         "use_ssl": True,
         "force_starttls": False,
@@ -1041,16 +1043,14 @@ async def test_connect_xmpp_awaits_async_connect(monkeypatch):
     assert calls == [{"host": "xmpp.example.org", "port": 5222, "use_ssl": False}]
 
 
-def test_boundjid_domain_and_configured_domain_edges(monkeypatch):
-    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=None)) is None
-    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(domain=" xmpp.example.org "))) == "xmpp.example.org"
-    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(host=" host.example.org "))) == "host.example.org"
-    assert envsbot._boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(domain=" ", host=""))) is None
+def test_boundjid_domain_and_configured_domain_edges():
+    assert connection.boundjid_domain(types.SimpleNamespace(boundjid=None)) is None
+    assert connection.boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(domain=" xmpp.example.org "))) == "xmpp.example.org"
+    assert connection.boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(host=" host.example.org "))) == "host.example.org"
+    assert connection.boundjid_domain(types.SimpleNamespace(boundjid=types.SimpleNamespace(domain=" ", host=""))) is None
 
-    monkeypatch.setattr(envsbot, "config", {"jid": "invalid"})
-    assert envsbot._configured_jid_domain() is None
-    monkeypatch.setattr(envsbot, "config", {"jid": "bot@example.org/resource"})
-    assert envsbot._configured_jid_domain() == "example.org"
+    assert connection.configured_jid_domain({"jid": "invalid"}) is None
+    assert connection.configured_jid_domain({"jid": "bot@example.org/resource"}) == "example.org"
 
 
 def test_connect_kwargs_falls_back_to_boundjid_and_uninspectable_signature(monkeypatch):
@@ -1060,8 +1060,8 @@ def test_connect_kwargs_falls_back_to_boundjid_and_uninspectable_signature(monke
         def connect(self, host=None, port=None):
             return True
 
-    monkeypatch.setattr(envsbot, "config", {"jid": "invalid", "host": None, "port": 5222, "direct_tls": False})
-    assert envsbot._connect_kwargs(FakeXMPP()) == {"host": "bound.example.org", "port": 5222}
+    cfg = {"jid": "invalid", "host": None, "port": 5222, "direct_tls": False}
+    assert connection.connect_kwargs(FakeXMPP(), cfg) == {"host": "bound.example.org", "port": 5222}
 
     connect_method = object()
     sentinel_parameters = {"host": object()}
@@ -1069,11 +1069,11 @@ def test_connect_kwargs_falls_back_to_boundjid_and_uninspectable_signature(monke
 
     def fake_signature_parameters(value):
         calls.append(value)
-        return sentinel_parameters
+        return types.SimpleNamespace(parameters=sentinel_parameters)
 
-    monkeypatch.setattr(envsbot, "_connect_signature_parameters_impl", fake_signature_parameters)
+    monkeypatch.setattr(connection.inspect, "signature", fake_signature_parameters)
 
-    assert envsbot._connect_signature_parameters(connect_method) is sentinel_parameters
+    assert connection.connect_signature_parameters(connect_method) is sentinel_parameters
     assert calls == [connect_method]
 
 
@@ -1388,22 +1388,21 @@ def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
     assert envsbot.cli([]) == 0
     assert calls[-2:] == ["copy", "run-interrupted"]
 
-def test_configured_rate_limit_bypass_role_edges(monkeypatch):
-    monkeypatch.setattr(envsbot, "config", {"command_rate_limit_bypass_role": " admin "})
-    assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.ADMIN
-    assert envsbot._role_bypasses_rate_limit(envsbot.Role.OWNER) is True
-    assert envsbot._role_bypasses_rate_limit(envsbot.Role.ADMIN) is True
-    assert envsbot._role_bypasses_rate_limit(envsbot.Role.MODERATOR) is False
+def test_configured_rate_limit_bypass_role_edges():
+    cfg = {"command_rate_limit_bypass_role": " admin "}
+    assert bot_permissions.configured_rate_limit_bypass_role(cfg) is envsbot.Role.ADMIN
+    assert bot_permissions.role_bypasses_rate_limit(envsbot.Role.OWNER, cfg) is True
+    assert bot_permissions.role_bypasses_rate_limit(envsbot.Role.ADMIN, cfg) is True
+    assert bot_permissions.role_bypasses_rate_limit(envsbot.Role.MODERATOR, cfg) is False
 
-    monkeypatch.setattr(envsbot, "config", {"command_rate_limit_bypass_role": "off"})
-    assert envsbot._configured_rate_limit_bypass_role() is None
-    assert envsbot._role_bypasses_rate_limit(envsbot.Role.OWNER) is False
+    cfg = {"command_rate_limit_bypass_role": "off"}
+    assert bot_permissions.configured_rate_limit_bypass_role(cfg) is None
+    assert bot_permissions.role_bypasses_rate_limit(envsbot.Role.OWNER, cfg) is False
 
-    monkeypatch.setattr(envsbot, "config", {"command_rate_limit_bypass_role": "unknown"})
-    assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.MODERATOR
-
-    monkeypatch.setattr(envsbot, "config", {})
-    assert envsbot._configured_rate_limit_bypass_role() is envsbot.Role.MODERATOR
+    assert bot_permissions.configured_rate_limit_bypass_role(
+        {"command_rate_limit_bypass_role": "unknown"}
+    ) is envsbot.Role.MODERATOR
+    assert bot_permissions.configured_rate_limit_bypass_role({}) is envsbot.Role.MODERATOR
 
 
 def test_cli_check_mode_runs_only_preflight_and_preserves_exit_code(monkeypatch):

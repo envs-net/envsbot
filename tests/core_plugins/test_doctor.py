@@ -126,15 +126,6 @@ async def test_doctor_migrations_accept_sqlite_rows(bot):
     assert any("Migrations: 0002_row_version" in line for line in lines)
 
 
-def test_parse_doctor_args_supports_full_and_all_paging():
-    assert doctor._parse_doctor_args([]) == (False, [])
-    assert doctor._parse_doctor_args(["2"]) == (False, ["2"])
-    assert doctor._parse_doctor_args(["full"]) == (True, [])
-    assert doctor._parse_doctor_args(["details", "last"]) == (True, ["last"])
-    assert doctor._parse_doctor_args(["all"]) == (True, ["all"])
-    assert doctor._parse_doctor_args(["full", "all"]) == (True, ["all"])
-
-
 @pytest.mark.asyncio
 async def test_doctor_all_disables_paging_and_keeps_full_details(bot):
     message = MagicMock()

@@ -18,22 +18,14 @@ import slixmpp
 
 from bot.audit import AuditMixin
 from bot.connection import (
-    boundjid_domain as _boundjid_domain_impl,
     build_client_jid as _build_client_jid_impl,
-    configured_jid_domain as _configured_jid_domain_impl,
-    connect_kwargs as _connect_kwargs_impl,
-    connect_signature_parameters as _connect_signature_parameters_impl,
     connect_xmpp as _connect_xmpp_impl,
     get_configured_resource as _get_configured_resource_impl,
 )
 from bot.dispatch import CommandDispatchMixin
 from bot.lifecycle import LifecycleMixin
 from bot.messages import MessageMixin
-from bot.permissions import (
-    PermissionMixin,
-    configured_rate_limit_bypass_role as _configured_rate_limit_bypass_role_impl,
-    role_bypasses_rate_limit as _role_bypasses_rate_limit_impl,
-)
+from bot.permissions import PermissionMixin
 from bot.routing import MessageRoutingMixin
 from bot.room_state import room_state
 from database.manager import DatabaseManager
@@ -71,21 +63,6 @@ def check_permission(user_role: Role, cmd) -> bool:
 
 
 # -------------------------------------------------
-# RATE LIMIT HELPERS
-# -------------------------------------------------
-
-
-def _configured_rate_limit_bypass_role() -> Role | None:
-    """Return the configured role threshold for rate-limit bypasses."""
-    return _configured_rate_limit_bypass_role_impl(config)
-
-
-def _role_bypasses_rate_limit(role: Role) -> bool:
-    """Return whether *role* is privileged enough to bypass command limits."""
-    return _role_bypasses_rate_limit_impl(role, config)
-
-
-# -------------------------------------------------
 # XMPP CONNECTION HELPERS
 # -------------------------------------------------
 
@@ -98,26 +75,6 @@ def _get_configured_resource() -> str | None:
 def _build_client_jid(jid, resource=None) -> str:
     """Build the login JID, optionally replacing/adding a resource."""
     return _build_client_jid_impl(jid, resource)
-
-
-def _configured_jid_domain() -> str | None:
-    """Return the domain part of the configured bot JID if available."""
-    return _configured_jid_domain_impl(config)
-
-
-def _boundjid_domain(xmpp) -> str | None:
-    """Return a best-effort domain from Slixmpp's bound JID object."""
-    return _boundjid_domain_impl(xmpp)
-
-
-def _connect_signature_parameters(connect_method):
-    """Return inspectable connect() parameters, or an empty mapping."""
-    return _connect_signature_parameters_impl(connect_method)
-
-
-def _connect_kwargs(xmpp) -> dict:
-    """Build kwargs for xmpp.connect() without passing unsupported names."""
-    return _connect_kwargs_impl(xmpp, config)
 
 
 async def connect_xmpp(xmpp):

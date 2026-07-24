@@ -132,26 +132,6 @@ async def reset_poll_data(bot):
 
 # --- Test helpers/private functions ---
 
-def test__parse_create_args():
-    # With duration
-    d, q, opts, err = poll._parse_create_args("10m | Q? | A | B | C")
-    assert d == 600 and q == "Q?" and opts == ["A", "B", "C"] and err is None
-    # No duration
-    d, q, opts, err = poll._parse_create_args("Q? | A | B")
-    assert d is None and q == "Q?" and opts == ["A", "B"] and err is None
-    # Not enough fields
-    d, q, opts, err = poll._parse_create_args("one | onlyone", "!")
-    assert err
-    assert "Usage: !poll create" in err
-    # Timed but not enough
-    d, q, opts, err = poll._parse_create_args("5h | onlyQ | onl")
-    assert err
-    # Strip/cleanup: this triggers not enough non-empty fields; expect error
-    # (not q == "bad" etc.)
-    d, q, opts, err = poll._parse_create_args(" | | bad | | again")
-    assert err
-
-
 def test__normalize_poll_roundtrip():
     p = {"id": "5", "question": "Q", "options": ["A"], "votes": {"a": 1},
          "created_by": "x", "status": "open"}

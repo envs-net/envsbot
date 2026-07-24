@@ -204,19 +204,6 @@ def _write_config_text_atomic(path, text: str) -> None:
             os.close(dir_fd)
 
 
-def _update_config_file_assignment(display_key: str, value: object) -> None:
-    path = get_runtime_config_path()
-    if path.suffix.lower() == ".json":
-        raise ConfigError("config set/unset only supports config.py, not legacy config.json")
-    if not path.exists():
-        raise ConfigError(f"Missing config file: {path}")
-    source = path.read_text(encoding="utf-8")
-    updated = _replace_config_assignment(source, display_key, value)
-    # Ensure we never persist syntactically invalid Python.
-    ast.parse(updated, filename=str(path))
-    _write_config_text_atomic(path, updated)
-
-
 def _write_config_text_with_rollback(path, new_text: str, *, rollback_text: str | None = None) -> None:
     """Atomically write config text and restore the previous text on failure."""
     if rollback_text is None and path.exists():
@@ -413,13 +400,6 @@ def _format_diff_body(cfg: dict, args: Sequence[str], *, prefix: str = ",") -> s
         "",
         *entries,
     ])
-
-
-def _format_diff_lines(cfg: dict) -> list[str]:
-    entries = _config_diff_entries(cfg)
-    if not entries:
-        return ["No config differences from config_sample.py defaults."]
-    return entries
 
 
 @command(

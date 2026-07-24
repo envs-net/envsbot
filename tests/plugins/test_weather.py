@@ -258,8 +258,6 @@ async def test_weather_unicode_location(fake_bot, fake_msg, patch_plugins,
                                               "München Hauptbahnhof"})), \
             patch.object(weather.vcard, "vcard_field",
                          AsyncMock(return_value="München Hauptbahnhof")), \
-            patch.object(weather, "get_display_name",
-                         AsyncMock(return_value="Alice")), \
             patch.object(weather, "aiohttp") as fake_aiohttp:
         # Provide a unicode-aware weather service
         class DummyResp:
@@ -486,13 +484,7 @@ async def test_weather_command_muc_pm_missing_resource(fake_bot, monkeypatch):
     assert "determine your nickname" in output_of_reply(fake_bot.reply)
 
 
-def test_weather_target_and_location_helpers():
-    bare, nick = weather.get_pm_target(Mock(bare="alice@example.org"), "Alice")
-    assert (bare, nick) == ("alice@example.org", "Alice")
-    assert weather.get_pm_target("bob@example.org/device", "Bob") == (
-        "bob@example.org",
-        "Bob",
-    )
+def test_weather_location_helpers():
     assert weather._extract_location_fields(
         {"LOCALITY": "City", "REGION": "State", "CTRY": "DE"}
     ) == (
@@ -538,45 +530,6 @@ def test_weather_target_and_location_helpers():
         "Dresden Neustadt",
         "Dresden: Sunny 21°C",
     ) == "🌤️ Weather for Dresden Neustadt: Dresden: Sunny 21°C"
-
-
-@pytest.mark.asyncio
-async def test_get_display_name_uses_first_roomnick_and_fallbacks(caplog):
-    class Store:
-        def __init__(self, value=None, exc=None):
-            self.value = value
-            self.exc = exc
-
-        async def get(self, jid, key):
-            assert jid == "alice@example.org"
-            assert key == "roomnicks"
-            if self.exc:
-                raise self.exc
-            return self.value
-
-    class Users:
-        def __init__(self, store):
-            self.store = store
-
-        def plugin(self, name):
-            assert name == "users"
-            return self.store
-
-    bot = Mock()
-    bot.db.users = Users(Store({"room1": [], "room2": ["Alice", "Ali"]}))
-    assert await weather.get_display_name(bot, "alice@example.org") == "Alice"
-
-    bot.db.users = Users(Store({"room1": []}))
-    assert await weather.get_display_name(
-        bot,
-        "alice@example.org",
-    ) == "unknown"
-
-    bot.db.users = Users(Store(exc=RuntimeError("db down")))
-    assert await weather.get_display_name(
-        bot,
-        "alice@example.org",
-    ) == "unknown"
 
 
 @pytest.mark.asyncio

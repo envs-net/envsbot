@@ -25,7 +25,6 @@ from utils.plugin_manager_dependencies import (
     dependency_conflict,
     get_dependents,
     topological_sort,
-    validate_dependencies,
 )
 from utils.plugin_manager_diagnostics import (
     call_doctor_hook,
@@ -140,23 +139,6 @@ class PluginManager:
     def _check_dependency_conflict(self, name: str) -> tuple[bool, str]:
         """Check if unloading a plugin would break other plugins."""
         return dependency_conflict(self.meta, name)
-
-    def _validate_dependencies(
-        self,
-        name: str,
-        _visited=None,
-        _discovered=None,
-    ) -> tuple[bool, str]:
-        """Validate that all dependencies of a plugin are available."""
-        discovered = set(_discovered if _discovered is not None else self.discover())
-        return validate_dependencies(
-            name,
-            meta_by_plugin=self.meta,
-            discovered=discovered,
-            module_path=self._module_path,
-            import_module=importlib.import_module,
-            visited=_visited,
-        )
 
     # --------------------------------------------------
     # SOURCE HELPERS

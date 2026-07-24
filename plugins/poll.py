@@ -219,14 +219,6 @@ def _parse_create_args_full(
     return duration, question, options, multi_choice, max_choices, None
 
 
-def _parse_create_args(
-    raw: str, prefix: str = ","
-) -> tuple[int | None, str | None, list[str] | None, str | None]:
-    """Backward-compatible parser returning duration/question/options/error."""
-    duration, question, options, _multi_choice, _max_choices, error = _parse_create_args_full(raw, prefix)
-    return duration, question, options, error
-
-
 def _normalize_poll(room_jid: str, poll_id: str, poll: dict) -> dict:
     poll["id"] = int(poll.get("id", int(poll_id)))
     poll["room_jid"] = room_jid

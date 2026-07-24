@@ -393,8 +393,6 @@ def test_extract_urls_handles_inline_code_fences():
 
 
 def test_urlcheck_small_helpers_and_on_load(fake_bot):
-    assert urlcheck.strip_html_tags("<b>Hello</b> <i>World</i>") == "Hello World"
-    assert urlcheck.strip_html_tags(None) == ""
     assert urlcheck.is_youtube_url("https://youtube.com/watch?v=abcdefghijk")
     assert urlcheck.is_youtube_url("https://youtu.be/abcdefghijk")
     assert not urlcheck.is_youtube_url("https://example.org/watch?v=abcdefghijk")

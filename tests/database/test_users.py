@@ -123,15 +123,6 @@ async def test_load_from_db_decoding_error(plugin_store, dummy_um, caplog):
 
 
 @pytest.mark.asyncio
-async def test_ensure_cache_creates_structure(plugin_store, dummy_um):
-    jid = "abc@domain"
-    # No entry
-    plugin_store._ensure_cache(jid)
-    assert jid in dummy_um._runtime_cache
-    assert "plugins" in dummy_um._runtime_cache[jid]
-
-
-@pytest.mark.asyncio
 async def test_get_and_set(plugin_store, dummy_um):
     jid = "u@d"
     # Simulate blank load

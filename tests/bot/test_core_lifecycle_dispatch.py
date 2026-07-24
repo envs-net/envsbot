@@ -11,20 +11,6 @@ from utils.command import Role
 from utils.permissions import can_manage_room_role
 
 
-@pytest.mark.asyncio
-async def test_call_with_timeout_success_no_timeout_and_failure():
-    async def ok():
-        return "done"
-
-    async def boom():
-        raise RuntimeError("broken")
-
-    assert await lifecycle.call_with_timeout("ok", ok, timeout=1.0) == "done"
-    assert await lifecycle.call_with_timeout("no-timeout", ok, timeout=0) == "done"
-    with pytest.raises(RuntimeError, match="broken"):
-        await lifecycle.call_with_timeout("boom", boom, timeout=1.0)
-
-
 def test_can_manage_room_role_threshold():
     assert can_manage_room_role(Role.OWNER) is True
     assert can_manage_room_role(Role.ADMIN) is True

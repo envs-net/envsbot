@@ -733,21 +733,6 @@ async def build_doctor_lines(bot: Any, *, full: bool = False, sections: tuple[st
     return ["🩺 EnvsBot doctor", _overall_status(body), "", *body]
 
 
-def _parse_doctor_args(args: list[str]) -> tuple[bool, list[str]]:
-    """Return legacy ``(full, page_args)`` for doctor command arguments."""
-    normalized = [str(arg).strip().lower() for arg in args if str(arg).strip()]
-    full = False
-    page_args: list[str] = []
-    for arg in normalized:
-        if arg in {"full", "details"}:
-            full = True
-            continue
-        if arg == "all":
-            full = True
-        page_args.append(arg)
-    return full, page_args
-
-
 def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list[str]]:
     """Return ``(full, sections, page_args)`` for doctor command arguments.
 
