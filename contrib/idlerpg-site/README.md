@@ -30,6 +30,23 @@ IDLERPG = {
 }
 ```
 
+## Included views
+
+The standalone example includes a leaderboard, player profiles, recent events,
+quest information, the Hall of Fame, command help, and an SVG world map built
+directly from the public JSON export.
+
+The map mirrors the bundled envs.net presentation while remaining self-contained:
+
+- blue markers show online players
+- red markers show offline players
+- orange markers show active quest participants
+- grid-quest routes use numbered orange waypoints and a dashed route line
+- player labels avoid markers and other labels where possible
+- markers link directly to the matching public player profile
+
+No image asset or JavaScript map library is required.
+
 ## Environment variables
 
 The page works without environment variables when the JSON files are below the

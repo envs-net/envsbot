@@ -149,35 +149,116 @@ function idlerpg_point_coord($point, $axis) {
 }
 
 
-function idlerpg_map_label_position($x, $y, $name, $map_width, $map_height, &$occupied) {
-    $bucket_x = (int) floor(((float) $x) / 42);
-    $bucket_y = (int) floor(((float) $y) / 24);
-    $bucket = $bucket_x . ':' . $bucket_y;
-    $slot = (int) ($occupied[$bucket] ?? 0);
-    $occupied[$bucket] = $slot + 1;
+function idlerpg_map_label_width($name, $map_width) {
+    $margin = 6;
+    return min(max(24, strlen((string) $name) * 7), max(24, $map_width - ($margin * 2)));
+}
 
-    $offsets = [
-        [8, -8, 'start'],
-        [8, 16, 'start'],
-        [-8, -8, 'end'],
-        [-8, 16, 'end'],
-        [0, -20, 'middle'],
-        [0, 28, 'middle'],
+function idlerpg_map_label_rect($label_x, $label_y, $anchor, $label_width) {
+    $padding = 2;
+    if ($anchor === 'end') {
+        $left = $label_x - $label_width - $padding;
+        $right = $label_x + $padding;
+    } elseif ($anchor === 'middle') {
+        $left = $label_x - ($label_width / 2) - $padding;
+        $right = $label_x + ($label_width / 2) + $padding;
+    } else {
+        $left = $label_x - $padding;
+        $right = $label_x + $label_width + $padding;
+    }
+
+    return [
+        'left' => $left,
+        'top' => $label_y - 11,
+        'right' => $right,
+        'bottom' => $label_y + 3,
     ];
-    $choice = $offsets[$slot % count($offsets)];
-    $extra = intdiv($slot, count($offsets)) * 14;
-    $dy = $choice[1] < 0 ? $choice[1] - $extra : $choice[1] + $extra;
+}
 
-    $label_x = max(8, min((float) $map_width - 8, (float) $x + $choice[0]));
-    $label_y = max(14, min((float) $map_height - 8, (float) $y + $dy));
+function idlerpg_map_rects_overlap($a, $b) {
+    $gap = 2;
+    return !(
+        $a['right'] + $gap <= $b['left']
+        || $a['left'] >= $b['right'] + $gap
+        || $a['bottom'] + $gap <= $b['top']
+        || $a['top'] >= $b['bottom'] + $gap
+    );
+}
+
+function idlerpg_map_layout_collides($rect, $occupied_rects) {
+    foreach ($occupied_rects as $occupied) {
+        if (idlerpg_map_rects_overlap($rect, $occupied)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function idlerpg_map_clamp_label_layout($label_x, $label_y, $anchor, $label_width, $map_width, $map_height) {
+    $margin = 6;
+    if ($anchor === 'end') {
+        $label_x = max($margin + $label_width, min($map_width - $margin, $label_x));
+    } elseif ($anchor === 'middle') {
+        $half_width = $label_width / 2;
+        $label_x = max($margin + $half_width, min($map_width - $margin - $half_width, $label_x));
+    } else {
+        $label_x = max($margin, min($map_width - $margin - $label_width, $label_x));
+    }
+    $label_y = max(14, min($map_height - $margin, $label_y));
 
     return [
         'x' => $label_x,
         'y' => $label_y,
-        'anchor' => $choice[2],
-        'crowded' => $slot > 0,
-        'title' => $name . ' [' . (int) $x . ',' . (int) $y . ']',
+        'anchor' => $anchor,
+        'rect' => idlerpg_map_label_rect($label_x, $label_y, $anchor, $label_width),
     ];
+}
+
+function idlerpg_map_marker_label_layout($x, $y, $name, $map_width, $map_height, $occupied_rects = []) {
+    $label_gap = 10;
+    $label_width = idlerpg_map_label_width($name, $map_width);
+    $candidates = [
+        [$x + $label_gap, $y - 7, 'start'],
+        [$x + $label_gap, $y + 15, 'start'],
+        [$x - $label_gap, $y - 7, 'end'],
+        [$x - $label_gap, $y + 15, 'end'],
+        [$x, $y - 16, 'middle'],
+        [$x, $y + 24, 'middle'],
+        [$x + $label_gap, $y - 25, 'start'],
+        [$x - $label_gap, $y - 25, 'end'],
+        [$x + $label_gap, $y + 33, 'start'],
+        [$x - $label_gap, $y + 33, 'end'],
+    ];
+
+    for ($radius = 44; $radius <= 110; $radius += 18) {
+        $candidates[] = [$x + $label_gap, $y + $radius, 'start'];
+        $candidates[] = [$x - $label_gap, $y + $radius, 'end'];
+        $candidates[] = [$x + $label_gap, $y - $radius, 'start'];
+        $candidates[] = [$x - $label_gap, $y - $radius, 'end'];
+        $candidates[] = [$x, $y + $radius, 'middle'];
+        $candidates[] = [$x, $y - $radius, 'middle'];
+    }
+
+    $fallback = null;
+    foreach ($candidates as $candidate) {
+        [$label_x, $label_y, $anchor] = $candidate;
+        $layout = idlerpg_map_clamp_label_layout(
+            $label_x,
+            $label_y,
+            $anchor,
+            $label_width,
+            $map_width,
+            $map_height
+        );
+        if ($fallback === null) {
+            $fallback = $layout;
+        }
+        if (!idlerpg_map_layout_collides($layout['rect'], $occupied_rects)) {
+            return $layout;
+        }
+    }
+
+    return $fallback;
 }
 
 function idlerpg_export_files_exist($dir) {
@@ -289,6 +370,13 @@ function idlerpg_player_url($name) {
 
 function idlerpg_achievement_count($player) {
     return is_array($player['achievements'] ?? null) ? count($player['achievements']) : 0;
+}
+
+function idlerpg_player_status_badge($player) {
+    $online = idlerpg_player_online($player);
+    $class = $online ? 'status online' : 'status offline';
+    $label = $online ? 'online' : 'offline';
+    return '<span class="' . h($class) . '">' . h($label) . '</span>';
 }
 
 function idlerpg_player_created_at($player) {
@@ -450,19 +538,24 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 .stats strong { display: block; font-size: 1.4rem; }
 .events li { margin-bottom: .45rem; }
 .event-time, .event-kind { color: var(--muted); }
+.map-wrap { max-width: 760px; margin: 1rem 0 1.5rem; }
 .world-map { display: block; width: min(100%, 720px); height: auto; border: 1px solid var(--line); background: #f3edbd; }
 .map-label { font-style: italic; font-size: 16px; fill: #4b2d10; opacity: .88; }
 .map-small-label { font-size: 11px; fill: #4b2d10; opacity: .8; }
 .marker { cursor: pointer; }
 .marker text { font-size: 12px; fill: #111; paint-order: stroke; stroke: #f3edbd; stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
-.marker.crowded text { font-size: 10px; }
-.marker:hover text, .marker:focus text { font-weight: 700; }
+.world-map a:hover .marker circle, .world-map a:focus .marker circle { stroke-width: 2.4; }
+.world-map a:hover .marker text, .world-map a:focus .marker text { font-weight: 700; }
 .marker.online circle { fill: #2f80ff; }
 .marker.offline circle { fill: #b33; }
 .marker.quester circle { fill: #d99b00; }
 .marker circle { stroke: #111; stroke-width: 1.5; }
 .quest-point { fill: #d99b00; stroke: #111; stroke-width: 1.5; }
 .quest-line { fill: none; stroke: #d99b00; stroke-width: 2; stroke-dasharray: 6 5; }
+.status { display: inline-flex; align-items: center; gap: .45ch; white-space: nowrap; }
+.status::before { content: ''; width: .7em; height: .7em; border-radius: 999px; background: currentColor; }
+.status.online { color: #2f80ff; }
+.status.offline { color: #d65c5c; }
 </style>
 </head>
 <body>
@@ -542,7 +635,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                             <tr><th>Bosses defeated</th><td><?php echo h($profile_stats['bosses_defeated'] ?? 0); ?></td></tr>
                             <tr><th>Random battles won</th><td><?php echo h($profile_stats['battles_won'] ?? 0); ?></td></tr>
                             <tr><th>Quests completed</th><td><?php echo h($profile_stats['quests_completed'] ?? 0); ?></td></tr>
-                            <tr><th>Status</th><td><?php echo idlerpg_player_online($selected_profile) ? 'online' : 'offline'; ?></td></tr>
+                            <tr><th>Status</th><td><?php echo idlerpg_player_status_badge($selected_profile); ?></td></tr>
                         </tbody></table>
                     </section>
                     <h3>Recent player events</h3>
@@ -553,9 +646,9 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                     idlerpg_render_events($player_events, 8);
                     ?>
                 <?php endif; ?>
-                <table><thead><tr><th>#</th><th>Player</th><th>Class</th><th>Level</th><th>Next level</th><th>Achievements</th></tr></thead><tbody>
+                <table><thead><tr><th>#</th><th>Player</th><th>Class</th><th>Level</th><th>Next level</th><th>Achievements</th><th>Status</th></tr></thead><tbody>
                 <?php foreach ($players as $index => $player): $name = idlerpg_player_name($player); ?>
-                    <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td><td><?php echo h(idlerpg_achievement_count($player)); ?></td></tr>
+                    <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td><td><?php echo h(idlerpg_achievement_count($player)); ?></td><td><?php echo idlerpg_player_status_badge($player); ?></td></tr>
                 <?php endforeach; ?>
                 </tbody></table>
             <?php endif; ?>
@@ -611,35 +704,119 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                     Labels are staggered when players stand close together; hover a marker for exact details.
                 </p>
                 <?php if (count($map_players) > 0): ?>
-                    <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
-                        <defs><pattern id="noise" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/></pattern></defs>
-                        <rect x="0" y="0" width="<?php echo h($map_width); ?>" height="<?php echo h($map_height); ?>" fill="#f4edbd"/>
-                        <rect x="0" y="0" width="<?php echo h($map_width); ?>" height="<?php echo h($map_height); ?>" fill="url(#noise)" opacity=".45"/>
-                        <path d="M0,0 L145,0 C85,35 50,70 0,95 Z" fill="#8a4f12" opacity=".9"/>
-                        <path d="M0,345 C85,315 135,345 176,393 C110,415 62,462 0,500 Z" fill="#8a4f12" opacity=".85"/>
-                        <path d="M355,500 C415,430 455,395 500,370 L500,500 Z" fill="#8a4f12" opacity=".9"/>
-                        <path d="M270,45 C315,20 365,28 388,74 C362,116 315,136 270,115 C245,85 246,58 270,45 Z" fill="#a57937" opacity=".42"/>
-                        <path d="M292,230 C330,208 371,218 395,254 C365,285 316,293 282,265 C272,250 276,238 292,230 Z" fill="#7d4d1b" opacity=".55"/>
-                        <text class="map-label" x="27" y="36">Debmark</text><text class="map-label" x="286" y="42">Mountains of Qwok</text><text class="map-label" x="365" y="218">Velbragh</text><text class="map-label" x="270" y="390">Tower of Anh-Allor</text>
-                        <?php if ($has_quest_route): ?>
-                            <?php $route_points = []; foreach ($quest_route as $point) { $route_points[] = (int) idlerpg_point_coord($point, 'x') . ',' . (int) idlerpg_point_coord($point, 'y'); } ?>
-                            <polyline class="quest-line" points="<?php echo h(implode(' ', $route_points)); ?>"/>
-                            <?php foreach ($quest_route as $idx => $point): $qx = idlerpg_point_coord($point, 'x'); $qy = idlerpg_point_coord($point, 'y'); ?>
-                                <rect class="quest-point" x="<?php echo h($qx - 5); ?>" y="<?php echo h($qy - 5); ?>" width="10" height="10"/>
+                    <div class="map-wrap">
+                        <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
+                            <defs>
+                                <pattern id="idlerpgNoise" width="32" height="32" patternUnits="userSpaceOnUse">
+                                    <path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/>
+                                </pattern>
+                                <filter id="idlerpgRough">
+                                    <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="7"/>
+                                    <feDisplacementMap in="SourceGraphic" scale="2"/>
+                                </filter>
+                            </defs>
+
+                            <rect x="0" y="0" width="<?php echo h($map_width); ?>" height="<?php echo h($map_height); ?>" fill="#f4edbd"/>
+                            <rect x="0" y="0" width="<?php echo h($map_width); ?>" height="<?php echo h($map_height); ?>" fill="url(#idlerpgNoise)" opacity=".45"/>
+
+                            <path d="M0,0 L145,0 C85,35 50,70 0,95 Z" fill="#8a4f12" opacity=".9" filter="url(#idlerpgRough)"/>
+                            <path d="M0,345 C85,315 135,345 176,393 C110,415 62,462 0,500 Z" fill="#8a4f12" opacity=".85" filter="url(#idlerpgRough)"/>
+                            <path d="M355,500 C415,430 455,395 500,370 L500,500 Z" fill="#8a4f12" opacity=".9" filter="url(#idlerpgRough)"/>
+                            <path d="M270,45 C315,20 365,28 388,74 C362,116 315,136 270,115 C245,85 246,58 270,45 Z" fill="#a57937" opacity=".42" filter="url(#idlerpgRough)"/>
+                            <path d="M292,230 C330,208 371,218 395,254 C365,285 316,293 282,265 C272,250 276,238 292,230 Z" fill="#7d4d1b" opacity=".55" filter="url(#idlerpgRough)"/>
+                            <path d="M230,380 C270,332 318,350 348,403 C318,437 258,445 220,413 Z" fill="#7d4d1b" opacity=".62" filter="url(#idlerpgRough)"/>
+
+                            <text class="map-label" x="27" y="36" transform="rotate(-7 27 36)">Debmark</text>
+                            <text class="map-label" x="286" y="42" transform="rotate(-8 286 42)">Mountains of</text>
+                            <text class="map-label" x="300" y="64" transform="rotate(-8 300 64)">Qwok</text>
+                            <text class="map-label" x="382" y="93" transform="rotate(8 382 93)">The land of</text>
+                            <text class="map-label" x="399" y="118" transform="rotate(8 399 118)">Qwok</text>
+                            <text class="map-label" x="90" y="160" transform="rotate(-5 90 160)">Jow Boti</text>
+                            <text class="map-label" x="82" y="182" transform="rotate(-5 82 182)">Territory</text>
+                            <text class="map-label" x="365" y="218" transform="rotate(-3 365 218)">Velbragh</text>
+                            <text class="map-small-label" x="40" y="255" transform="rotate(-5 40 255)">Secret Passage</text>
+                            <text class="map-small-label" x="50" y="275" transform="rotate(-5 50 275)">to Aharah</text>
+                            <text class="map-label" x="4" y="374" transform="rotate(-5 4 374)">The great</text>
+                            <text class="map-label" x="3" y="397" transform="rotate(-5 3 397)">Shell</text>
+                            <text class="map-label" x="3" y="420" transform="rotate(-5 3 420)">mountains</text>
+                            <text class="map-label" x="270" y="390" transform="rotate(-5 270 390)">Tower of</text>
+                            <text class="map-label" x="270" y="415" transform="rotate(-5 270 415)">Anh-Allor</text>
+                            <text class="map-label" x="410" y="468" transform="rotate(-5 410 468)">Irnalveh</text>
+
+                            <?php if ($has_quest_route): ?>
+                                <?php
+                                $route_points = [];
+                                foreach ($quest_route as $point) {
+                                    $route_points[] = (int) idlerpg_point_coord($point, 'x') . ',' . (int) idlerpg_point_coord($point, 'y');
+                                }
+                                ?>
+                                <polyline class="quest-line" points="<?php echo h(implode(' ', $route_points)); ?>"/>
+                                <?php foreach ($quest_route as $idx => $point): ?>
+                                    <?php $qx = idlerpg_point_coord($point, 'x'); $qy = idlerpg_point_coord($point, 'y'); ?>
+                                    <g>
+                                        <title>Quest point Q<?php echo h($idx + 1); ?> [<?php echo h((int) $qx); ?>,<?php echo h((int) $qy); ?>]</title>
+                                        <rect class="quest-point" x="<?php echo h($qx - 5); ?>" y="<?php echo h($qy - 5); ?>" width="10" height="10"/>
+                                        <text x="<?php echo h($qx + 7); ?>" y="<?php echo h($qy - 7); ?>" class="map-small-label">Q<?php echo h($idx + 1); ?></text>
+                                    </g>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+
+                            <?php
+                            $visible_map_players = array_slice($map_players, 0, 120);
+                            $occupied_map_labels = [];
+                            foreach ($visible_map_players as $player) {
+                                $marker_x = max(6, min($map_width - 6, max(0, min($map_width, idlerpg_player_coord($player, 'x')))));
+                                $marker_y = max(6, min($map_height - 6, max(0, min($map_height, idlerpg_player_coord($player, 'y')))));
+                                $occupied_map_labels[] = [
+                                    'left' => $marker_x - 5,
+                                    'top' => $marker_y - 5,
+                                    'right' => $marker_x + 5,
+                                    'bottom' => $marker_y + 5,
+                                ];
+                            }
+                            ?>
+                            <?php foreach ($visible_map_players as $player): ?>
+                                <?php
+                                $name = idlerpg_player_name($player);
+                                $raw_x = max(0, min($map_width, idlerpg_player_coord($player, 'x')));
+                                $raw_y = max(0, min($map_height, idlerpg_player_coord($player, 'y')));
+                                $x = max(6, min($map_width - 6, $raw_x));
+                                $y = max(6, min($map_height - 6, $raw_y));
+                                $label = idlerpg_map_marker_label_layout(
+                                    $x,
+                                    $y,
+                                    $name,
+                                    $map_width,
+                                    $map_height,
+                                    $occupied_map_labels
+                                );
+                                $occupied_map_labels[] = $label['rect'];
+                                $on_quest = idlerpg_player_on_quest($player, $quest_player_lookup);
+                                $class = $on_quest
+                                    ? 'marker quester'
+                                    : (idlerpg_player_online($player) ? 'marker online' : 'marker offline');
+                                $marker_state = idlerpg_player_online($player) ? 'online' : 'offline';
+                                if ($on_quest) {
+                                    $marker_state .= ' · quest participant';
+                                }
+                                ?>
+                                <a href="<?php echo h(idlerpg_player_url($name)); ?>">
+                                    <g class="<?php echo h($class); ?>">
+                                        <title><?php echo h($name); ?> [<?php echo h((int) $raw_x); ?>,<?php echo h((int) $raw_y); ?>] · lv.<?php echo h(idlerpg_player_level($player)); ?> · <?php echo h($marker_state); ?></title>
+                                        <circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/>
+                                        <text x="<?php echo h($label['x']); ?>" y="<?php echo h($label['y']); ?>" text-anchor="<?php echo h($label['anchor']); ?>"><?php echo h($name); ?></text>
+                                    </g>
+                                </a>
                             <?php endforeach; ?>
-                        <?php endif; ?>
-                        <?php $occupied_labels = []; ?>
-                        <?php foreach (array_slice($map_players, 0, 120) as $player): $name = idlerpg_player_name($player); $x = max(0, min($map_width, idlerpg_player_coord($player, 'x'))); $y = max(0, min($map_height, idlerpg_player_coord($player, 'y'))); $label = idlerpg_map_label_position($x, $y, $name, $map_width, $map_height, $occupied_labels); $on_quest = idlerpg_player_on_quest($player, $quest_player_lookup); $class = $on_quest ? 'marker quester' : (idlerpg_player_online($player) ? 'marker online' : 'marker offline'); if ($label['crowded']) { $class .= ' crowded'; } $marker_state = idlerpg_player_online($player) ? 'online' : 'offline'; if ($on_quest) { $marker_state .= ' · quest participant'; } ?>
-                            <a href="<?php echo h(idlerpg_player_url($name)); ?>"><g class="<?php echo h($class); ?>"><title><?php echo h($label['title'] . ' · lv.' . idlerpg_player_level($player) . ' · ' . $marker_state); ?></title><circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/><text text-anchor="<?php echo h($label['anchor']); ?>" x="<?php echo h($label['x']); ?>" y="<?php echo h($label['y']); ?>"><?php echo h($name); ?></text></g></a>
-                        <?php endforeach; ?>
-                    </svg>
+                        </svg>
+                    </div>
                     <h3>Map positions</h3>
                     <table><thead><tr><th>Character</th><th>Position</th><th>Level</th><th>Status</th></tr></thead><tbody>
                     <?php foreach (array_slice($map_players, 0, 25) as $player): $name = idlerpg_player_name($player); ?>
-                        <tr><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td>[<?php echo h((int) idlerpg_player_coord($player, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($player, 'y')); ?>]</td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo idlerpg_player_online($player) ? 'online' : 'offline'; ?></td></tr>
+                        <tr><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td>[<?php echo h((int) idlerpg_player_coord($player, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($player, 'y')); ?>]</td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo idlerpg_player_status_badge($player); ?></td></tr>
                     <?php endforeach; ?>
                     </tbody></table>
-                <?php else: ?><p class="muted">No readable map data found.</p><?php endif; ?>
+                <?php else: ?><p class="muted">No readable map data found. The website needs <code>map.json</code> or <code>players.json</code> in a readable export directory.</p><?php endif; ?>
             <?php endif; ?>
 
             <?php if ($view === 'hof'): ?>
