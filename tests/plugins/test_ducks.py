@@ -176,6 +176,9 @@ async def test_duck_command_subcommands(monkeypatch):
     ducks.ACTIVE_DUCKS[room] = time0
     await ducks.duck_command(bot, "jid", "nick", ["trap"], msg, True)
     assert any("trap" in t[0].lower() for t in bot._replies)
+    ducks.ACTIVE_DUCKS[room] = time0
+    await ducks.duck_command(bot, "jid", "nick", ["bang"], msg, True)
+    assert any("trap" in t[0].lower() for t in bot._replies)
     await ducks.duck_command(bot, "jid", "nick", ["foobar"], msg, True)
     assert any("unknown" in t[0].lower() for t in bot._replies)
 
@@ -232,8 +235,16 @@ async def test_duck_command_stats_path(monkeypatch):
     assert any("could not determine" in t[0].lower() for t in bot._replies)
 
 
+def test_bang_is_registered_as_trap_alias():
+    assert ducks.trap_command._command_names == ["trap", "bang"]
+    assert ducks.trap_command._aliases == ["bang"]
+    registered = {name: command for name, command in ducks.trap_command.__commands__}
+    assert registered["bang"] is registered["trap"]
+    assert registered["bang"].handler is ducks.trap_command
+
+
 @pytest.mark.asyncio
-async def test_bef_and_trap_commands(monkeypatch):
+async def test_bef_trap_and_bang_commands(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
     room = msg.from_.bare
@@ -248,6 +259,9 @@ async def test_bef_and_trap_commands(monkeypatch):
     await ducks.bef_command(bot, "jid", "nick", [], msg, True)
     ducks.ACTIVE_DUCKS[room] = 1000.0
     await ducks.trap_command(bot, "jid", "nick", [], msg, True)
+    ducks.ACTIVE_DUCKS[room] = 1000.0
+    registered = {name: command for name, command in ducks.trap_command.__commands__}
+    await registered["bang"].handler(bot, "jid", "nick", [], msg, True)
     texts = [x[0].lower() for x in bot._replies]
     assert any("befriend" in t or "trap" in t for t in texts)
 

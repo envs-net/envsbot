@@ -72,6 +72,8 @@ async def fake_bot(monkeypatch):
         meta = {"foo": {"version": "1.0", "category": "test"}}
 
     class FakeBound:
+        @property
+        def bare(self): return "bot@domain"
         def __str__(self): return "bot@domain"
     bot = types.SimpleNamespace()
     bot.disconnected = await _awaitable(True)
@@ -131,6 +133,12 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     _admin.JOINED_ROOMS.clear()
     _admin.JOINED_ROOMS["room1"] = {"nick": "anon1"}
     _admin.JOINED_ROOMS["room2"] = {"nick": "anon2"}
+    fake_bot.client_roster = {
+        "bot@domain": {"subscription": "both"},
+        "room1": {"subscription": "both"},
+        "alice@example.org": {"subscription": "both"},
+        "removed@example.org": {"subscription": "remove"},
+    }
     # Patch psutil
     monkeypatch.setattr(_admin, "psutil", types.SimpleNamespace(
         Process=lambda x=None: types.SimpleNamespace(
@@ -151,6 +159,7 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     assert "Core:" in reply
     assert "Runtime:" in reply
     assert "XMPP:" in reply
+    assert "Rooms: 2 joined MUCs · 1 direct contact (1:1/DM)" in reply
     assert "Plugins:" in reply
     assert "Database:" in reply
     assert "Avatar: published" in reply
@@ -280,8 +289,8 @@ async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fak
     await _admin.bot_status(fake_bot, Sender(), "nick", ["full"], DummyMsg(), False)
     reply_lines = fake_bot._replies[-1][0]
     reply = "\n".join(reply_lines)
-    assert reply_lines.index("• Latest release: v1.4.0") == (
-        reply_lines.index("• Version: v1.3.0") + 1
+    assert reply_lines.index("├─ Latest release: v1.4.0") == (
+        reply_lines.index("├─ Version: v1.3.0") + 1
     )
     assert "Page count: 1" in reply
     assert "Page size: 1" in reply
@@ -369,7 +378,10 @@ def test_status_formatting_helpers_cover_edges(monkeypatch):
     assert _admin.human_time(24 * 3600 + 60) == "1d 1m"
     assert _admin.human_size(1024 ** 4) == "1.0 TiB"
     assert _admin._section("Title", ["one", "two"]) == [
-        "Title:", "• one", "• two", ""
+        "• Title:", "├─ one", "└─ two", ""
+    ]
+    assert _admin._section("Core", ["ready"]) == [
+        "⚙️ Core:", "└─ ready", ""
     ]
 
     monkeypatch.setattr(_admin.metadata, "version", lambda package: "9.9")
@@ -428,6 +440,58 @@ def test_presence_connection_and_room_snapshots(monkeypatch):
 
     monkeypatch.setattr(_admin, "JOINED_ROOMS", BrokenRooms())
     assert _admin._joined_rooms_snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_status_room_and_direct_contact_helpers(monkeypatch):
+    stored_rows = [("stored@conference.example.org", None, True)]
+
+    class Rooms:
+        async def list(self):
+            return stored_rows
+
+    bot = types.SimpleNamespace(
+        db=types.SimpleNamespace(rooms=Rooms()),
+        boundjid=types.SimpleNamespace(bare="bot@example.org"),
+        client_roster={
+            "bot@example.org": {"subscription": "both"},
+            "stored@conference.example.org": {"subscription": "both"},
+            "alice@example.org": {"subscription": "both"},
+            "removed@example.org": {"subscription": "remove"},
+        },
+    )
+
+    assert await _admin._stored_rooms_snapshot(bot) == tuple(stored_rows)
+    assert _admin._direct_contact_count(bot, stored_rows) == 1
+    assert _admin._xmpp_status_lines(bot, tuple(), stored_rows)[0] == (
+        "Rooms: 0 joined MUCs · 1 direct contact (1:1/DM)"
+    )
+    bot.client_roster["bob@example.org"] = {"subscription": "both"}
+    assert _admin._xmpp_status_lines(bot, (("joined@example.org", {}),), stored_rows)[0] == (
+        "Rooms: 1 joined MUC · 2 direct contacts (1:1/DM)"
+    )
+
+    monkeypatch.setattr(
+        _admin,
+        "direct_roster_contacts",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("broken")),
+    )
+    assert _admin._direct_contact_count(bot, stored_rows) is None
+    assert "unknown direct contacts" in _admin._xmpp_status_lines(
+        bot, tuple(), stored_rows
+    )[0]
+
+
+@pytest.mark.asyncio
+async def test_stored_rooms_snapshot_handles_missing_and_failed_manager():
+    assert await _admin._stored_rooms_snapshot(types.SimpleNamespace()) == ()
+
+    class BrokenRooms:
+        async def list(self):
+            raise RuntimeError("broken")
+
+    bot = types.SimpleNamespace(db=types.SimpleNamespace(rooms=BrokenRooms()))
+    assert await _admin._stored_rooms_snapshot(bot) == ()
 
 
 def test_command_plugin_and_task_status_helpers(monkeypatch):

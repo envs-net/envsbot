@@ -24,6 +24,7 @@ from pathlib import Path
 import psutil
 
 from bot.lifecycle import _restart_notification_paths
+from bot.room_state import direct_roster_contacts
 from core_plugins._core import JOINED_ROOMS
 from utils.command import COMMANDS, Role, command
 from utils.file_security import PRIVATE_FILE_MODE
@@ -37,7 +38,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "_admin",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Bot administration commands",
     "category": "core",
     "requires": ["_core"],
@@ -98,9 +99,26 @@ def human_size(size_bytes: int) -> str:
     return f"{size_bytes} B"
 
 
+_STATUS_SECTION_ICONS = {
+    "Core": "⚙️",
+    "Runtime": "🖥️",
+    "XMPP": "💬",
+    "Plugins": "🧩",
+    "Database": "🗄️",
+    "Rooms": "🏠",
+    "Loaded plugins": "📦",
+    "Background tasks": "⏱️",
+}
+
+
 def _section(title: str, lines: list[str]) -> list[str]:
-    """Format one status section."""
-    return [f"{title}:", *[f"• {line}" for line in lines], ""]
+    """Format one visually structured status section."""
+    icon = _STATUS_SECTION_ICONS.get(title, "•")
+    body = []
+    for index, line in enumerate(lines):
+        marker = "└─" if index == len(lines) - 1 else "├─"
+        body.append(f"{marker} {line}")
+    return [f"{icon} {title}:", *body, ""]
 
 
 def _package_version(package: str) -> str:
@@ -227,17 +245,52 @@ def _runtime_status_lines() -> list[str]:
     return lines
 
 
-def _xmpp_status_lines(bot, room_snapshot: tuple[tuple[str, dict], ...]) -> list[str]:
+async def _stored_rooms_snapshot(bot) -> tuple:
+    """Return stored room rows for status-only roster filtering."""
+    rooms_manager = getattr(getattr(bot, "db", None), "rooms", None)
+    list_rooms = getattr(rooms_manager, "list", None)
+    if not callable(list_rooms):
+        return tuple()
+    try:
+        return tuple(await list_rooms())
+    except Exception:
+        log.debug("[ADMIN] Could not load stored rooms for status", exc_info=True)
+        return tuple()
+
+
+def _direct_contact_count(bot, stored_rooms=()) -> int | None:
+    """Return the filtered 1:1 roster count, or None when unavailable."""
+    try:
+        return len(direct_roster_contacts(bot, stored_rooms))
+    except Exception:
+        log.debug("[ADMIN] Could not count direct roster contacts", exc_info=True)
+        return None
+
+
+def _xmpp_status_lines(
+    bot,
+    room_snapshot: tuple[tuple[str, dict], ...],
+    stored_rooms=(),
+) -> list[str]:
     """Return XMPP-related status lines."""
     joined_rooms = len(room_snapshot)
+    direct_contacts = _direct_contact_count(bot, stored_rooms)
+    muc_label = f"{joined_rooms} joined MUC{'s' if joined_rooms != 1 else ''}"
+    if direct_contacts is None:
+        direct_label = "unknown direct contacts (1:1/DM)"
+    else:
+        direct_label = (
+            f"{direct_contacts} direct "
+            f"contact{'s' if direct_contacts != 1 else ''} (1:1/DM)"
+        )
     occupants = sum(_room_occupant_count(room_data)
                     for _room, room_data in room_snapshot)
     avatar_hash = getattr(bot, "avatar_hash", None)
     vcard_path = Path(__file__).resolve().parent.parent / "vcard.py"
 
     return [
-        f"Joined rooms: {joined_rooms}",
-        f"Tracked occupants: {occupants}",
+        f"Rooms: {muc_label} · {direct_label}",
+        f"Occupants: {occupants} tracked",
         f"Avatar: {'published' if avatar_hash else 'missing'}",
         f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
     ]
@@ -425,11 +478,14 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     """Build the complete status reply."""
     set_bot_start_time(bot)
     room_snapshot = _joined_rooms_snapshot()
+    stored_rooms = await _stored_rooms_snapshot(bot)
 
     lines = ["🤖 EnvsBot Status", ""]
     lines.extend(_section("Core", _core_status_lines(bot)))
     lines.extend(_section("Runtime", _runtime_status_lines()))
-    lines.extend(_section("XMPP", _xmpp_status_lines(bot, room_snapshot)))
+    lines.extend(
+        _section("XMPP", _xmpp_status_lines(bot, room_snapshot, stored_rooms))
+    )
 
     plugin_lines = _plugin_status_lines(bot)
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
@@ -747,7 +803,7 @@ async def bot_checkupdate(bot, sender, nick, args, msg, is_room):
     "bot status",
     role=Role.ADMIN,
     aliases=["bot info", "status"],
-    short="Show bot, runtime, XMPP, plugin and database status.",
+    short="Show bot, runtime, XMPP rooms/direct contacts, plugin and database status.",
     usage="{prefix}bot status [full]",
     examples=[
         "{prefix}bot status",

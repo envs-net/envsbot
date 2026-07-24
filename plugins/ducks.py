@@ -14,7 +14,7 @@ Commands:
     {prefix}duck on|off|status        - Enable/disable ducks in this room
                                         (MUC DM only)
     {prefix}duck befriend             - Befriend the current duck
-    {prefix}duck trap                 - Trap the current duck
+    {prefix}duck trap|bang            - Trap the current duck
     {prefix}duck friends              - Show top duck friends
     {prefix}duck top                  - Alias for top duck friends
     {prefix}duck enemies              - Show top duck enemies
@@ -23,6 +23,7 @@ Commands:
 Aliases:
     {prefix}bef
     {prefix}trap
+    {prefix}bang
     {prefix}duckstats [jid|nickname]
 """
 
@@ -52,7 +53,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "ducks",
-    "version": "1.4.1",
+    "version": "1.4.2",
     "description": "Duck game for MUCs with room toggles and leaderboards",
     "category": "games",
     "requires": ["rooms", "_core"],
@@ -583,7 +584,7 @@ async def _subcommand(bot, msg, sub, args, room_jid):
         await _handle_duck_action(bot, msg, "befriended")
         return
 
-    if sub == "trap":
+    if sub in ("trap", "bang"):
         await _handle_duck_action(bot, msg, "trapped")
         return
 
@@ -640,7 +641,7 @@ async def _subcommand(bot, msg, sub, args, room_jid):
     "duck",
     role=Role.USER,
     short="Start or interact with the duck game.",
-    usage="{prefix}duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickname]>",
+    usage="{prefix}duck <on|off|status|befriend|trap|bang|friends|top|enemies|stats [jid|nickname]>",
     subcommands=[
         help_subcommand(
             "befriend",
@@ -654,7 +655,11 @@ async def _subcommand(bot, msg, sub, args, room_jid):
             "trap",
             "{prefix}duck trap",
             "Set a trap for the active duck.",
-            examples=[help_example("{prefix}duck trap", "Attempt to trap the current room duck.")],
+            aliases=("bang",),
+            examples=[
+                help_example("{prefix}duck trap", "Attempt to trap the current room duck."),
+                help_example("{prefix}duck bang", "Catch the current room duck with a bang."),
+            ],
             context="groupchat",
         ),
         help_subcommand(
@@ -750,7 +755,7 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
             msg,
             (
                 f"🦆 Usage: {config.get('prefix', ',')}duck "
-                "befriend|trap|friends|top|enemies|stats [jid|nickname]"
+                "befriend|trap|bang|friends|top|enemies|stats [jid|nickname]"
             ),
         )
         return
@@ -783,7 +788,8 @@ async def bef_command(bot, sender_jid, nick, args, msg, is_room):
     role=Role.USER,
     short="Set a trap in the duck game.",
     usage="{prefix}trap",
-    examples=["{prefix}trap"],
+    aliases=["bang"],
+    examples=["{prefix}trap", "{prefix}bang"],
     category="fun",
     context="any",
 )

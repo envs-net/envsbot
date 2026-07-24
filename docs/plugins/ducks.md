@@ -33,7 +33,7 @@ Start or interact with the duck game.
 Role: `user`<br>
 Context: `room / MUC PM; use rooms enable with <room_jid> from private chat`<br>
 Category: `fun`<br>
-Usage: `,duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickname]>`
+Usage: `,duck <on|off|status|befriend|trap|bang|friends|top|enemies|stats [jid|nickname]>`
 
 #### Subcommands
 
@@ -46,9 +46,11 @@ Usage: `,duck <on|off|status|befriend|trap|friends|top|enemies|stats [jid|nickna
 
 - `,duck trap`
   - Description: Set a trap for the active duck.
+  - Aliases: `,duck bang`
   - Context: `groupchat`
   - Examples:
     - `,duck trap` — Attempt to trap the current room duck.
+    - `,duck bang` — Catch the current room duck with a bang.
 
 - `,duck friends`
   - Description: List the room's most successful duck friends.
@@ -114,6 +116,9 @@ Context: `room, MUC PM or private chat`<br>
 Category: `fun`<br>
 Usage: `,trap`
 
+Aliases: `,bang`
+
 Examples:
 
 - `,trap` — Set a trap in the duck game.
+- `,bang` — Set a trap in the duck game.

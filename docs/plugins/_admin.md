@@ -62,7 +62,7 @@ Examples:
 
 ### `,bot status`
 
-Show bot, runtime, XMPP, plugin and database status.
+Show bot, runtime, XMPP rooms/direct contacts, plugin and database status.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
@@ -73,9 +73,9 @@ Aliases: `,bot info`, `,status`
 
 Examples:
 
-- `,bot status` — Show bot, runtime, XMPP, plugin and database status.
-- `,status` — Show bot, runtime, XMPP, plugin and database status.
-- `,bot status full` — Show bot, runtime, XMPP, plugin and database status.
+- `,bot status` — Show bot, runtime, XMPP rooms/direct contacts, plugin and database status.
+- `,status` — Show bot, runtime, XMPP rooms/direct contacts, plugin and database status.
+- `,bot status full` — Show bot, runtime, XMPP rooms/direct contacts, plugin and database status.
 
 ### `,bot version`
 
