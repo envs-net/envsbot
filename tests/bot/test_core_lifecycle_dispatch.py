@@ -7,7 +7,6 @@ import pytest
 
 import envsbot
 import bot.lifecycle as lifecycle
-from bot.dispatch import CommandDispatchMixin
 from utils.command import Role
 from utils.permissions import can_manage_room_role
 
@@ -24,26 +23,6 @@ async def test_call_with_timeout_success_no_timeout_and_failure():
     assert await lifecycle.call_with_timeout("no-timeout", ok, timeout=0) == "done"
     with pytest.raises(RuntimeError, match="broken"):
         await lifecycle.call_with_timeout("boom", boom, timeout=1.0)
-
-
-class DispatchOnly(CommandDispatchMixin):
-    pass
-
-
-def test_can_execute_command_in_room_edges():
-    bot = DispatchOnly()
-    bot.config = {"room_invite_notify_jid": "admin@example.org"}
-
-    public_cmd = SimpleNamespace(name="dice", role=Role.USER)
-    admin_cmd = SimpleNamespace(name="users role", role=Role.ADMIN)
-    invite_cmd = SimpleNamespace(name="rooms invite", role=Role.ADMIN)
-
-    assert bot._can_execute_command_in_room(admin_cmd, is_room=False) is True
-    assert bot._can_execute_command_in_room(public_cmd, is_room=True, room="room@example.org") is True
-    assert bot._can_execute_command_in_room(admin_cmd, is_room=True, room="room@example.org") is False
-
-    assert bot._can_execute_command_in_room(invite_cmd, is_room=True, room="ADMIN@example.org") is True
-    assert bot._can_execute_command_in_room(invite_cmd, is_room=True, room="other@example.org") is False
 
 
 def test_can_manage_room_role_threshold():

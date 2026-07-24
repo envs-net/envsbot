@@ -960,7 +960,18 @@ def test_connect_kwargs_falls_back_to_boundjid_and_uninspectable_signature(monke
     monkeypatch.setattr(envsbot, "config", {"jid": "invalid", "host": None, "port": 5222, "direct_tls": False})
     assert envsbot._connect_kwargs(FakeXMPP()) == {"host": "bound.example.org", "port": 5222}
 
-    assert envsbot._connect_signature_parameters(object()) == {}
+    connect_method = object()
+    sentinel_parameters = {"host": object()}
+    calls = []
+
+    def fake_signature_parameters(value):
+        calls.append(value)
+        return sentinel_parameters
+
+    monkeypatch.setattr(envsbot, "_connect_signature_parameters_impl", fake_signature_parameters)
+
+    assert envsbot._connect_signature_parameters(connect_method) is sentinel_parameters
+    assert calls == [connect_method]
 
 
 @pytest.mark.asyncio

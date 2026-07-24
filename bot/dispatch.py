@@ -111,28 +111,6 @@ class CommandDispatchMixin:
             log.warning("[BOT] Failed to parse resolved JID: %s", exc)
             return str(sender_jid), room
 
-    def _can_execute_command_in_room(self, cmd_obj: Any, is_room: bool, room: str | None = None) -> bool:
-        """Enforce the MUC direct-message restriction for privileged commands."""
-        if not is_room:
-            return True
-
-        required_role = getattr(cmd_obj, "role", Role.NONE)
-        if required_role > Role.MODERATOR:
-            return True
-
-        try:
-            from utils.permissions import configured_room_invite_admin_rooms
-
-            if (
-                getattr(cmd_obj, "name", "") == "rooms invite"
-                and str(room or "").lower() in configured_room_invite_admin_rooms(self.config)
-            ):
-                return True
-        except Exception:
-            log.debug("[BOT] Could not inspect room invite admin rooms", exc_info=True)
-
-        return False
-
     def _command_error_message(self, user_role: Role, cmd_name: str, error: Exception) -> str:
         """Preserve the existing public/internal error wording."""
         if user_role in (Role.OWNER, Role.ADMIN):
