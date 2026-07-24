@@ -273,73 +273,146 @@ function idlerpg_export_files_exist($dir) {
     return false;
 }
 
-function idlerpg_find_room_slug($base_dir) {
-    if (!is_dir($base_dir)) {
+function idlerpg_safe_room_slug($value) {
+    $value = trim((string) $value);
+    if ($value === '' || strlen($value) > 180) {
         return '';
     }
-    $entries = scandir($base_dir);
-    if (!is_array($entries)) {
-        return '';
+    return preg_match('/^[A-Za-z0-9._-]+$/', $value) === 1 ? $value : '';
+}
+
+function idlerpg_export_base_dirs() {
+    $dirs = [];
+    $env_dir = getenv('IDLERPG_DATA_DIR');
+    if ($env_dir !== false && trim($env_dir) !== '') {
+        $dirs[] = rtrim(trim($env_dir), '/');
     }
-    foreach ($entries as $entry) {
-        if ($entry === '.' || $entry === '..') {
+    $dirs[] = __DIR__ . '/data';
+    $dirs[] = __DIR__;
+    return array_values(array_unique($dirs));
+}
+
+function idlerpg_room_entry($slug, $dir, $summary = []) {
+    $slug = idlerpg_safe_room_slug($slug);
+    if ($slug === '' || !idlerpg_export_files_exist($dir)) {
+        return null;
+    }
+    $room_payload = idlerpg_load_json(rtrim($dir, '/') . '/room.json', []);
+    return [
+        'slug' => $slug,
+        'room' => (string) ($summary['room'] ?? $room_payload['room'] ?? $slug),
+        'dir' => rtrim($dir, '/'),
+        'players_total' => max(0, (int) ($summary['players_total'] ?? $room_payload['players_total'] ?? 0)),
+        'players_online' => max(0, (int) ($summary['players_online'] ?? $room_payload['players_online'] ?? 0)),
+    ];
+}
+
+function idlerpg_available_rooms() {
+    $rooms = [];
+    foreach (idlerpg_export_base_dirs() as $base_dir) {
+        if (!is_dir($base_dir)) {
             continue;
         }
-        $path = rtrim($base_dir, '/') . '/' . $entry;
-        if (is_dir($path) && idlerpg_export_files_exist($path)) {
-            return $entry;
+
+        $index = idlerpg_load_json(rtrim($base_dir, '/') . '/index.json', ['rooms' => []]);
+        $summaries = is_array($index['rooms'] ?? null) ? $index['rooms'] : [];
+        foreach ($summaries as $summary) {
+            if (!is_array($summary)) {
+                continue;
+            }
+            $slug = idlerpg_safe_room_slug($summary['slug'] ?? '');
+            if ($slug === '') {
+                continue;
+            }
+            $entry = idlerpg_room_entry($slug, rtrim($base_dir, '/') . '/' . $slug, $summary);
+            if ($entry !== null && !isset($rooms[$slug])) {
+                $rooms[$slug] = $entry;
+            }
+        }
+
+        $entries = scandir($base_dir);
+        if (is_array($entries)) {
+            foreach ($entries as $entry_name) {
+                $slug = idlerpg_safe_room_slug($entry_name);
+                if ($slug === '' || isset($rooms[$slug])) {
+                    continue;
+                }
+                $entry = idlerpg_room_entry($slug, rtrim($base_dir, '/') . '/' . $slug);
+                if ($entry !== null) {
+                    $rooms[$slug] = $entry;
+                }
+            }
+        }
+
+        if (idlerpg_export_files_exist($base_dir)) {
+            $room_payload = idlerpg_load_json(rtrim($base_dir, '/') . '/room.json', []);
+            $slug = idlerpg_safe_room_slug($room_payload['slug'] ?? basename($base_dir));
+            if ($slug === '') {
+                $slug = IDLERPG_DEFAULT_ROOM_SLUG;
+            }
+            if (!isset($rooms[$slug])) {
+                $entry = idlerpg_room_entry($slug, $base_dir);
+                if ($entry !== null) {
+                    $rooms[$slug] = $entry;
+                }
+            }
         }
     }
-    return '';
+
+    uasort($rooms, function ($a, $b) {
+        return strcasecmp((string) ($a['room'] ?? ''), (string) ($b['room'] ?? ''));
+    });
+    return $rooms;
 }
 
-function idlerpg_room_slug() {
-    $env_slug = getenv('IDLERPG_ROOM_SLUG');
-    if ($env_slug !== false && trim($env_slug) !== '') {
-        return trim($env_slug);
+function idlerpg_room_slug($rooms = null) {
+    $rooms = is_array($rooms) ? $rooms : idlerpg_available_rooms();
+    $requested = idlerpg_safe_room_slug($_GET['room'] ?? '');
+    if ($requested !== '' && isset($rooms[$requested])) {
+        return $requested;
     }
 
-    $env_dir = getenv('IDLERPG_DATA_DIR');
-    if ($env_dir !== false && trim($env_dir) !== '') {
-        $slug = idlerpg_find_room_slug(rtrim(trim($env_dir), '/'));
-        if ($slug !== '') {
-            return $slug;
-        }
+    $env_slug = idlerpg_safe_room_slug(getenv('IDLERPG_ROOM_SLUG') ?: '');
+    if ($env_slug !== '' && (count($rooms) === 0 || isset($rooms[$env_slug]))) {
+        return $env_slug;
     }
 
-    $local_slug = idlerpg_find_room_slug(__DIR__ . '/data');
-    return $local_slug !== '' ? $local_slug : IDLERPG_DEFAULT_ROOM_SLUG;
+    if (count($rooms) > 0) {
+        return (string) array_key_first($rooms);
+    }
+    return IDLERPG_DEFAULT_ROOM_SLUG;
 }
 
-function idlerpg_candidate_dirs() {
-    $slug = idlerpg_room_slug();
+function idlerpg_candidate_dirs($slug = null, $rooms = null) {
+    $rooms = is_array($rooms) ? $rooms : idlerpg_available_rooms();
+    $slug = idlerpg_safe_room_slug($slug ?? idlerpg_room_slug($rooms));
     $candidates = [];
 
-    $env_dir = getenv('IDLERPG_DATA_DIR');
-    if ($env_dir !== false && trim($env_dir) !== '') {
-        $env_dir = rtrim(trim($env_dir), '/');
-        $candidates[] = $env_dir;
-        $candidates[] = $env_dir . '/' . $slug;
+    if ($slug !== '' && isset($rooms[$slug]['dir'])) {
+        $candidates[] = $rooms[$slug]['dir'];
     }
-
-    $candidates[] = __DIR__ . '/data/' . $slug;
-    $candidates[] = __DIR__ . '/data';
-    $candidates[] = __DIR__;
-
+    foreach (idlerpg_export_base_dirs() as $base_dir) {
+        if ($slug !== '') {
+            $candidates[] = rtrim($base_dir, '/') . '/' . $slug;
+        }
+        $candidates[] = rtrim($base_dir, '/');
+    }
     return array_values(array_unique($candidates));
 }
 
-function idlerpg_data_dir() {
-    foreach (idlerpg_candidate_dirs() as $candidate) {
+function idlerpg_data_dir($slug = null, $rooms = null) {
+    foreach (idlerpg_candidate_dirs($slug, $rooms) as $candidate) {
         if (idlerpg_export_files_exist($candidate)) {
             return $candidate;
         }
     }
-    return __DIR__ . '/data/' . idlerpg_room_slug();
+    $slug = idlerpg_safe_room_slug($slug ?? idlerpg_room_slug($rooms));
+    return __DIR__ . '/data/' . ($slug !== '' ? $slug : IDLERPG_DEFAULT_ROOM_SLUG);
 }
 
-function idlerpg_data_file($filename) {
-    return rtrim(idlerpg_data_dir(), '/') . '/' . ltrim($filename, '/');
+function idlerpg_data_file($filename, $data_dir = null) {
+    $data_dir = $data_dir ?? idlerpg_data_dir();
+    return rtrim($data_dir, '/') . '/' . ltrim($filename, '/');
 }
 
 function idlerpg_sort_players($players) {
@@ -354,18 +427,90 @@ function idlerpg_sort_players($players) {
 }
 
 function idlerpg_current_view() {
-    $allowed = ['home', 'players', 'map', 'quest', 'events', 'hof', 'commands'];
+    $allowed = ['home', 'players', 'achievements', 'map', 'quest', 'events', 'hof', 'rules', 'commands'];
     $view = strtolower(trim((string) ($_GET['view'] ?? 'home')));
     return in_array($view, $allowed, true) ? $view : 'home';
 }
 
 function idlerpg_view_url($view, $extra = []) {
-    $params = array_merge(['view' => $view], $extra);
+    global $selected_room_slug;
+    $params = ['view' => $view];
+    if (!empty($selected_room_slug)) {
+        $params['room'] = $selected_room_slug;
+    }
+    $params = array_merge($params, $extra);
+    foreach ($params as $key => $value) {
+        if ($value === null || $value === '') {
+            unset($params[$key]);
+        }
+    }
     return '?' . http_build_query($params);
 }
 
 function idlerpg_player_url($name) {
     return idlerpg_view_url('players', ['character' => $name]);
+}
+
+function idlerpg_bool_label($value) {
+    return $value ? 'enabled' : 'disabled';
+}
+
+function idlerpg_human_key($key) {
+    return ucwords(trim(str_replace(['_', '-'], ' ', (string) $key)));
+}
+
+function idlerpg_rule_value($key, $value) {
+    if (is_bool($value)) {
+        return idlerpg_bool_label($value);
+    }
+    if ($value === null || $value === '') {
+        return 'not set';
+    }
+    if (is_array($value)) {
+        return implode(', ', array_map('strval', $value));
+    }
+    if (str_ends_with((string) $key, '_days')) {
+        return max(0, (int) $value) . ' days';
+    }
+    if (str_ends_with((string) $key, '_seconds') || str_contains((string) $key, '_duration') || str_ends_with((string) $key, '_interval')) {
+        return idlerpg_ttl((int) $value);
+    }
+    if ((str_contains((string) $key, 'chance') || str_contains((string) $key, 'percent')) && is_numeric($value)) {
+        $number = (float) $value;
+        if ($number >= 0 && $number <= 1) {
+            return rtrim(rtrim(number_format($number * 100, 2), '0'), '.') . '%';
+        }
+        return rtrim(rtrim(number_format($number, 2), '0'), '.') . '%';
+    }
+    if (is_float($value)) {
+        return rtrim(rtrim(number_format($value, 4), '0'), '.');
+    }
+    return (string) $value;
+}
+
+function idlerpg_paginate($items, $page, $per_page) {
+    $per_page = max(1, (int) $per_page);
+    $total = count($items);
+    $pages = max(1, (int) ceil($total / $per_page));
+    $page = max(1, min($pages, (int) $page));
+    return [
+        'items' => array_slice($items, ($page - 1) * $per_page, $per_page),
+        'page' => $page,
+        'pages' => $pages,
+        'total' => $total,
+    ];
+}
+
+function idlerpg_render_pagination($view, $pagination, $extra = []) {
+    if (($pagination['pages'] ?? 1) <= 1) {
+        return;
+    }
+    echo '<nav class="pagination" aria-label="Pagination">';
+    for ($page = 1; $page <= $pagination['pages']; $page++) {
+        $class = $page === $pagination['page'] ? 'active' : '';
+        echo '<a class="' . h($class) . '" href="' . h(idlerpg_view_url($view, array_merge($extra, ['page' => $page]))) . '">' . h($page) . '</a>';
+    }
+    echo '</nav>';
 }
 
 function idlerpg_achievement_count($player) {
@@ -443,30 +588,138 @@ function idlerpg_render_events($events, $limit = 10) {
     echo '</ol>';
 }
 
-$data_dir = idlerpg_data_dir();
-$leaderboard_payload = idlerpg_load_json(idlerpg_data_file('leaderboard.json'), ['players' => []]);
-$players_payload = idlerpg_load_json(idlerpg_data_file('players.json'), ['players' => []]);
-$map_payload = idlerpg_load_json(idlerpg_data_file('map.json'), ['players' => [], 'width' => 500, 'height' => 500]);
-$events_payload = idlerpg_load_json(idlerpg_data_file('events.json'), ['events' => []]);
-$hof_payload = idlerpg_load_json(idlerpg_data_file('hall_of_fame.json'), ['seasons' => []]);
 
-$leaderboard = is_array($leaderboard_payload['players'] ?? null) ? $leaderboard_payload['players'] : [];
-$players = is_array($players_payload['players'] ?? null) ? $players_payload['players'] : $leaderboard;
+function idlerpg_player_achievement_keys($player) {
+    $keys = [];
+    $achievements = is_array($player['achievements'] ?? null) ? $player['achievements'] : [];
+    foreach ($achievements as $achievement) {
+        $key = is_array($achievement) ? (string) ($achievement['key'] ?? '') : (string) $achievement;
+        if ($key !== '') {
+            $keys[$key] = true;
+        }
+    }
+    return $keys;
+}
+
+function idlerpg_filter_players($players, $query, $status) {
+    $query = strtolower(trim((string) $query));
+    $status = strtolower(trim((string) $status));
+    return array_values(array_filter($players, function ($player) use ($query, $status) {
+        if ($status === 'online' && !idlerpg_player_online($player)) {
+            return false;
+        }
+        if ($status === 'offline' && idlerpg_player_online($player)) {
+            return false;
+        }
+        if ($query === '') {
+            return true;
+        }
+        $haystack = implode(' ', [
+            idlerpg_player_name($player),
+            idlerpg_player_class($player),
+            (string) ($player['title'] ?? ''),
+            (string) ($player['alignment'] ?? ''),
+            (string) ($player['region'] ?? ''),
+        ]);
+        return str_contains(strtolower($haystack), $query);
+    }));
+}
+
+function idlerpg_filter_events($events, $query, $kind, $player) {
+    $query = strtolower(trim((string) $query));
+    $kind = strtolower(trim((string) $kind));
+    $player = strtolower(trim((string) $player));
+    return array_values(array_filter($events, function ($event) use ($query, $kind, $player) {
+        $event_kind = strtolower((string) ($event['kind'] ?? 'event'));
+        if ($kind !== '' && $kind !== 'all' && $event_kind !== $kind) {
+            return false;
+        }
+        if ($player !== '' && !idlerpg_event_matches_player($event, $player)) {
+            return false;
+        }
+        if ($query === '') {
+            return true;
+        }
+        $players = is_array($event['players'] ?? null) ? implode(' ', $event['players']) : '';
+        return str_contains(strtolower($event_kind . ' ' . (string) ($event['text'] ?? '') . ' ' . $players), $query);
+    }));
+}
+
+function idlerpg_event_kinds($events) {
+    $kinds = [];
+    foreach ($events as $event) {
+        $kind = strtolower(trim((string) ($event['kind'] ?? 'event')));
+        if ($kind !== '') {
+            $kinds[$kind] = true;
+        }
+    }
+    $values = array_keys($kinds);
+    sort($values, SORT_NATURAL | SORT_FLAG_CASE);
+    return $values;
+}
+
+function idlerpg_achievement_earners($players, $key) {
+    $earners = [];
+    foreach ($players as $player) {
+        if (isset(idlerpg_player_achievement_keys($player)[$key])) {
+            $earners[] = idlerpg_player_name($player);
+        }
+    }
+    natcasesort($earners);
+    return array_values($earners);
+}
+
+function idlerpg_percent($part, $total) {
+    if ((int) $total <= 0) {
+        return '0%';
+    }
+    return rtrim(rtrim(number_format(((int) $part / (int) $total) * 100, 1), '0'), '.') . '%';
+}
+
+$available_rooms = idlerpg_available_rooms();
+$selected_room_slug = idlerpg_room_slug($available_rooms);
+$data_dir = idlerpg_data_dir($selected_room_slug, $available_rooms);
+$room_payload = idlerpg_load_json(idlerpg_data_file('room.json', $data_dir), []);
+$leaderboard_payload = idlerpg_load_json(idlerpg_data_file('leaderboard.json', $data_dir), ['players' => []]);
+$players_payload = idlerpg_load_json(idlerpg_data_file('players.json', $data_dir), ['players' => []]);
+$map_payload = idlerpg_load_json(idlerpg_data_file('map.json', $data_dir), ['players' => [], 'width' => 500, 'height' => 500]);
+$events_payload = idlerpg_load_json(idlerpg_data_file('events.json', $data_dir), ['events' => []]);
+$hof_payload = idlerpg_load_json(idlerpg_data_file('hall_of_fame.json', $data_dir), ['seasons' => []]);
+$achievements_payload = idlerpg_load_json(idlerpg_data_file('achievements.json', $data_dir), ['achievements' => []]);
+
+$leaderboard = is_array($leaderboard_payload['players'] ?? null)
+    ? $leaderboard_payload['players']
+    : (is_array($room_payload['leaderboard'] ?? null) ? $room_payload['leaderboard'] : []);
+$players = is_array($players_payload['players'] ?? null)
+    ? $players_payload['players']
+    : (is_array($room_payload['players'] ?? null) ? $room_payload['players'] : $leaderboard);
 $players = idlerpg_sort_players($players);
 if (count($leaderboard) === 0 && count($players) > 0) {
     $leaderboard = $players;
 }
-$map_players = is_array($map_payload['players'] ?? null) ? $map_payload['players'] : $players;
+$map_players = is_array($map_payload['players'] ?? null)
+    ? $map_payload['players']
+    : (is_array($room_payload['players'] ?? null) ? $room_payload['players'] : $players);
 if (count($map_players) === 0 && count($players) > 0) {
     $map_players = $players;
 }
-$events = is_array($events_payload['events'] ?? null) ? $events_payload['events'] : [];
+$events = is_array($events_payload['events'] ?? null)
+    ? $events_payload['events']
+    : (is_array($room_payload['events'] ?? null) ? $room_payload['events'] : []);
 usort($events, function ($a, $b) {
     return ((int) ($b['ts'] ?? 0)) <=> ((int) ($a['ts'] ?? 0));
 });
-$seasons = is_array($hof_payload['seasons'] ?? null) ? $hof_payload['seasons'] : [];
-$room = $leaderboard_payload['room'] ?? $players_payload['room'] ?? $map_payload['room'] ?? '';
-$updated = $leaderboard_payload['generated_at'] ?? $players_payload['generated_at'] ?? $map_payload['generated_at'] ?? null;
+$seasons = is_array($hof_payload['seasons'] ?? null)
+    ? $hof_payload['seasons']
+    : (is_array($room_payload['hall_of_fame'] ?? null) ? $room_payload['hall_of_fame'] : []);
+$achievement_catalog = is_array($achievements_payload['achievements'] ?? null)
+    ? $achievements_payload['achievements']
+    : (is_array($room_payload['achievement_catalog'] ?? null) ? $room_payload['achievement_catalog'] : []);
+$rules = is_array($room_payload['rules'] ?? null) ? $room_payload['rules'] : [];
+$season = is_array($room_payload['season'] ?? null) ? $room_payload['season'] : [];
+$room = $room_payload['room'] ?? $leaderboard_payload['room'] ?? $players_payload['room'] ?? $map_payload['room'] ?? '';
+$updated = $room_payload['generated_at'] ?? $leaderboard_payload['generated_at'] ?? $players_payload['generated_at'] ?? $map_payload['generated_at'] ?? null;
+
 $selected_character = trim((string) ($_GET['character'] ?? ''));
 $selected_profile = null;
 foreach ($players as $player) {
@@ -477,7 +730,9 @@ foreach ($players as $player) {
 }
 $view = idlerpg_current_view();
 $render_map = false;
-$quest = is_array($map_payload['quest'] ?? null) ? $map_payload['quest'] : null;
+$quest = is_array($map_payload['quest'] ?? null)
+    ? $map_payload['quest']
+    : (is_array($room_payload['quest'] ?? null) ? $room_payload['quest'] : null);
 $active_quest_type = '';
 if ($quest) {
     $active_quest_type = strtolower((string) ($quest['type'] ?? ''));
@@ -488,12 +743,42 @@ if ($quest) {
 $quest_route = $quest && is_array($quest['route'] ?? null) ? $quest['route'] : [];
 $has_quest_route = count($quest_route) > 0;
 $quest_player_lookup = idlerpg_quest_player_lookup($quest);
-$map_width = max(1, (int) ($map_payload['width'] ?? $map_payload['map_x'] ?? 500));
-$map_height = max(1, (int) ($map_payload['height'] ?? $map_payload['map_y'] ?? 500));
+$room_map = is_array($room_payload['map'] ?? null) ? $room_payload['map'] : [];
+$map_width = max(1, (int) ($map_payload['width'] ?? $map_payload['map_x'] ?? $room_map['width'] ?? 500));
+$map_height = max(1, (int) ($map_payload['height'] ?? $map_payload['map_y'] ?? $room_map['height'] ?? 500));
 $online_count = 0;
 foreach ($players as $player) {
     if (idlerpg_player_online($player)) {
         $online_count++;
+    }
+}
+
+$player_query = trim((string) ($_GET['q'] ?? ''));
+$player_status = strtolower(trim((string) ($_GET['status'] ?? 'all')));
+if (!in_array($player_status, ['all', 'online', 'offline'], true)) {
+    $player_status = 'all';
+}
+$filtered_players = idlerpg_filter_players($players, $player_query, $player_status);
+$player_pagination = idlerpg_paginate($filtered_players, (int) ($_GET['page'] ?? 1), 40);
+
+$event_query = trim((string) ($_GET['q'] ?? ''));
+$event_kind = strtolower(trim((string) ($_GET['kind'] ?? 'all')));
+$event_player = trim((string) ($_GET['player'] ?? ''));
+$event_kinds = idlerpg_event_kinds($events);
+$filtered_events = idlerpg_filter_events($events, $event_query, $event_kind, $event_player);
+$event_pagination = idlerpg_paginate($filtered_events, (int) ($_GET['page'] ?? 1), 30);
+
+$current_season_ends_at = max(0, (int) ($season['ends_at'] ?? 0));
+$current_season_started_at = max(0, (int) ($season['started_at'] ?? 0));
+$current_season_remaining = $current_season_ends_at > 0 ? max(0, $current_season_ends_at - time()) : 0;
+$achievement_unlocks = [];
+foreach ($achievement_catalog as $achievement) {
+    if (!is_array($achievement)) {
+        continue;
+    }
+    $key = (string) ($achievement['key'] ?? '');
+    if ($key !== '') {
+        $achievement_unlocks[$key] = idlerpg_achievement_earners($players, $key);
     }
 }
 ?>
@@ -502,16 +787,20 @@ foreach ($players as $player) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IdleRPG</title>
+<title>IdleRPG<?php if ($room !== ''): ?> · <?php echo h($room); ?><?php endif; ?></title>
 <style>
 :root {
     color-scheme: dark;
     --bg: #10151a;
+    --panel: #151c23;
     --fg: #f4f4f0;
     --muted: #9ca3af;
     --line: #38414a;
     --link: #00c2b8;
     --active: #2563eb;
+    --good: #49c27b;
+    --warn: #e0a82e;
+    --bad: #d65c5c;
 }
 * { box-sizing: border-box; }
 body {
@@ -521,23 +810,59 @@ body {
     font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 a { color: var(--link); }
-.container { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
-.header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+a:hover, a:focus { text-decoration-thickness: 2px; }
+.container { max-width: 1280px; margin: 0 auto; padding: 1.25rem; }
+.header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.header h1 { margin-bottom: .25rem; }
+.header-tools { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; }
 .muted { color: var(--muted); }
-.nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 1.5rem; }
+.nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 1.25rem; }
 .nav a { border: 1px solid var(--line); padding: .35rem .7rem; text-decoration: none; }
 .nav a:hover, .nav a:focus { background: rgba(0, 194, 184, .18); outline: none; }
 .nav a.active { background: var(--active); border-color: var(--active); color: white; }
-.grid { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 2rem; align-items: start; }
-@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
-.card { border-left: 4px solid var(--line); padding: .5rem 0 .5rem 1rem; margin-bottom: 1rem; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 2rem; align-items: start; }
+@media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+.card { border-left: 4px solid var(--line); padding: .65rem 0 .65rem 1rem; margin-bottom: 1rem; }
+.panel { border: 1px solid var(--line); background: var(--panel); padding: 1rem; margin: 1rem 0; }
+.panel > :first-child { margin-top: 0; }
+.panel > :last-child { margin-bottom: 0; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0 2rem; }
-th, td { border-bottom: 1px solid var(--line); padding: .35rem .5rem .35rem 0; text-align: left; vertical-align: top; }
-code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
-.stats { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
-.stats strong { display: block; font-size: 1.4rem; }
+th, td { border-bottom: 1px solid var(--line); padding: .42rem .55rem .42rem 0; text-align: left; vertical-align: top; }
+thead th { color: #dce3ea; }
+code { background: rgba(255,255,255,.08); padding: .05rem .3rem; overflow-wrap: anywhere; }
+.stats { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+.stats strong { display: block; font-size: 1.35rem; }
 .events li { margin-bottom: .45rem; }
 .event-time, .event-kind { color: var(--muted); }
+.form-row { display: flex; flex-wrap: wrap; gap: .65rem; align-items: end; margin: .75rem 0 1.25rem; }
+.form-row label { display: grid; gap: .25rem; color: var(--muted); }
+input, select, button {
+    font: inherit;
+    color: var(--fg);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: .42rem .55rem;
+}
+button { cursor: pointer; }
+button:hover, button:focus { border-color: var(--link); }
+.pagination { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 2rem; }
+.pagination a { min-width: 2rem; text-align: center; border: 1px solid var(--line); padding: .25rem .45rem; text-decoration: none; }
+.pagination a.active { background: var(--active); border-color: var(--active); color: white; }
+.badges { display: flex; flex-wrap: wrap; gap: .45rem; margin: .75rem 0; }
+.badge { display: inline-block; border: 1px solid var(--line); padding: .2rem .45rem; }
+.badge.good { border-color: var(--good); color: var(--good); }
+.badge.warn { border-color: var(--warn); color: var(--warn); }
+.achievement-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+.achievement { border: 1px solid var(--line); padding: .85rem; background: var(--panel); }
+.achievement h3 { margin: 0 0 .35rem; }
+.achievement .progress { color: var(--muted); font-size: .92rem; }
+.details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+.compact-list { margin: .4rem 0; padding-left: 1.25rem; }
+.rule-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr)); gap: 1rem; }
+.rule-group { border: 1px solid var(--line); padding: .75rem; background: var(--panel); }
+.rule-group h3 { margin-top: 0; }
+details.season { border: 1px solid var(--line); margin: .75rem 0; padding: .65rem .8rem; background: var(--panel); }
+details.season summary { cursor: pointer; font-weight: 700; }
 .map-wrap { max-width: 760px; margin: 1rem 0 1.5rem; }
 .world-map { display: block; width: min(100%, 720px); height: auto; border: 1px solid var(--line); background: #f3edbd; }
 .map-label { font-style: italic; font-size: 16px; fill: #4b2d10; opacity: .88; }
@@ -555,18 +880,56 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
 .status { display: inline-flex; align-items: center; gap: .45ch; white-space: nowrap; }
 .status::before { content: ''; width: .7em; height: .7em; border-radius: 999px; background: currentColor; }
 .status.online { color: #2f80ff; }
-.status.offline { color: #d65c5c; }
+.status.offline { color: var(--bad); }
+.empty { border: 1px dashed var(--line); padding: 1rem; color: var(--muted); }
+.footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); }
+@media (max-width: 700px) {
+    .container { padding: .8rem; }
+    table { display: block; overflow-x: auto; }
+    .header-tools { width: 100%; }
+    .header-tools form { width: 100%; }
+    .header-tools select { max-width: 100%; }
+}
 </style>
 </head>
 <body>
 <div class="container">
     <header class="header">
-        <h1>IdleRPG</h1>
-        <p class="muted"><?php echo h(count($players)); ?> players · <?php echo h($online_count); ?> online</p>
+        <div>
+            <h1>IdleRPG</h1>
+            <p class="muted"><?php echo h(count($players)); ?> players · <?php echo h($online_count); ?> online · <?php echo h(count($achievement_catalog)); ?> achievements</p>
+        </div>
+        <?php if (count($available_rooms) > 1): ?>
+            <div class="header-tools">
+                <form method="get" action="">
+                    <input type="hidden" name="view" value="<?php echo h($view); ?>">
+                    <label>Game room
+                        <select name="room">
+                            <?php foreach ($available_rooms as $slug => $entry): ?>
+                                <option value="<?php echo h($slug); ?>" <?php echo $slug === $selected_room_slug ? 'selected' : ''; ?>>
+                                    <?php echo h($entry['room'] ?? $slug); ?> (<?php echo h($entry['players_online'] ?? 0); ?>/<?php echo h($entry['players_total'] ?? 0); ?> online)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <button type="submit">Switch</button>
+                </form>
+            </div>
+        <?php endif; ?>
     </header>
 
     <nav class="nav" aria-label="IdleRPG navigation">
-        <?php foreach (['home' => 'Home', 'players' => 'Player Info', 'quest' => 'Quest Info', 'events' => 'Events', 'map' => 'World Map', 'hof' => 'Hall of Fame', 'commands' => 'Commands'] as $tab => $label): ?>
+        <?php foreach ([
+            'home' => 'Home',
+            'players' => 'Players',
+            'achievements' => 'Achievements',
+            'quest' => 'Quest',
+            'events' => 'Events',
+            'map' => 'World Map',
+            'hof' => 'Seasons & Hall of Fame',
+            'rules' => 'Rules',
+            'commands' => 'Commands',
+        ] as $tab => $label): ?>
             <a class="<?php echo $view === $tab ? 'active' : ''; ?>" href="<?php echo h(idlerpg_view_url($tab)); ?>"><?php echo h($label); ?></a>
         <?php endforeach; ?>
     </nav>
@@ -582,7 +945,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
         <table>
             <thead><tr><th>Candidate</th><th>Directory</th><th>map.json</th><th>players.json</th></tr></thead>
             <tbody>
-            <?php foreach (idlerpg_candidate_dirs() as $candidate): ?>
+            <?php foreach (idlerpg_candidate_dirs($selected_room_slug, $available_rooms) as $candidate): ?>
                 <tr>
                     <td><code><?php echo h($candidate); ?></code></td>
                     <td><?php echo is_dir($candidate) ? 'yes' : 'no'; ?></td>
@@ -597,65 +960,184 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
     <div class="grid">
         <main>
             <?php if ($view === 'home'): ?>
-                <p>The IdleRPG is just what it sounds like: an RPG where players idle. Create a character, log in, stay quiet, and wait for your next level. Items, battles, quests, godsends and calamities happen automatically.</p>
+                <p>The IdleRPG is an RPG for patient XMPP users: create a character, log in, remain idle and wait for the next level. Equipment, battles, quests, godsends, calamities, achievements and seasons progress automatically while the game runs.</p>
                 <div class="stats">
-                    <div class="card"><span>Top player</span><strong><?php echo count($leaderboard) > 0 ? h(idlerpg_player_name($leaderboard[0])) : 'n/a'; ?></strong></div>
-                    <div class="card"><span>Highest level</span><strong><?php echo count($leaderboard) > 0 ? 'lv.' . h(idlerpg_player_level($leaderboard[0])) : 'n/a'; ?></strong></div>
-                    <div class="card"><span>Quest</span><strong><?php echo $quest ? 'active' : 'none'; ?></strong></div>
+                    <div class="card"><span>Players</span><strong><?php echo h(count($players)); ?></strong><small class="muted"><?php echo h($online_count); ?> currently online</small></div>
+                    <div class="card"><span>Top player</span><strong><?php echo count($leaderboard) > 0 ? h(idlerpg_player_name($leaderboard[0])) : 'n/a'; ?></strong><small class="muted"><?php echo count($leaderboard) > 0 ? 'level ' . h(idlerpg_player_level($leaderboard[0])) : 'no ranking yet'; ?></small></div>
+                    <div class="card"><span>Quest</span><strong><?php echo $quest ? h($active_quest_type . '-based') : 'none'; ?></strong><small class="muted"><?php echo $quest ? h(count($quest['questers'] ?? [])) . ' participants' : 'waiting for the next quest'; ?></small></div>
+                    <div class="card"><span>Season</span><strong><?php echo h($season['id'] ?? 'manual'); ?></strong><small class="muted"><?php echo $current_season_ends_at > 0 ? h(idlerpg_ttl($current_season_remaining)) . ' remaining' : 'no automatic end'; ?></small></div>
                 </div>
+
+                <?php if ($quest): ?>
+                    <section class="panel">
+                        <h2>Active quest</h2>
+                        <p><strong><?php echo h($quest['text'] ?? 'adventure'); ?></strong></p>
+                        <p class="muted"><?php echo h(ucfirst($active_quest_type)); ?> quest with <?php echo h(count($quest['questers'] ?? [])); ?> participants<?php if (!empty($quest['complete_at'])): ?> · <?php echo h(idlerpg_ttl(max(0, (int) $quest['complete_at'] - time()))); ?> remaining<?php endif; ?>.</p>
+                        <p><a href="<?php echo h(idlerpg_view_url('quest')); ?>">Open quest details and map →</a></p>
+                    </section>
+                <?php endif; ?>
+
                 <h2>Top 5 players</h2>
                 <?php if (count($leaderboard) > 0): ?>
-                    <table><thead><tr><th>#</th><th>Character</th><th>Class</th><th>Level</th><th>Next level</th></tr></thead><tbody>
+                    <table><thead><tr><th>#</th><th>Character</th><th>Class</th><th>Level</th><th>Next level</th><th>Status</th></tr></thead><tbody>
                     <?php foreach (array_slice($leaderboard, 0, 5) as $index => $player): $name = idlerpg_player_name($player); ?>
-                        <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td></tr>
+                        <tr><td><?php echo h($player['rank'] ?? $index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td><td><?php echo idlerpg_player_status_badge($player); ?></td></tr>
                     <?php endforeach; ?>
                     </tbody></table>
-                <?php else: ?><p class="muted">No players exported yet.</p><?php endif; ?>
+                <?php else: ?><p class="empty">No players exported yet.</p><?php endif; ?>
+                <p><a href="<?php echo h(idlerpg_view_url('players')); ?>">View all players →</a></p>
+
                 <h2>Recent events</h2>
                 <?php idlerpg_render_events($events, 8); ?>
+                <?php if (count($events) > 8): ?><p><a href="<?php echo h(idlerpg_view_url('events')); ?>">Browse the complete event export →</a></p><?php endif; ?>
             <?php endif; ?>
 
             <?php if ($view === 'players'): ?>
-                <h2><?php echo $selected_profile ? 'Player profile' : 'Pick a player to view'; ?></h2>
+                <h2><?php echo $selected_profile ? 'Player profile' : 'Players'; ?></h2>
                 <?php if ($selected_profile): ?>
-                    <section class="card">
-                        <h3><?php echo h(idlerpg_player_name($selected_profile)); ?></h3>
-                        <table><tbody>
-                            <tr><th>Class</th><td><?php echo h(idlerpg_player_class($selected_profile)); ?></td></tr>
-                            <tr><th>Title</th><td><?php echo h($selected_profile['title'] ?? ''); ?></td></tr>
-                            <tr><th>Level</th><td>lv.<?php echo h(idlerpg_player_level($selected_profile)); ?></td></tr>
-                            <tr><th>Next level</th><td><?php echo h(idlerpg_ttl($selected_profile['ttl'] ?? 0)); ?></td></tr>
-                            <tr><th>Playing since</th><td><?php echo h(idlerpg_player_created_label($selected_profile) !== '' ? idlerpg_player_created_label($selected_profile) : 'unknown'); ?></td></tr>
-                            <tr><th>Playing for</th><td><?php echo h(idlerpg_player_played_label($selected_profile) !== '' ? idlerpg_player_played_label($selected_profile) : 'unknown'); ?></td></tr>
-                            <tr><th>Idled online</th><td><?php echo h(idlerpg_ttl($selected_profile['idled'] ?? 0)); ?></td></tr>
-                            <tr><th>Alignment</th><td><?php echo h($selected_profile['alignment'] ?? 'neutral'); ?></td></tr>
-                            <tr><th>Map</th><td>[<?php echo h((int) idlerpg_player_coord($selected_profile, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($selected_profile, 'y')); ?>]</td></tr>
-                            <tr><th>Item sum</th><td><?php echo h($selected_profile['item_sum'] ?? 0); ?></td></tr>
-                            <?php $profile_stats = is_array($selected_profile['stats'] ?? null) ? $selected_profile['stats'] : []; ?>
-                            <tr><th>Bosses defeated</th><td><?php echo h($profile_stats['bosses_defeated'] ?? 0); ?></td></tr>
-                            <tr><th>Random battles won</th><td><?php echo h($profile_stats['battles_won'] ?? 0); ?></td></tr>
-                            <tr><th>Quests completed</th><td><?php echo h($profile_stats['quests_completed'] ?? 0); ?></td></tr>
-                            <tr><th>Status</th><td><?php echo idlerpg_player_status_badge($selected_profile); ?></td></tr>
-                        </tbody></table>
-                    </section>
-                    <h3>Recent player events</h3>
                     <?php
+                    $profile_name = idlerpg_player_name($selected_profile);
+                    $profile_stats = is_array($selected_profile['stats'] ?? null) ? $selected_profile['stats'] : [];
+                    $profile_items = is_array($selected_profile['items'] ?? null) ? $selected_profile['items'] : [];
+                    $profile_unique_items = is_array($selected_profile['unique_items'] ?? null) ? $selected_profile['unique_items'] : [];
+                    $profile_unique_bonuses = is_array($selected_profile['unique_item_bonuses'] ?? null) ? $selected_profile['unique_item_bonuses'] : [];
+                    $profile_achievements = is_array($selected_profile['achievements'] ?? null) ? $selected_profile['achievements'] : [];
                     $player_events = array_values(array_filter($events, function ($event) use ($selected_profile) {
                         return idlerpg_event_matches_player($event, idlerpg_player_name($selected_profile));
                     }));
-                    idlerpg_render_events($player_events, 8);
                     ?>
+                    <section class="panel">
+                        <h3><?php echo h($profile_name); ?><?php if (!empty($selected_profile['title'])): ?> · <?php echo h($selected_profile['title']); ?><?php endif; ?></h3>
+                        <div class="badges">
+                            <?php echo idlerpg_player_status_badge($selected_profile); ?>
+                            <span class="badge">lv.<?php echo h(idlerpg_player_level($selected_profile)); ?></span>
+                            <span class="badge"><?php echo h($selected_profile['alignment'] ?? 'neutral'); ?></span>
+                            <span class="badge"><?php echo h($selected_profile['region'] ?? 'unknown region'); ?></span>
+                        </div>
+                        <div class="details-grid">
+                            <div>
+                                <h4>Character</h4>
+                                <table><tbody>
+                                    <tr><th>Class</th><td><?php echo h(idlerpg_player_class($selected_profile)); ?></td></tr>
+                                    <tr><th>Rank</th><td>#<?php echo h($selected_profile['rank'] ?? '?'); ?></td></tr>
+                                    <tr><th>Next level</th><td><?php echo h(idlerpg_ttl($selected_profile['ttl'] ?? 0)); ?></td></tr>
+                                    <tr><th>Playing since</th><td><?php echo h(idlerpg_player_created_label($selected_profile) ?: 'unknown'); ?></td></tr>
+                                    <tr><th>Playing for</th><td><?php echo h(idlerpg_player_played_label($selected_profile) ?: 'unknown'); ?></td></tr>
+                                    <tr><th>Idled online</th><td><?php echo h(idlerpg_ttl($selected_profile['idled'] ?? 0)); ?></td></tr>
+                                    <tr><th>Last seen</th><td><?php echo !empty($selected_profile['last_seen']) ? h(idlerpg_time_value($selected_profile['last_seen'])) : 'unknown'; ?></td></tr>
+                                    <tr><th>Map position</th><td><a href="<?php echo h(idlerpg_view_url('map')); ?>">[<?php echo h((int) idlerpg_player_coord($selected_profile, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($selected_profile, 'y')); ?>]</a></td></tr>
+                                    <tr><th>Item sum</th><td><?php echo h($selected_profile['item_sum'] ?? 0); ?></td></tr>
+                                </tbody></table>
+                            </div>
+                            <div>
+                                <h4>Statistics</h4>
+                                <?php if (count($profile_stats) > 0): ?>
+                                    <table><tbody>
+                                    <?php foreach ($profile_stats as $key => $value): ?>
+                                        <tr><th><?php echo h(idlerpg_human_key($key)); ?></th><td><?php echo h($value); ?></td></tr>
+                                    <?php endforeach; ?>
+                                    </tbody></table>
+                                <?php else: ?><p class="muted">No statistics exported yet.</p><?php endif; ?>
+                            </div>
+                        </div>
+
+                        <div class="details-grid">
+                            <div>
+                                <h4>Equipment</h4>
+                                <?php if (count($profile_items) > 0): ?>
+                                    <table><thead><tr><th>Slot</th><th>Level</th><th>Bound unique item</th></tr></thead><tbody>
+                                    <?php foreach ($profile_items as $slot => $level): ?>
+                                        <tr><td><?php echo h(idlerpg_human_key($slot)); ?></td><td><?php echo h(max(0, (int) $level)); ?></td><td><?php echo h($profile_unique_items[$slot] ?? ''); ?></td></tr>
+                                    <?php endforeach; ?>
+                                    </tbody></table>
+                                <?php else: ?><p class="muted">No equipment exported.</p><?php endif; ?>
+                            </div>
+                            <div>
+                                <h4>Unique-item bonuses</h4>
+                                <?php if (count($profile_unique_bonuses) > 0): ?>
+                                    <ul class="compact-list">
+                                    <?php foreach ($profile_unique_bonuses as $bonus): ?>
+                                        <li><strong><?php echo h($bonus['name'] ?? 'Unique item'); ?></strong> — <?php echo h(idlerpg_human_key($bonus['bonus'] ?? 'bonus')); ?> +<?php echo h($bonus['bonus_percent'] ?? 0); ?>%</li>
+                                    <?php endforeach; ?>
+                                    </ul>
+                                <?php else: ?><p class="muted">No unique-item bonuses.</p><?php endif; ?>
+                            </div>
+                        </div>
+
+                        <h4>Achievements (<?php echo h(count($profile_achievements)); ?>/<?php echo h(count($achievement_catalog)); ?>)</h4>
+                        <?php if (count($profile_achievements) > 0): ?>
+                            <div class="achievement-grid">
+                            <?php foreach ($profile_achievements as $achievement): ?>
+                                <div class="achievement"><h3>🏅 <?php echo h(is_array($achievement) ? ($achievement['title'] ?? $achievement['key'] ?? '') : $achievement); ?></h3><p><?php echo h(is_array($achievement) ? ($achievement['description'] ?? '') : ''); ?></p></div>
+                            <?php endforeach; ?>
+                            </div>
+                        <?php else: ?><p class="muted">No achievements unlocked yet.</p><?php endif; ?>
+
+                        <h4>Recent player events</h4>
+                        <?php idlerpg_render_events($player_events, 12); ?>
+                        <?php if (count($player_events) > 12): ?><p><a href="<?php echo h(idlerpg_view_url('events', ['player' => $profile_name])); ?>">Show all events involving <?php echo h($profile_name); ?> →</a></p><?php endif; ?>
+                    </section>
+                <?php elseif ($selected_character !== ''): ?>
+                    <p class="empty">No exported player named <strong><?php echo h($selected_character); ?></strong> was found.</p>
                 <?php endif; ?>
-                <table><thead><tr><th>#</th><th>Player</th><th>Class</th><th>Level</th><th>Next level</th><th>Achievements</th><th>Status</th></tr></thead><tbody>
-                <?php foreach ($players as $index => $player): $name = idlerpg_player_name($player); ?>
-                    <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td><td><?php echo h(idlerpg_achievement_count($player)); ?></td><td><?php echo idlerpg_player_status_badge($player); ?></td></tr>
-                <?php endforeach; ?>
-                </tbody></table>
+
+                <form class="form-row" method="get" action="">
+                    <input type="hidden" name="view" value="players">
+                    <input type="hidden" name="room" value="<?php echo h($selected_room_slug); ?>">
+                    <label>Search<input type="search" name="q" value="<?php echo h($player_query); ?>" placeholder="Name, class, title, region"></label>
+                    <label>Status<select name="status"><option value="all">all</option><option value="online" <?php echo $player_status === 'online' ? 'selected' : ''; ?>>online</option><option value="offline" <?php echo $player_status === 'offline' ? 'selected' : ''; ?>>offline</option></select></label>
+                    <button type="submit">Filter</button>
+                    <?php if ($player_query !== '' || $player_status !== 'all'): ?><a href="<?php echo h(idlerpg_view_url('players')); ?>">Reset</a><?php endif; ?>
+                </form>
+                <p class="muted"><?php echo h($player_pagination['total']); ?> matching players.</p>
+                <?php if (count($player_pagination['items']) > 0): ?>
+                    <table><thead><tr><th>#</th><th>Player</th><th>Class</th><th>Level</th><th>Next level</th><th>Region</th><th>Achievements</th><th>Status</th></tr></thead><tbody>
+                    <?php foreach ($player_pagination['items'] as $player): $name = idlerpg_player_name($player); ?>
+                        <tr><td><?php echo h($player['rank'] ?? '?'); ?></td><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a><?php if (!empty($player['title'])): ?><br><small class="muted"><?php echo h($player['title']); ?></small><?php endif; ?></td><td><?php echo h(idlerpg_player_class($player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo h(idlerpg_ttl($player['ttl'] ?? 0)); ?></td><td><?php echo h($player['region'] ?? ''); ?></td><td><?php echo h(idlerpg_achievement_count($player)); ?></td><td><?php echo idlerpg_player_status_badge($player); ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody></table>
+                    <?php idlerpg_render_pagination('players', $player_pagination, ['q' => $player_query, 'status' => $player_status]); ?>
+                <?php else: ?><p class="empty">No players match the selected filters.</p><?php endif; ?>
+            <?php endif; ?>
+
+            <?php if ($view === 'achievements'): ?>
+                <h2>Achievements</h2>
+                <p>The catalog contains <?php echo h(count($achievement_catalog)); ?> achievements. Unlock counts are calculated from the current public player export.</p>
+                <?php if (count($achievement_catalog) > 0): ?>
+                    <div class="achievement-grid">
+                    <?php foreach ($achievement_catalog as $achievement): ?>
+                        <?php
+                        if (!is_array($achievement)) { continue; }
+                        $achievement_key = (string) ($achievement['key'] ?? '');
+                        $earners = $achievement_unlocks[$achievement_key] ?? [];
+                        ?>
+                        <article class="achievement">
+                            <h3>🏅 <?php echo h($achievement['title'] ?? $achievement_key); ?></h3>
+                            <p><?php echo h($achievement['description'] ?? ''); ?></p>
+                            <p class="progress"><code><?php echo h($achievement_key); ?></code> · unlocked by <?php echo h(count($earners)); ?>/<?php echo h(count($players)); ?> players (<?php echo h(idlerpg_percent(count($earners), count($players))); ?>)</p>
+                            <?php if (count($earners) > 0): ?>
+                                <p><?php foreach ($earners as $index => $earner): ?><?php if ($index > 0): ?>, <?php endif; ?><a href="<?php echo h(idlerpg_player_url($earner)); ?>"><?php echo h($earner); ?></a><?php endforeach; ?></p>
+                            <?php endif; ?>
+                        </article>
+                    <?php endforeach; ?>
+                    </div>
+                <?php else: ?><p class="empty">No achievement catalog is available. Ensure <code>room.json</code> or <code>achievements.json</code> is readable.</p><?php endif; ?>
             <?php endif; ?>
 
             <?php if ($view === 'events'): ?>
-                <h2>Recent Events</h2>
-                <?php idlerpg_render_events($events, 50); ?>
+                <h2>Events</h2>
+                <form class="form-row" method="get" action="">
+                    <input type="hidden" name="view" value="events">
+                    <input type="hidden" name="room" value="<?php echo h($selected_room_slug); ?>">
+                    <label>Search<input type="search" name="q" value="<?php echo h($event_query); ?>" placeholder="Event text or player"></label>
+                    <label>Kind<select name="kind"><option value="all">all</option><?php foreach ($event_kinds as $kind): ?><option value="<?php echo h($kind); ?>" <?php echo $event_kind === $kind ? 'selected' : ''; ?>><?php echo h($kind); ?></option><?php endforeach; ?></select></label>
+                    <label>Player<input type="search" name="player" value="<?php echo h($event_player); ?>" placeholder="Character"></label>
+                    <button type="submit">Filter</button>
+                    <?php if ($event_query !== '' || $event_kind !== 'all' || $event_player !== ''): ?><a href="<?php echo h(idlerpg_view_url('events')); ?>">Reset</a><?php endif; ?>
+                </form>
+                <p class="muted"><?php echo h($event_pagination['total']); ?> matching events.</p>
+                <?php idlerpg_render_events($event_pagination['items'], count($event_pagination['items'])); ?>
+                <?php idlerpg_render_pagination('events', $event_pagination, ['q' => $event_query, 'kind' => $event_kind, 'player' => $event_player]); ?>
             <?php endif; ?>
 
             <?php if ($view === 'quest'): ?>
@@ -762,7 +1244,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                             <?php endif; ?>
 
                             <?php
-                            $visible_map_players = array_slice($map_players, 0, 120);
+                            $visible_map_players = $map_players;
                             $occupied_map_labels = [];
                             foreach ($visible_map_players as $player) {
                                 $marker_x = max(6, min($map_width - 6, max(0, min($map_width, idlerpg_player_coord($player, 'x')))));
@@ -812,7 +1294,7 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
                     </div>
                     <h3>Map positions</h3>
                     <table><thead><tr><th>Character</th><th>Position</th><th>Level</th><th>Status</th></tr></thead><tbody>
-                    <?php foreach (array_slice($map_players, 0, 25) as $player): $name = idlerpg_player_name($player); ?>
+                    <?php foreach ($map_players as $player): $name = idlerpg_player_name($player); ?>
                         <tr><td><a href="<?php echo h(idlerpg_player_url($name)); ?>"><?php echo h($name); ?></a></td><td>[<?php echo h((int) idlerpg_player_coord($player, 'x')); ?>,<?php echo h((int) idlerpg_player_coord($player, 'y')); ?>]</td><td>lv.<?php echo h(idlerpg_player_level($player)); ?></td><td><?php echo idlerpg_player_status_badge($player); ?></td></tr>
                     <?php endforeach; ?>
                     </tbody></table>
@@ -820,47 +1302,138 @@ code { background: rgba(255,255,255,.08); padding: .05rem .3rem; }
             <?php endif; ?>
 
             <?php if ($view === 'hof'): ?>
-                <h2>Hall of Fame</h2>
+                <h2>Seasons & Hall of Fame</h2>
+                <section class="panel">
+                    <h3>Current season</h3>
+                    <?php if (count($season) > 0): ?>
+                        <table><tbody>
+                            <tr><th>Season ID</th><td><?php echo h($season['id'] ?? 'unknown'); ?></td></tr>
+                            <tr><th>Started</th><td><?php echo $current_season_started_at > 0 ? h(idlerpg_time_value($current_season_started_at)) : 'unknown'; ?></td></tr>
+                            <tr><th>Scheduled end</th><td><?php echo $current_season_ends_at > 0 ? h(idlerpg_time_value($current_season_ends_at)) : 'manual'; ?></td></tr>
+                            <tr><th>Remaining</th><td><?php echo $current_season_ends_at > 0 ? h(idlerpg_ttl($current_season_remaining)) : 'manual season'; ?></td></tr>
+                            <tr><th>Current leader</th><td><?php echo count($leaderboard) > 0 ? h(idlerpg_player_name($leaderboard[0])) . ' (lv.' . h(idlerpg_player_level($leaderboard[0])) . ')' : 'n/a'; ?></td></tr>
+                        </tbody></table>
+                    <?php else: ?><p class="muted">No season metadata is available in <code>room.json</code>.</p><?php endif; ?>
+                </section>
+
+                <h3>Completed seasons</h3>
                 <?php if (count($seasons) > 0): ?>
-                    <table><thead><tr><th>Season</th><th>Champion</th><th>Ended</th></tr></thead><tbody>
-                    <?php foreach (array_reverse($seasons) as $season): ?>
-                        <tr><td><?php echo h($season['id'] ?? '?'); ?></td><td><?php echo h($season['champion'] ?? ''); ?></td><td><?php echo !empty($season['ended_at']) ? h(idlerpg_time_value($season['ended_at'])) : ''; ?></td></tr>
+                    <?php foreach (array_reverse($seasons) as $historic_season): ?>
+                        <?php $historic_top = is_array($historic_season['top'] ?? null) ? $historic_season['top'] : []; ?>
+                        <details class="season">
+                            <summary><?php echo h($historic_season['id'] ?? '?'); ?> · champion <?php echo h($historic_season['champion'] ?? 'no champion'); ?><?php if (!empty($historic_season['ended_at'])): ?> · <?php echo h(idlerpg_time_value($historic_season['ended_at'])); ?><?php endif; ?></summary>
+                            <table><tbody>
+                                <tr><th>Started</th><td><?php echo !empty($historic_season['started_at']) ? h(idlerpg_time_value($historic_season['started_at'])) : 'unknown'; ?></td></tr>
+                                <tr><th>Ended</th><td><?php echo !empty($historic_season['ended_at']) ? h(idlerpg_time_value($historic_season['ended_at'])) : 'unknown'; ?></td></tr>
+                                <tr><th>Champion</th><td><?php echo h($historic_season['champion'] ?? ''); ?></td></tr>
+                            </tbody></table>
+                            <?php if (count($historic_top) > 0): ?>
+                                <h4>Final ranking</h4>
+                                <table><thead><tr><th>#</th><th>Character</th><th>Class</th><th>Level</th><th>Next level</th><th>Item sum</th></tr></thead><tbody>
+                                <?php foreach ($historic_top as $index => $historic_player): ?>
+                                    <tr><td><?php echo h($historic_player['rank'] ?? $index + 1); ?></td><td><?php echo h(idlerpg_player_name($historic_player)); ?></td><td><?php echo h(idlerpg_player_class($historic_player)); ?></td><td>lv.<?php echo h(idlerpg_player_level($historic_player)); ?></td><td><?php echo h(idlerpg_ttl($historic_player['ttl'] ?? 0)); ?></td><td><?php echo h($historic_player['item_sum'] ?? 0); ?></td></tr>
+                                <?php endforeach; ?>
+                                </tbody></table>
+                            <?php else: ?><p class="muted">This historic export contains only the champion summary.</p><?php endif; ?>
+                        </details>
                     <?php endforeach; ?>
-                    </tbody></table>
-                <?php else: ?><p class="muted">No completed seasons yet.</p><?php endif; ?>
+                <?php else: ?><p class="empty">No completed seasons yet.</p><?php endif; ?>
+            <?php endif; ?>
+
+            <?php if ($view === 'rules'): ?>
+                <h2>Game rules & exported configuration</h2>
+                <p>These values are the public rules exported by the running bot. They reflect the actual configuration of this IdleRPG instance rather than generic defaults.</p>
+                <?php
+                $rule_groups = [
+                    'Leveling & penalties' => ['tick_seconds', 'rp_base', 'rp_step', 'penalty_step', 'message_penalty', 'logout_penalty', 'logout_grace_seconds', 'max_penalty'],
+                    'World map' => ['map_x', 'map_y', 'map_step_per_second', 'map_step_per_tick', 'grid_battle_enabled', 'manual_duel_max_distance', 'manual_duel_cooldown_seconds'],
+                    'Quests' => ['quest_time_enabled', 'quest_grid_enabled', 'quest_time_weight', 'quest_grid_weight', 'quest_time_min_duration', 'quest_time_max_duration', 'quest_grid_step_seconds', 'quest_min_level', 'quest_min_online_seconds', 'quest_interval', 'quest_min_duration', 'quest_max_duration'],
+                    'Events & battles' => ['event_chance', 'item_chance', 'battle_event_weight', 'team_battle_event_weight', 'boss_event_weight', 'item_event_weight', 'item_damage_event_weight', 'item_steal_event_weight', 'alignment_event_weight', 'critical_strike_chance', 'critical_strike_chance_good', 'critical_strike_chance_evil', 'item_drop_chance', 'level_battle_chance_below_25', 'level_battle_chance_at_25'],
+                    'Bosses' => ['boss_min_players', 'boss_max_players', 'boss_min_level', 'boss_reward_percent', 'boss_loss_percent', 'boss_power_min_factor', 'boss_power_max_factor'],
+                    'Items & achievements' => ['unique_items_enabled', 'unique_item_min_level', 'unique_item_chance', 'level_reward_min_level', 'season_achievement_gates_enabled'],
+                    'Seasons & history' => ['season_enabled', 'season_duration_days', 'season_reset_on_rollover', 'season_hof_size', 'event_log_limit', 'event_retention_days', 'export_event_limit', 'export_top_limit'],
+                    'Announcements' => ['announce_login', 'announce_top_interval', 'announce_top_limit', 'update_room_topic', 'topic_update_interval', 'topic_custom_text'],
+                ];
+                $shown_rule_keys = [];
+                ?>
+                <?php if (count($rules) > 0): ?>
+                    <div class="rule-groups">
+                    <?php foreach ($rule_groups as $group_name => $keys): ?>
+                        <?php $available_keys = array_values(array_filter($keys, fn($key) => array_key_exists($key, $rules))); ?>
+                        <?php if (count($available_keys) === 0) { continue; } ?>
+                        <section class="rule-group"><h3><?php echo h($group_name); ?></h3><table><tbody>
+                        <?php foreach ($available_keys as $key): $shown_rule_keys[$key] = true; ?>
+                            <tr><th><?php echo h(idlerpg_human_key($key)); ?></th><td><?php echo h(idlerpg_rule_value($key, $rules[$key])); ?><br><small class="muted"><code><?php echo h($key); ?></code></small></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table></section>
+                    <?php endforeach; ?>
+                    <?php $other_rules = array_diff_key($rules, $shown_rule_keys); ?>
+                    <?php if (count($other_rules) > 0): ?>
+                        <section class="rule-group"><h3>Other exported values</h3><table><tbody>
+                        <?php foreach ($other_rules as $key => $value): ?>
+                            <tr><th><?php echo h(idlerpg_human_key($key)); ?></th><td><?php echo h(idlerpg_rule_value($key, $value)); ?><br><small class="muted"><code><?php echo h($key); ?></code></small></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table></section>
+                    <?php endif; ?>
+                    </div>
+                <?php else: ?><p class="empty">No public rule data is available. The complete rules view requires the room-specific <code>room.json</code> export.</p><?php endif; ?>
             <?php endif; ?>
 
             <?php if ($view === 'commands'): ?>
-                <h2>Commands</h2>
-                <ul>
-                    <li><code>,idlerpg register &lt;character&gt; &lt;class&gt;</code> — create a character</li>
-                    <li><code>,idlerpg login</code> / <code>,idlerpg logout</code> — start or stop idling</li>
-                    <li><code>,idlerpg status [character]</code> — show character progress</li>
-                    <li><code>,idlerpg profile [character]</code> — show a detailed profile</li>
-                    <li><code>,idlerpg achievements [character]</code> — show achievements</li>
-                    <li><code>,idlerpg title &lt;achievement|none&gt;</code> — choose a public title</li>
-                    <li><code>,idlerpg top</code> / <code>,idlerpg players</code> — show rankings and players</li>
-                    <li><code>,idlerpg events</code> / <code>,idlerpg map</code> / <code>,idlerpg hof</code> — show events, map and Hall of Fame</li>
-                </ul>
+                <h2>IdleRPG commands</h2>
+                <p>Commands are used in an XMPP room where IdleRPG is enabled. The default command prefix is shown as <code>,</code>; installations may configure a different prefix.</p>
+                <div class="details-grid">
+                    <section class="panel"><h3>Character</h3><ul class="compact-list">
+                        <li><code>,idlerpg register &lt;character&gt; &lt;class&gt;</code> — create a character</li>
+                        <li><code>,idlerpg login</code> / <code>,idlerpg logout</code> — enter or leave the game</li>
+                        <li><code>,idlerpg status [character]</code> — show progress and online state</li>
+                        <li><code>,idlerpg profile [character]</code> — show the complete profile and website link</li>
+                        <li><code>,idlerpg items [character]</code> — show equipment and item levels</li>
+                        <li><code>,idlerpg align &lt;good|neutral|evil&gt;</code> — select alignment</li>
+                        <li><code>,idlerpg remove-me</code> — permanently remove your character</li>
+                    </ul></section>
+                    <section class="panel"><h3>Progress & community</h3><ul class="compact-list">
+                        <li><code>,idlerpg top [page|last|all]</code> — leaderboard</li>
+                        <li><code>,idlerpg players [page|last|all]</code> — registered characters</li>
+                        <li><code>,idlerpg achievements [character|list]</code> — earned or available achievements</li>
+                        <li><code>,idlerpg title &lt;achievement|none&gt;</code> — select an earned public title</li>
+                        <li><code>,idlerpg duel &lt;character&gt;</code> — challenge a nearby online player</li>
+                        <li><code>,idlerpg events [page|last|all]</code> — recent game history</li>
+                    </ul></section>
+                    <section class="panel"><h3>World & seasons</h3><ul class="compact-list">
+                        <li><code>,idlerpg quest</code> — current quest and participants</li>
+                        <li><code>,idlerpg map</code> — player positions and website map</li>
+                        <li><code>,idlerpg hof</code> — Hall of Fame</li>
+                        <li><code>,idlerpg season</code> — current season status</li>
+                        <li><code>,idlerpg stats</code> — room-wide balance statistics</li>
+                    </ul></section>
+                    <section class="panel"><h3>Room administration</h3><ul class="compact-list">
+                        <li><code>,idlerpg on</code> / <code>,idlerpg off</code> / <code>,idlerpg enabled</code> — room feature state</li>
+                        <li><code>,idlerpg announce top</code> — post the leaderboard</li>
+                        <li><code>,idlerpg topic update [custom text]</code> — refresh the room topic</li>
+                        <li><code>,idlerpg season extend [duration]</code> — extend the active season</li>
+                        <li><code>,idlerpg season clear-end</code> — remove an automatic end date</li>
+                        <li><code>,idlerpg hof clear confirm</code> — clear Hall of Fame history</li>
+                    </ul></section>
+                </div>
+                <p class="muted">Aliases include <code>,idle</code> and <code>,irpg</code>. For role requirements and the exact active command metadata, use <code>,help idlerpg</code> in the bot.</p>
             <?php endif; ?>
         </main>
 
         <aside>
-            <div class="card"><h2>Quick start</h2><ul><li><code>,idlerpg register &lt;name&gt; &lt;class&gt;</code></li><li><code>,idlerpg login</code></li><li><code>,idlerpg status</code></li><li><code>,idlerpg top</code></li></ul></div>
-            <div class="card"><h2>Data setup</h2><p class="muted">Put JSON exports in <code>data/&lt;room-slug&gt;/</code> or set <code>IDLERPG_DATA_DIR</code>. Open <code>?debug=1</code> to check readable paths.</p></div>
+            <div class="card"><h2>Quick start</h2><ul class="compact-list"><li><code>,idlerpg register &lt;name&gt; &lt;class&gt;</code></li><li><code>,idlerpg login</code></li><li><code>,idlerpg status</code></li><li><code>,idlerpg top</code></li></ul></div>
+            <div class="card"><h2>Current game</h2><p class="muted"><?php echo h(count($players)); ?> players, <?php echo h($online_count); ?> online. <?php echo $quest ? 'A ' . h($active_quest_type) . ' quest is active.' : 'No quest is active.'; ?></p><?php if ($current_season_ends_at > 0): ?><p class="muted">Season ends in <?php echo h(idlerpg_ttl($current_season_remaining)); ?>.</p><?php endif; ?></div>
+            <div class="card"><h2>Data setup</h2><p class="muted">Use the complete room export under <code>data/&lt;room-slug&gt;/</code> or set <code>IDLERPG_DATA_DIR</code>. Open <a href="<?php echo h(idlerpg_view_url($view, ['debug' => 1])); ?>"><code>debug=1</code></a> to inspect paths.</p></div>
             <div class="card"><h2>Map legend</h2><p class="muted">
                 Blue circles = online, red circles = offline, orange circles = active quest participants.
-                <?php if ($has_quest_route): ?>
-                    Orange squares and lines show the current grid-quest route.
-                <?php elseif ($quest && $active_quest_type === 'time'): ?>
-                    The current quest is time-based and therefore has no map route.
-                <?php else: ?>
-                    Orange squares and lines appear when a grid quest with route data is active.
-                <?php endif; ?>
-                <code>[293,133] lv.16</code> means x=293, y=133 and level 16.
+                <?php if ($has_quest_route): ?>Orange squares and lines show the current grid-quest route.
+                <?php elseif ($quest && $active_quest_type === 'time'): ?>The current quest is time-based and therefore has no map route.
+                <?php else: ?>Route markers appear when a grid quest is active.<?php endif; ?>
             </p></div>
+            <div class="card"><h2>Privacy</h2><p class="muted">This website reads only the public IdleRPG export. Raw player JIDs and bot administration data are not required.</p></div>
         </aside>
     </div>
+    <footer class="footer">Public IdleRPG state generated by EnvsBot · <a href="<?php echo h(idlerpg_view_url('commands')); ?>">command reference</a></footer>
 </div>
 </body>
 </html>
