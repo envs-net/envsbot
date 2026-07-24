@@ -233,6 +233,7 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
     from plugins import rss
     from plugins.rss import commands as rss_commands
     from plugins.rss import formatting as rss_formatting
+    from plugins.rss import tasks as rss_tasks
 
     values = runtime._rss_values({
         "rss_trusted_max_feeds": 0,
@@ -240,6 +241,7 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
         "rss_max_entries_per_poll": 4,
         "rss_broken_error_threshold": 7,
         "rss_template_max_length": 1500,
+        "rss_startup_stagger_seconds": 0,
     })
 
     assert values["RSS_TRUSTED_MAX_FEEDS"] == 0
@@ -247,18 +249,21 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
     assert values["RSS_MAX_ENTRIES_PER_POLL"] == 4
     assert values["RSS_BROKEN_ERROR_THRESHOLD"] == 7
     assert values["RSS_TEMPLATE_MAX_LENGTH"] == 1500
+    assert values["RSS_STARTUP_STAGGER_SECONDS"] == 0.0
 
     monkeypatch.setattr(rss, "RSS_TRUSTED_MAX_FEEDS", 10)
     monkeypatch.setattr(rss_commands, "RSS_TRUSTED_MAX_FEEDS", 10)
     monkeypatch.setattr(rss_commands, "RSS_BROKEN_ERROR_THRESHOLD", 3)
     monkeypatch.setattr(rss_formatting, "RSS_LIST_PAGE_SIZE", 10)
     monkeypatch.setattr(rss_formatting, "RSS_TEMPLATE_MAX_LENGTH", 1000)
+    monkeypatch.setattr(rss_tasks, "RSS_STARTUP_STAGGER_SECONDS", 2.0)
 
     refreshed = runtime.refresh_runtime_config_constants({
         "rss_trusted_max_feeds": 0,
         "rss_list_page_size": 25,
         "rss_broken_error_threshold": 7,
         "rss_template_max_length": 1500,
+        "rss_startup_stagger_seconds": 0,
     })
 
     assert rss.RSS_TRUSTED_MAX_FEEDS == 0
@@ -266,6 +271,7 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
     assert rss_commands.RSS_BROKEN_ERROR_THRESHOLD == 7
     assert rss_formatting.RSS_LIST_PAGE_SIZE == 25
     assert rss_formatting.RSS_TEMPLATE_MAX_LENGTH == 1500
+    assert rss_tasks.RSS_STARTUP_STAGGER_SECONDS == 0.0
     assert any("plugins.rss.commands" in line for line in refreshed)
     assert any("plugins.rss.formatting" in line for line in refreshed)
 

@@ -137,6 +137,12 @@ Trusted users may remove only their own subscriptions. Owner, superadmin, and ad
 In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
 Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. For trusted users, `,rss list` shows only their own direct subscriptions without empty room or moderator sections.
 
+## Fetch retries and startup behavior
+
+Feed workers retain their current cursor when an HTTP request fails, so a temporary timeout does not lose entries. The first retry uses `RSS_RETRY_INITIAL_DELAY`, followed by exponential backoff up to `RSS_MAX_BACKOFF_TIME`.
+
+When several feeds use the same host, their first requests after bot startup are spread apart by `RSS_STARTUP_STAGGER_SECONDS` (default: `2.0`). This reduces request bursts against slower Git or feed servers. Set it to `0` to disable staggering. Operators of consistently slow feed servers may also increase `RSS_FETCH_TIMEOUT_SECONDS` without changing the global HTTP timeout.
+
 ## Commands
 
 ### `,rss`

@@ -183,7 +183,7 @@ async def test_failed_load_cleans_events_and_tasks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_load_all_sorted(monkeypatch):
+async def test_load_all_sorted(monkeypatch, caplog):
     bot = FakeBot()
     pm = PluginManager(bot, package="fakepkg")
     pm.meta = {
@@ -194,9 +194,29 @@ async def test_load_all_sorted(monkeypatch):
     fake_modB = make_fake_plugin(meta={"name": "B"})
     monkeypatch.setattr("utils.plugin_manager.importlib.import_module",
                         lambda name: fake_modA if "A" in name else fake_modB)
-    monkeypatch.setattr(pm, "discover", lambda: ["A", "B"])
-    await pm.load_all()
+    monkeypatch.setattr(pm, "discover", lambda: ["B", "A"])
+    with caplog.at_level("DEBUG", logger="utils.plugin_manager"):
+        await pm.load_all()
     assert set(pm.plugins.keys()) == {"A", "B"}
+    info_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "INFO"
+        and "load_all" in record.getMessage()
+    ]
+    assert info_messages == [
+        "[PLUGIN] load_all complete: 2/2 loaded, 0 failed"
+    ]
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelname == "DEBUG"
+        and "load_all pass" in record.getMessage()
+    ]
+    assert debug_messages == [
+        "[PLUGIN] load_all pass 1: 1/2 loaded, 0 failed",
+        "[PLUGIN] load_all pass 2: 2/2 loaded, 0 failed",
+    ]
 
 
 @pytest.mark.asyncio

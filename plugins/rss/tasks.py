@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import urlparse
 
 from utils.task_supervisor import create_plugin_task
 
-from .config import DEFAULT_POLL_INTERVAL, RSS_MAX_ENTRIES_PER_POLL
-from .fetch import _entry_is_new, _get_latest_entry_id, feedparser, fetch_feed
+from .config import (
+    DEFAULT_POLL_INTERVAL,
+    RSS_MAX_ENTRIES_PER_POLL,
+    RSS_STARTUP_STAGGER_SECONDS,
+)
+from .fetch import (
+    _entry_is_new,
+    _format_feed_fetch_error,
+    _get_latest_entry_id,
+    feedparser,
+    fetch_feed,
+)
 from .formatting import _post_new_entries
 from .store import (
     _apply_retry_state,
@@ -31,8 +42,16 @@ async def _initialize_last_id(bot, store, url, latest_id):
     if not latest_id:
         return False
     return await _set_feed_field(bot, store, url, "last_id", latest_id)
-async def rss_check_loop(bot, store, url, period):
+async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
     """Periodically check a feed for updates and post new items."""
+    if initial_delay > 0:
+        log.debug(
+            "[RSS] Delaying initial fetch url=%s by %.1fs",
+            url,
+            initial_delay,
+        )
+        await asyncio.sleep(initial_delay)
+
     while True:
         _, feed = await _load_feed(store, url)
 
@@ -88,23 +107,40 @@ async def rss_check_loop(bot, store, url, period):
             continue
 
         await asyncio.sleep(period)
-async def ensure_task(bot, store, url, period):
+async def ensure_task(bot, store, url, period, *, initial_delay=0.0):
     """Ensure a check task is running for the given feed."""
     if url in CHECK_TASKS and not CHECK_TASKS[url].done():
         return
 
     CHECK_TASKS[url] = create_plugin_task(bot,
         "rss",
-        rss_check_loop(bot, store, url, period),
+        rss_check_loop(
+            bot,
+            store,
+            url,
+            period,
+            initial_delay=initial_delay,
+        ),
         name=f"rss-check-{url}",
     )
 async def restart_all_tasks(bot):
     store = bot.db.users.plugin("rss")
     feeds = await get_feeds(store)
+    host_counts = {}
 
     for url, feed in feeds.items():
         period = feed.get("period", DEFAULT_POLL_INTERVAL)
-        await ensure_task(bot, store, url, period)
+        hostname = (urlparse(url).hostname or "").lower()
+        host_index = host_counts.get(hostname, 0)
+        host_counts[hostname] = host_index + 1
+        initial_delay = host_index * RSS_STARTUP_STAGGER_SECONDS
+        await ensure_task(
+            bot,
+            store,
+            url,
+            period,
+            initial_delay=initial_delay,
+        )
 async def on_load(bot):
     if feedparser is None:
         log.error(
@@ -162,15 +198,25 @@ async def _handle_post_error(bot, store, url, period, now, exc):
 
 
 async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
-    log.warning("Failed to fetch RSS feed %s: %s", url, exc)
-
     error_count += 1
     retry_delay = _retry_delay(period, error_count)
     next_retry = now + retry_delay
+    detail = _format_feed_fetch_error(url, exc)
+    log.warning(
+        "[RSS] Fetch failed url=%s error=%s retry_in=%ss",
+        url,
+        detail,
+        retry_delay,
+    )
 
     def mutator(feed):
         changed = _apply_retry_state(feed, error_count, next_retry)
-        changed = _record_feed_check(feed, now=now, success=False, error=str(exc)) or changed
+        changed = _record_feed_check(
+            feed,
+            now=now,
+            success=False,
+            error=detail,
+        ) or changed
         return changed
 
     await _update_feed(bot, store, url, mutator)

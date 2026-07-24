@@ -246,6 +246,15 @@ def _rss_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "MAX_BACKOFF_TIME": max(1, _to_int(cfg.get("rss_max_backoff_time") or 3600, 3600)),
         "RSS_USER_AGENT": _to_str(cfg.get("rss_user_agent") or cfg.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"),
         "RSS_FETCH_TIMEOUT_SECONDS": _to_float(cfg.get("rss_fetch_timeout_seconds") or cfg.get("http_timeout_seconds") or 8, 8),
+        "RSS_STARTUP_STAGGER_SECONDS": max(
+            0.0,
+            _to_float(
+                2.0
+                if cfg.get("rss_startup_stagger_seconds") is None
+                else cfg.get("rss_startup_stagger_seconds"),
+                2.0,
+            ),
+        ),
         "RSS_MAX_REDIRECTS": max(1, _to_int(cfg.get("rss_max_redirects") or 5, 5)),
         "RSS_MAX_READ_BYTES": max(4096, _to_int(cfg.get("rss_max_read_bytes") or 1048576, 1048576)),
         "ALLOW_PRIVATE_FETCH_URLS": _to_bool(cfg.get("allow_private_fetch_urls"), False),
@@ -305,7 +314,11 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         "plugins.rss.config": rss_values,
         "plugins.rss.tasks": {
             key: rss_values[key]
-            for key in ("DEFAULT_POLL_INTERVAL", "RSS_MAX_ENTRIES_PER_POLL")
+            for key in (
+                "DEFAULT_POLL_INTERVAL",
+                "RSS_MAX_ENTRIES_PER_POLL",
+                "RSS_STARTUP_STAGGER_SECONDS",
+            )
         },
         "plugins.rss.commands": {
             "DEFAULT_POLL_INTERVAL": rss_values["DEFAULT_POLL_INTERVAL"],

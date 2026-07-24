@@ -421,6 +421,7 @@ def test_validate_config_checks_rss_list_template_and_trusted_limits():
         "rss_list_page_size": 0,
         "rss_template_max_length": 0,
         "rss_broken_error_threshold": 0,
+        "rss_startup_stagger_seconds": -0.1,
     }
 
     with pytest.raises(config_mod.ConfigError) as exc:
@@ -431,6 +432,7 @@ def test_validate_config_checks_rss_list_template_and_trusted_limits():
     assert "rss_list_page_size: must be greater than 0" in message
     assert "rss_template_max_length: must be greater than 0" in message
     assert "rss_broken_error_threshold: must be greater than 0" in message
+    assert "rss_startup_stagger_seconds: must be 0 or greater" in message
 
 
 def test_collect_config_warnings_for_missing_avatar(tmp_path, monkeypatch):

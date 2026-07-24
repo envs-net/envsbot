@@ -5,7 +5,7 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.6",
+    "version": "0.2.7",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms", "_core", "users"],
@@ -72,6 +72,17 @@ RSS_FETCH_TIMEOUT_SECONDS = float(
 )
 
 
+_configured_startup_stagger = config.get("rss_startup_stagger_seconds", 2.0)
+RSS_STARTUP_STAGGER_SECONDS = max(
+    0.0,
+    float(
+        2.0
+        if _configured_startup_stagger is None
+        else _configured_startup_stagger
+    ),
+)
+
+
 RSS_MAX_REDIRECTS = max(1, int(config.get("rss_max_redirects", 5) or 5))
 
 
@@ -118,6 +129,7 @@ __all__ = [
     'MAX_BACKOFF_TIME',
     'RSS_USER_AGENT',
     'RSS_FETCH_TIMEOUT_SECONDS',
+    'RSS_STARTUP_STAGGER_SECONDS',
     'RSS_MAX_REDIRECTS',
     'RSS_MAX_READ_BYTES',
     'ALLOW_PRIVATE_FETCH_URLS',

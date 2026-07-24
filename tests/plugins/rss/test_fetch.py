@@ -384,7 +384,40 @@ async def test_fetch_error_sleeps_retry_delay(monkeypatch, make_bot):
 
     assert store[rss.RSS_KEY][url]["error_count"] == 1
     assert store[rss.RSS_KEY][url]["next_retry"] == 1300
+    assert store[rss.RSS_KEY][url]["last_error"] == "boom"
     assert sleep_calls == [300]
+
+
+@pytest.mark.asyncio
+async def test_fetch_timeout_records_readable_error(monkeypatch, make_bot, caplog):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://slow.example.org/rss.xml"
+    store[rss.RSS_KEY] = {url: {"error_count": 0, "next_retry": 0}}
+
+    async def fake_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(rss_store, "RSS_RETRY_INITIAL_DELAY", 300)
+
+    with caplog.at_level("WARNING", logger="plugins.rss.store"):
+        await rss._handle_fetch_error(
+            bot,
+            store,
+            url,
+            period=1200,
+            now=1000,
+            error_count=0,
+            exc=asyncio.TimeoutError(),
+        )
+
+    feed = store[rss.RSS_KEY][url]
+    assert feed["last_error"] == "Timed out while fetching feed."
+    assert (
+        "[RSS] Fetch failed url=https://slow.example.org/rss.xml "
+        "error=Timed out while fetching feed. retry_in=300s"
+    ) in caplog.messages
 
 
 def test_filter_feeds_for_room_matches_normalized_room_and_skips_missing_rooms():

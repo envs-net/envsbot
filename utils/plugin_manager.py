@@ -648,10 +648,22 @@ class PluginManager:
                                           plugin)
                             failed.add(plugin)
                 break
-            log.info("[PLUGIN] load_all progress: %d/%d loaded, %d failed",
-                     len(loaded), len(discovered), len(failed))
-            if len(failed) > 0:
-                log.warning("[PLUGIN] failed: %s", ", ".join(sorted(failed)))
+            log.debug(
+                "[PLUGIN] load_all pass %d: %d/%d loaded, %d failed",
+                iteration,
+                len(loaded),
+                len(discovered),
+                len(failed),
+            )
+
+        log.info(
+            "[PLUGIN] load_all complete: %d/%d loaded, %d failed",
+            len(loaded),
+            len(discovered),
+            len(failed),
+        )
+        if failed:
+            log.warning("[PLUGIN] failed: %s", ", ".join(sorted(failed)))
 
     async def cleanup_room_state(self, room_jid: str) -> dict[str, dict]:
         """Ask loaded plugins to clean state for a deleted room.

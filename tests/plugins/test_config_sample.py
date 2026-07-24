@@ -18,6 +18,7 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.BACKUP_ON_START is True
     assert sample.ALLOW_PRIVATE_FETCH_URLS is False
     assert sample.RSS_FETCH_TIMEOUT_SECONDS == sample.HTTP_TIMEOUT_SECONDS
+    assert sample.RSS_STARTUP_STAGGER_SECONDS == 2.0
     assert sample.RSS_MAX_REDIRECTS > 0
     assert sample.RSS_MAX_READ_BYTES > 0
     assert sample.RSS_TRUSTED_MAX_FEEDS == 10

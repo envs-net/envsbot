@@ -119,6 +119,9 @@ def _validate_numeric_ranges(cfg, errors):
         "message_cache_max_age_days",
         "rss_trusted_max_feeds",
     }
+    zero_or_greater_number_keys = {
+        "rss_startup_stagger_seconds",
+    }
     default_pagination = cfg.get("default_pagination")
     if default_pagination is not None:
         if str(default_pagination).strip().lower() != "all":
@@ -148,6 +151,11 @@ def _validate_numeric_ranges(cfg, errors):
     for key in zero_or_greater_integer_keys:
         value = cfg.get(key)
         if _is_config_int(value) and value < 0:
+            errors.append(f"{key}: must be 0 or greater")
+
+    for key in zero_or_greater_number_keys:
+        value = cfg.get(key)
+        if _is_config_number(value) and value < 0:
             errors.append(f"{key}: must be 0 or greater")
 
     for key, (minimum, maximum) in range_integer_keys.items():

@@ -271,6 +271,9 @@ RSS_USER_AGENT = HTTP_USER_AGENT
 
 # Explicit RSS HTTP fetch limits.
 RSS_FETCH_TIMEOUT_SECONDS = HTTP_TIMEOUT_SECONDS
+# Spread initial requests to the same host across a few seconds after startup.
+# This avoids a burst when many feeds are hosted by one slower service.
+RSS_STARTUP_STAGGER_SECONDS = 2.0
 RSS_MAX_REDIRECTS = 5
 RSS_MAX_READ_BYTES = 1048576
 

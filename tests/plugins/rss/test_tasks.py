@@ -169,6 +169,36 @@ async def test_rss_task_and_flush_helpers(monkeypatch, make_bot):
 
 
 @pytest.mark.asyncio
+async def test_restart_all_tasks_staggers_initial_fetches_per_host(
+        monkeypatch, make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    await rss.save_feeds(store, {
+        "https://git.example.org/one.rss": {"period": 100},
+        "https://other.example.org/feed.rss": {"period": 200},
+        "https://git.example.org/two.rss": {"period": 300},
+        "https://git.example.org/three.rss": {"period": 400},
+    })
+    scheduled = []
+
+    async def fake_ensure_task(
+            bot_arg, store_arg, url_arg, period_arg, *, initial_delay=0.0):
+        scheduled.append((url_arg, period_arg, initial_delay))
+
+    monkeypatch.setattr(rss_tasks, "ensure_task", fake_ensure_task)
+    monkeypatch.setattr(rss_tasks, "RSS_STARTUP_STAGGER_SECONDS", 2.0)
+
+    await rss_tasks.restart_all_tasks(bot)
+
+    assert scheduled == [
+        ("https://git.example.org/one.rss", 100, 0.0),
+        ("https://other.example.org/feed.rss", 200, 0.0),
+        ("https://git.example.org/two.rss", 300, 2.0),
+        ("https://git.example.org/three.rss", 400, 4.0),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_reset_feed_retry_prunes_cancelled_supervised_task(monkeypatch, make_bot):
     bot = make_bot()
     bot.tasks = TaskSupervisor()
