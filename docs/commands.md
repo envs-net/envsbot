@@ -18,6 +18,9 @@ Runtime help is available through:
 - `,help <plugin>`
 - `,help ,<command>`
 
+Calling a registered command family without a subcommand (for example `,rooms`, `,users` or `,bot`) opens the matching help overview automatically.
+Unknown command names still produce no automatic response.
+
 For paginated commands, `all` disables paging and `last` jumps to the final page.
 
 ## Context notes

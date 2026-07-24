@@ -449,6 +449,25 @@ def resolve_command(text: str):
     return best_cmd, args
 
 
+def is_command_group(text: str) -> bool:
+    """Return whether *text* is a registered command-family prefix.
+
+    Exact commands are intentionally excluded: callers should resolve those
+    normally first.  This helper only recognizes prefixes that have at least
+    one longer registered command, for example ``rooms`` when ``rooms list``
+    and ``rooms add`` are registered.
+    """
+    tokens = tuple(part.lower() for part in str(text).split() if part)
+    if not tokens:
+        return False
+
+    candidates = COMMANDS.by_prefix.get(tokens[0], ())
+    return any(
+        len(candidate) > len(tokens) and candidate[:len(tokens)] == tokens
+        for candidate in candidates
+    )
+
+
 def has_permission(user_role: Role, required_role: Role) -> bool:
     """
     Check if a user with user_role is permitted to execute a command

@@ -9,7 +9,7 @@ import slixmpp
 
 from bot.context import CommandContext
 from bot.permissions import role_bypasses_rate_limit
-from utils.command import Role
+from utils.command import Role, is_command_group
 from utils.command_execution import CommandExecutionContext
 from utils.permissions import can_execute_command
 
@@ -117,6 +117,18 @@ class CommandDispatchMixin:
             return f"🔴 Command error: {error}"
         return f"🔴 Command '{cmd_name}' failed due to internal error."
 
+    def _is_loaded_plugin_help_target(self, text: str) -> bool:
+        """Return whether *text* exactly names one loaded plugin."""
+        tokens = tuple(part.lower() for part in str(text).split() if part)
+        if len(tokens) != 1:
+            return False
+        try:
+            plugins = getattr(getattr(self, "bot_plugins", None), "plugins", {})
+            return any(str(name).lower() == tokens[0] for name in plugins)
+        except Exception:
+            log.debug("[COMMAND] Could not inspect loaded plugin names", exc_info=True)
+            return False
+
     async def build_command_context(
         self,
         body: str,
@@ -158,6 +170,11 @@ class CommandDispatchMixin:
 
         import envsbot as app
         cmd_obj, args = app.resolve_command(text)
+        if not cmd_obj and (
+            is_command_group(text) or self._is_loaded_plugin_help_target(text)
+        ):
+            cmd_obj, _ = app.resolve_command("help")
+            args = text.split()
         if not cmd_obj:
             return
 

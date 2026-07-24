@@ -330,3 +330,27 @@ def test_room_toggle_subcommands_support_custom_status_name():
     ]
     assert subcommands[-1].usage == "{prefix}idlerpg enabled"
     assert subcommands[-1].examples[0].description
+
+
+def test_is_command_group_recognizes_only_registered_longer_prefixes(monkeypatch):
+    registry = CommandRegistry()
+    monkeypatch.setattr(command_mod, "COMMANDS", registry)
+
+    command = command_mod.Command(
+        name="rooms list",
+        handler=fake_handler1,
+        role=Role.USER,
+    )
+    nested = command_mod.Command(
+        name="rooms feature list",
+        handler=fake_handler2,
+        role=Role.USER,
+    )
+    registry.register("rooms list", command, "rooms")
+    registry.register("rooms feature list", nested, "rooms")
+
+    assert command_mod.is_command_group("rooms") is True
+    assert command_mod.is_command_group("ROOMS feature") is True
+    assert command_mod.is_command_group("rooms list") is False
+    assert command_mod.is_command_group("rooms missing") is False
+    assert command_mod.is_command_group("") is False

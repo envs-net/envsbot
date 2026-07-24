@@ -216,6 +216,109 @@ async def test_handle_command_no_body_or_prefix(bot):
     await bot.handle_command(",", "jid@host", None, m, False)
 
 
+def test_loaded_plugin_help_target_edges(bot):
+    bot.bot_plugins.plugins = {"ducks": object(), "RSS": object()}
+
+    assert bot._is_loaded_plugin_help_target("DUCKS") is True
+    assert bot._is_loaded_plugin_help_target("rss") is True
+    assert bot._is_loaded_plugin_help_target("missing") is False
+    assert bot._is_loaded_plugin_help_target("ducks extra") is False
+    assert bot._is_loaded_plugin_help_target("") is False
+
+    class BrokenPlugins:
+        def __iter__(self):
+            raise RuntimeError("broken registry")
+
+    bot.bot_plugins.plugins = BrokenPlugins()
+    assert bot._is_loaded_plugin_help_target("ducks") is False
+
+
+@pytest.mark.asyncio
+async def test_handle_command_routes_registered_group_root_to_help(bot, monkeypatch):
+    m = {
+        "type": "chat",
+        "from": DummyFrom("user@host", "resource"),
+        "get": lambda key, default=None: default,
+    }
+    received = []
+
+    async def help_handler(_bot, _sender, _nick, args, _msg, _is_room):
+        received.append(args)
+
+    help_cmd = types.SimpleNamespace(
+        name="help",
+        handler=help_handler,
+        role=envsbot.Role.NONE,
+        context="any",
+    )
+
+    def resolve(text):
+        if text == "rooms":
+            return None, ["rooms"]
+        if text == "help":
+            return help_cmd, []
+        raise AssertionError(f"unexpected command resolution: {text}")
+
+    monkeypatch.setattr(envsbot, "resolve_command", resolve)
+    monkeypatch.setattr("bot.dispatch.is_command_group", lambda text: text == "rooms")
+
+    await bot.handle_command(",rooms", "user@host", None, m, False)
+
+    assert received == [["rooms"]]
+
+
+@pytest.mark.asyncio
+async def test_handle_command_routes_loaded_plugin_name_to_help(bot, monkeypatch):
+    m = {
+        "type": "chat",
+        "from": DummyFrom("user@host", "resource"),
+        "get": lambda key, default=None: default,
+    }
+    received = []
+
+    async def help_handler(_bot, _sender, _nick, args, _msg, _is_room):
+        received.append(args)
+
+    help_cmd = types.SimpleNamespace(
+        name="help",
+        handler=help_handler,
+        role=envsbot.Role.NONE,
+        context="any",
+    )
+    bot.bot_plugins.plugins = {"ducks": object()}
+
+    def resolve(text):
+        if text == "ducks":
+            return None, ["ducks"]
+        if text == "help":
+            return help_cmd, []
+        raise AssertionError(f"unexpected command resolution: {text}")
+
+    monkeypatch.setattr(envsbot, "resolve_command", resolve)
+    monkeypatch.setattr("bot.dispatch.is_command_group", lambda _text: False)
+
+    await bot.handle_command(",ducks", "user@host", None, m, False)
+
+    assert received == [["ducks"]]
+
+
+@pytest.mark.asyncio
+async def test_handle_command_does_not_route_unknown_root_to_help(bot, monkeypatch):
+    m = {
+        "type": "chat",
+        "from": DummyFrom("user@host", "resource"),
+        "get": lambda key, default=None: default,
+    }
+    resolver = MagicMock(return_value=(None, ["unknown"]))
+    bot.bot_plugins.plugins = {"ducks": object()}
+    monkeypatch.setattr(envsbot, "resolve_command", resolver)
+    monkeypatch.setattr("bot.dispatch.is_command_group", lambda _text: False)
+
+    await bot.handle_command(",unknown", "user@host", None, m, False)
+
+    resolver.assert_called_once_with("unknown")
+
+
 @pytest.mark.asyncio
 async def test_handle_command_unresolved_or_noperm(bot):
     m = {
