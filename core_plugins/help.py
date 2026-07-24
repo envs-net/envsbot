@@ -59,11 +59,30 @@ HELP_KEY = "HELP"
 
 PLUGIN_META = {
     "name": "help",
-    "version": "0.6.0",
+    "version": "0.6.1",
     "description": "Dynamic help for plugins and commands.",
     "category": "core",
     "requires": ["_core", "rooms"],
 }
+
+
+ENVS_BOT_INTRO_LINES = (
+    "🤖 About EnvsBot",
+    "",
+    (
+        "EnvsBot is the envs.net-maintained evolution of XMPPBot: a modular, "
+        "plugin-driven bot for XMPP rooms and direct chats. It provides room "
+        "management, user roles, persistent data, diagnostics, feeds, reminders, "
+        "utilities and community features."
+    ),
+    "",
+    (
+        "The commands shown below are filtered according to your role and the "
+        "current chat context. Room-specific plugins may also need to be enabled "
+        "by a room administrator."
+    ),
+    "",
+)
 
 
 # Plugin name -> room feature toggle metadata.  The feature name is the value
@@ -688,7 +707,8 @@ def _format_command_group(bot, query: str, role: Role) -> list[str] | None:
         return None
 
     group = " ".join(tokens)
-    lines = [
+    lines = list(ENVS_BOT_INTRO_LINES) if group == "bot" else []
+    lines += [
         f"📖 Command group: {bot.prefix}{group}",
         "",
         "Subcommands:",
@@ -953,7 +973,8 @@ async def cmd_help(bot, sender_jid, nick, args, msg, is_room):
 # --------------------------------------------------
 async def _general(bot, role: Role) -> list[str]:
     lines = [
-        f"📚 Envsbot {bot.version or 'unknown'} help",
+        *ENVS_BOT_INTRO_LINES,
+        f"📚 EnvsBot {bot.version or 'unknown'} help",
         "",
         "Start here:",
         f"• {bot.prefix}help commands — list commands visible to you",

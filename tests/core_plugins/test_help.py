@@ -157,6 +157,25 @@ async def test_general_help_lists_plugins_and_commands(
     msg = DummyMsg(body=",help")
     await help_plugin.cmd_help(bot, "user@host", "Bob", [], msg, True)
     assert bot.replies
+    intro = [
+        "🤖 About EnvsBot",
+        "",
+        (
+            "EnvsBot is the envs.net-maintained evolution of XMPPBot: a modular, "
+            "plugin-driven bot for XMPP rooms and direct chats. It provides room "
+            "management, user roles, persistent data, diagnostics, feeds, reminders, "
+            "utilities and community features."
+        ),
+        "",
+        (
+            "The commands shown below are filtered according to your role and the "
+            "current chat context. Room-specific plugins may also need to be enabled "
+            "by a room administrator."
+        ),
+        "",
+    ]
+    assert bot.replies[-1][:len(intro)] == intro
+    assert bot.replies[-1][len(intro)] == "📚 EnvsBot 99.99-x help"
     reply = flatten_lines(bot.replies[-1])
     # Plugins in expected list
     assert "foo" in reply
@@ -722,12 +741,64 @@ async def test_help_command_group_prefers_subcommands_over_base_alias(
     )
 
     reply = flatten_lines(bot.replies[-1])
+    assert "🤖 About EnvsBot" not in reply
     assert "Command group: ,config" in reply
     assert ",config show [all|page|last]" in reply
     assert ",config diff [all|page|last]" in reply
     assert ",config validate" in reply
     assert ",config reload" in reply
     assert "Command: ,config show" not in reply
+
+
+def test_bot_command_group_starts_with_envsbot_introduction(monkeypatch):
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    for name in ("bot status", "bot restart"):
+        registry.register(
+            name,
+            command_utils.Command(
+                name=name,
+                handler=handler,
+                role=command_utils.Role.ADMIN,
+                short=f"{name} short.",
+                usage="{prefix}" + name,
+            ),
+            "_admin",
+        )
+
+    bot = DummyBot(role=command_utils.Role.ADMIN)
+    lines = help_plugin._format_command_group(
+        bot,
+        "bot",
+        command_utils.Role.ADMIN,
+    )
+
+    assert lines is not None
+    intro = [
+        "🤖 About EnvsBot",
+        "",
+        (
+            "EnvsBot is the envs.net-maintained evolution of XMPPBot: a modular, "
+            "plugin-driven bot for XMPP rooms and direct chats. It provides room "
+            "management, user roles, persistent data, diagnostics, feeds, reminders, "
+            "utilities and community features."
+        ),
+        "",
+        (
+            "The commands shown below are filtered according to your role and the "
+            "current chat context. Room-specific plugins may also need to be enabled "
+            "by a room administrator."
+        ),
+        "",
+    ]
+    assert lines[:len(intro)] == intro
+    assert lines[len(intro)] == "📖 Command group: ,bot"
+    assert "• ,bot restart — bot restart short." in lines
+    assert "• ,bot status — bot status short." in lines
 
 
 @pytest.mark.asyncio
