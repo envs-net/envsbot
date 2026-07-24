@@ -82,17 +82,30 @@ def test_complete_quest_without_valid_questers_still_resets_state():
     assert room["quest"] == {"active": False, "next_at": 55 + idlerpg.QUEST_INTERVAL}
 
 
-def test_fail_quest_penalizes_only_online_players_and_records_stats():
+def test_fail_quest_penalizes_only_quest_participants_and_records_stats():
     room = idlerpg._blank_room()
     alice = _online_player("alice@envs.net", "Alice", level=1, next_ttl=100)
     bob = idlerpg._normalize_player(
         "bob@envs.net",
         {"name": "Bob", "level": 1, "next": 100, "logged_out": True},
     )
+    carol = _online_player("carol@envs.net", "Carol", level=1, next_ttl=100)
     room["players"] = {
         "alice@envs.net": alice,
         "bob@envs.net": bob,
+        "carol@envs.net": carol,
         "broken@envs.net": object(),
+    }
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "questers": [
+            "alice@envs.net",
+            "bob@envs.net",
+            "alice@envs.net",
+            "missing@envs.net",
+            "broken@envs.net",
+        ],
     }
     messages: list[str] = []
 
@@ -102,18 +115,26 @@ def test_fail_quest_penalizes_only_online_players_and_records_stats():
     assert alice["next"] > 100
     assert alice["penalties"]["quest"] == alice["next"] - 100
     assert alice["stats"]["quest_failures"] == 1
-    assert "Alice receive a p15 penalty" in messages[0]
-    assert bob["next"] == 100
-    assert "quest" not in bob.get("penalties", {})
+    assert bob["next"] > 100
+    assert bob["penalties"]["quest"] == bob["next"] - 100
+    assert bob["stats"]["quest_failures"] == 1
+    assert "Alice, Bob receive a p15 penalty" in messages[0]
+    assert carol["next"] == 100
+    assert "quest" not in carol.get("penalties", {})
+    assert carol["stats"].get("quest_failures", 0) == 0
 
 
-def test_fail_quest_without_online_players_reports_plain_failure():
-    JOINED_ROOMS["room@conf"] = {"nicks": {}}
+def test_fail_quest_without_valid_quest_participants_reports_plain_failure():
     room = idlerpg._blank_room()
-    room["players"] = {"alice@envs.net": idlerpg._normalize_player("alice@envs.net", {"name": "Alice"})}
+    room["players"] = {"broken@envs.net": object()}
     messages: list[str] = []
 
-    room["quest"] = {"active": True, "type": "grid", "route": [[1, 2]], "questers": ["alice@envs.net"]}
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "route": [[1, 2]],
+        "questers": ["missing@envs.net", "broken@envs.net"],
+    }
 
     quests._fail_quest(room, "room@conf", 42, messages)
 
@@ -276,7 +297,7 @@ def test_maybe_fail_time_quest_for_penalty_only_affects_time_questers():
     assert room["quest"] == {"active": False, "next_at": 101 + idlerpg.QUEST_INTERVAL}
     assert "Alice received a message penalty" in messages[0]
     assert alice["penalties"]["quest"] > 0
-    assert bob["penalties"]["quest"] > 0
+    assert "quest" not in bob.get("penalties", {})
 
 
 def test_start_time_and_grid_quests_build_expected_state(monkeypatch):

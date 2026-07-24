@@ -135,9 +135,11 @@ def _fail_quest(
     quest = room.get("quest") if isinstance(room.get("quest"), dict) else {}
     quest_kind = _quest_type(quest)
     players = room.get("players", {})
+    questers = [str(jid) for jid in quest.get("questers", [])]
     penalized: list[str] = []
-    for jid, player in players.items():
-        if not isinstance(player, dict) or not _dep_state._is_player_online(room_jid, str(jid), player):
+    for jid in dict.fromkeys(questers):
+        player = players.get(jid) if isinstance(players, dict) else None
+        if not isinstance(player, dict):
             continue
         changed = _dep_leveling._add_time(player, _dep_leveling._penalty_amount_for(player, 15, "quest"))
         penalties = player.setdefault("penalties", {})
