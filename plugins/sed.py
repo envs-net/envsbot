@@ -309,7 +309,6 @@ def _validate_sed_inputs(original_text: str, pattern: str, replacement: str,
     return original_text, pattern, replacement, flags_str, None
 
 
-
 def _apply_literal_sed_direct(original_text: str, pattern: str, replacement: str, flags_str: str):
     """Apply literal-mode sed without process startup overhead."""
     re_flags = 0

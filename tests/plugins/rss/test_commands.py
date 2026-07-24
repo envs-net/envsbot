@@ -611,7 +611,6 @@ async def test_rss_global_default_template_requires_global_moderator(make_bot):
     assert rss.RSS_DEFAULT_TEMPLATE_KEY not in bot.plugin_store
 
 
-
 @pytest.mark.asyncio
 async def test_rss_feed_template_show_set_test_unset(make_bot):
     bot = make_bot()

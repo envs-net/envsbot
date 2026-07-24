@@ -246,8 +246,6 @@ async def backup_prune(bot, sender, nick, args, msg, is_room):
     bot.reply_ok(msg, "\n".join(lines))
 
 
-
-
 @command(
     "backup verify",
     role=Role.ADMIN,

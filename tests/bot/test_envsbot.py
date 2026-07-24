@@ -168,8 +168,6 @@ async def test_reply_groupchat_and_private(monkeypatch, bot):
     assert bot._replies
 
 
-
-
 @pytest.mark.asyncio
 async def test_reply_tasks_are_tracked_and_drained(bot, monkeypatch):
     release = asyncio.Event()
@@ -1303,7 +1301,6 @@ async def test_main_shutdown_timeout_and_close_error(monkeypatch):
         ("wait_for", fake_xmpp.disconnected, 2.0),
         "db.close",
     ]
-
 
 
 def test_install_shutdown_signal_handlers_requests_clean_disconnect():

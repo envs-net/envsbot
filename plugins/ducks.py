@@ -443,7 +443,7 @@ async def _spawn_duck_after_delay(bot, room_jid, delay):
             old_expire.cancel()
 
         if DUCK_TIMEOUT > 0:
-            EXPIRE_TASKS[room_jid] = create_plugin_task(bot, 
+            EXPIRE_TASKS[room_jid] = create_plugin_task(bot,
                 "ducks",
                 _expire_duck(bot, room_jid),
                 name=f"duck-expire-{room_jid}",
@@ -505,7 +505,7 @@ async def _maybe_schedule_duck(bot, room_jid):
 
     delay = random.randint(5, 20)
     PENDING_DUCKS.add(room_jid)
-    SPAWN_TASKS[room_jid] = create_plugin_task(bot, 
+    SPAWN_TASKS[room_jid] = create_plugin_task(bot,
         "ducks",
         _spawn_duck_after_delay(bot, room_jid, delay),
         name=f"duck-spawn-{room_jid}",

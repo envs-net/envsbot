@@ -346,7 +346,6 @@ async def test_on_groupchat_message_codeblock_and_quote_suppression(
     assert fake_bot._replies == []
 
 
-
 def test_extract_urls_handles_multiple_code_blocks():
     text = "\n".join([
         "https://example.org/one",

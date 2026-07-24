@@ -360,7 +360,6 @@ async def test_reminder_on_load_registers_reply_fallback_handlers():
     )
 
 
-
 @pytest.mark.asyncio
 async def test_remind_command_reports_past_absolute_time(dummy_bot, dummy_msg, monkeypatch):
     fixed_now = datetime.datetime(

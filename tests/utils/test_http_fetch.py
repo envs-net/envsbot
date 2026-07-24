@@ -167,7 +167,6 @@ async def test_fetch_bytes_redirect_without_location_raises():
         )
 
 
-
 @pytest.mark.asyncio
 async def test_fetch_preview_returns_partial_body_without_large_error():
     calls = []
@@ -212,8 +211,6 @@ async def test_fetch_preview_obeys_stop_predicate():
 
     assert result.body == b"<html><head><title>Example</title>"
     assert result.truncated is False
-
-
 
 
 @pytest.mark.asyncio

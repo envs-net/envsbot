@@ -825,7 +825,6 @@ def test_xmpp_server_endpoints_falls_back_for_empty_or_invalid_answers(
     ]
 
 
-
 @pytest.mark.parametrize(
     "error",
     [
@@ -863,7 +862,6 @@ def test_xmpp_server_endpoints_falls_back_on_dns_error(monkeypatch):
     assert certificate._xmpp_server_endpoints("timeout.example.org", 2.0) == [
         ("timeout.example.org", 5269),
     ]
-
 
 
 def test_xmpp_server_endpoints_falls_back_without_dnspython(monkeypatch):

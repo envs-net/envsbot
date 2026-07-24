@@ -126,7 +126,6 @@ def test_validate_fetch_url_allow_private_still_requires_valid_http_url(url):
         url_safety.validate_fetch_url(url, allow_private=True)
 
 
-
 def test_hosts_from_addrinfo_unpacks_socket_address_hosts():
     addrinfos = [
         (

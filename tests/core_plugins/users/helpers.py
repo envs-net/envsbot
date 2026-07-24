@@ -49,11 +49,9 @@ class FakeUserManager:
         return self.nick_index_lock
 
 
-
 @pytest.fixture
 def mock_bot():
     return _make_mock_bot(include_audit=True)
-
 
 
 @pytest.fixture
@@ -71,12 +69,10 @@ def mock_msg():
     return m
 
 
-
 @pytest.fixture(autouse=True)
 def patch_joined_rooms():
     with patch.object(users_mod, "JOINED_ROOMS", {}, create=True):
         yield
-
 
 
 @pytest.fixture

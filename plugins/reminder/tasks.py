@@ -37,7 +37,7 @@ def _schedule_task(
     if old_task and not old_task.done():
         old_task.cancel()
 
-    task = create_plugin_task(bot, 
+    task = create_plugin_task(bot,
         "reminder",
         schedule_reminder_task(
             bot,

@@ -82,8 +82,6 @@ def clear_ducks_state():
     ducks.EXPIRE_TASKS.clear()
 
 
-
-
 def true_func(*a, **k):
     return True
 
@@ -646,4 +644,3 @@ async def test_ducks_runtime_state_global_and_room():
         "expire_tasks": 1,
         "tracked_rooms": 1,
     }
-

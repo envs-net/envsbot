@@ -237,8 +237,6 @@ async def test_cache_reports_and_retries_persistence_failure(monkeypatch):
     await cache.close()
 
 
-
-
 @pytest.mark.asyncio
 async def test_cache_counts_entries_dropped_from_bounded_retry_backlog(monkeypatch):
     class FailingStore(FakeStore):

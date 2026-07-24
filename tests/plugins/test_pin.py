@@ -504,7 +504,6 @@ async def test_pin_runtime_state_global_and_room(monkeypatch):
     assert await pin.get_runtime_state(bot) == {"rooms": 2, "pins": 3}
 
 
-
 def _reply_text(reply_mock):
     value = reply_mock.call_args[0][1]
     if isinstance(value, list):

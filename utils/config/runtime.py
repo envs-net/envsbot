@@ -37,7 +37,6 @@ _RATE_LIMIT_KEYS = {
 }
 
 
-
 def _display_key(key: str) -> str:
     from .defaults import _LOWER_TO_PYTHON_CONFIG_KEY
 

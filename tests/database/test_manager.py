@@ -64,8 +64,6 @@ async def test_database_manager_flush(tmp_db_path):
     await db.close()
 
 
-
-
 @pytest.mark.asyncio
 async def test_manual_flush_raises_after_retries(monkeypatch):
     db = DatabaseManager(":memory:")
@@ -197,7 +195,6 @@ async def test_database_manager_integrity_check_stringifies_unusual_rows():
     assert await db.integrity_check() == ["ok", "bad-row"]
     await db.optimize()
     assert db.conn.queries == ["PRAGMA integrity_check;", "PRAGMA optimize;", "commit"]
-
 
 
 @pytest.mark.asyncio

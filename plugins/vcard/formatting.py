@@ -40,7 +40,6 @@ def _extract_email_addresses(vcard):
     return emails
 
 
-
 def _format_vcard_header(label, display_name, rooms=None):
     if rooms:
         return f"{label} - {display_name} in {', '.join(rooms)}:"

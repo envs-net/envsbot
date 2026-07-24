@@ -594,7 +594,6 @@ def test_docstring_and_formatting_helpers():
     assert help_plugin._context_label(structured) == "private"
 
 
-
 @pytest.mark.asyncio
 async def test_help_exact_primary_command_prefers_details_over_group(monkeypatch):
     registry = command_utils.CommandRegistry()
@@ -1206,7 +1205,6 @@ def test_weather_command_metadata_matches_city_zip_support():
     assert "vCard location" in cmd.short
     assert "room nick" in cmd.short
     assert "city/ZIP code" in cmd.short
-
 
 
 def test_section_lines_extracts_docstring_sections_and_stops_at_next_header():

@@ -51,7 +51,6 @@ async def get_info(bot, msg, jid=None):
     return vcard
 
 
-
 async def get_user_vcard(bot, msg, jid=None):
     """ Fetch and return the vCard information for a user.
 

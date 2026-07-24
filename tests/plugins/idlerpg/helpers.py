@@ -93,7 +93,6 @@ class DummyMsg:
         return self.data.get(key, default)
 
 
-
 @pytest.fixture(autouse=True)
 def clear_idlerpg_state():
     idlerpg.ROOM_TASKS.clear()

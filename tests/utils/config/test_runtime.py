@@ -68,8 +68,6 @@ def test_apply_runtime_config_replaces_limiter_when_rate_limit_changes():
     assert any("rate limiter" in note for note in notes)
 
 
-
-
 def test_idlerpg_runtime_values_derive_or_override_website_url():
     derived = runtime._idlerpg_values({
         "idlerpg": {

@@ -76,7 +76,6 @@ def test_write_generated_docs_writes_exact_utf8_files(monkeypatch, tmp_path):
     ]
 
 
-
 def test_write_generated_docs_creates_nested_plugin_directory(monkeypatch, tmp_path):
     root = tmp_path / "checkout"
     (root / "docs").mkdir(parents=True)

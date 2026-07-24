@@ -156,7 +156,6 @@ def test_original_style_grid_battle_only_when_players_meet(monkeypatch):
     assert messages == []
 
 
-
 def test_boss_event_defeat_awards_and_records_event(monkeypatch):
     room = idlerpg._blank_room()
     players = []

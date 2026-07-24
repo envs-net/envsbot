@@ -93,7 +93,7 @@ async def ensure_task(bot, store, url, period):
     if url in CHECK_TASKS and not CHECK_TASKS[url].done():
         return
 
-    CHECK_TASKS[url] = create_plugin_task(bot, 
+    CHECK_TASKS[url] = create_plugin_task(bot,
         "rss",
         rss_check_loop(bot, store, url, period),
         name=f"rss-check-{url}",

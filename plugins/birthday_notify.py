@@ -649,7 +649,7 @@ async def birthday_notify_command(bot, sender_jid, nick, args, msg, is_room):
             and str(msg["from"].bare) in JOINED_ROOMS
         ):
             room_jid = str(msg["from"].bare)
-            create_plugin_task(bot, 
+            create_plugin_task(bot,
                 "birthday_notify",
                 _check_room_birthdays(bot, room_jid),
                 name=f"birthday-check-{room_jid}",
@@ -715,7 +715,7 @@ async def on_ready(bot):
             except asyncio.CancelledError:
                 log.debug("[BIRTHDAY] Previous birthday check task cancelled")
 
-        _BIRTHDAY_CHECK_TASK = create_plugin_task(bot, 
+        _BIRTHDAY_CHECK_TASK = create_plugin_task(bot,
             "birthday_notify",
             _birthday_check_loop(bot),
             name="birthday-check-loop",

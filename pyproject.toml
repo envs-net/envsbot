@@ -81,8 +81,6 @@ exclude = ["tests*", "mutants*"]
 [tool.setuptools.data-files]
 "." = ["init_chat_slang.csv", "avatar.jpg"]
 
-
-
 [tool.mutmut]
 # The project uses a flat layout plus package directories, so mutmut cannot
 # reliably auto-detect the code paths. Keep this explicit.

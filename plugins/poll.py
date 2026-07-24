@@ -510,7 +510,7 @@ def _schedule_auto_close(bot, room_jid: str, poll: dict):
         return
 
     delay = max(0, int(ends_at) - _now())
-    AUTO_CLOSE_TASKS[key] = create_plugin_task(bot, 
+    AUTO_CLOSE_TASKS[key] = create_plugin_task(bot,
         "poll",
         _auto_close_after(bot, room_jid, poll_id, delay),
         name=f"poll-autoclose-{room_jid}-{poll_id}",

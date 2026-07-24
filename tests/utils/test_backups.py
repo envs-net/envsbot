@@ -77,8 +77,6 @@ async def test_create_backup_contains_runtime_files_and_manifest(backup_env):
     }
 
 
-
-
 @pytest.mark.asyncio
 async def test_create_backup_offloads_archive_work_and_pruning(backup_env, monkeypatch):
     bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
@@ -238,7 +236,6 @@ def test_parse_archive_created_at_handles_timezone_and_invalid_values():
     assert naive.hour == 3
 
     assert backups._parse_archive_created_at("not-a-date") is None
-
 
 
 def test_verify_backup_and_restore_plan(backup_env):

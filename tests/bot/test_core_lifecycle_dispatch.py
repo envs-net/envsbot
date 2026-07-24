@@ -74,8 +74,6 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
     assert events == ["plugins", "tasks:10.0", "cache", "db"]
 
 
-
-
 @pytest.mark.asyncio
 async def test_shutdown_runtime_drains_reply_tasks_before_plugins():
     events: list[str] = []

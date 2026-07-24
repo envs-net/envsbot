@@ -242,8 +242,6 @@ def test_explicit_source_keeps_unchanged_provider_response():
     ) == "Blume"
 
 
-
-
 @pytest.mark.asyncio
 async def test_translate_request_failure_does_not_log_private_text(
     monkeypatch, caplog
@@ -376,8 +374,6 @@ async def test_translate_command_treats_auto_as_text_with_default_target(
         source_language="en",
     )
     bot.reply.assert_called_once_with(msg, "Auto", mention=False)
-
-
 
 
 @pytest.mark.asyncio

@@ -307,8 +307,6 @@ async def user_has_room_plugin_grant(
     return await user_is_room_owner_or_admin(bot, bare_jid, room_jid)
 
 
-
-
 async def _validate_grant_change(bot, actor: str, target: str) -> tuple[bool, str, dict | None]:
     """Validate that actor may change plugin grants for target."""
     actor_jid = _parse_user_jid(actor)

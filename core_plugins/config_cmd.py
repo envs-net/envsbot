@@ -369,7 +369,6 @@ def _config_diff_arg_requests_page(args: Sequence[str]) -> bool:
     )
 
 
-
 def _format_diff_body(cfg: dict, args: Sequence[str], *, prefix: str = ",") -> str:
     entries = _config_diff_entries(cfg)
     diff_count = sum(1 for line in entries if line.startswith("• "))
@@ -448,7 +447,6 @@ async def config_diff(bot, sender, nick, args, msg, is_room):
         msg,
         _format_diff_body(config, args, prefix=getattr(bot, "prefix", ",")),
     )
-
 
 
 @command(

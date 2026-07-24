@@ -884,12 +884,12 @@ async def on_load(bot):
     INDEX_TASK = None
     CHECK_TASK = None
 
-    INDEX_TASK = create_plugin_task(bot, 
+    INDEX_TASK = create_plugin_task(bot,
         "xkcd",
         build_full_index(bot),
         name="xkcd-index",
     )
-    CHECK_TASK = create_plugin_task(bot, 
+    CHECK_TASK = create_plugin_task(bot,
         "xkcd",
         xkcd_check_loop(bot),
         name="xkcd-check",

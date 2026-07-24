@@ -52,7 +52,6 @@ def _audit_log(bot):
     return getattr(getattr(bot, "db", None), "audit", None)
 
 
-
 def _row_event(row) -> str:
     """Return the event field from a row-like object."""
     try:
@@ -250,7 +249,6 @@ def _parse_export_args(args: list[str]) -> tuple[int, dict[str, str], str | None
             return limit, filters, f"missing value for {key}"
         filters[field] = str(remaining.pop(0))
     return limit, filters, None
-
 
 
 def _parse_summary_window(args: list[str] | tuple[str, ...] | None) -> tuple[int, str, str | None]:
@@ -457,7 +455,6 @@ async def audit_action(bot, sender, nick, args, msg, is_room):
         command_hint=f"{config.get('prefix', ',')}audit action {event}",
         event=event,
     )
-
 
 
 @command(

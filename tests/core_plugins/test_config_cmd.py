@@ -58,7 +58,6 @@ def test_config_diff_entries_reports_muc_banbot_style_and_skips_secrets(monkeypa
     ]
 
 
-
 def test_config_diff_entries_shows_idlerpg_leaf_changes(monkeypatch):
     monkeypatch.setattr(
         config_cmd,

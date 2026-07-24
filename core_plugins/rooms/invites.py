@@ -459,7 +459,6 @@ async def on_room_invite(bot, msg) -> None:
         log.warning("Room invite event received without an extractable room JID")
 
 
-
 def _room_invite_onboarding_lines(bot, room_jid: str) -> list[str]:
     """Return concise next steps after accepting a room invite."""
     prefix = getattr(bot, "prefix", None) or str(config.get("prefix", ",") or ",")

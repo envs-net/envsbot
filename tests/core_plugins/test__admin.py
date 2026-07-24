@@ -699,8 +699,6 @@ async def test_on_ready_version_worker_branches(monkeypatch, fake_bot):
     assert created[0][1]["name"] == "version-check"
 
 
-
-
 @pytest.mark.asyncio
 async def test_bot_shutdown_external_success_still_drains_runtime(monkeypatch, fake_bot):
     monkeypatch.setitem(_admin.config, "stop_cmd", ["service", "envsbot", "stop"])
