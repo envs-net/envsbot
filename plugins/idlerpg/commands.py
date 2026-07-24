@@ -12,25 +12,6 @@ from core_plugins import _core
 from .handlers import _message_actor_nick, _remember_player_nick
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
     room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:

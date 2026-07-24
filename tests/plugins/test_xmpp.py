@@ -174,6 +174,74 @@ async def test_cmd_xmpp_uptime_success(bot, msg):
     await xmpp.cmd_xmpp_uptime(bot, "jid", "nick", ["example.org"], m, True)
     bot.reply.assert_called()
     assert "Uptime for example.org" in bot.reply.call_args[0][1]
+    assert "1h 1m 1s" in bot.reply.call_args[0][1]
+    bot.plugin["xep_0012"].get_last_activity.assert_awaited_once_with(
+        jid="example.org",
+        timeout=xmpp.XMPP_QUERY_TIMEOUT_SECONDS,
+    )
+
+
+def test_format_uptime_seconds_covers_compact_boundaries():
+    assert xmpp._format_uptime_seconds(0) == "0s"
+    assert xmpp._format_uptime_seconds("60") == "1m"
+    assert xmpp._format_uptime_seconds(3600) == "1h"
+    assert xmpp._format_uptime_seconds(90061) == "1d 1h 1m 1s"
+
+
+@pytest.mark.asyncio
+async def test_xmpp_check_uptime_statuses(monkeypatch, bot):
+    class FakeTimeout(Exception):
+        pass
+
+    class FakeIqError(Exception):
+        def __init__(self, condition):
+            super().__init__(condition)
+            self.iq = {"error": {"condition": condition}}
+
+    monkeypatch.setattr(
+        xmpp.slixmpp.exceptions,
+        "IqTimeout",
+        FakeTimeout,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        xmpp.slixmpp.exceptions,
+        "IqError",
+        FakeIqError,
+        raising=False,
+    )
+
+    query = AsyncMock(return_value=90061)
+    monkeypatch.setattr(xmpp, "_query_xmpp_uptime", query)
+    assert await xmpp._xmpp_check_uptime(bot, "example.org") == (
+        "✅",
+        "uptime: 1d 1h 1m 1s",
+    )
+    query.assert_awaited_once_with(bot, "example.org")
+
+    query.side_effect = FakeTimeout()
+    assert await xmpp._xmpp_check_uptime(bot, "example.org") == (
+        "⚠️",
+        "uptime: timed out",
+    )
+
+    query.side_effect = FakeIqError("service-unavailable")
+    assert await xmpp._xmpp_check_uptime(bot, "example.org") == (
+        "ℹ️",
+        "uptime: unsupported",
+    )
+
+    query.side_effect = FakeIqError("forbidden")
+    assert await xmpp._xmpp_check_uptime(bot, "example.org") == (
+        "⚠️",
+        "uptime: forbidden",
+    )
+
+    query.side_effect = ValueError("bad seconds")
+    assert await xmpp._xmpp_check_uptime(bot, "example.org") == (
+        "⚠️",
+        "uptime: bad seconds",
+    )
 
 
 @pytest.mark.asyncio
@@ -622,9 +690,14 @@ def test_xmpp_check_srv_success_none_and_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_cmd_xmpp_check_replies_with_combined_diagnostics(monkeypatch, bot, msg):
     m = msg()
-    monkeypatch.setattr(xmpp, "_xmpp_check_ping", AsyncMock(return_value=("✅", "ping ok")))
-    monkeypatch.setattr(xmpp, "_xmpp_check_disco", AsyncMock(return_value=("✅", "disco ok")))
-    monkeypatch.setattr(xmpp, "_xmpp_check_version", AsyncMock(return_value=("ℹ️", "version unsupported")))
+    ping = AsyncMock(return_value=("✅", "ping ok"))
+    disco = AsyncMock(return_value=("✅", "disco ok"))
+    version = AsyncMock(return_value=("ℹ️", "version unsupported"))
+    monkeypatch.setattr(xmpp, "_xmpp_check_ping", ping)
+    monkeypatch.setattr(xmpp, "_xmpp_check_disco", disco)
+    monkeypatch.setattr(xmpp, "_xmpp_check_version", version)
+    uptime = AsyncMock(return_value=("✅", "uptime: 12d 3h"))
+    monkeypatch.setattr(xmpp, "_xmpp_check_uptime", uptime)
     certificate_line = (
         "S2S TLS certificate is valid. "
         "Valid for another 30d (until 2026-08-21 12:00 UTC)."
@@ -638,17 +711,23 @@ async def test_cmd_xmpp_check_replies_with_combined_diagnostics(monkeypatch, bot
         return ("✅", "SRV records: _xmpp-client._tcp")
 
     monkeypatch.setattr(xmpp.asyncio, "to_thread", fake_to_thread)
-    await xmpp.cmd_xmpp_check(bot, "jid", "nick", ["example.org"], m, False)
+    target = "service@example.org/resource"
+    await xmpp.cmd_xmpp_check(bot, "jid", "nick", [target], m, False)
 
     lines = bot.reply.call_args[0][1]
     assert lines == [
-        "🩺 XMPP check for example.org",
+        f"🩺 XMPP check for {target}",
         "✅ ping ok",
         "✅ disco ok",
         "ℹ️ version unsupported",
+        "✅ uptime: 12d 3h",
         "✅ SRV records: _xmpp-client._tcp",
         f"✅ {certificate_line}",
     ]
+    ping.assert_awaited_once_with(bot, target)
+    disco.assert_awaited_once_with(bot, target)
+    version.assert_awaited_once_with(bot, target)
+    uptime.assert_awaited_once_with(bot, "example.org")
     certificate.assert_awaited_once_with("example.org")
 
 

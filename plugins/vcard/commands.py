@@ -14,22 +14,6 @@ from .store import get_vcard_store
 from .timezone import _get_vcard_timezone
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 async def _resolve_vcard_target(bot, msg, args, is_room, enabled_rooms):
     """Resolve lookup target for room/PM/DM contexts.
 

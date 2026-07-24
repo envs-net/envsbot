@@ -18,7 +18,7 @@ Commands:
     {prefix}x info <domain|jid>     - Shows identities & features (XEP-0030).
     {prefix}x ping <domain|jid>     - Pings an XMPP entity (XEP-0199).
     {prefix}x cert <domain>         - Check the XMPP S2S TLS certificate.
-    {prefix}x check <domain|jid>    - Run ping/disco/version/SRV/TLS diagnostics.
+    {prefix}x check <domain|jid>    - Run ping/disco/version/uptime/SRV/TLS diagnostics.
     {prefix}x uptime <domain>       - Shows the uptime of an XMPP server
                                       (XEP-0012).
     {prefix}x srv <domain>          - DNS SRV lookup.
@@ -67,7 +67,7 @@ def _compliance_preview_complete(body: bytes) -> bool:
 
 PLUGIN_META = {
     "name": "xmpp",
-    "version": "0.3.7",
+    "version": "0.3.8",
     "description":
     "XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)",
     "category": "tools",
@@ -93,7 +93,7 @@ XMPP Utility Commands:
   {prefix}x info <domain|jid>     - Show identities & features (XEP-0030)
   {prefix}x ping <domain|jid>     - Ping entity (XEP-0199)
   {prefix}x cert <domain>         - Check the XMPP S2S TLS certificate
-  {prefix}x check <domain|jid>    - Run ping/disco/version/SRV/TLS diagnostics
+  {prefix}x check <domain|jid>    - Run ping/disco/version/uptime/SRV/TLS diagnostics
   {prefix}x uptime <domain>       - Show server uptime (XEP-0012)
   {prefix}x srv <domain>          - DNS SRV lookup
   {prefix}x compliance <domain>   - Compliance score
@@ -329,6 +329,34 @@ def _get_iq_error_condition(exc):
     return err.get("condition", "unknown")
 
 
+def _format_uptime_seconds(seconds) -> str:
+    """Format XEP-0012 seconds as a compact human-readable duration."""
+    total_seconds = int(seconds)
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if secs > 0 or not parts:
+        parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+async def _query_xmpp_uptime(bot, target: str) -> int:
+    """Return an entity's XEP-0012 uptime in seconds."""
+    result = await bot.plugin["xep_0012"].get_last_activity(
+        jid=target,
+        timeout=XMPP_QUERY_TIMEOUT_SECONDS,
+    )
+    return int(result["last_activity"]["seconds"])
+
+
 @command(
     "xmpp uptime",
     role=Role.USER,
@@ -369,23 +397,8 @@ async def cmd_xmpp_uptime(bot, sender_jid, nick, args, msg, is_room):
                        f" Using '{target}' from '{args[0]}'.")
 
     try:
-        result = await bot.plugin["xep_0012"].get_last_activity(jid=target,
-                                                                timeout=XMPP_QUERY_TIMEOUT_SECONDS)
-        seconds = result['last_activity']['seconds']
-        days = seconds // 86400
-        hours = (seconds % 86400) // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
-        uptime_str = []
-        if days > 0:
-            uptime_str.append(f"{days}d")
-        if hours > 0:
-            uptime_str.append(f"{hours}h")
-        if minutes > 0:
-            uptime_str.append(f"{minutes}m")
-        if secs > 0 or not uptime_str:
-            uptime_str.append(f"{secs}s")
-        bot.reply(msg, f"⏱️ Uptime for {target}: {' '.join(uptime_str)}")
+        seconds = await _query_xmpp_uptime(bot, target)
+        bot.reply(msg, f"⏱️ Uptime for {target}: {_format_uptime_seconds(seconds)}")
     except slixmpp.exceptions.IqTimeout:
         bot.reply(msg, f"🔴 Uptime request to {target} timed out.")
     except slixmpp.exceptions.IqError as e:
@@ -1027,6 +1040,21 @@ async def _xmpp_check_version(bot, target: str) -> tuple[str, str]:
         return "⚠️", f"version: {exc}"
 
 
+async def _xmpp_check_uptime(bot, target: str) -> tuple[str, str]:
+    try:
+        seconds = await _query_xmpp_uptime(bot, target)
+        return "✅", f"uptime: {_format_uptime_seconds(seconds)}"
+    except slixmpp.exceptions.IqTimeout:
+        return "⚠️", "uptime: timed out"
+    except slixmpp.exceptions.IqError as exc:
+        condition = _get_iq_error_condition(exc)
+        if condition == "service-unavailable":
+            return "ℹ️", "uptime: unsupported"
+        return "⚠️", f"uptime: {condition}"
+    except Exception as exc:
+        return "⚠️", f"uptime: {exc}"
+
+
 async def _xmpp_check_disco(bot, target: str) -> tuple[str, str]:
     try:
         info = await bot.plugin["xep_0030"].get_info(
@@ -1083,7 +1111,7 @@ def _xmpp_check_srv(domain: str) -> tuple[str, str]:
     "xmpp check",
     role=Role.USER,
     aliases=["x check"],
-    short="Run combined XMPP service and S2S TLS diagnostics.",
+    short="Run combined XMPP service, uptime and S2S TLS diagnostics.",
     usage="{prefix}xmpp check <domain|jid>",
     examples=["{prefix}x check envs.net", "{prefix}x check conference.envs.net"],
     category="xmpp",
@@ -1115,12 +1143,14 @@ async def cmd_xmpp_check(bot, sender_jid, nick, args, msg, is_room):
         (ping_status, ping_line),
         (disco_status, disco_line),
         (version_status, version_line),
+        (uptime_status, uptime_line),
         (srv_status, srv_line),
         (certificate_status, certificate_line),
     ) = await asyncio.gather(
         _xmpp_check_ping(bot, target),
         _xmpp_check_disco(bot, target),
         _xmpp_check_version(bot, target),
+        _xmpp_check_uptime(bot, domain),
         asyncio.to_thread(_xmpp_check_srv, domain),
         _xmpp_check_certificate(domain),
     )
@@ -1130,6 +1160,7 @@ async def cmd_xmpp_check(bot, sender_jid, nick, args, msg, is_room):
         f"{ping_status} {ping_line}",
         f"{disco_status} {disco_line}",
         f"{version_status} {version_line}",
+        f"{uptime_status} {uptime_line}",
         f"{srv_status} {srv_line}",
         f"{certificate_status} {certificate_line}",
     ]

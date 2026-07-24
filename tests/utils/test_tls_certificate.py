@@ -1,10 +1,196 @@
 import builtins
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from utils import tls_certificate as certificate
+
+
+_REAL_NAMED_TEMPORARY_FILE = certificate.tempfile.NamedTemporaryFile
+
+
+def _temporary_certificate_file_in(monkeypatch, directory):
+    def create_file(**kwargs):
+        assert kwargs == {
+            "mode": "w",
+            "encoding": "ascii",
+            "suffix": ".pem",
+            "delete": False,
+        }
+        return _REAL_NAMED_TEMPORARY_FILE(dir=directory, **kwargs)
+
+    monkeypatch.setattr(
+        certificate.tempfile,
+        "NamedTemporaryFile",
+        create_file,
+    )
+
+
+def test_decode_der_certificate_writes_decodes_and_removes_pem(monkeypatch, tmp_path):
+    _temporary_certificate_file_in(monkeypatch, tmp_path)
+    decoded = {"subject": ((('commonName', 'example.org'),),)}
+    decoder_paths = []
+
+    def decoder(path):
+        certificate_path = Path(path)
+        decoder_paths.append(certificate_path)
+        assert certificate_path.parent == tmp_path
+        assert certificate_path.suffix == ".pem"
+        assert certificate_path.read_text(encoding="ascii") == "PEM DATA"
+        return decoded
+
+    monkeypatch.setattr(
+        certificate.ssl,
+        "_ssl",
+        SimpleNamespace(_test_decode_cert=decoder),
+    )
+    der_to_pem = Mock(return_value="PEM DATA")
+    monkeypatch.setattr(certificate.ssl, "DER_cert_to_PEM_cert", der_to_pem)
+
+    assert certificate._decode_der_certificate(b"DER DATA") is decoded
+    der_to_pem.assert_called_once_with(b"DER DATA")
+    assert len(decoder_paths) == 1
+    assert decoder_paths[0].exists() is False
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_decode_der_certificate_requires_decoder_and_der_bytes(monkeypatch):
+    der_to_pem = Mock(return_value="PEM DATA")
+    monkeypatch.setattr(certificate.ssl, "DER_cert_to_PEM_cert", der_to_pem)
+    monkeypatch.setattr(certificate.ssl, "_ssl", None)
+
+    assert certificate._decode_der_certificate(b"DER DATA") is None
+    der_to_pem.assert_not_called()
+
+    decoder = Mock(return_value={})
+    monkeypatch.setattr(
+        certificate.ssl,
+        "_ssl",
+        SimpleNamespace(_test_decode_cert=decoder),
+    )
+    assert certificate._decode_der_certificate(b"") is None
+    decoder.assert_not_called()
+    der_to_pem.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "decoder_result",
+    [None, [], "not a mapping", 1],
+)
+def test_decode_der_certificate_rejects_non_dict_results(
+    monkeypatch,
+    tmp_path,
+    decoder_result,
+):
+    _temporary_certificate_file_in(monkeypatch, tmp_path)
+    decoder = Mock(return_value=decoder_result)
+    monkeypatch.setattr(
+        certificate.ssl,
+        "_ssl",
+        SimpleNamespace(_test_decode_cert=decoder),
+    )
+    monkeypatch.setattr(
+        certificate.ssl,
+        "DER_cert_to_PEM_cert",
+        Mock(return_value="PEM DATA"),
+    )
+
+    assert certificate._decode_der_certificate(b"DER DATA") is None
+    decoder.assert_called_once()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError("decode failed"),
+        ValueError("decode failed"),
+        certificate.ssl.SSLError("decode failed"),
+    ],
+)
+def test_decode_der_certificate_handles_expected_decode_errors(
+    monkeypatch,
+    tmp_path,
+    failure,
+):
+    _temporary_certificate_file_in(monkeypatch, tmp_path)
+    decoder = Mock(side_effect=failure)
+    monkeypatch.setattr(
+        certificate.ssl,
+        "_ssl",
+        SimpleNamespace(_test_decode_cert=decoder),
+    )
+    monkeypatch.setattr(
+        certificate.ssl,
+        "DER_cert_to_PEM_cert",
+        Mock(return_value="PEM DATA"),
+    )
+
+    assert certificate._decode_der_certificate(b"DER DATA") is None
+    decoder.assert_called_once()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_decode_der_certificate_handles_file_and_conversion_errors(
+    monkeypatch,
+    tmp_path,
+):
+    decoder = Mock(return_value={"decoded": True})
+    monkeypatch.setattr(
+        certificate.ssl,
+        "_ssl",
+        SimpleNamespace(_test_decode_cert=decoder),
+    )
+    monkeypatch.setattr(
+        certificate.tempfile,
+        "NamedTemporaryFile",
+        Mock(side_effect=OSError("cannot create file")),
+    )
+
+    assert certificate._decode_der_certificate(b"DER DATA") is None
+    decoder.assert_not_called()
+
+    _temporary_certificate_file_in(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        certificate.ssl,
+        "DER_cert_to_PEM_cert",
+        Mock(side_effect=ValueError("invalid DER")),
+    )
+    assert certificate._decode_der_certificate(b"DER DATA") is None
+    decoder.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_decode_der_certificate_suppresses_cleanup_error(monkeypatch, tmp_path):
+    _temporary_certificate_file_in(monkeypatch, tmp_path)
+    decoded = {"decoded": True}
+    decoder_path = None
+
+    def decoder(path):
+        nonlocal decoder_path
+        decoder_path = Path(path)
+        return decoded
+
+    monkeypatch.setattr(
+        certificate.ssl,
+        "_ssl",
+        SimpleNamespace(_test_decode_cert=decoder),
+    )
+    monkeypatch.setattr(
+        certificate.ssl,
+        "DER_cert_to_PEM_cert",
+        Mock(return_value="PEM DATA"),
+    )
+    real_unlink = certificate.os.unlink
+    unlink = Mock(side_effect=OSError("busy"))
+    monkeypatch.setattr(certificate.os, "unlink", unlink)
+
+    assert certificate._decode_der_certificate(b"DER DATA") is decoded
+    unlink.assert_called_once_with(str(decoder_path))
+    assert decoder_path is not None and decoder_path.exists()
+    real_unlink(decoder_path)
 
 
 def test_domain_extraction_and_validation():

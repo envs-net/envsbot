@@ -45,7 +45,7 @@ Examples:
 
 ### `,xmpp check`
 
-Run combined XMPP service and S2S TLS diagnostics.
+Run combined XMPP service, uptime and S2S TLS diagnostics.
 
 Role: `user`<br>
 Context: `room, MUC PM or private chat`<br>
@@ -56,8 +56,8 @@ Aliases: `,x check`
 
 Examples:
 
-- `,x check envs.net` — Run combined XMPP service and S2S TLS diagnostics.
-- `,x check conference.envs.net` — Run combined XMPP service and S2S TLS diagnostics.
+- `,x check envs.net` — Run combined XMPP service, uptime and S2S TLS diagnostics.
+- `,x check conference.envs.net` — Run combined XMPP service, uptime and S2S TLS diagnostics.
 
 ### `,xmpp compliance`
 
