@@ -64,6 +64,13 @@ def bot(tmp_path, monkeypatch):
     bot.tasks = Tasks()
     bot.bot_plugins = Plugins()
     bot.presence = SimpleNamespace(joined_rooms={"room@example.org": "Bot"})
+    bot.boundjid = SimpleNamespace(bare="bot@example.org")
+    bot.client_roster = {
+        "bot@example.org": {"subscription": "both"},
+        "room@example.org": {"subscription": "both"},
+        "alice@example.org": {"subscription": "both", "resources": {"phone": {}}},
+        "removed@example.org": {"subscription": "remove"},
+    }
     return bot
 
 
@@ -78,6 +85,7 @@ async def test_doctor_command_reports_runtime_health(bot):
     assert any("Database: connected" in line for line in reply)
     assert any("Background tasks: 2 running" in line for line in reply)
     assert any("Backup retention: keep=5, days=30" in line for line in reply)
+    assert any("1:1 DM contacts: 1" in line for line in reply)
 
 
 class MigrationRow:
@@ -87,6 +95,23 @@ class MigrationRow:
         if key == 0:
             return "0002_tuple_version"
         raise KeyError(key)
+
+
+@pytest.mark.asyncio
+async def test_room_lines_reports_direct_contact_count_failure_without_aborting(bot):
+    class BrokenRoster:
+        def keys(self):
+            raise RuntimeError("roster unavailable")
+
+    bot.client_roster = BrokenRoster()
+
+    lines = await doctor._room_lines(bot, full=False)
+
+    assert any("Rooms in DB: 1" in line for line in lines)
+    assert any(
+        "1:1 DM contacts: count failed: roster unavailable" in line
+        for line in lines
+    )
 
 
 @pytest.mark.asyncio
@@ -120,6 +145,7 @@ async def test_doctor_all_disables_paging_and_keeps_full_details(bot):
     assert reply[0] == "🩺 EnvsBot doctor"
     assert not any("Use ,doctor" in line for line in reply)
     assert any("Room room@example.org" in line for line in reply)
+    assert any("1:1 DM contacts: 1" in line for line in reply)
 
 
 @pytest.mark.asyncio

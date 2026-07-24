@@ -91,11 +91,54 @@ def known_room_jids(
     return result
 
 
+def direct_roster_contacts(
+    bot: Any,
+    stored_rooms: Any = None,
+) -> list[tuple[str, Any]]:
+    """Return normalized non-MUC contacts from the bot's XMPP roster.
+
+    Stored and currently joined MUC JIDs, the bot's own JID, and roster entries
+    marked for removal are excluded.  The helper intentionally returns the
+    original roster item alongside the normalized bare JID so callers can
+    format subscription, presence, and pending-state details consistently.
+    """
+    roster = getattr(bot, "client_roster", None)
+    if roster is None:
+        return []
+
+    own_jid = _bare_jid_key(getattr(getattr(bot, "boundjid", None), "bare", ""))
+    muc_jids = known_room_jids(bot, stored_rooms=stored_rooms)
+    contacts: list[tuple[str, Any]] = []
+
+    for roster_jid in roster.keys():
+        jid = (
+            str(getattr(roster_jid, "bare", roster_jid) or "")
+            .split("/", 1)[0]
+            .strip()
+        )
+        key = jid.casefold()
+        if not jid or key == own_jid or key in muc_jids:
+            continue
+
+        item = roster[roster_jid]
+        try:
+            subscription = item["subscription"]
+        except (KeyError, TypeError):
+            subscription = getattr(item, "subscription", "none")
+        if str(subscription or "none") == "remove":
+            continue
+        contacts.append((jid, item))
+
+    contacts.sort(key=lambda entry: entry[0].casefold())
+    return contacts
+
+
 __all__ = [
     "JOINED_ROOMS",
     "LEAVING_ROOMS",
     "RoomState",
     "WARNED_PLUGIN_DEFAULT_KEYS",
+    "direct_roster_contacts",
     "joined_room_jids",
     "known_room_jids",
     "room_state",

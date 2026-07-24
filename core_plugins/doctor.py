@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from bot.room_state import direct_roster_contacts
 from utils.backups import backup_dir, backup_keep, backup_retention_days, list_backups
 from utils.command import COMMANDS, Role, command
 from utils.command_metadata import help_example, help_subcommand
@@ -31,7 +32,7 @@ from utils.version import display_version
 
 PLUGIN_META = {
     "name": "doctor",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Operator health checks and runtime diagnostics.",
     "category": "core",
     "requires": ["rooms"],
@@ -253,9 +254,19 @@ async def _room_lines(bot: Any, *, full: bool) -> list[str]:
     autojoin_rooms = {str(row[0]) for row in db_rooms if len(row) >= 3 and bool(row[2])}
     missing = sorted(autojoin_rooms - joined_rooms)
 
+    try:
+        direct_contact_line = _line(
+            True,
+            "1:1 DM contacts",
+            str(len(direct_roster_contacts(bot, db_rooms))),
+        )
+    except Exception as exc:
+        direct_contact_line = _line(False, "1:1 DM contacts", f"count failed: {exc}")
+
     lines = [
         _line(True, "Rooms in DB", str(len(db_rooms))),
         _line(True, "Joined rooms", str(len(joined_rooms))),
+        direct_contact_line,
         _line(not missing, "Autojoin coverage", "ok" if not missing else f"missing: {', '.join(missing)}"),
     ]
     if full and joined_rooms:

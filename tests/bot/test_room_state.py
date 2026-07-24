@@ -77,3 +77,51 @@ def test_known_room_jids_handles_broken_stored_room_mapping():
         {"Joined@Conf.Test": {}},
         BrokenStoredRooms(),
     ) == {"joined@conf.test"}
+
+
+def test_direct_roster_contacts_excludes_rooms_self_and_removed_entries():
+    class JID:
+        def __init__(self, bare):
+            self.bare = bare
+
+    own = JID("bot@example.org")
+    friend = JID("Friend@Example.org/Phone")
+    stored_room = JID("Stored@Conference.Example.org")
+    joined_room = JID("Joined@Conference.Example.org")
+    removed = JID("removed@example.org")
+    bot = SimpleNamespace(
+        boundjid=own,
+        presence=SimpleNamespace(
+            joined_rooms={"joined@conference.example.org": "Bot"},
+        ),
+        client_roster={
+            own: {"subscription": "both"},
+            friend: {"subscription": "both"},
+            stored_room: {"subscription": "both"},
+            joined_room: {"subscription": "both"},
+            removed: {"subscription": "remove"},
+        },
+    )
+
+    contacts = room_state.direct_roster_contacts(
+        bot,
+        [("stored@conference.example.org", "Bot", True, None)],
+    )
+
+    assert contacts == [("Friend@Example.org", bot.client_roster[friend])]
+
+
+def test_direct_roster_contacts_handles_missing_roster_and_object_items():
+    class RosterItem:
+        subscription = "from"
+
+    bot = SimpleNamespace(
+        boundjid=SimpleNamespace(bare="bot@example.org"),
+        presence=SimpleNamespace(joined_rooms={}),
+        client_roster={"alice@example.org": RosterItem()},
+    )
+
+    assert room_state.direct_roster_contacts(None) == []
+    assert room_state.direct_roster_contacts(bot) == [
+        ("alice@example.org", bot.client_roster["alice@example.org"]),
+    ]

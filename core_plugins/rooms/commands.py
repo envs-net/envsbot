@@ -4,7 +4,7 @@ from utils.command import command, Role
 from utils.formatting import format_page, parse_page_args
 from utils.audit import audit_event
 from utils.room_features import format_room_feature_line, list_room_features
-from bot.room_state import known_room_jids
+from bot.room_state import direct_roster_contacts
 
 from .defaults import _cleanup_room_plugin_state
 from .presence import (
@@ -105,17 +105,9 @@ def _direct_contact_lines(bot, stored_rooms=()) -> tuple[list[str], int, int]:
     if roster is None:
         return [], 0, 0
 
-    own_jid = str(getattr(getattr(bot, "boundjid", None), "bare", "")).lower()
-    muc_jids = known_room_jids(bot, _runtime_rooms(bot), stored_rooms)
     contacts = []
-    for roster_jid in roster.keys():
-        jid = str(getattr(roster_jid, "bare", roster_jid)).split("/", 1)[0]
-        if not jid or jid.lower() == own_jid or jid.casefold() in muc_jids:
-            continue
-        item = roster[roster_jid]
+    for jid, item in direct_roster_contacts(bot, stored_rooms):
         subscription = str(_roster_value(item, "subscription", "none") or "none")
-        if subscription == "remove":
-            continue
         resources = _roster_value(item, "resources", {}) or {}
         name = str(_roster_value(item, "name", "") or "").strip()
         pending = []
@@ -124,8 +116,6 @@ def _direct_contact_lines(bot, stored_rooms=()) -> tuple[list[str], int, int]:
         if _roster_value(item, "pending_out", False):
             pending.append("out")
         contacts.append((jid, subscription, name, bool(resources), pending))
-
-    contacts.sort(key=lambda item: item[0].casefold())
     lines = []
     for jid, subscription, name, online, pending in contacts:
         fields = [f"subscription={subscription}"]
