@@ -38,7 +38,7 @@ async def autojoin_rooms(bot):
                 room_info["autojoin"] = autojoin
                 room_info["status"] = status
             else:
-                JOINED_ROOMS[room_jid] = {
+                room_info = {
                     "nick": nick,
                     "autojoin": autojoin,
                     "status": status,
@@ -46,7 +46,15 @@ async def autojoin_rooms(bot):
                     "role": "unknown",
                     "nicks": {},
                 }
-                bot.presence.joined_rooms[room_jid] = nick
+                JOINED_ROOMS[room_jid] = room_info
+
+            # ``join_muc()`` may deliver our own MUC presence before it
+            # returns. In that case ``on_muc_presence()`` has already created
+            # JOINED_ROOMS and the old ``else``-only update skipped the
+            # PresenceManager mirror. Keep the routing/presence state in sync
+            # after every successful join, regardless of event ordering.
+            runtime_nick = str(room_info.get("nick") or nick)
+            bot.presence.joined_rooms[room_jid] = runtime_nick
         except Exception:
             log.exception("[ROOMS] 🔴 Couldn't join room %s", room_jid)
 

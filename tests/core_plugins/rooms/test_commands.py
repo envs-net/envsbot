@@ -411,9 +411,36 @@ async def test_room_diagnose_lines_handles_missing_room_and_bad_row(fake_bot, mo
 
     assert "Known in DB: no" in lines
     assert "Currently joined: no" in lines
-    assert "Presence joined: no" in lines
+    assert not any("Presence routing" in line for line in lines)
     assert "Pending invites: 0" in lines
     assert "Enabled room plugins (0): none" in lines
     assert "Disabled room plugins (0): none" in lines
     assert rooms._yes_no(object()) == "yes"
     assert rooms._yes_no(None) == "no"
+
+
+@pytest.mark.asyncio
+async def test_room_diagnose_lines_warns_only_for_runtime_state_mismatches(fake_bot, monkeypatch):
+    room_jid = "room@conference.test"
+    fake_bot.db.rooms.get = AsyncMock(return_value=(room_jid, "BotNick", True, None))
+    fake_bot.pending_room_invites = {}
+    fake_bot.bot_plugins.plugins = {}
+    monkeypatch.setattr(state_module, "list_room_features", AsyncMock(return_value=[]))
+
+    rooms.JOINED_ROOMS[room_jid] = {"nick": "BotNick", "nicks": {}}
+    fake_bot.presence.joined_rooms = {}
+    lines = await rooms._room_diagnose_lines(fake_bot, room_jid)
+    assert "⚠️ Presence routing state is missing for this joined room." in lines
+
+    rooms.JOINED_ROOMS.clear()
+    fake_bot.presence.joined_rooms = {room_jid: "BotNick"}
+    lines = await rooms._room_diagnose_lines(fake_bot, room_jid)
+    assert "⚠️ Core room state is missing for this presence-tracked room." in lines
+
+    rooms.JOINED_ROOMS[room_jid] = {"nick": "CoreNick", "nicks": {}}
+    fake_bot.presence.joined_rooms = {room_jid: "PresenceNick"}
+    lines = await rooms._room_diagnose_lines(fake_bot, room_jid)
+    assert (
+        "⚠️ Presence routing nick differs from the core runtime nick: "
+        "PresenceNick != CoreNick"
+    ) in lines

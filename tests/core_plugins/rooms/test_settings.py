@@ -357,7 +357,7 @@ async def test_room_diagnose_lines_include_runtime_and_plugin_state(fake_bot, mo
     assert lines[0] == f"🔎 Room diagnostics: {room_jid}"
     assert "Known in DB: yes" in lines
     assert "Currently joined: yes" in lines
-    assert "Presence joined: yes" in lines
+    assert not any("Presence routing" in line for line in lines)
     assert "Tracked occupants: 2" in lines
     assert "Pending invites: 1" in lines
     assert "Configured nick: BotNick" in lines

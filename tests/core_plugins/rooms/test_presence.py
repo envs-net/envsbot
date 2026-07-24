@@ -45,6 +45,7 @@ async def test_on_muc_presence_join_or_leave(fake_bot):
     )
     assert ROOM_JID in rooms.JOINED_ROOMS
     assert BOT_NICK in rooms.JOINED_ROOMS[ROOM_JID]["nicks"]
+    assert fake_bot.presence.joined_rooms[ROOM_JID] == BOT_NICK
 
     # User joins.
     await rooms.on_muc_presence(fake_bot, make_presence(USER_NICK))
@@ -66,6 +67,7 @@ async def test_on_muc_presence_join_or_leave(fake_bot):
         ),
     )
     assert ROOM_JID not in rooms.JOINED_ROOMS
+    assert ROOM_JID not in fake_bot.presence.joined_rooms
 
 
 @pytest.mark.asyncio
@@ -124,14 +126,32 @@ async def test_is_valid_room_jid_failures(fake_bot, fake_msg):
 
 
 @pytest.mark.asyncio
-async def test_autojoin_rooms(fake_bot):
+async def test_autojoin_rooms_keeps_presence_mirror_when_join_event_wins_race(fake_bot):
     fake_bot.db.rooms.list = AsyncMock(
         return_value=[("room1@conf", "BotNick", True, "joined"),
                       ("room2@conf", "BotNick", False, "left")]
     )
-    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+
+    async def join_muc(room_jid, nick, **kwargs):
+        # Slixmpp can deliver our own groupchat presence before join_muc()
+        # returns. Reproduce that ordering by creating the detailed room state
+        # first while leaving the PresenceManager mirror empty.
+        rooms.JOINED_ROOMS[room_jid] = {
+            "nick": nick,
+            "autojoin": "unknown",
+            "status": None,
+            "affiliation": "admin",
+            "role": "moderator",
+            "nicks": {nick: {}},
+        }
+
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock(side_effect=join_muc)
+
     await rooms.autojoin_rooms(fake_bot)
-    assert "room1@conf" in rooms.JOINED_ROOMS
+
+    assert rooms.JOINED_ROOMS["room1@conf"]["autojoin"] is True
+    assert rooms.JOINED_ROOMS["room1@conf"]["status"] == "joined"
+    assert fake_bot.presence.joined_rooms == {"room1@conf": "BotNick"}
     assert "room2@conf" not in rooms.JOINED_ROOMS
 
 

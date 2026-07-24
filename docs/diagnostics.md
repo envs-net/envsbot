@@ -39,7 +39,9 @@ Use `,rooms diagnose <room_jid>` when a room behaves differently than expected.
 
 The output shows whether the room is known in the database, whether it is joined,
 tracked occupant count, pending invites, enabled/disabled room plugins and
-plugin-provided room state where available.
+plugin-provided room state where available. The command reports a warning only
+when the detailed core MUC state and the smaller presence/routing room mirror
+disagree; a normal joined room does not need a separate presence line.
 
 ```text
 ,rooms diagnose lounge@conference.example.org

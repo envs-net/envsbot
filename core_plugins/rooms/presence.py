@@ -133,9 +133,14 @@ async def on_muc_presence(bot, pres):
             if nick in nicks:
                 del nicks[nick]
                 log.debug(f"[ROOMS] Removed nick {nick} from {room}")
-            # If the bot itself left the room, remove entire entry
+            # If the bot itself left the room, remove both runtime mirrors.
             if nick == room_info.get("nick"):
                 JOINED_ROOMS.pop(room, None)
+                presence_rooms = getattr(
+                    getattr(bot, "presence", None), "joined_rooms", None
+                )
+                if isinstance(presence_rooms, dict):
+                    presence_rooms.pop(room, None)
                 log.info(f"[ROOMS] Bot left room {
                          room}, cleaned up room state.")
             return
@@ -154,7 +159,11 @@ async def on_muc_presence(bot, pres):
             "role": role if role is not None else "unknown"
         }
 
-        # Update bot's own state in room_info if relevant
+        # Update bot's own state in room_info if relevant. The detailed
+        # JOINED_ROOMS mapping is the primary MUC state, while
+        # PresenceManager.joined_rooms is still used for routing, MUC-PM
+        # context and directed presence broadcasts. Refresh both from the
+        # authoritative self-presence so missing state heals automatically.
         if jid_bare == bot.boundjid.bare:
             if affiliation is not None:
                 room_info["affiliation"] = affiliation
@@ -162,6 +171,11 @@ async def on_muc_presence(bot, pres):
                 room_info["role"] = role
             if nick != room_info["nick"]:
                 room_info["nick"] = nick
+            presence_rooms = getattr(
+                getattr(bot, "presence", None), "joined_rooms", None
+            )
+            if isinstance(presence_rooms, dict):
+                presence_rooms[room] = nick
 
         JOINED_ROOMS[room] = room_info
 

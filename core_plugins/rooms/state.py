@@ -209,14 +209,32 @@ async def _room_diagnose_lines(bot, room_jid: str) -> list[str]:
     enabled = sorted(feature.name for feature in features if feature.enabled)
     disabled = sorted(feature.name for feature in features if not feature.enabled)
 
+    core_joined = bool(joined_info)
     lines = [
         f"🔎 Room diagnostics: {room_jid}",
         f"Known in DB: {_yes_no(db_room)}",
-        f"Currently joined: {_yes_no(bool(joined_info) or presence_joined)}",
-        f"Presence joined: {_yes_no(presence_joined)}",
+        f"Currently joined: {_yes_no(core_joined or presence_joined)}",
         f"Tracked occupants: {len(nicks)}",
         f"Pending invites: {invite_count}",
     ]
+    if core_joined and not presence_joined:
+        lines.append(
+            "⚠️ Presence routing state is missing for this joined room."
+        )
+    elif presence_joined and not core_joined:
+        lines.append(
+            "⚠️ Core room state is missing for this presence-tracked room."
+        )
+    elif core_joined and presence_joined:
+        runtime_nick = str(joined_info.get("nick") or "")
+        presence_nick = str(
+            getattr(bot.presence, "joined_rooms", {}).get(room_jid) or ""
+        )
+        if runtime_nick and presence_nick and runtime_nick != presence_nick:
+            lines.append(
+                "⚠️ Presence routing nick differs from the core runtime nick: "
+                f"{presence_nick} != {runtime_nick}"
+            )
     if db_room:
         try:
             lines.extend([

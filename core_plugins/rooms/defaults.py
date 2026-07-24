@@ -10,7 +10,7 @@ from .state import (
 )
 PLUGIN_META = {
     "name": "rooms",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "Database-backed room management",
     "category": "core",
 }
