@@ -19,6 +19,7 @@ from .fetch import (
     _extract_entry_link,
     _format_feed_fetch_error,
     _get_entry_id,
+    _get_latest_entry_id,
     _log_feed_fetch_error,
     _normalize_url,
     _resolve_relative_url,
@@ -1334,10 +1335,23 @@ async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
                 "title": parsed.feed.get("title", url),
                 "link": parsed.feed.get("link", url),
                 "period": config.get("rss_global_query_interval", DEFAULT_POLL_INTERVAL),
-                "rooms": [], "users": {}, "last_id": None, "error_count": 0,
-                "next_retry": 0, "paused": False, "paused_rooms": [],
-                "last_checked": _now(), "last_success": _now(), "last_error": "",
-                "last_error_at": 0, "last_posted": 0, "posted_count": 0,
+                "rooms": [],
+                "users": {},
+                # Establish the subscription cursor from the feed snapshot used
+                # during add. Otherwise the first polling run initializes the
+                # cursor from whatever is newest at that later time and can
+                # silently skip an entry published between add and first poll.
+                "last_id": _get_latest_entry_id(parsed),
+                "error_count": 0,
+                "next_retry": 0,
+                "paused": False,
+                "paused_rooms": [],
+                "last_checked": _now(),
+                "last_success": _now(),
+                "last_error": "",
+                "last_error_at": 0,
+                "last_posted": 0,
+                "posted_count": 0,
             }
         except Exception as exc:
             _log_feed_fetch_error("Failed to add direct RSS feed", url, exc)
@@ -1355,7 +1369,11 @@ async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
     feeds[url]["users"] = users
     await save_feeds(store, feeds)
     await ensure_task(bot, store, url, feeds[url]["period"])
-    bot.reply(msg, f"✅ Added direct RSS feed: {feeds[url]['title']} ({url})")
+    bot.reply(
+        msg,
+        f"✅ Added direct RSS feed: {feeds[url]['title']} ({url})\n"
+        "New entries will be delivered in this chat.",
+    )
 
 
 async def _delete_direct_feed_target(bot, msg, url, store, target: str):

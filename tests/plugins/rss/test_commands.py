@@ -1334,6 +1334,97 @@ async def test_trusted_user_can_add_and_remove_own_direct_feed(monkeypatch, make
 
 
 @pytest.mark.asyncio
+async def test_add_direct_feed_initializes_cursor_from_add_snapshot(
+    monkeypatch, make_bot
+):
+    bot = make_bot()
+    url = "https://example.org/direct.xml"
+    msg = {
+        "from": SimpleNamespace(
+            bare="trusted@example.org",
+            resource="phone",
+        ),
+        "type": "chat",
+    }
+
+    class DummyFeed:
+        feed = {"title": "Direct feed", "link": url}
+        entries = [
+            {
+                "title": "Current entry",
+                "link": "https://example.org/current",
+                "id": "current-entry",
+            }
+        ]
+
+    monkeypatch.setattr(
+        rss_commands,
+        "fetch_feed",
+        AsyncMock(return_value=DummyFeed()),
+    )
+    ensure_task = AsyncMock()
+    monkeypatch.setattr(rss_commands, "ensure_task", ensure_task)
+
+    await rss_commands._add_direct_feed(
+        bot,
+        msg,
+        url,
+        bot.plugin_store,
+        "trusted@example.org",
+        Role.TRUSTED,
+    )
+
+    feed = bot.plugin_store[rss.RSS_KEY][url]
+    assert feed["last_id"] == "https://example.org/current"
+    assert feed["users"] == {
+        "trusted@example.org": {
+            "owner": "trusted@example.org",
+            "role": "trusted",
+        }
+    }
+    ensure_task.assert_awaited_once_with(
+        bot,
+        bot.plugin_store,
+        url,
+        feed["period"],
+    )
+    assert "New entries will be delivered in this chat." in bot.replies[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_existing_feed_direct_subscription_keeps_existing_cursor(
+    monkeypatch, make_bot
+):
+    bot = make_bot()
+    url = "https://example.org/shared.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Shared feed",
+            "link": url,
+            "period": 300,
+            "rooms": ["room@conference.example.org"],
+            "users": {},
+            "last_id": "already-seen",
+        }
+    }
+    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+
+    await rss_commands._add_direct_feed(
+        bot,
+        {"type": "chat"},
+        url,
+        bot.plugin_store,
+        "trusted@example.org",
+        Role.TRUSTED,
+    )
+
+    feed = bot.plugin_store[rss.RSS_KEY][url]
+    assert feed["last_id"] == "already-seen"
+    rss_commands.fetch_feed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_add_direct_feed_rejects_invalid_subscriber_jid(make_bot):
     bot = make_bot()
     url = "https://example.org/direct.xml"
