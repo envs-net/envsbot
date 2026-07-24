@@ -12,9 +12,44 @@ import pytest
 
 
 PHP = shutil.which("php")
-SITE = Path(__file__).resolve().parents[2] / "contrib" / "idlerpg-site" / "index.php"
+
+
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout root when tests run from mutmut's copy.
+
+    mutmut copies the test suite below ``<repo>/mutants`` while the contrib
+    website remains in the normal checkout.  Walk upwards until both the
+    project marker and the website entrypoint are present instead of assuming
+    that ``parents[2]`` is always the repository root.
+    """
+    resolved = path.resolve()
+    search_from = resolved if resolved.is_dir() else resolved.parent
+    for candidate in (search_from, *search_from.parents):
+        site = candidate / "contrib" / "idlerpg-site" / "index.php"
+        if (candidate / "pyproject.toml").is_file() and site.is_file():
+            return candidate
+    return search_from
+
+
+ROOT = _checkout_root(Path(__file__))
+SITE = ROOT / "contrib" / "idlerpg-site" / "index.php"
 
 pytestmark = pytest.mark.skipif(PHP is None, reason="PHP CLI is not installed")
+
+
+def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    site = checkout / "contrib" / "idlerpg-site" / "index.php"
+    site.parent.mkdir(parents=True)
+    site.write_text("<?php\n", encoding="utf-8")
+    (checkout / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+    mutant_test = checkout / "mutants" / "tests" / "contrib" / "test_idlerpg_site.py"
+    mutant_test.parent.mkdir(parents=True)
+    mutant_test.write_text("", encoding="utf-8")
+
+    assert _checkout_root(mutant_test) == checkout
+    assert _checkout_root(site) == checkout
 
 
 def _player(name: str, *, rank: int, online: bool, level: int) -> dict[str, object]:
