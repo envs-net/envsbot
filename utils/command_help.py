@@ -55,6 +55,7 @@ def _metadata_map() -> dict[str, CommandMetadata]:
                     ],
                     "role": subcommand.role,
                     "context": subcommand.context,
+                    "section": subcommand.section,
                 }
                 for subcommand in command_subcommands(cmd)
             ],

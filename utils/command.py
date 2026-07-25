@@ -71,6 +71,7 @@ class CommandSubcommand:
     examples: Tuple[CommandExample, ...] = ()
     role: Role | None = None
     context: str = ""
+    section: str = ""
 
 
 def normalize_command_example(value: object) -> CommandExample:
@@ -120,6 +121,7 @@ def normalize_command_subcommand(value: object) -> CommandSubcommand:
         examples=examples,
         role=role,
         context=str(value.get("context", "") or ""),
+        section=str(value.get("section", "") or ""),
     )
 
 
@@ -285,6 +287,7 @@ class CommandRegistry:
                         ],
                         "role": subcommand.role,
                         "context": subcommand.context,
+                        "section": subcommand.section,
                     }
                     for subcommand in subcommands
                 ]

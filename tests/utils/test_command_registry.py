@@ -238,6 +238,7 @@ def test_command_records_include_structured_subcommands(monkeypatch):
                 ],
                 "role": Role.TRUSTED,
                 "context": "private chat / MUC PM",
+                "section": "Trusted commands",
             }
         ],
         category="tests",
@@ -260,5 +261,6 @@ def test_command_records_include_structured_subcommands(monkeypatch):
             ],
             "role": Role.TRUSTED,
             "context": "private chat / MUC PM",
+            "section": "Trusted commands",
         }
     ]

@@ -232,6 +232,7 @@ def test_structured_help_metadata_normalizes_examples_subcommands_and_roles():
             ],
             "role": int(Role.MODERATOR),
             "context": "private chat / MUC PM",
+            "section": "Moderator commands",
         }
     )
 
@@ -246,6 +247,7 @@ def test_structured_help_metadata_normalizes_examples_subcommands_and_roles():
     )
     assert subcommand.role is Role.MODERATOR
     assert subcommand.context == "private chat / MUC PM"
+    assert subcommand.section == "Moderator commands"
 
     string_metadata = command_mod.normalize_command_subcommand(
         {

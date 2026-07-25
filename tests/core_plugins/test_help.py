@@ -362,6 +362,49 @@ async def test_structured_plugin_help_describes_subcommands_examples_and_room_se
     assert "\n\n• " not in command_section
 
 
+def test_structured_help_groups_named_subcommand_sections():
+    def handler(*_args, **_kwargs):
+        return None
+
+    cmd = command_utils.Command(
+        name="idlerpg",
+        handler=handler,
+        role=command_utils.Role.USER,
+        short="Play IdleRPG.",
+        usage="{prefix}idlerpg <command>",
+        subcommands=[
+            help_plugin.help_subcommand(
+                "register",
+                "{prefix}idlerpg register <character> <class>",
+                "Create a character.",
+                section="Player commands",
+            ),
+            help_plugin.help_subcommand(
+                "season reset",
+                "{prefix}idlerpg season reset",
+                "Reset the season.",
+                context="room or MUC PM; room owner/admin",
+                section="Room owner/admin commands",
+            ),
+        ],
+        category="fun",
+        context="groupchat / MUC PM",
+    )
+
+    lines = help_plugin._format_plugin_command_lines(
+        cmd,
+        ",",
+        command_utils.Role.ADMIN,
+    )
+    rendered = "\n".join(lines)
+
+    assert "Player commands:\n• ,idlerpg register <character> <class>" in rendered
+    assert "Room owner/admin commands:\n• ,idlerpg season reset" in rendered
+    assert rendered.index("Player commands:") < rendered.index(
+        "Room owner/admin commands:"
+    )
+
+
 @pytest.mark.asyncio
 async def test_focused_help_resolves_metadata_only_subcommand_and_alias(monkeypatch):
     registry = command_utils.CommandRegistry()

@@ -235,6 +235,7 @@ def _command_subcommand_entries(
                 ),
                 role=subcommand.role,
                 context=subcommand.context,
+                section=subcommand.section,
             )
         )
     return result
@@ -433,6 +434,44 @@ def _common_plugin_access(
     return next(iter(profiles)) if len(profiles) == 1 else None
 
 
+def _format_one_subcommand_lines(
+    cmd_obj,
+    subcommand: CommandSubcommand,
+    prefix: str,
+    *,
+    common_access: tuple[Role, str] | None = None,
+) -> list[str]:
+    """Return compact lines for one structured subcommand."""
+    effective_role = _effective_subcommand_role(cmd_obj, subcommand)
+    context = _effective_subcommand_context(cmd_obj, subcommand)
+    access = (effective_role, context)
+    access_suffix = (
+        ""
+        if common_access == access
+        else f" [{_access_label(effective_role, context)}]"
+    )
+    lines = [f"• {subcommand.usage} — {subcommand.short}{access_suffix}"]
+    aliases = _subcommand_aliases(cmd_obj, subcommand, prefix)
+    if aliases:
+        lines.append("  Aliases: " + ", ".join(aliases))
+    return lines
+
+
+def _sectioned_subcommands(
+    subcommands: list[CommandSubcommand],
+) -> list[tuple[str, list[CommandSubcommand]]]:
+    """Group subcommands by their optional help section, preserving order."""
+    sections: list[tuple[str, list[CommandSubcommand]]] = []
+    indexes: dict[str, int] = {}
+    for subcommand in subcommands:
+        section = subcommand.section.strip()
+        if section not in indexes:
+            indexes[section] = len(sections)
+            sections.append((section, []))
+        sections[indexes[section]][1].append(subcommand)
+    return sections
+
+
 def _format_plugin_command_lines(
     cmd_obj,
     prefix: str,
@@ -443,22 +482,23 @@ def _format_plugin_command_lines(
     """Return compact, consistently spaced plugin-help command lines."""
     subcommands = _visible_subcommands(cmd_obj, role, prefix)
     if subcommands:
+        sections = _sectioned_subcommands(subcommands)
+        has_named_sections = any(section for section, _entries in sections)
         lines = []
-        for subcommand in subcommands:
-            effective_role = _effective_subcommand_role(cmd_obj, subcommand)
-            context = _effective_subcommand_context(cmd_obj, subcommand)
-            access = (effective_role, context)
-            access_suffix = (
-                ""
-                if common_access == access
-                else f" [{_access_label(effective_role, context)}]"
-            )
-            lines.append(
-                f"• {subcommand.usage} — {subcommand.short}{access_suffix}"
-            )
-            aliases = _subcommand_aliases(cmd_obj, subcommand, prefix)
-            if aliases:
-                lines.append("  Aliases: " + ", ".join(aliases))
+        for section, entries in sections:
+            if has_named_sections:
+                if lines:
+                    lines.append("")
+                lines.append(f"{section or 'Other commands'}:")
+            for subcommand in entries:
+                lines.extend(
+                    _format_one_subcommand_lines(
+                        cmd_obj,
+                        subcommand,
+                        prefix,
+                        common_access=common_access,
+                    )
+                )
         return lines
 
     aliases = sorted(set(a for a in (cmd_obj.aliases or []) if a != cmd_obj.name))

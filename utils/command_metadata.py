@@ -21,6 +21,7 @@ def help_subcommand(
     examples: Iterable[dict[str, str] | tuple[str, str]] = (),
     role: Role | None = None,
     context: str = "",
+    section: str = "",
 ) -> dict[str, object]:
     """Return one normalized-friendly structured subcommand mapping."""
     return {
@@ -31,6 +32,7 @@ def help_subcommand(
         "examples": list(examples),
         "role": role,
         "context": context,
+        "section": section,
     }
 
 
@@ -39,6 +41,8 @@ def room_toggle_subcommands(
     feature_label: str,
     *,
     status_name: str = "status",
+    context: str = "room or MUC PM",
+    section: str = "",
 ) -> list[dict[str, object]]:
     """Return standard on/off/status metadata for a room-scoped plugin."""
     return [
@@ -52,7 +56,8 @@ def room_toggle_subcommands(
                     f"Enable {feature_label} for the current room or MUC PM.",
                 )
             ],
-            context="room or MUC PM",
+            context=context,
+            section=section,
         ),
         help_subcommand(
             "off",
@@ -64,7 +69,8 @@ def room_toggle_subcommands(
                     f"Disable {feature_label} for the current room or MUC PM.",
                 )
             ],
-            context="room or MUC PM",
+            context=context,
+            section=section,
         ),
         help_subcommand(
             status_name,
@@ -76,6 +82,7 @@ def room_toggle_subcommands(
                     f"Inspect the current room setting for {feature_label}.",
                 )
             ],
-            context="room or MUC PM",
+            context=context,
+            section=section,
         ),
     ]

@@ -1497,6 +1497,12 @@ def test_structured_help_lists_all_mutating_admin_commands():
     assert subcommands["season end"].aliases == ("season finish",)
     assert subcommands["delete"].aliases == ("remove",)
     assert all("room owner/admin" in subcommands[name].context for name in expected)
+    assert all(
+        subcommands[name].section == "Room owner/admin commands"
+        for name in expected
+    )
+    assert subcommands["register"].section == "Player commands"
+    assert subcommands["enabled"].section == "Room owner/admin commands"
 
 
 @pytest.mark.asyncio

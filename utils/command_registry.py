@@ -140,6 +140,7 @@ def _normalized_subcommands(value: object) -> tuple[dict[str, Any], ...]:
                 ],
                 "role": subcommand.role,
                 "context": subcommand.context,
+                "section": subcommand.section,
             }
         )
     return tuple(result)

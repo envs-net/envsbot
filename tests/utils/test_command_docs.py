@@ -51,6 +51,20 @@ def test_generated_rss_docs_include_direct_and_filtered_list_guidance():
     assert "`,rss delete all user@example.org`" in rss_doc
 
 
+
+
+def test_generated_idlerpg_docs_group_player_and_admin_commands():
+    idlerpg_doc = generate_plugin_docs()["idlerpg.md"]
+
+    assert "##### Player commands" in idlerpg_doc
+    assert "##### Room owner/admin commands" in idlerpg_doc
+    assert idlerpg_doc.index("##### Player commands") < idlerpg_doc.index(
+        "##### Room owner/admin commands"
+    )
+    assert "`,idlerpg register <character> <class>`" in idlerpg_doc
+    assert "`,idlerpg season reset`" in idlerpg_doc
+
+
 def test_write_generated_docs_writes_exact_utf8_files(monkeypatch, tmp_path):
     root = tmp_path / "checkout"
     (root / "docs").mkdir(parents=True)

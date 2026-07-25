@@ -70,6 +70,7 @@ def _metadata(cmd):
                 ],
                 "role": subcommand.role,
                 "context": subcommand.context,
+                "section": subcommand.section,
             }
         )
     return {
@@ -492,35 +493,50 @@ def _append_examples(lines: list[str], data: dict, examples: list[dict]) -> None
 
 def _append_subcommands(lines: list[str], cmd, data: dict) -> None:
     """Append structured subcommand documentation."""
-    if not data["subcommands"]:
+    subcommands = data["subcommands"]
+    if not subcommands:
         return
+
+    sections: list[tuple[str, list[dict]]] = []
+    indexes: dict[str, int] = {}
+    for subcommand in subcommands:
+        section = str(subcommand.get("section") or "")
+        if section not in indexes:
+            indexes[section] = len(sections)
+            sections.append((section, []))
+        sections[indexes[section]][1].append(subcommand)
+
+    has_named_sections = any(section for section, _entries in sections)
     lines += ["#### Subcommands", ""]
-    for subcommand in data["subcommands"]:
-        lines.append(f"- `{_inline_code(subcommand['usage'])}`")
-        lines.append(f"  - Description: {subcommand['short']}")
-        aliases = subcommand["aliases"]
-        if aliases:
-            root = str(cmd.name)
-            rendered = ", ".join(
-                f"`{PREFIX}{root} {alias}`" for alias in aliases
-            )
-            lines.append(f"  - Aliases: {rendered}")
-        effective_role = subcommand["role"] or data["role"]
-        if effective_role != data["role"]:
-            lines.append(f"  - Role: `{effective_role}`")
-        effective_context = subcommand["context"] or data["context"]
-        if effective_context != data["context"]:
-            lines.append(f"  - Context: `{effective_context}`")
-        examples = subcommand["examples"]
-        if examples:
-            lines.append("  - Examples:")
-            for example in examples:
-                description = _example_description(data, example)
-                lines.append(
-                    "    - "
-                    f"`{_inline_code(example['command'])}` — {description}"
+    for section, entries in sections:
+        if has_named_sections:
+            lines += [f"##### {section or 'Other commands'}", ""]
+        for subcommand in entries:
+            lines.append(f"- `{_inline_code(subcommand['usage'])}`")
+            lines.append(f"  - Description: {subcommand['short']}")
+            aliases = subcommand["aliases"]
+            if aliases:
+                root = str(cmd.name)
+                rendered = ", ".join(
+                    f"`{PREFIX}{root} {alias}`" for alias in aliases
                 )
-        lines.append("")
+                lines.append(f"  - Aliases: {rendered}")
+            effective_role = subcommand["role"] or data["role"]
+            if effective_role != data["role"]:
+                lines.append(f"  - Role: `{effective_role}`")
+            effective_context = subcommand["context"] or data["context"]
+            if effective_context != data["context"]:
+                lines.append(f"  - Context: `{effective_context}`")
+            examples = subcommand["examples"]
+            if examples:
+                lines.append("  - Examples:")
+                for example in examples:
+                    description = _example_description(data, example)
+                    lines.append(
+                        "    - "
+                        f"`{_inline_code(example['command'])}` — {description}"
+                    )
+            lines.append("")
 
 def generate_plugin_doc(name: str, meta: dict, plugin_commands: list[object]) -> str:
     """Generate one detailed plugin documentation page."""
