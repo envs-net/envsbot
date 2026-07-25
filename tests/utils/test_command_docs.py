@@ -40,11 +40,14 @@ def test_generated_rss_docs_include_direct_and_filtered_list_guidance():
     assert "`,rss list trusted`" in rss_doc
     assert "The bot recognizes the 1:1 destination automatically" in rss_doc
     assert "never stored as part of the template" in rss_doc
+    assert "placeholder text such as `MEINE_JID` is ignored" in rss_doc
+    assert ",rss remove all <user-jid>" in rss_doc
     assert "## Fetch retries and startup behavior" in rss_doc
     assert "RSS_STARTUP_STAGGER_SECONDS" in rss_doc
     assert "RSS_FETCH_TIMEOUT_SECONDS" in rss_doc
     assert "DIRECT $title" not in rss_doc
     assert "- `,rss add https://example.org/feed.rss`" in rss_doc
+    assert "`,rss delete all user@example.org`" in rss_doc
 
 
 def test_write_generated_docs_writes_exact_utf8_files(monkeypatch, tmp_path):

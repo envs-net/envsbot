@@ -126,12 +126,20 @@ The equivalent explicit forms `template set direct ...` and `template set <feed-
 
 Trusted users and higher may subscribe to feeds in a direct chat. Trusted users are limited by `RSS_TRUSTED_MAX_FEEDS` (default: 10); moderators and higher are unlimited.
 
+The direct-chat destination is implicit. Use `,rss add <feed-url>` without appending your own JID. A redundant own-JID argument or placeholder text such as `MEINE_JID` is ignored so the subscription still belongs to the current 1:1 chat. An explicit, different room JID continues to select that room.
+
 Use `,rss template set ...` in the same direct chat to customize all personal deliveries, or include a subscribed feed URL for a feed-specific personal template.
 
 Trusted users may remove only their own subscriptions. Owner, superadmin, and admin users may remove a trusted user's subscription explicitly:
 
 ```text
 ,rss remove <feed-url> <user-jid>
+```
+
+Owner, superadmin, and admin users may also remove every direct RSS subscription for one user in a normal 1:1 chat:
+
+```text
+,rss remove all <user-jid>
 ```
 
 In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
@@ -168,11 +176,12 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
     - `,rss list` — Show your direct subscriptions or the full moderator overview.
     - `,rss list trusted` — Show trusted-user direct subscriptions permitted for your role.
 
-- `,rss delete <feed_url> [room_jid|jid|all]`
-  - Description: Remove a room or direct-user subscription.
+- `,rss delete <feed_url> [room_jid|jid|all] | ,rss delete all <user_jid>`
+  - Description: Remove one subscription, or all direct subscriptions for a user.
   - Aliases: `,rss del`, `,rss remove`, `,rss rm`
   - Examples:
     - `,rss delete https://example.org/feed.rss` — Remove the feed from the current room or your direct subscriptions.
+    - `,rss delete all user@example.org` — As an admin, remove every direct RSS subscription for one user.
 
 - `,rss retry <feed_url|all> [room_jid]`
   - Description: Clear retry/backoff state and schedule another feed attempt.

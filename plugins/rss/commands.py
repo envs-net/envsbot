@@ -65,6 +65,7 @@ from .store import (
     set_room_template,
     unset_feed_template,
     unset_feed_templates_for_feed,
+    unset_feed_templates_for_room,
     unset_default_template,
     unset_room_template,
 )
@@ -801,13 +802,18 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
         ),
         help_subcommand(
             "delete",
-            "{prefix}rss delete <feed_url> [room_jid|jid|all]",
-            "Remove a room or direct-user subscription.",
+            "{prefix}rss delete <feed_url> [room_jid|jid|all] | "
+            "{prefix}rss delete all <user_jid>",
+            "Remove one subscription, or all direct subscriptions for a user.",
             aliases=("del", "remove", "rm"),
             examples=[
                 help_example(
                     "{prefix}rss delete https://example.org/feed.rss",
                     "Remove the feed from the current room or your direct subscriptions.",
+                ),
+                help_example(
+                    "{prefix}rss delete all user@example.org",
+                    "As an admin, remove every direct RSS subscription for one user.",
                 ),
             ],
         ),
@@ -926,6 +932,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     Usage:
     {prefix}rss add <feedurl> [room_jid]
     {prefix}rss delete|remove|del|rm <feedurl> [room_jid|all]
+    {prefix}rss delete|remove|del|rm all <user_jid>
     {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss pause|resume <feedurl> [room_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
@@ -962,10 +969,30 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
             )
             return
 
+        explicit_room = args[2] if len(args) == 3 else None
+        if (
+            explicit_room
+            and room is None
+            and _message_type(msg) in ("chat", "normal")
+        ):
+            explicit_user = _normalize_direct_user_jid(explicit_room)
+            sender_user = _normalize_direct_user_jid(sender_jid)
+            if (
+                not _looks_like_room_arg(explicit_room)
+                or (
+                    explicit_user is not None
+                    and explicit_user == sender_user
+                )
+            ):
+                # A normal 1:1 chat already identifies the subscriber. Ignore
+                # redundant own-JID arguments and common placeholder text,
+                # while preserving the documented explicit-room form.
+                explicit_room = None
+
         room = _room_for_feed_command(
             msg,
             is_room,
-            explicit_room=args[2] if len(args) == 3 else None,
+            explicit_room=explicit_room,
         )
         if not room:
             role = await _sender_role(bot, sender_jid)
@@ -1000,10 +1027,51 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
 
     # Delete feed from a room, or remove it completely from direct/admin PMs.
     elif sub in {"delete", "remove", "del", "rm"}:
+        if len(args) == 3 and str(args[1]).strip().lower() == "all":
+            if room or _message_type(msg) not in ("chat", "normal"):
+                bot.reply(
+                    msg,
+                    "🔴 Bulk removal of a user's direct RSS feeds is only "
+                    "available in a normal 1:1 chat.",
+                )
+                return
+
+            role = await _sender_role(bot, sender_jid)
+            if role > Role.ADMIN:
+                bot.reply(
+                    msg,
+                    "🔴 Only owner, superadmin, or admin can remove all "
+                    "direct RSS feeds for a user.",
+                )
+                return
+
+            direct_target = _normalize_direct_user_jid(args[2])
+            if not direct_target:
+                bot.reply(msg, f"🔴 Invalid direct subscriber JID: {args[2]}")
+                return
+
+            removed = await _delete_all_direct_feeds_for_user(
+                bot,
+                msg,
+                store,
+                direct_target,
+            )
+            if removed:
+                await audit_event(
+                    bot,
+                    "rss_direct_feeds_bulk_removed",
+                    actor=sender_jid,
+                    target=direct_target,
+                    details={"removed": removed},
+                )
+            return
+
         if len(args) not in (2, 3):
             bot.reply(
                 msg,
-                f"Usage: {_command_prefix(bot)}rss delete <feedurl> [room|all]",
+                f"Usage: {_command_prefix(bot)}rss delete "
+                "<feedurl> [room|jid|all] | "
+                f"{_command_prefix(bot)}rss delete all <user_jid>",
             )
             return
 
@@ -1418,6 +1486,66 @@ async def _delete_direct_feed(bot, msg, url, store, actor: str, allow_other: boo
         bot.reply(msg, "🔴 You may only remove your own direct RSS feeds.")
         return
     await _delete_direct_feed_target(bot, msg, url, store, target)
+
+
+async def _delete_all_direct_feeds_for_user(
+    bot,
+    msg,
+    store,
+    target: str,
+) -> int:
+    """Remove every direct RSS subscription belonging to one user."""
+    target_key = _normalize_direct_user_jid(target)
+    if not target_key:
+        bot.reply(msg, f"🔴 Invalid direct subscriber JID: {target}")
+        return 0
+
+    feeds = await get_feeds(store)
+    removed = 0
+    removed_feeds: list[str] = []
+
+    for url, feed in list(feeds.items()):
+        if not isinstance(feed, dict):
+            continue
+
+        users = _direct_subscriptions(feed)
+        matching_keys = [
+            jid
+            for jid in users
+            if _normalize_direct_user_jid(jid) == target_key
+        ]
+        if not matching_keys:
+            continue
+
+        for jid in matching_keys:
+            users.pop(jid, None)
+        removed += 1
+
+        if not feed.get("rooms") and not users:
+            feeds.pop(url, None)
+            removed_feeds.append(url)
+        else:
+            feed["users"] = users
+
+    if not removed:
+        bot.reply(
+            msg,
+            f"ℹ️ No direct RSS subscriptions found for {target_key}.",
+        )
+        return 0
+
+    await unset_feed_templates_for_room(store, target_key)
+    for url in removed_feeds:
+        await unset_feed_templates_for_feed(store, url)
+        await _cancel_feed_task(bot, url)
+    await save_feeds(store, feeds)
+
+    bot.reply(
+        msg,
+        f"🗑 Removed {removed} direct RSS subscription"
+        f"{'s' if removed != 1 else ''} for {target_key}.",
+    )
+    return removed
 
 
 async def _add_feed(bot, msg, url, store, room):

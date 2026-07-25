@@ -1333,6 +1333,62 @@ async def test_trusted_user_can_add_and_remove_own_direct_feed(monkeypatch, make
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "redundant_target",
+    (
+        "trusted@example.org",
+        "TRUSTED@EXAMPLE.ORG/phone",
+        "MEINE_JID",
+    ),
+)
+async def test_direct_add_ignores_redundant_own_jid_or_placeholder(
+    monkeypatch,
+    make_bot,
+    redundant_target,
+):
+    bot = make_bot()
+    owner = "trusted@example.org"
+    url = "https://example.org/direct.xml"
+    msg = {
+        "from": SimpleNamespace(bare=owner, resource="phone"),
+        "type": "chat",
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.TRUSTED)
+
+    class DummyFeed:
+        feed = {"title": "Direct feed", "link": url}
+        entries = []
+
+    monkeypatch.setattr(
+        rss_commands,
+        "fetch_feed",
+        AsyncMock(return_value=DummyFeed()),
+    )
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    room_grant = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        rss_commands,
+        "user_has_room_plugin_grant",
+        room_grant,
+    )
+
+    await rss.rss_command(
+        bot,
+        owner,
+        "trusted",
+        ["add", url, redundant_target],
+        msg,
+        False,
+    )
+
+    feed = bot.plugin_store[rss.RSS_KEY][url]
+    assert feed["rooms"] == []
+    assert set(feed["users"]) == {owner}
+    assert "Added direct RSS feed" in bot.replies[-1][1]
+    room_grant.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_add_direct_feed_initializes_cursor_from_add_snapshot(
     monkeypatch, make_bot
 ):
@@ -1488,6 +1544,198 @@ async def test_admin_can_remove_trusted_users_direct_feed(make_bot):
     bot.get_user_role = admin_role
     await rss.rss_command(bot, "admin@example.org", "admin", ["remove", url, owner], msg, False)
     assert url not in bot.plugin_store[rss.RSS_KEY]
+
+
+@pytest.mark.asyncio
+async def test_admin_can_remove_all_direct_feeds_for_one_user(
+    monkeypatch,
+    make_bot,
+):
+    bot = make_bot()
+    owner = "trusted@example.org"
+    other = "other@example.org"
+    removed_url = "https://example.org/removed.xml"
+    shared_url = "https://example.org/shared.xml"
+    untouched_url = "https://example.org/untouched.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        removed_url: {
+            "title": "Removed",
+            "rooms": [],
+            "users": {owner.upper(): {"role": "trusted"}},
+        },
+        shared_url: {
+            "title": "Shared",
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                owner: {"role": "trusted"},
+                other: {"role": "trusted"},
+            },
+        },
+        untouched_url: {
+            "title": "Untouched",
+            "rooms": [],
+            "users": {other: {"role": "trusted"}},
+        },
+    }
+    bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] = {
+        owner: {
+            removed_url: "OWNER REMOVED",
+            shared_url: "OWNER SHARED",
+        },
+        other: {
+            shared_url: "OTHER SHARED",
+            untouched_url: "OTHER UNTOUCHED",
+        },
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
+    cancel_task = AsyncMock()
+    audit = AsyncMock()
+    monkeypatch.setattr(rss_commands, "_cancel_feed_task", cancel_task)
+    monkeypatch.setattr(rss_commands, "audit_event", audit)
+    msg = {
+        "from": SimpleNamespace(
+            bare="admin@example.org",
+            resource="desktop",
+        ),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["remove", "all", owner],
+        msg,
+        False,
+    )
+
+    feeds = bot.plugin_store[rss.RSS_KEY]
+    assert removed_url not in feeds
+    assert feeds[shared_url]["users"] == {
+        other: {"role": "trusted"},
+    }
+    assert feeds[untouched_url]["users"] == {
+        other: {"role": "trusted"},
+    }
+    assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] == {
+        other: {
+            shared_url: "OTHER SHARED",
+            untouched_url: "OTHER UNTOUCHED",
+        }
+    }
+    cancel_task.assert_awaited_once_with(bot, removed_url)
+    audit.assert_awaited_once_with(
+        bot,
+        "rss_direct_feeds_bulk_removed",
+        actor="admin@example.org",
+        target=owner,
+        details={"removed": 2},
+    )
+    assert bot.replies[-1][1] == (
+        f"🗑 Removed 2 direct RSS subscriptions for {owner}."
+    )
+
+
+@pytest.mark.asyncio
+async def test_bulk_direct_feed_removal_requires_admin_and_direct_chat(
+    monkeypatch,
+    make_bot,
+):
+    owner = "trusted@example.org"
+    url = "https://example.org/direct.xml"
+
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "title": "Direct",
+            "rooms": [],
+            "users": {owner: {"role": "trusted"}},
+        }
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.MODERATOR)
+    audit = AsyncMock()
+    monkeypatch.setattr(rss_commands, "audit_event", audit)
+    direct_msg = {
+        "from": SimpleNamespace(
+            bare="moderator@example.org",
+            resource="desktop",
+        ),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "moderator@example.org",
+        "moderator",
+        ["delete", "all", owner],
+        direct_msg,
+        False,
+    )
+
+    assert owner in bot.plugin_store[rss.RSS_KEY][url]["users"]
+    assert "Only owner, superadmin, or admin" in bot.replies[-1][1]
+    audit.assert_not_awaited()
+
+    bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
+    room_msg = {
+        "from": SimpleNamespace(bare="room@conference.example.org"),
+        "type": "groupchat",
+    }
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["delete", "all", owner],
+        room_msg,
+        True,
+    )
+
+    assert owner in bot.plugin_store[rss.RSS_KEY][url]["users"]
+    assert "only available in a normal 1:1 chat" in bot.replies[-1][1]
+    audit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_bulk_direct_feed_removal_handles_invalid_or_empty_target(
+    monkeypatch,
+    make_bot,
+):
+    bot = make_bot()
+    bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
+    audit = AsyncMock()
+    monkeypatch.setattr(rss_commands, "audit_event", audit)
+    msg = {
+        "from": SimpleNamespace(
+            bare="admin@example.org",
+            resource="desktop",
+        ),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["delete", "all", "not a jid"],
+        msg,
+        False,
+    )
+    assert bot.replies[-1][1] == (
+        "🔴 Invalid direct subscriber JID: not a jid"
+    )
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["delete", "all", "missing@example.org"],
+        msg,
+        False,
+    )
+    assert bot.replies[-1][1] == (
+        "ℹ️ No direct RSS subscriptions found for missing@example.org."
+    )
+    audit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
