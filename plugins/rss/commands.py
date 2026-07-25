@@ -164,11 +164,14 @@ def _trusted_feed_count(feeds: dict, owner: str) -> int:
 def _compact_subscription_lines(
     feeds: dict,
     section: str | None = None,
+    *,
+    owner: str | None = None,
 ) -> list[str]:
     """Return the compact subscription overview, optionally for one section."""
     room_feeds: dict[str, list[tuple[str, str]]] = {}
-    mod_lines, trusted_lines = [], []
+    mod_lines, trusted_lines, own_lines = [], [], []
     room_subscription_count = 0
+    owner_key = _normalize_direct_user_jid(owner) if owner else None
 
     for url, feed in feeds.items():
         title = str(feed.get("title") or url)
@@ -184,6 +187,8 @@ def _compact_subscription_lines(
         for jid, meta in sorted(_direct_subscriptions(feed).items()):
             role = str((meta or {}).get("role") or "trusted").lower()
             line = f"• {title} | {status} | {period}s | {jid} | {url}"
+            if owner_key and _normalize_direct_user_jid(jid) == owner_key:
+                own_lines.append(line)
             target = (
                 mod_lines
                 if role in {"owner", "superadmin", "admin", "moderator"}
@@ -204,6 +209,7 @@ def _compact_subscription_lines(
 
     mod_lines.sort(key=str.casefold)
     trusted_lines.sort(key=str.casefold)
+    own_lines.sort(key=str.casefold)
     sections = {
         "rooms": [
             f"Room feeds ({room_subscription_count}):",
@@ -216,6 +222,10 @@ def _compact_subscription_lines(
         "trusted": [
             f"Trusted user feeds ({len(trusted_lines)}):",
             *(trusted_lines or ["• none"]),
+        ],
+        "own": [
+            f"Own direct feeds ({len(own_lines)}):",
+            *(own_lines or ["• none"]),
         ],
     }
     if section:
@@ -238,7 +248,7 @@ def _rss_list_usage(bot=None) -> str:
     """Return the usage string for paginated RSS list output."""
     return (
         f"Usage: {_command_prefix(bot)}rss list "
-        "[rooms|mods|trusted|room_jid] [page|all|last]"
+        "[own|rooms|mods|trusted|room_jid] [page|all|last]"
     )
 async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=""):
     """
@@ -787,12 +797,16 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
         ),
         help_subcommand(
             "list",
-            "{prefix}rss list [rooms|mods|trusted|room_jid] [page|all|last]",
+            "{prefix}rss list [own|rooms|mods|trusted|room_jid] [page|all|last]",
             "List RSS subscriptions visible to you.",
             examples=[
                 help_example(
                     "{prefix}rss list",
                     "Show your direct subscriptions or the full moderator overview.",
+                ),
+                help_example(
+                    "{prefix}rss list own",
+                    "Show only your own personal direct subscriptions.",
                 ),
                 help_example(
                     "{prefix}rss list trusted",
@@ -936,7 +950,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss pause|resume <feedurl> [room_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
-    {prefix}rss list [rooms|mods|trusted|room_jid] [page|all|last]
+    {prefix}rss list [own|rooms|mods|trusted|room_jid] [page|all|last]
     {prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feedurl] [template]
     Direct chat: omit room_jid to manage your personal template.
     Room/MUC PM: omit room_jid to manage the current room template.
@@ -1294,7 +1308,12 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         target_room = room
         explicit_room = False
         compact_section = None
-        if len(args) >= 2 and str(args[1]).lower() in {"rooms", "mods", "trusted"}:
+        if len(args) >= 2 and str(args[1]).lower() in {
+            "own",
+            "rooms",
+            "mods",
+            "trusted",
+        }:
             compact_section = str(args[1]).lower()
             list_args = [args[0], *args[2:]]
         elif len(args) >= 2 and _looks_like_room_arg(args[1]):
@@ -1305,11 +1324,69 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         is_global_manager = await _sender_can_manage_rss_globally(
             bot, sender_jid
         )
-        if not explicit_room and msg.get("type") in ("chat", "normal"):
-            if compact_section and len(list_args) != 1:
+        if compact_section == "own" and (
+            room is not None or _message_type(msg) not in ("chat", "normal")
+        ):
+            bot.reply(
+                msg,
+                "🔴 Own direct RSS subscriptions can only be listed in a "
+                "normal 1:1 chat.",
+            )
+            return
+        if not explicit_room and _message_type(msg) in ("chat", "normal"):
+            if (
+                compact_section
+                and compact_section != "own"
+                and len(list_args) != 1
+            ):
                 bot.reply(msg, _rss_list_usage(bot))
                 return
             role = await _sender_role(bot, sender_jid)
+            if compact_section == "own":
+                if role > Role.TRUSTED:
+                    bot.reply(
+                        msg,
+                        "🔴 Direct RSS subscriptions require trusted role "
+                        "or higher.",
+                    )
+                    return
+                owner = _normalize_room_jid(sender_jid)
+                own_lines = _compact_subscription_lines(
+                    feeds,
+                    "own",
+                    owner=owner,
+                )[1:]
+                if own_lines == ["• none"]:
+                    bot.reply(msg, "No direct RSS feeds configured for you.")
+                    return
+                page_size = int(config.get("rss_list_page_size", 10) or 10)
+                parsed = _rss_list_page(list_args, len(own_lines), page_size)
+                if parsed is None:
+                    bot.reply(msg, _rss_list_usage(bot))
+                    return
+                page, show_all, page_size = parsed
+                if show_all:
+                    page_items = own_lines
+                    lines = [f"Own direct feeds ({len(own_lines)}) - all:"]
+                else:
+                    page_items, page, total_pages, total = paginate_items(
+                        own_lines,
+                        page,
+                        page_size,
+                    )
+                    lines = [
+                        f"Own direct feeds ({total}) - Page "
+                        f"{page}/{total_pages}:"
+                    ]
+                lines.extend(page_items)
+                if not show_all and page < total_pages:
+                    lines.extend([
+                        "",
+                        f"Use {_command_prefix(bot)}rss list own {page + 1} "
+                        "for the next page.",
+                    ])
+                bot.reply(msg, lines)
+                return
             if role <= Role.MODERATOR:
                 bot.reply(
                     msg,

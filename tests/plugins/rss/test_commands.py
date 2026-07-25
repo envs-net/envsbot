@@ -394,7 +394,7 @@ async def test_rss_list_all_and_invalid_page(monkeypatch, make_bot):
     await rss.rss_command(bot, "jid", "nick", ["list", "nope"], msg, True)
     assert bot.replies[-1][1] == (
         "Usage: ,rss list "
-        "[rooms|mods|trusted|room_jid] [page|all|last]"
+        "[own|rooms|mods|trusted|room_jid] [page|all|last]"
     )
 
 
@@ -1840,6 +1840,14 @@ def test_compact_subscription_lines_can_select_one_section():
         "Trusted user feeds (1):",
         "• Shared | ok | 900s | trusted@example.org | https://example.org/shared.xml",
     ]
+    assert rss_commands._compact_subscription_lines(
+        feeds,
+        "own",
+        owner="MOD@example.org/device",
+    ) == [
+        "Own direct feeds (1):",
+        "• Shared | ok | 900s | mod@example.org | https://example.org/shared.xml",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1932,6 +1940,128 @@ async def test_trusted_user_compact_rss_list_shows_only_own_feeds(make_bot):
     ]
     assert all("bob@example.org" not in line for line in lines)
     assert all("mod@example.org" not in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/alice.xml": {
+            "title": "Alice feed",
+            "period": 300,
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                "admin@example.org": {"role": "admin"},
+                "other-admin@example.org": {"role": "admin"},
+            },
+        },
+        "https://example.org/second.xml": {
+            "title": "Second feed",
+            "period": 600,
+            "rooms": [],
+            "users": {
+                "ADMIN@example.org": {"role": "admin"},
+                "trusted@example.org": {"role": "trusted"},
+            },
+        },
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
+    msg = {
+        "from": SimpleNamespace(
+            bare="admin@example.org",
+            resource="desktop",
+        ),
+        "type": "chat",
+    }
+    monkeypatch.setattr(
+        rss_commands,
+        "config",
+        {"prefix": ",", "rss_list_page_size": 1},
+    )
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["list", "own", "1"],
+        msg,
+        False,
+    )
+
+    lines = bot.replies[-1][1]
+    assert lines == [
+        "Own direct feeds (2) - Page 1/2:",
+        "• Alice feed | ok | 300s | admin@example.org | "
+        "https://example.org/alice.xml",
+        "",
+        "Use ,rss list own 2 for the next page.",
+    ]
+    assert all("other-admin@example.org" not in line for line in lines)
+    assert all("trusted@example.org" not in line for line in lines)
+    assert all("room@conference.example.org" not in line for line in lines)
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["list", "own", "2"],
+        msg,
+        False,
+    )
+
+    lines = bot.replies[-1][1]
+    assert lines == [
+        "Own direct feeds (2) - Page 2/2:",
+        "• Second feed | ok | 600s | ADMIN@example.org | "
+        "https://example.org/second.xml",
+    ]
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["list", "own", "all"],
+        msg,
+        False,
+    )
+
+    lines = bot.replies[-1][1]
+    assert lines[0] == "Own direct feeds (2) - all:"
+    assert len(lines) == 3
+    assert all("other-admin@example.org" not in line for line in lines)
+    assert all("trusted@example.org" not in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_rss_list_own_requires_normal_direct_chat(make_bot):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/feed.xml": {
+            "title": "Feed",
+            "period": 300,
+            "rooms": ["room@conference.example.org"],
+            "users": {"admin@example.org": {"role": "admin"}},
+        }
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
+    msg = {
+        "from": SimpleNamespace(bare="room@conference.example.org"),
+        "type": "groupchat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["list", "own"],
+        msg,
+        True,
+    )
+
+    assert bot.replies[-1][1] == (
+        "🔴 Own direct RSS subscriptions can only be listed in a normal "
+        "1:1 chat."
+    )
 
 
 @pytest.mark.asyncio

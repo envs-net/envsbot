@@ -38,6 +38,7 @@ def test_generated_rss_docs_include_direct_and_filtered_list_guidance():
     assert "`,rss list rooms`" in rss_doc
     assert "`,rss list mods`" in rss_doc
     assert "`,rss list trusted`" in rss_doc
+    assert "`,rss list own [page|all|last]`" in rss_doc
     assert "The bot recognizes the 1:1 destination automatically" in rss_doc
     assert "never stored as part of the template" in rss_doc
     assert "placeholder text such as `MEINE_JID` is ignored" in rss_doc

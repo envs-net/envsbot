@@ -373,7 +373,7 @@ def _rss_notes() -> list[str]:
         "```",
         "",
         f"In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.",
-        f"Global moderators may select a single section with `{PREFIX}rss list rooms`, `{PREFIX}rss list mods`, or `{PREFIX}rss list trusted`. For trusted users, `{PREFIX}rss list` shows only their own direct subscriptions without empty room or moderator sections.",
+        f"Global moderators may select a single section with `{PREFIX}rss list rooms`, `{PREFIX}rss list mods`, or `{PREFIX}rss list trusted`. Trusted users continue to see only their own direct subscriptions with `{PREFIX}rss list`. Any trusted user or global moderator may use `{PREFIX}rss list own [page|all|last]` in a normal 1:1 chat to show only their own personal subscriptions.",
         "",
         "## Fetch retries and startup behavior",
         "",

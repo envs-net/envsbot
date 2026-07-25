@@ -143,7 +143,7 @@ Owner, superadmin, and admin users may also remove every direct RSS subscription
 ```
 
 In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
-Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. For trusted users, `,rss list` shows only their own direct subscriptions without empty room or moderator sections.
+Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. Trusted users continue to see only their own direct subscriptions with `,rss list`. Any trusted user or global moderator may use `,rss list own [page|all|last]` in a normal 1:1 chat to show only their own personal subscriptions.
 
 ## Fetch retries and startup behavior
 
@@ -170,10 +170,11 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
     - `,rss add https://example.org/feed.rss` — Subscribe the current 1:1 chat to a feed.
     - `,rss add https://example.org/feed.rss room@conference.example.org` — Subscribe an explicitly named room to a feed.
 
-- `,rss list [rooms|mods|trusted|room_jid] [page|all|last]`
+- `,rss list [own|rooms|mods|trusted|room_jid] [page|all|last]`
   - Description: List RSS subscriptions visible to you.
   - Examples:
     - `,rss list` — Show your direct subscriptions or the full moderator overview.
+    - `,rss list own` — Show only your own personal direct subscriptions.
     - `,rss list trusted` — Show trusted-user direct subscriptions permitted for your role.
 
 - `,rss delete <feed_url> [room_jid|jid|all] | ,rss delete all <user_jid>`
