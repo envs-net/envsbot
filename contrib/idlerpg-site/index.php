@@ -48,7 +48,8 @@ function idlerpg_ttl($seconds) {
     $seconds %= 3600;
     $minutes = intdiv($seconds, 60);
     $seconds %= 60;
-    return sprintf('%d days, %02d:%02d:%02d', $days, $hours, $minutes, $seconds);
+    $day_label = $days === 1 ? 'day' : 'days';
+    return sprintf('%d %s, %02d:%02d:%02d', $days, $day_label, $hours, $minutes, $seconds);
 }
 
 function idlerpg_time_value($value) {
@@ -1409,9 +1410,17 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     </ul></section>
                     <section class="panel"><h3>Room administration</h3><ul class="compact-list">
                         <li><code>,idlerpg on</code> / <code>,idlerpg off</code> / <code>,idlerpg enabled</code> — room feature state</li>
+                        <li><code>,idlerpg stats</code> — room-wide balance and runtime statistics</li>
+                        <li><code>,idlerpg push &lt;character&gt; &lt;duration&gt;</code> — remove time from a character's clock</li>
+                        <li><code>,idlerpg setlevel &lt;character&gt; &lt;level&gt;</code> — set a character level</li>
+                        <li><code>,idlerpg reset &lt;character&gt;</code> — reset one character's progress and equipment</li>
+                        <li><code>,idlerpg delete &lt;character&gt;</code> — delete another room character</li>
                         <li><code>,idlerpg announce top</code> — post the leaderboard</li>
                         <li><code>,idlerpg topic update [custom text]</code> — refresh the room topic</li>
-                        <li><code>,idlerpg season extend [duration]</code> — extend the active season</li>
+                        <li><code>,idlerpg export</code> — refresh the public website export</li>
+                        <li><code>,idlerpg season end</code> — archive the ranking and start a new season without a player reset</li>
+                        <li><code>,idlerpg season reset</code> — archive the ranking and start a new season with a full player reset</li>
+                        <li><code>,idlerpg season extend [duration|manual]</code> — extend the active season or make it endless</li>
                         <li><code>,idlerpg season clear-end</code> — remove an automatic end date</li>
                         <li><code>,idlerpg hof clear confirm</code> — clear Hall of Fame history</li>
                     </ul></section>

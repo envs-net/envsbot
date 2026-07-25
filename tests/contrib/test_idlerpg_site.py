@@ -302,3 +302,39 @@ def test_idlerpg_site_rejects_unknown_or_unsafe_room_slug(tmp_path: Path) -> Non
     html = _render(data_dir, view="home", room="../../etc/passwd")
     assert "../../etc/passwd" not in html
     assert "alpha@conference.example.org" in html
+
+
+def test_idlerpg_site_commands_match_available_admin_commands(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    html = _render(
+        data_dir,
+        view="commands",
+        room="alpha_at_conference.example.org",
+    )
+
+    for command in (
+        ",idlerpg push",
+        ",idlerpg setlevel",
+        ",idlerpg reset",
+        ",idlerpg delete",
+        ",idlerpg export",
+        ",idlerpg season end",
+        ",idlerpg season reset",
+        ",idlerpg season extend",
+        ",idlerpg season clear-end",
+        ",idlerpg hof clear confirm",
+    ):
+        assert command in html
+
+
+def test_idlerpg_site_uses_singular_day_label(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    html = _render(
+        data_dir,
+        view="players",
+        room="alpha_at_conference.example.org",
+        character="Alice",
+    )
+
+    assert "1 day, 01:00:00" in html
+    assert "1 days, 01:00:00" not in html

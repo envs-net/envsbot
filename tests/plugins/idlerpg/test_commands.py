@@ -1445,3 +1445,90 @@ async def test_message_penalty_dedupe_only_after_player_is_found():
 
     assert player["next"] > before
     assert player["stats"]["messages"] == 1
+
+
+def test_usage_lists_every_primary_player_and_admin_command():
+    usage = idlerpg._usage(DummyBot())
+
+    expected = (
+        "Player commands:",
+        ",idlerpg register <character> <class>",
+        ",idlerpg login|logout|remove-me",
+        ",idlerpg top|players [page|last|all]",
+        ",idlerpg items|profile|achievements [character]",
+        ",idlerpg season end",
+        ",idlerpg season reset",
+        ",idlerpg season extend [duration|manual]",
+        ",idlerpg season clear-end",
+        ",idlerpg push <character> <duration>",
+        ",idlerpg setlevel <character> <level>",
+        ",idlerpg reset <character>",
+        ",idlerpg delete <character>",
+        ",idlerpg export",
+        ",idlerpg hof clear confirm",
+    )
+    for line in expected:
+        assert line in usage
+
+    assert "balance" not in usage
+
+
+def test_structured_help_lists_all_mutating_admin_commands():
+    from utils.command import command_subcommands
+
+    command_record = idlerpg.idlerpg_command.__commands__[0][1]
+    subcommands = {entry.name: entry for entry in command_subcommands(command_record)}
+
+    expected = {
+        "push",
+        "setlevel",
+        "reset",
+        "delete",
+        "export",
+        "hof clear",
+        "season end",
+        "season reset",
+        "season extend",
+        "season clear-end",
+        "announce top",
+        "topic update",
+    }
+    assert expected <= set(subcommands)
+    assert subcommands["season end"].aliases == ("season finish",)
+    assert subcommands["delete"].aliases == ("remove",)
+    assert all("room owner/admin" in subcommands[name].context for name in expected)
+
+
+@pytest.mark.asyncio
+async def test_time_quest_status_names_only_penalties_that_fail_it():
+    bot = DummyBot()
+    msg = DummyMsg()
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        msg,
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["quest"] = {
+        "active": True,
+        "type": "time",
+        "text": "wait quietly",
+        "questers": ["alice@envs.net"],
+        "complete_at": idlerpg._now() + 3600,
+    }
+
+    await idlerpg.idlerpg_command(
+        bot,
+        "alice@envs.net",
+        "Alice",
+        ["quest"],
+        msg,
+        True,
+    )
+
+    reply = bot.replies[-1][0]
+    assert "avoid message or logout penalties" in reply
+    assert "random game events do not fail the quest" in reply
+    assert "No quester may receive a penalty" not in reply

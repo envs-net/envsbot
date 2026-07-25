@@ -442,7 +442,7 @@ async def _handle_quest(bot, msg, is_room: bool) -> None:
     quest_kind = _dep_quests._quest_type(quest)
     remaining = _dep_formatting._duration(int(quest.get("complete_at", 0) or 0) - _dep_formatting._now())
     if quest_kind == "time":
-        detail = "No quester may receive a penalty before the timer ends."
+        detail = "Every quester must remain online and avoid message or logout penalties until the timer ends; random game events do not fail the quest."
     else:
         target = _dep_map._active_quest_target(quest)
         detail = f"Current target: [{target[0]},{target[1]}]." if target else "No active route target."
@@ -958,9 +958,10 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         help_subcommand(
             "stats",
             "{prefix}idlerpg stats",
-            "Show room-wide game balance and runtime statistics.",
+            "Show room-wide game balance and runtime statistics as a room owner/admin.",
             aliases=("balance",),
             examples=[help_example("{prefix}idlerpg stats", "Show statistics for the current IdleRPG room.")],
+            context="room or MUC PM; room owner/admin",
         ),
         help_subcommand(
             "duel",
@@ -989,28 +990,102 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         ),
         help_subcommand(
             "hof",
-            "{prefix}idlerpg hof [clear confirm]",
-            "Show the hall of fame or clear it as a room owner/admin.",
+            "{prefix}idlerpg hof",
+            "Show the room's Hall of Fame.",
             aliases=("hall", "hall-of-fame"),
-            examples=[help_example("{prefix}idlerpg hof", "Show the room's hall of fame.")],
+            examples=[help_example("{prefix}idlerpg hof", "Show the room's Hall of Fame.")],
+        ),
+        help_subcommand(
+            "hof clear",
+            "{prefix}idlerpg hof clear confirm",
+            "Clear all Hall of Fame entries as a room owner/admin.",
+            examples=[help_example("{prefix}idlerpg hof clear confirm", "Clear the room's Hall of Fame after explicit confirmation.")],
+            context="room or MUC PM; room owner/admin",
         ),
         help_subcommand(
             "season",
-            "{prefix}idlerpg season [extend [duration]|clear-end]",
-            "Show season status or manage the season end as a room owner/admin.",
+            "{prefix}idlerpg season [status]",
+            "Show the current season, remaining time and Hall of Fame count.",
             examples=[help_example("{prefix}idlerpg season", "Show the current season and remaining time.")],
+        ),
+        help_subcommand(
+            "season end",
+            "{prefix}idlerpg season end",
+            "Archive the current ranking and start a new season without resetting players.",
+            aliases=("season finish",),
+            examples=[help_example("{prefix}idlerpg season end", "End the current season while keeping player progress.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "season reset",
+            "{prefix}idlerpg season reset",
+            "Archive the current ranking, start a new season and reset player progress.",
+            examples=[help_example("{prefix}idlerpg season reset", "Start a fresh season and reset every room character.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "season extend",
+            "{prefix}idlerpg season extend [duration|manual]",
+            "Extend the current season, use the configured default, or make it manual/endless.",
+            examples=[help_example("{prefix}idlerpg season extend 7d", "Extend the current season by seven days.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "season clear-end",
+            "{prefix}idlerpg season clear-end",
+            "Remove the automatic season end and make the season manual/endless.",
+            examples=[help_example("{prefix}idlerpg season clear-end", "Remove the current season deadline.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "push",
+            "{prefix}idlerpg push <character> <duration>",
+            "Remove time from a character's next-level clock as a room owner/admin.",
+            examples=[help_example("{prefix}idlerpg push Alice 10m", "Move Alice ten minutes closer to the next level.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "setlevel",
+            "{prefix}idlerpg setlevel <character> <level>",
+            "Set a character's level and recalculate its timer as a room owner/admin.",
+            examples=[help_example("{prefix}idlerpg setlevel Alice 25", "Set Alice to level 25.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "reset",
+            "{prefix}idlerpg reset <character>",
+            "Reset one character's progress, items and penalties as a room owner/admin.",
+            examples=[help_example("{prefix}idlerpg reset Alice", "Reset Alice's current character progress.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "delete",
+            "{prefix}idlerpg delete <character>",
+            "Permanently delete another character as a room owner/admin.",
+            aliases=("remove",),
+            examples=[help_example("{prefix}idlerpg delete Alice", "Delete Alice's room character.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        help_subcommand(
+            "export",
+            "{prefix}idlerpg export",
+            "Refresh the room's public IdleRPG export as a room owner/admin.",
+            examples=[help_example("{prefix}idlerpg export", "Regenerate public website data for the room.")],
+            context="room or MUC PM; room owner/admin",
         ),
         help_subcommand(
             "announce top",
             "{prefix}idlerpg announce top",
             "Post the current leaderboard to the room as a room owner/admin.",
             examples=[help_example("{prefix}idlerpg announce top", "Announce the current top characters in the room.")],
+            context="room or MUC PM; room owner/admin",
         ),
         help_subcommand(
             "topic update",
             "{prefix}idlerpg topic update [custom text]",
             "Refresh the room topic from game state as a room owner/admin.",
             examples=[help_example("{prefix}idlerpg topic update IdleRPG", "Set the generated room topic with custom prefix text.")],
+            context="room or MUC PM; room owner/admin",
         ),
         help_subcommand(
             "remove-me",

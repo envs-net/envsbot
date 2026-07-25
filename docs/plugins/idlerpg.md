@@ -87,8 +87,9 @@ Aliases: `,idle`, `,irpg`
     - `,idlerpg events` — Show the latest IdleRPG events.
 
 - `,idlerpg stats`
-  - Description: Show room-wide game balance and runtime statistics.
+  - Description: Show room-wide game balance and runtime statistics as a room owner/admin.
   - Aliases: `,idlerpg balance`
+  - Context: `room or MUC PM; room owner/admin`
   - Examples:
     - `,idlerpg stats` — Show statistics for the current IdleRPG room.
 
@@ -113,24 +114,88 @@ Aliases: `,idle`, `,irpg`
   - Examples:
     - `,idlerpg map` — Show the current IdleRPG map summary.
 
-- `,idlerpg hof [clear confirm]`
-  - Description: Show the hall of fame or clear it as a room owner/admin.
+- `,idlerpg hof`
+  - Description: Show the room's Hall of Fame.
   - Aliases: `,idlerpg hall`, `,idlerpg hall-of-fame`
   - Examples:
-    - `,idlerpg hof` — Show the room's hall of fame.
+    - `,idlerpg hof` — Show the room's Hall of Fame.
 
-- `,idlerpg season [extend [duration]|clear-end]`
-  - Description: Show season status or manage the season end as a room owner/admin.
+- `,idlerpg hof clear confirm`
+  - Description: Clear all Hall of Fame entries as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg hof clear confirm` — Clear the room's Hall of Fame after explicit confirmation.
+
+- `,idlerpg season [status]`
+  - Description: Show the current season, remaining time and Hall of Fame count.
   - Examples:
     - `,idlerpg season` — Show the current season and remaining time.
 
+- `,idlerpg season end`
+  - Description: Archive the current ranking and start a new season without resetting players.
+  - Aliases: `,idlerpg season finish`
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg season end` — End the current season while keeping player progress.
+
+- `,idlerpg season reset`
+  - Description: Archive the current ranking, start a new season and reset player progress.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg season reset` — Start a fresh season and reset every room character.
+
+- `,idlerpg season extend [duration|manual]`
+  - Description: Extend the current season, use the configured default, or make it manual/endless.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg season extend 7d` — Extend the current season by seven days.
+
+- `,idlerpg season clear-end`
+  - Description: Remove the automatic season end and make the season manual/endless.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg season clear-end` — Remove the current season deadline.
+
+- `,idlerpg push <character> <duration>`
+  - Description: Remove time from a character's next-level clock as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg push Alice 10m` — Move Alice ten minutes closer to the next level.
+
+- `,idlerpg setlevel <character> <level>`
+  - Description: Set a character's level and recalculate its timer as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg setlevel Alice 25` — Set Alice to level 25.
+
+- `,idlerpg reset <character>`
+  - Description: Reset one character's progress, items and penalties as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg reset Alice` — Reset Alice's current character progress.
+
+- `,idlerpg delete <character>`
+  - Description: Permanently delete another character as a room owner/admin.
+  - Aliases: `,idlerpg remove`
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg delete Alice` — Delete Alice's room character.
+
+- `,idlerpg export`
+  - Description: Refresh the room's public IdleRPG export as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg export` — Regenerate public website data for the room.
+
 - `,idlerpg announce top`
   - Description: Post the current leaderboard to the room as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
   - Examples:
     - `,idlerpg announce top` — Announce the current top characters in the room.
 
 - `,idlerpg topic update [custom text]`
   - Description: Refresh the room topic from game state as a room owner/admin.
+  - Context: `room or MUC PM; room owner/admin`
   - Examples:
     - `,idlerpg topic update IdleRPG` — Set the generated room topic with custom prefix text.
 
