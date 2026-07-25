@@ -1991,8 +1991,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
     lines = bot.replies[-1][1]
     assert lines == [
         "Own direct feeds (2) - Page 1/2:",
-        "• Alice feed | ok | 300s | admin@example.org | "
-        "https://example.org/alice.xml",
+        "• Alice feed | ok | 300s | admin@example.org | https://example.org/alice.xml",
         "",
         "Use ,rss list own 2 for the next page.",
     ]
@@ -2012,8 +2011,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
     lines = bot.replies[-1][1]
     assert lines == [
         "Own direct feeds (2) - Page 2/2:",
-        "• Second feed | ok | 600s | ADMIN@example.org | "
-        "https://example.org/second.xml",
+        "• Second feed | ok | 600s | ADMIN@example.org | https://example.org/second.xml",
     ]
 
     await rss.rss_command(
