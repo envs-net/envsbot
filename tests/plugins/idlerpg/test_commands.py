@@ -472,7 +472,7 @@ async def test_profile_command_includes_website_link(tmp_path, monkeypatch):
 
     assert "Profile: Alice" in bot.replies[-1][0]
     assert "Playing since:" in bot.replies[-1][0]
-    assert "Playing for: 1 days, 01:01:01" in bot.replies[-1][0]
+    assert "Playing for: 1 day, 01:01:01" in bot.replies[-1][0]
     assert "Idled online:" in bot.replies[-1][0]
     assert "Website: https://envs.net/idlerpg/?view=players&character=Alice" in bot.replies[-1][0]
     assert "alice@envs.net" not in bot.replies[-1][0]

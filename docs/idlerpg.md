@@ -260,12 +260,14 @@ time requirement is 10 hours, matching classic IdleRPG. Quest completion removes
 The bot supports both classic quest types:
 
 - **Grid quests**: four questers automatically walk toward route points on the
-  world map. If they do not finish before the configured deadline, all online
-  users receive a p15 quest penalty.
-- **Time quests**: four questers must simply keep idling until a random 12-24h
-  timer ends. Any message/logout/manual penalty against a quester fails the
-  quest and all online users receive a p15 quest penalty. Logout grace still
-  applies, so short XMPP reconnects do not immediately destroy a time quest.
+  world map. If they do not finish before the configured deadline, only the
+  assigned questers receive a p15 quest penalty.
+- **Time quests**: four questers must remain online and avoid message or logout
+  penalties until a random 12-24h timer ends. Such a penalty against any
+  quester fails the quest, and only the assigned questers receive the p15 quest
+  penalty. Random battles and other game events may still change a quester's
+  clock without failing the time quest. Logout grace applies, so short XMPP
+  reconnects do not immediately destroy it.
 
 Relevant settings:
 

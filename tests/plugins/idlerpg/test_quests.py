@@ -317,6 +317,7 @@ def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
     assert room["quest"]["type"] == "time"
     assert room["quest"]["complete_at"] == 100 + idlerpg.QUEST_TIME_MIN_DURATION
     assert "time-based quest" in messages[0]
+    assert "remain online and avoid message or logout penalties" in messages[0]
     assert "https://envs.net/idlerpg/?view=quest" in messages[0]
 
     values = iter([11, 12, 13, 14])

@@ -288,7 +288,8 @@ def _start_time_quest(
     url_part = f" See {quest_url} to monitor the quest." if quest_url else ""
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
-        f"This is a time-based quest: no quester may receive a penalty for {_dep_formatting._duration_clock(duration)}."
+        f"This is a time-based quest: every quester must remain online and avoid message or logout penalties "
+        f"for {_dep_formatting._duration_clock(duration)}."
         f"{url_part}"
     )
 

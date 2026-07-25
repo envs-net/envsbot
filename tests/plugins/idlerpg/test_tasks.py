@@ -12,6 +12,7 @@ from .helpers import (
 import random
 from core_plugins import _core
 from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import events as idlerpg_events
 from plugins.idlerpg import export as idlerpg_export
 from plugins.idlerpg import formatting as idlerpg_formatting
 from plugins.idlerpg import tasks as idlerpg_tasks
@@ -228,6 +229,74 @@ async def test_tick_announces_new_achievements(monkeypatch):
     assert any("unlocked achievement: Novice Idler" in text for text in replies)
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
     assert any("Novice Idler" in event["text"] for event in room["events"])
+
+
+@pytest.mark.asyncio
+async def test_boss_achievement_is_announced_and_recorded_once(monkeypatch):
+    bot = DummyBot()
+    now = 6_000_000
+    players = {}
+    for index, name in enumerate(("Alice", "Bob", "Carol")):
+        jid = f"{name.lower()}@envs.net"
+        player = idlerpg._normalize_player(
+            jid,
+            {
+                "name": name,
+                "class": "idler",
+                "level": idlerpg.BOSS_MIN_LEVEL,
+                "next": 10_000,
+                "items": {"weapon": 50},
+                "achievements": [] if name == "Alice" else ["boss_slayer"],
+                "x": index,
+                "y": index,
+            },
+        )
+        players[jid] = player
+        JOINED_ROOMS["room@conf"]["nicks"][name] = {
+            "jid": jid,
+            "affiliation": "member",
+        }
+
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = {
+        "rooms": {
+            "room@conf": {
+                "players": players,
+                "last_tick": now - 60,
+                "next_top_announce_at": now + 3600,
+                "next_topic_update_at": now + 3600,
+                "quest": {"active": False, "next_at": now + 3600},
+                "events": [],
+            }
+        }
+    }
+
+    async def run_boss(room, _room_jid, messages):
+        idlerpg_events._run_boss_event(
+            list(room["players"].items()),
+            messages,
+            room,
+        )
+
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_config, "ITEM_CHANCE", 0.0)
+    monkeypatch.setattr(idlerpg_config, "GRID_BATTLE_ENABLED", False)
+    monkeypatch.setattr(idlerpg_events, "_maybe_run_random_event", run_boss)
+    monkeypatch.setattr(idlerpg_events.random, "sample", lambda seq, count: list(seq)[:count])
+    monkeypatch.setattr(idlerpg_events.random, "uniform", lambda _start, _stop: 1.0)
+    rolls = iter([10_000, 0])
+    monkeypatch.setattr(idlerpg_events.random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(idlerpg_events.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
+
+    await idlerpg._tick_room(bot, "room@conf", announce=True)
+
+    announcement = "🏅 Alice unlocked achievement: Boss Slayer — helped defeat a room boss."
+    replies = [text for text, _kwargs in bot.replies]
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+
+    assert replies.count(announcement) == 1
+    assert [event["text"] for event in room["events"]].count(announcement) == 1
+    assert "boss_slayer" in room["players"]["alice@envs.net"]["achievements"]
 
 
 @pytest.mark.asyncio

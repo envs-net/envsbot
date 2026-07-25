@@ -289,11 +289,6 @@ def _run_boss_event(
     boss_roll = random.randint(0, boss_power)
     boss_name = random.choice(_BOSS_NAMES)
     won = party_roll >= boss_roll
-    before_achievements = {
-        id(player): set(player.get("achievements", []) if isinstance(player.get("achievements"), list) else [])
-        for _jid, player in party
-    }
-
     if won:
         changed_values = []
         for _jid, player in party:
@@ -319,7 +314,6 @@ def _run_boss_event(
 
     for _jid, player in party:
         messages.append(_dep_formatting._next_level_line(player))
-        messages.extend(_dep_leveling._achievement_announcements(player, before_achievements[id(player)]))
 
     if room is not None:
         _dep_export._record_event(

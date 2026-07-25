@@ -1155,7 +1155,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                         <?php endif; ?>
                     </p>
                     <?php if ($quest_type === 'time'): ?>
-                        <p class="muted">Time-based quest: no quester may receive a penalty before the timer ends.</p>
+                        <p class="muted">Time-based quest: every quester must remain online and avoid message or logout penalties until the timer ends. Random game events do not fail the quest.</p>
                     <?php elseif (is_array($quest['current_target'] ?? null)): ?>
                         <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]</p>
                     <?php endif; ?>

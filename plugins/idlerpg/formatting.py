@@ -64,7 +64,8 @@ def _duration_clock(seconds: int | float | None) -> str:
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, secs = divmod(rem, 60)
-    return f"{days} days, {hours:02d}:{minutes:02d}:{secs:02d}"
+    day_word = "day" if days == 1 else "days"
+    return f"{days} {day_word}, {hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 def _possessive(name: str) -> str:

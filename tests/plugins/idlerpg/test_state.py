@@ -14,8 +14,8 @@ from plugins.idlerpg import items as idlerpg_items
 
 def test_duration_clock_and_next_level_line():
     player = {"name": "Alice", "next": 93784}
-    assert idlerpg._duration_clock(93784) == "1 days, 02:03:04"
-    assert idlerpg._next_level_line(player) == "Alice reaches next level in 1 days, 02:03:04."
+    assert idlerpg._duration_clock(93784) == "1 day, 02:03:04"
+    assert idlerpg._next_level_line(player) == "Alice reaches next level in 1 day, 02:03:04."
 
 
 def test_idlerpg_small_helper_edges(monkeypatch):
