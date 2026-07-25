@@ -91,6 +91,19 @@ def _asyncio_create_task_supports_name() -> bool:
         return True
 
 
+def _close_unscheduled_awaitable(awaitable: Awaitable[Any]) -> None:
+    """Close a coroutine that no task creator accepted.
+
+    Creating the coroutine happens before the task-creation call. If a task
+    creator fails synchronously, ownership never transfers and the coroutine
+    must be closed explicitly to avoid ``coroutine was never awaited``
+    warnings. Other awaitable types do not necessarily expose ``close``.
+    """
+    close = getattr(awaitable, "close", None)
+    if callable(close):
+        close()
+
+
 def create_plugin_task(
     bot: BotLike,
     plugin: str,
@@ -112,20 +125,24 @@ def create_plugin_task(
     Returns:
         The created asyncio task.
     """
-    manager = getattr(bot, "bot_plugins", None)
-    creator = getattr(manager, "create_task", None)
-    if _is_plugin_task_creator(creator):
-        return creator(plugin, coro, name=name)
-    if _asyncio_create_task_supports_name():
-        try:
-            return asyncio.create_task(coro, name=name)
-        except TypeError as exc:
-            if "name" not in str(exc):
-                raise
-            # Some tests monkeypatch asyncio.create_task with a reduced callable.
-            # Fall back to the pre-name signature while production keeps using names.
-            return asyncio.create_task(coro)
-    return asyncio.create_task(coro)
+    try:
+        manager = getattr(bot, "bot_plugins", None)
+        creator = getattr(manager, "create_task", None)
+        if _is_plugin_task_creator(creator):
+            return creator(plugin, coro, name=name)
+        if _asyncio_create_task_supports_name():
+            try:
+                return asyncio.create_task(coro, name=name)
+            except TypeError as exc:
+                if "name" not in str(exc):
+                    raise
+                # Some tests monkeypatch asyncio.create_task with a reduced callable.
+                # Fall back to the pre-name signature while production keeps using names.
+                return asyncio.create_task(coro)
+        return asyncio.create_task(coro)
+    except BaseException:
+        _close_unscheduled_awaitable(coro)
+        raise
 
 
 class TaskSupervisor:

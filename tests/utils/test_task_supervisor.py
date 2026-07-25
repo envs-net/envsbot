@@ -75,6 +75,30 @@ async def test_create_plugin_task_uses_valid_manager_creator():
 
 
 @pytest.mark.asyncio
+async def test_create_plugin_task_closes_coroutine_when_creator_fails():
+    created_coroutines = []
+
+    class Manager:
+        def create_task(self, _plugin_name, coro, *, name=None):
+            created_coroutines.append(coro)
+            raise RuntimeError("task creation failed")
+
+    async def marker():
+        return "unused"
+
+    with pytest.raises(RuntimeError, match="task creation failed"):
+        create_plugin_task(
+            SimpleNamespace(bot_plugins=Manager()),
+            "example",
+            marker(),
+            name="example-task",
+        )
+
+    assert len(created_coroutines) == 1
+    assert created_coroutines[0].cr_frame is None
+
+
+@pytest.mark.asyncio
 async def test_create_plugin_task_ignores_mock_creator():
     creator = Mock()
 

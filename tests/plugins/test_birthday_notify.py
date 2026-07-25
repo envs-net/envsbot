@@ -368,12 +368,18 @@ async def test_birthday_lifecycle_propagates_critical_startup_failures(
     monkeypatch,
     bot,
 ):
-    def fail_task(*_args, **_kwargs):
+    created_coroutines = []
+
+    def fail_task(_plugin, coro, *, name=None):
+        created_coroutines.append(coro)
         raise RuntimeError("task creation failed")
 
-    monkeypatch.setattr(birthday_notify, "create_plugin_task", fail_task)
+    monkeypatch.setattr(bot.bot_plugins, "create_task", fail_task, raising=False)
     with pytest.raises(RuntimeError, match="task creation failed"):
         await birthday_notify.on_ready(bot)
+
+    assert len(created_coroutines) == 1
+    assert created_coroutines[0].cr_frame is None
 
     def fail_event(*_args, **_kwargs):
         raise RuntimeError("event failed")
