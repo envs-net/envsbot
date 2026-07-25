@@ -6,6 +6,8 @@ import ast
 from importlib import import_module
 from pathlib import Path
 
+from utils.plugin_manager_dependencies import topological_sort
+
 
 _TEST_ROOT = Path(__file__).resolve().parents[1]
 
@@ -120,6 +122,92 @@ def test_cross_plugin_imports_are_declared_as_dependencies():
     for module_name, dependencies in expected.items():
         metadata = import_module(module_name).PLUGIN_META
         assert dependencies <= set(metadata.get("requires", [])), module_name
+
+
+def _discover_plugin_modules() -> dict[str, str]:
+    modules: dict[str, str] = {}
+    for package in ("core_plugins", "plugins"):
+        package_root = ROOT / package
+        for path in package_root.iterdir():
+            if path.name.startswith("__"):
+                continue
+            if path.is_file() and path.suffix == ".py":
+                modules.setdefault(path.stem, f"{package}.{path.stem}")
+            elif path.is_dir() and (path / "__init__.py").exists():
+                modules.setdefault(path.name, f"{package}.{path.name}")
+    return modules
+
+
+def test_complete_plugin_dependency_graph_is_valid_and_acyclic():
+    modules = _discover_plugin_modules()
+    metadata = {
+        name: import_module(module_name).PLUGIN_META
+        for name, module_name in modules.items()
+    }
+
+    errors: list[str] = []
+    for name, meta in metadata.items():
+        requires = list(meta.get("requires", []) or [])
+        if len(requires) != len(set(requires)):
+            errors.append(f"{name}: duplicate dependencies")
+        if name in requires:
+            errors.append(f"{name}: depends on itself")
+        for dependency in requires:
+            if dependency not in modules:
+                errors.append(f"{name}: unknown dependency {dependency}")
+
+    assert errors == []
+
+    order = topological_sort(metadata, modules)
+    positions = {name: index for index, name in enumerate(order)}
+    for name, meta in metadata.items():
+        for dependency in meta.get("requires", []) or []:
+            assert positions[dependency] < positions[name], (
+                f"{dependency} must load before {name}"
+            )
+
+
+def test_all_absolute_cross_plugin_imports_are_declared():
+    modules = _discover_plugin_modules()
+    metadata = {
+        name: import_module(module_name).PLUGIN_META
+        for name, module_name in modules.items()
+    }
+    offenders: list[str] = []
+
+    for package in ("core_plugins", "plugins"):
+        package_root = ROOT / package
+        for path in package_root.rglob("*.py"):
+            relative = path.relative_to(package_root)
+            owner = relative.parts[0]
+            if owner.endswith(".py"):
+                owner = owner[:-3]
+            if owner == "__init__":
+                continue
+
+            declared = set(metadata.get(owner, {}).get("requires", []) or [])
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            imported_plugins: set[str] = set()
+            for node in ast.walk(tree):
+                module_names: list[str] = []
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    module_names.append(node.module)
+                elif isinstance(node, ast.Import):
+                    module_names.extend(alias.name for alias in node.names)
+                for module_name in module_names:
+                    parts = module_name.split(".")
+                    if len(parts) >= 2 and parts[0] in {"core_plugins", "plugins"}:
+                        dependency = parts[1]
+                        if dependency != owner:
+                            imported_plugins.add(dependency)
+
+            for dependency in sorted(imported_plugins - declared):
+                offenders.append(
+                    f"{path.relative_to(ROOT)}: imports {dependency} "
+                    "without declaring it"
+                )
+
+    assert offenders == []
 
 
 def test_plugin_categories_match_help_grouping():

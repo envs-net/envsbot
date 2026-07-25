@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import logging
 import slixmpp
 import types
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -1109,6 +1110,43 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     assert broadcasts == ["broadcast", "broadcast"]
     assert calls == ["roster", "db", "cache", "load_all", "ready", "backup", "restart"]
     assert bot.roster.auto_subscribe is True
+
+
+@pytest.mark.asyncio
+async def test_on_start_reports_degraded_plugin_state(monkeypatch, bot, caplog):
+    monkeypatch.setattr(
+        envsbot.Bot,
+        "__getitem__",
+        lambda self, key: types.SimpleNamespace(add_feature=lambda feature: None),
+        raising=False,
+    )
+    bot.presence = types.SimpleNamespace(
+        broadcast=lambda: None,
+        joined_rooms={},
+    )
+    bot.get_roster = AsyncMock()
+    bot.db = types.SimpleNamespace(
+        connect=AsyncMock(),
+        message_cache=object(),
+    )
+    bot.message_cache = types.SimpleNamespace(start=AsyncMock())
+    bot.bot_plugins = types.SimpleNamespace(
+        load_all=AsyncMock(),
+        call_on_ready=AsyncMock(),
+        plugins={"_core": object()},
+        failed_plugins={"broken": "boom"},
+    )
+    bot._create_startup_backup = AsyncMock()
+    bot._send_restart_notification = AsyncMock()
+    bot.roster = types.SimpleNamespace(auto_subscribe=False)
+
+    with caplog.at_level(logging.INFO, logger="bot.lifecycle"):
+        await envsbot.Bot.on_start(bot, object())
+
+    assert "status=degraded" in caplog.text
+    assert "loaded_plugins=1" in caplog.text
+    assert "failed_plugins=1" in caplog.text
+    assert "Bot started with 1 plugin load failure(s)" in caplog.text
 
 
 @pytest.mark.asyncio

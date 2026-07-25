@@ -184,15 +184,27 @@ class LifecycleMixin:
         self.roster.auto_subscribe = True
 
         failed = getattr(self.bot_plugins, "failed_plugins", None)
-        failed_count = len(failed or {}) if isinstance(failed, dict) else 0
+        try:
+            failed_count = len(failed or {})
+        except TypeError:
+            failed_count = 0
         loaded_count = len(getattr(self.bot_plugins, "plugins", {}) or {})
-        log.info(
-            "[BOT] event=startup status=ok loaded_plugins=%d failed_plugins=%d rooms=%d",
+        startup_status = "degraded" if failed_count else "ok"
+        startup_log = log.warning if failed_count else log.info
+        startup_log(
+            "[BOT] event=startup status=%s loaded_plugins=%d failed_plugins=%d rooms=%d",
+            startup_status,
             loaded_count,
             failed_count,
             len(getattr(self.presence, "joined_rooms", {}) or {}),
         )
-        log.info("[BOT] ✅ Bot started, all rooms joined")
+        if failed_count:
+            log.warning(
+                "[BOT] ⚠️ Bot started with %d plugin load failure(s)",
+                failed_count,
+            )
+        else:
+            log.info("[BOT] ✅ Bot started, all rooms joined")
 
     async def shutdown_runtime(self) -> None:
         """Run the ordered shutdown once, even when callers race."""

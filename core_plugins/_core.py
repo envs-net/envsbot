@@ -2,12 +2,11 @@
 
 """
 Core utility and shared helpers for all envsbot plugins.
-Depends on essential plugins (e.g., "rooms") via PLUGIN_META.
 
 Put any functions or objects here that:
   - are needed by multiple plugins
-  - require access to JOINED_ROOMS or runtime bot/plugin state
-  - should ONLY be initialized after their dependencies are loaded
+  - use shared room state without importing the rooms plugin package
+  - should be available before optional plugins are loaded
 """
 import logging
 import re

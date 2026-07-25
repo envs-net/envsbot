@@ -54,6 +54,9 @@ def bot():
     m.bot_plugins.load_all = AsyncMock()
     m.bot_plugins.unload = AsyncMock(return_value=(True, "Plugin unloaded."))
     m.bot_plugins.reload = AsyncMock(return_value=(True, "Plugin reloaded."))
+    m.bot_plugins.reload_all = AsyncMock(
+        return_value=(True, "✅ All 3 plugins reloaded successfully")
+    )
     m.bot_plugins.list = MagicMock(return_value=["plugins", "rooms", "info"])
     m.bot_plugins.plugin_doctor = AsyncMock(
         side_effect=lambda name: {
@@ -338,29 +341,23 @@ async def test_plugin_reload_missing_args(bot, msg):
 
 @pytest.mark.asyncio
 async def test_plugin_reload_all_success(bot, msg):
-    bot.bot_plugins.list = MagicMock(return_value=["plugins", "rooms"])
-    bot.bot_plugins.reload = AsyncMock(return_value=(True, "Reloaded"))
     await plugins_module.plugin_reload(bot, "adminjid", "AdminNick",
                                        ["all"], msg, False)
-    bot.bot_plugins.reload.assert_any_await("plugins", auto=False)
+    bot.bot_plugins.reload_all.assert_awaited_once_with()
     assert "reloaded successfully" in bot.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio
 async def test_plugin_reload_all_auto_some_errors(bot, msg):
-    bot.bot_plugins.list = MagicMock(return_value=["plugins", "rooms", "info"])
-    # First two succeed, info fails
-
-    def reload_side(name, *, auto):
-        if name == "info":
-            return (False, "Failed")
-        return (True, "Reloaded")
-    bot.bot_plugins.reload = AsyncMock(side_effect=reload_side)
+    bot.bot_plugins.reload_all = AsyncMock(
+        return_value=(False, "Reloaded 2 of 3 plugins with 1 error(s): info: Failed")
+    )
     await plugins_module.plugin_reload(bot, "adminjid", "AdminNick",
                                        ["all", "auto"], msg, False)
     out = bot.reply.call_args[0][1]
-    assert "some errors" in out or "errors" in out
-    assert "- info:" in out
+    assert "1 error" in out
+    assert "info: Failed" in out
+    bot.bot_plugins.reload_all.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

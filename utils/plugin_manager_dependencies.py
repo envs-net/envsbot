@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from collections import deque
 from typing import Any
-
-log = logging.getLogger(__name__)
 
 
 def get_dependents(meta_by_plugin: dict[str, dict[str, Any]], name: str) -> set[str]:
@@ -26,7 +23,11 @@ def get_dependents(meta_by_plugin: dict[str, dict[str, Any]], name: str) -> set[
 
 
 def topological_sort(meta_by_plugin: dict[str, dict[str, Any]], plugin_names) -> list[str]:
-    """Sort plugins by dependency order, dependencies first."""
+    """Sort plugins by dependency order, dependencies first.
+
+    Raises:
+        ValueError: If the selected dependency graph contains a cycle.
+    """
     plugin_set = set(plugin_names)
     sorted_plugins: list[str] = []
     visited: set[str] = set()
@@ -36,8 +37,7 @@ def topological_sort(meta_by_plugin: dict[str, dict[str, Any]], plugin_names) ->
         if node in visited:
             return
         if node in temp_marked:
-            log.warning("[PLUGIN] circular dependency: %s", node)
-            return
+            raise ValueError(f"Circular plugin dependency involving {node}")
 
         temp_marked.add(node)
         meta = meta_by_plugin.get(node, {})

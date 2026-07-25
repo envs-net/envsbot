@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "plugins",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Runtime plugin management",
     "category": "core",
 }
@@ -384,8 +384,10 @@ async def plugin_reload(bot, sender_jid, nick, args, msg, is_room):
     """
     Reload a plugin or all plugins that are currently loaded.
 
-    Respects plugin dependencies. If other plugins depend on the target,
-    use 'auto' flag to reload them automatically.
+    A single plugin reload respects plugin dependencies. If other plugins
+    depend on the target, use the 'auto' flag to reload them automatically.
+    Reloading all plugins always uses one complete dependency-ordered cycle;
+    the optional 'auto' word remains accepted for compatibility.
 
     Usage:
         {prefix}plugin reload <plugin>
@@ -401,49 +403,16 @@ async def plugin_reload(bot, sender_jid, nick, args, msg, is_room):
     auto = len(args) > 1 and args[1].lower() == "auto"
 
     if target == "all":
-        # Reload all plugins
-        plugins_to_reload = [
-            p for p in bot.bot_plugins.list() if p != "plugins"]
-
-        errors = []
-        successful = []
-
-        for name in plugins_to_reload:
-            # With auto flag: attempt reload with auto
-            success, message = await bot.bot_plugins.reload(name, auto=auto)
-            if success:
-                successful.append(name)
-                log.info("[PLUGIN] reload successful: %s", name)
-            else:
-                errors.append(f"- {name}: {message}")
-                log.warning("[PLUGIN] reload failed: %s", name)
-
-        # Reload plugins manager last
-        success, message = await bot.bot_plugins.reload("plugins", auto=False)
-        if success:
-            successful.append("plugins")
-        else:
-            errors.append(f"- plugins: {message}")
+        success, message = await bot.bot_plugins.reload_all()
 
         await audit_event(
             bot,
             "plugins_reloaded",
             actor=sender_jid,
             target="all",
-            details={"auto": auto, "successful": len(successful), "errors": len(errors)},
+            details={"auto": auto, "success": success},
         )
-        if errors:
-            error_text = "\n".join(errors)
-            if auto:
-                bot.reply(
-                    msg,
-                    f"⚠️ All plugins reloaded with some errors:\n{error_text}")
-            else:
-                bot.reply(
-                    msg, f"⚠️ All plugins reloaded with errors:\n{error_text}")
-        else:
-            bot.reply(msg, f"✅ All {len(successful)
-                                    } plugins reloaded successfully.")
+        bot.reply(msg, message)
         return
 
     success, message = await bot.bot_plugins.reload(target, auto=auto)

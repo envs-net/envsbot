@@ -236,6 +236,368 @@ async def test_reload_plugins(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dynamic_load_runs_on_ready_after_startup(monkeypatch):
+    bot = FakeBot()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+    calls = []
+    mod = make_fake_plugin(meta={"name": "late", "requires": []})
+
+    async def on_ready(bot_arg):
+        assert bot_arg is bot
+        calls.append("ready")
+
+    mod.on_ready = on_ready
+    pm._ready = True
+    monkeypatch.setattr(
+        "utils.plugin_manager.importlib.import_module",
+        lambda _name: mod,
+    )
+
+    await pm.load("late")
+
+    assert calls == ["ready"]
+    assert "late" in pm.plugins
+
+
+@pytest.mark.asyncio
+async def test_dynamic_load_rolls_back_when_on_ready_fails(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    mod = make_fake_plugin(meta={"name": "late", "requires": []})
+
+    async def on_ready(_bot):
+        raise RuntimeError("ready failed")
+
+    mod.on_ready = on_ready
+    pm._ready = True
+    monkeypatch.setattr(
+        "utils.plugin_manager.importlib.import_module",
+        lambda _name: mod,
+    )
+
+    with pytest.raises(RuntimeError, match="ready failed"):
+        await pm.load("late")
+
+    assert "late" not in pm.plugins
+    assert pm.failed_plugins["late"] == "ready failed"
+
+
+@pytest.mark.asyncio
+async def test_load_rejects_circular_dependencies(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    modules = {
+        "A": make_fake_plugin(meta={"name": "A", "requires": ["B"]}),
+        "B": make_fake_plugin(meta={"name": "B", "requires": ["A"]}),
+    }
+    monkeypatch.setattr(
+        "utils.plugin_manager.importlib.import_module",
+        lambda name: modules[name.rsplit(".", 1)[-1]],
+    )
+
+    with pytest.raises(RuntimeError, match="Circular plugin dependency"):
+        await pm.load("A")
+
+    assert pm.plugins == {}
+
+
+@pytest.mark.asyncio
+async def test_reload_stops_when_unload_reports_failure(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    pm.plugins["A"] = make_fake_plugin(meta={"name": "A"})
+    pm.meta["A"] = {"name": "A", "requires": []}
+    monkeypatch.setattr(
+        pm,
+        "unload",
+        AsyncMock(return_value=(False, "cleanup failed")),
+    )
+    load = AsyncMock()
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload("A")
+
+    assert success is False
+    assert "cleanup failed" in message
+    load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_reload_keeps_precomputed_dependency_order(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "mid": {"name": "mid", "requires": ["base"]},
+        "leaf": {"name": "leaf", "requires": ["mid"]},
+    }
+    modules = {
+        name: make_fake_plugin(meta=meta)
+        for name, meta in metadata.items()
+    }
+    pm.plugins = dict(modules)
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+    calls = []
+
+    async def unload(name, force=False, *, allow_core=False):
+        calls.append(("unload", name, force, allow_core))
+        pm.plugins.pop(name)
+        pm.meta.pop(name)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        calls.append(("load", name))
+        pm.plugins[name] = modules[name]
+        pm.meta[name] = metadata[name]
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload("base", auto=True)
+
+    assert success is True
+    assert "2 dependent" in message
+    assert calls == [
+        ("unload", "leaf", True, True),
+        ("unload", "mid", True, True),
+        ("unload", "base", False, True),
+        ("load", "base"),
+        ("load", "mid"),
+        ("load", "leaf"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_reload_restores_dependents_after_unload_failure(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "mid": {"name": "mid", "requires": ["base"]},
+        "leaf": {"name": "leaf", "requires": ["mid"]},
+    }
+    modules = {
+        name: make_fake_plugin(meta=meta)
+        for name, meta in metadata.items()
+    }
+    pm.plugins = dict(modules)
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+    calls = []
+
+    async def unload(name, force=False, *, allow_core=False):
+        calls.append(("unload", name))
+        if name == "mid":
+            return False, "mid cleanup failed"
+        pm.plugins.pop(name)
+        pm.meta.pop(name)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        calls.append(("load", name))
+        pm.plugins[name] = modules[name]
+        pm.meta[name] = metadata[name]
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload("base", auto=True)
+
+    assert success is False
+    assert "mid cleanup failed" in message
+    assert set(pm.plugins) == {"base", "mid", "leaf"}
+    assert calls == [
+        ("unload", "leaf"),
+        ("unload", "mid"),
+        ("load", "leaf"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_reload_restores_dependents_when_target_unload_fails(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "mid": {"name": "mid", "requires": ["base"]},
+        "leaf": {"name": "leaf", "requires": ["mid"]},
+    }
+    modules = {
+        name: make_fake_plugin(meta=meta)
+        for name, meta in metadata.items()
+    }
+    pm.plugins = dict(modules)
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+    calls = []
+
+    async def unload(name, force=False, *, allow_core=False):
+        calls.append(("unload", name))
+        if name == "base":
+            return False, "base cleanup failed"
+        pm.plugins.pop(name)
+        pm.meta.pop(name)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        calls.append(("load", name))
+        pm.plugins[name] = modules[name]
+        pm.meta[name] = metadata[name]
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload("base", auto=True)
+
+    assert success is False
+    assert "base cleanup failed" in message
+    assert set(pm.plugins) == {"base", "mid", "leaf"}
+    assert calls == [
+        ("unload", "leaf"),
+        ("unload", "mid"),
+        ("unload", "base"),
+        ("load", "mid"),
+        ("load", "leaf"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_reload_reports_dependent_load_failure(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "leaf": {"name": "leaf", "requires": ["base"]},
+    }
+    modules = {
+        name: make_fake_plugin(meta=meta)
+        for name, meta in metadata.items()
+    }
+    pm.plugins = dict(modules)
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+
+    async def unload(name, force=False, *, allow_core=False):
+        pm.plugins.pop(name)
+        pm.meta.pop(name)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        if name == "leaf":
+            raise RuntimeError("leaf import failed")
+        pm.plugins[name] = modules[name]
+        pm.meta[name] = metadata[name]
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload("base", auto=True)
+
+    assert success is False
+    assert "leaf import failed" in message
+    assert set(pm.plugins) == {"base"}
+
+
+@pytest.mark.asyncio
+async def test_reload_all_uses_one_dependency_ordered_cycle(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "mid": {"name": "mid", "requires": ["base"]},
+        "leaf": {"name": "leaf", "requires": ["mid"]},
+    }
+    modules = {
+        name: make_fake_plugin(meta=meta)
+        for name, meta in metadata.items()
+    }
+    pm.plugins = dict(modules)
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+    calls = []
+
+    async def unload(name, force=False, *, allow_core=False):
+        assert force is True
+        assert allow_core is True
+        calls.append(("unload", name))
+        pm.plugins.pop(name)
+        pm.meta.pop(name)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        calls.append(("load", name))
+        pm.plugins[name] = modules[name]
+        pm.meta[name] = metadata[name]
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload_all()
+
+    assert success is True
+    assert "3 plugins" in message
+    assert calls == [
+        ("unload", "leaf"),
+        ("unload", "mid"),
+        ("unload", "base"),
+        ("load", "base"),
+        ("load", "mid"),
+        ("load", "leaf"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reload_all_refuses_incomplete_loaded_dependency_state(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    pm.plugins["leaf"] = make_fake_plugin(meta={"name": "leaf"})
+    pm.meta["leaf"] = {"name": "leaf", "requires": ["missing"]}
+    unload = AsyncMock()
+    monkeypatch.setattr(pm, "unload", unload)
+
+    success, message = await pm.reload_all()
+
+    assert success is False
+    assert "leaf requires missing" in message
+    unload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reload_all_reports_plugins_that_remain_unloaded(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "leaf": {"name": "leaf", "requires": ["base"]},
+    }
+    pm.plugins = {
+        name: make_fake_plugin(meta=meta)
+        for name, meta in metadata.items()
+    }
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+
+    async def unload(name, force=False, *, allow_core=False):
+        pm.plugins.pop(name)
+        pm.meta.pop(name)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        raise RuntimeError(f"{name} failed")
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    success, message = await pm.reload_all()
+
+    assert success is False
+    assert "base: base failed" in message
+    assert "leaf: leaf failed" in message
+    assert pm.plugins == {}
+
+
+@pytest.mark.asyncio
+async def test_load_all_skips_plugins_that_are_already_loaded(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    pm.plugins["base"] = make_fake_plugin(meta={"name": "base"})
+    pm.meta["base"] = {"name": "base", "requires": []}
+    pm.failed_plugins["base"] = "old failure"
+    monkeypatch.setattr(pm, "discover", lambda: ["base"])
+    load = AsyncMock()
+    monkeypatch.setattr(pm, "load", load)
+
+    await pm.load_all()
+
+    load.assert_not_awaited()
+    assert "base" not in pm.failed_plugins
+
+
+@pytest.mark.asyncio
 async def test_unload_with_dependents(monkeypatch):
     bot = FakeBot()
     pm = PluginManager(bot)
@@ -335,6 +697,17 @@ def test_topological_sort_orders_dependencies_first():
     assert pm._topological_sort(["leaf", "base", "mid"]) == ["base", "mid", "leaf"]
 
 
+def test_topological_sort_rejects_cycles():
+    pm = PluginManager(FakeBot(), package="fakepkg")
+    pm.meta = {
+        "A": {"name": "A", "requires": ["B"]},
+        "B": {"name": "B", "requires": ["A"]},
+    }
+
+    with pytest.raises(ValueError, match="Circular plugin dependency"):
+        pm._topological_sort(["A", "B"])
+
+
 @pytest.mark.asyncio
 async def test_event_task_on_ready_and_detailed_info(monkeypatch):
     class EventBot(FakeBot):
@@ -392,6 +765,32 @@ async def test_event_task_on_ready_and_detailed_info(monkeypatch):
     detailed = await pm.list_detailed()
     assert detailed["core"]["loaded"] == ["help"]
     assert sorted(detailed["plugins"]["available"]) == ["weather", "xkcd"]
+
+
+@pytest.mark.asyncio
+async def test_call_on_ready_uses_dependency_order_and_marks_runtime_ready():
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    calls = []
+
+    async def base_ready(_bot):
+        calls.append("base")
+
+    async def leaf_ready(_bot):
+        calls.append("leaf")
+
+    pm.plugins = {
+        "leaf": types.SimpleNamespace(on_ready=leaf_ready),
+        "base": types.SimpleNamespace(on_ready=base_ready),
+    }
+    pm.meta = {
+        "leaf": {"name": "leaf", "requires": ["base"]},
+        "base": {"name": "base", "requires": []},
+    }
+
+    await pm.call_on_ready()
+
+    assert calls == ["base", "leaf"]
+    assert pm._ready is True
 
 
 @pytest.mark.asyncio
