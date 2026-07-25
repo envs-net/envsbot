@@ -2,7 +2,7 @@
 
 PLUGIN_META = {
     "name": "reminder",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "description": "Schedule and manage reminders",
     "category": "utility",
     "requires": ["_core", "rooms"],

@@ -89,10 +89,12 @@ async def on_load(bot):
     muc = bot.plugin["xep_0045"]
     rooms_db = bot.db.rooms
     if muc is None or rooms_db is None:
-        log.warning("[ROOMS] 🟡️ missing dependencies: "
-                    f"rooms_db={'OK' if rooms_db is not None else 'missing'} "
-                    f"xep_0045={'OK' if muc is not None else 'missing'}")
-        return
+        detail = (
+            f"rooms_db={'OK' if rooms_db is not None else 'missing'} "
+            f"xep_0045={'OK' if muc is not None else 'missing'}"
+        )
+        log.error("[ROOMS] 🔴 missing runtime dependencies: %s", detail)
+        raise RuntimeError(f"rooms plugin dependencies unavailable: {detail}")
 
     # Case 1: reload → restore previous runtime state
     reload_rooms = getattr(bot, "_reload_rooms", None)

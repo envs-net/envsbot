@@ -120,6 +120,15 @@ async def test_on_load_unload_calls(monkeypatch, make_bot):
 
 
 @pytest.mark.asyncio
+async def test_on_load_rejects_missing_feedparser(monkeypatch, make_bot):
+    bot = make_bot()
+    monkeypatch.setattr(rss_tasks, "feedparser", None)
+
+    with pytest.raises(RuntimeError, match="feedparser module is not installed"):
+        await rss.on_load(bot)
+
+
+@pytest.mark.asyncio
 async def test_rss_task_and_flush_helpers(monkeypatch, make_bot):
     bot = make_bot()
     store = bot.plugin_store

@@ -260,13 +260,15 @@ async def test_rooms_list_dm_handles_missing_roster_and_bad_args(fake_bot):
 @pytest.mark.asyncio
 async def test_on_load_missing_dependencies_and_normal_startup(fake_bot):
     fake_bot.plugin["xep_0045"] = None
-    await rooms.on_load(fake_bot)
+    with pytest.raises(RuntimeError, match="xep_0045=missing"):
+        await rooms.on_load(fake_bot)
     assert fake_bot.bot_plugins.register_event.call_count == 4
 
     fake_bot.bot_plugins.register_event.reset_mock()
     fake_bot.plugin["xep_0045"] = MagicMock()
     fake_bot.db.rooms = None
-    await rooms.on_load(fake_bot)
+    with pytest.raises(RuntimeError, match="rooms_db=missing"):
+        await rooms.on_load(fake_bot)
     assert fake_bot.bot_plugins.register_event.call_count == 4
 
     fake_bot.db.rooms = MagicMock()

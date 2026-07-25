@@ -52,7 +52,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "birthday_notify",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "description":
         "Automatic birthday notifications in rooms (opt-in per room)",
     "category": "info",
@@ -729,6 +729,7 @@ async def on_ready(bot):
 
     except Exception as exc:
         log.exception("[BIRTHDAY] Error during initialization: %s", exc)
+        raise
 
 
 async def on_load(bot):
@@ -743,6 +744,7 @@ async def on_load(bot):
 
     except Exception as exc:
         log.exception("[BIRTHDAY] Error registering event handler: %s", exc)
+        raise
 
 
 async def on_unload(bot):

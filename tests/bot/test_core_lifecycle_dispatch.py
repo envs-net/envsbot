@@ -130,6 +130,24 @@ async def test_shutdown_runtime_handles_skipped_and_failed_components():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_runtime_reports_partial_plugin_cleanup(caplog):
+    async def unload_all():
+        return False, "idlerpg checkpoint failed"
+
+    async def close():
+        return None
+
+    bot = DummyLifecycle(unload=unload_all, close=close)
+
+    with caplog.at_level("INFO", logger="bot.lifecycle"):
+        await bot.shutdown_runtime()
+
+    assert "phase=plugins status=partial" in caplog.text
+    assert "phase=done" in caplog.text
+    assert "status=partial" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_shutdown_runtime_uses_configured_db_timeout(monkeypatch):
     calls: list[object] = []
 

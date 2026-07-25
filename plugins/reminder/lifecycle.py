@@ -39,6 +39,7 @@ async def on_ready(bot):
 
     except Exception as exc:
         log.exception("[REMINDER] Error during reminder restoration: %s", exc)
+        raise
 async def on_load(bot):
     """Register XEP-0461 fallback handlers for room and private replies."""
     bot.bot_plugins.register_event(

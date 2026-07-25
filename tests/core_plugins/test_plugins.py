@@ -253,10 +253,19 @@ async def test_plugin_info_missing_args(bot, msg):
 @pytest.mark.asyncio
 async def test_plugin_load_single_success(bot, msg):
     await plugins_module.plugin_load(bot, "adminjid", "AdminNick",
-                                     ["info"], msg, False)
+                                     ["ducks"], msg, False)
     # load() called
-    bot.bot_plugins.load.assert_awaited_with("info")
-    assert "Plugin 'info' loaded." in bot.reply.call_args[0][1]
+    bot.bot_plugins.load.assert_awaited_with("ducks")
+    assert "Plugin 'ducks' loaded." in bot.reply.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_plugin_load_reports_already_loaded_without_reloading(bot, msg):
+    await plugins_module.plugin_load(bot, "adminjid", "AdminNick",
+                                     ["info"], msg, False)
+
+    bot.bot_plugins.load.assert_not_awaited()
+    assert "already loaded" in bot.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio
@@ -265,6 +274,18 @@ async def test_plugin_load_all(bot, msg):
                                      ["all"], msg, False)
     bot.bot_plugins.load_all.assert_awaited()
     assert "All plugins loaded" in bot.reply.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_plugin_load_all_reports_manager_failures(bot, msg):
+    bot.bot_plugins.load_all = AsyncMock(
+        return_value=(False, "Loaded 31 of 32 plugins; 1 failure(s): rss")
+    )
+
+    await plugins_module.plugin_load(bot, "adminjid", "AdminNick",
+                                     ["all"], msg, False)
+
+    assert "1 failure" in bot.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio

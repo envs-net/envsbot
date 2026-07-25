@@ -204,7 +204,7 @@ class LifecycleMixin:
                 failed_count,
             )
         else:
-            log.info("[BOT] ✅ Bot started, all rooms joined")
+            log.info("[BOT] ✅ Bot started successfully")
 
     async def shutdown_runtime(self) -> None:
         """Run the ordered shutdown once, even when callers race."""
@@ -256,8 +256,21 @@ class LifecycleMixin:
             if callable(unload):
                 result = unload()
                 if asyncio.iscoroutine(result):
-                    await asyncio.wait_for(result, timeout=10.0)
-                plugin_status = "ok"
+                    result = await asyncio.wait_for(result, timeout=30.0)
+                if (
+                    isinstance(result, tuple)
+                    and result
+                    and result[0] is False
+                ):
+                    plugin_status = "partial"
+                    detail = result[1] if len(result) > 1 else "plugin cleanup incomplete"
+                    log.warning(
+                        "[LIFECYCLE] event=shutdown phase=plugins "
+                        "status=partial detail=%s",
+                        detail,
+                    )
+                else:
+                    plugin_status = "ok"
         except Exception:
             plugin_status = "failed"
             log.exception("[LIFECYCLE] event=shutdown phase=plugins status=failed")
@@ -313,10 +326,20 @@ class LifecycleMixin:
             log.exception("[LIFECYCLE] event=shutdown phase=db status=failed error=%s", exc)
         else:
             log.info("[LIFECYCLE] event=shutdown phase=db status=closed")
+        healthy_statuses = {"ok", "skipped"}
+        overall_status = (
+            "ok"
+            if db_status == "ok"
+            and reply_status in healthy_statuses
+            and plugin_status in healthy_statuses
+            and task_status in healthy_statuses
+            and cache_status in healthy_statuses
+            else "partial"
+        )
         log.info(
             "[LIFECYCLE] event=shutdown phase=done %s",
             kv(
-                status="ok" if db_status == "ok" else "partial",
+                status=overall_status,
                 replies=reply_status,
                 plugins=plugin_status,
                 tasks=task_status,

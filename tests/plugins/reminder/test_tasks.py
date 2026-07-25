@@ -57,6 +57,16 @@ async def test_reminder_lifecycle(dummy_bot):
 
 
 @pytest.mark.asyncio
+async def test_reminder_on_ready_propagates_restore_failure(dummy_bot):
+    with patch(
+        "plugins.reminder.lifecycle._restore_pending_reminders",
+        new=AsyncMock(side_effect=RuntimeError("restore failed")),
+    ):
+        with pytest.raises(RuntimeError, match="restore failed"):
+            await reminder.on_ready(dummy_bot)
+
+
+@pytest.mark.asyncio
 async def test_cancel_active_tasks_for_room_only_cancels_matching_pending(dummy_bot):
     class CancelledTask:
         def __init__(self, done=False):

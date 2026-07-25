@@ -143,10 +143,9 @@ async def restart_all_tasks(bot):
         )
 async def on_load(bot):
     if feedparser is None:
-        log.error(
-            "[RSS] feedparser module not installed. RSS plugin will not work."
+        raise RuntimeError(
+            "feedparser module is not installed; RSS plugin cannot start"
         )
-        return
 
     await restart_all_tasks(bot)
 async def restart_tasks(bot):

@@ -582,7 +582,7 @@ async def test_reload_all_reports_plugins_that_remain_unloaded(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_load_all_skips_plugins_that_are_already_loaded(monkeypatch):
+async def test_load_all_skips_loaded_plugins_without_hiding_existing_failure(monkeypatch):
     pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
     pm.plugins["base"] = make_fake_plugin(meta={"name": "base"})
     pm.meta["base"] = {"name": "base", "requires": []}
@@ -591,10 +591,176 @@ async def test_load_all_skips_plugins_that_are_already_loaded(monkeypatch):
     load = AsyncMock()
     monkeypatch.setattr(pm, "load", load)
 
-    await pm.load_all()
+    success, message = await pm.load_all()
 
     load.assert_not_awaited()
-    assert "base" not in pm.failed_plugins
+    assert success is False
+    assert "1 failure" in message
+    assert pm.failed_plugins["base"] == "old failure"
+
+
+@pytest.mark.asyncio
+async def test_call_on_ready_records_failures_and_blocks_dependents():
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    calls = []
+
+    base = make_fake_plugin(meta={"name": "base", "requires": []})
+    leaf = make_fake_plugin(meta={"name": "leaf", "requires": ["base"]})
+
+    async def broken_ready(_bot):
+        calls.append("base-broken")
+        raise RuntimeError("database unavailable")
+
+    async def good_base_ready(_bot):
+        calls.append("base-ready")
+
+    async def leaf_ready(_bot):
+        calls.append("leaf-ready")
+
+    base.on_ready = broken_ready
+    leaf.on_ready = leaf_ready
+    pm.plugins = {"base": base, "leaf": leaf}
+    pm.meta = {
+        "base": {"name": "base", "requires": []},
+        "leaf": {"name": "leaf", "requires": ["base"]},
+    }
+
+    await pm.call_on_ready()
+
+    assert calls == ["base-broken"]
+    assert "on_ready: RuntimeError: database unavailable" == pm.failed_plugins["base"]
+    assert "blocked by failed dependency: base" in pm.failed_plugins["leaf"]
+    assert pm._ready is True
+
+    base.on_ready = good_base_ready
+    await pm.call_on_ready()
+
+    assert calls == ["base-broken", "base-ready", "leaf-ready"]
+    assert pm.failed_plugins == {}
+
+
+@pytest.mark.asyncio
+async def test_unload_all_runs_hooks_in_reverse_dependency_order(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    calls = []
+    modules = {}
+    metadata = {
+        "base": {"name": "base", "requires": []},
+        "leaf": {"name": "leaf", "requires": ["base"]},
+    }
+    for name, meta in metadata.items():
+        module = make_fake_plugin(meta=meta)
+
+        async def on_unload(_bot, plugin_name=name):
+            calls.append(plugin_name)
+
+        module.on_unload = on_unload
+        modules[name] = module
+
+    pm.plugins = dict(modules)
+    pm.meta = {name: dict(meta) for name, meta in metadata.items()}
+    pm._ready = True
+    monkeypatch.setattr(pm, "_detach_module", lambda _module, _name: None)
+
+    success, message = await pm.unload_all()
+
+    assert success is True
+    assert "2 plugins" in message
+    assert calls == ["leaf", "base"]
+    assert pm.plugins == {}
+    assert pm.meta == {}
+    assert pm._ready is False
+
+
+@pytest.mark.asyncio
+async def test_unload_refuses_to_detach_plugin_with_stubborn_task(monkeypatch):
+    class EventBot(FakeBot):
+        def __init__(self):
+            super().__init__()
+            self.removed = []
+            self.tasks = types.SimpleNamespace(
+                cancel_plugin=AsyncMock(return_value=1),
+                snapshot=lambda include_done=False: [
+                    types.SimpleNamespace(
+                        plugin="worker",
+                        name="stubborn-loop",
+                        status="running",
+                    )
+                ],
+            )
+
+        def del_event_handler(self, event, handler):
+            self.removed.append((event, handler))
+
+    bot = EventBot()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+    module = make_fake_plugin(meta={"name": "worker", "requires": []})
+    handler = object()
+    pm.plugins["worker"] = module
+    pm.meta["worker"] = {"name": "worker", "requires": []}
+    pm._event_handlers["worker"] = [("message", handler)]
+    detach = MagicMock()
+    monkeypatch.setattr(pm, "_detach_module", detach)
+
+    success, message = await pm.unload("worker")
+
+    assert success is False
+    assert "still has running task" in message
+    assert "worker" in pm.plugins
+    assert "worker" in pm.meta
+    assert pm._event_handlers["worker"] == [("message", handler)]
+    assert bot.removed == []
+    detach.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reload_operations_are_serialized(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    pm.plugins = {
+        "A": make_fake_plugin(meta={"name": "A"}),
+        "B": make_fake_plugin(meta={"name": "B"}),
+    }
+    pm.meta = {
+        "A": {"name": "A", "requires": []},
+        "B": {"name": "B", "requires": []},
+    }
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    calls = []
+
+    async def unload(name, force=False, *, allow_core=False):
+        calls.append(("unload", name))
+        if name == "A":
+            first_started.set()
+            await release_first.wait()
+        pm.plugins.pop(name, None)
+        pm.meta.pop(name, None)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        calls.append(("load", name))
+        pm.plugins[name] = make_fake_plugin(meta={"name": name})
+        pm.meta[name] = {"name": name, "requires": []}
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    first = asyncio.create_task(pm.reload("A"))
+    await first_started.wait()
+    second = asyncio.create_task(pm.reload("B"))
+    await asyncio.sleep(0)
+
+    assert calls == [("unload", "A")]
+
+    release_first.set()
+    assert (await first)[0] is True
+    assert (await second)[0] is True
+    assert calls == [
+        ("unload", "A"),
+        ("load", "A"),
+        ("unload", "B"),
+        ("load", "B"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,8 @@ import importlib
 import pkgutil
 import inspect
 import logging
+from contextlib import asynccontextmanager
+from functools import wraps
 
 from utils.command import COMMANDS, Role
 from utils.plugin_manager_dependencies import (
@@ -43,6 +45,17 @@ from utils.plugin_manager_lifecycle import (
 from utils.plugin_metadata import validate_plugin_metadata
 
 log = logging.getLogger(__name__)
+
+
+def _serialized_lifecycle(method):
+    """Serialize plugin lifecycle operations while allowing same-task nesting."""
+
+    @wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        async with self._lifecycle_operation():
+            return await method(self, *args, **kwargs)
+
+    return wrapper
 
 
 DEFAULT_OPTIONAL_PLUGIN_PACKAGE = "plugins"
@@ -124,6 +137,36 @@ class PluginManager:
         self._ready = False
 
         self._lock = asyncio.Lock()
+        self._lifecycle_lock = asyncio.Lock()
+        self._lifecycle_owner = None
+        self._lifecycle_depth = 0
+
+    @asynccontextmanager
+    async def _lifecycle_operation(self):
+        """Hold the manager-wide lifecycle lock with same-task reentrancy.
+
+        ``load()`` recursively loads dependencies and reload operations call
+        ``unload()``/``load()`` internally. A plain ``asyncio.Lock`` around
+        each public method would deadlock those nested calls, so ownership is
+        tracked per asyncio task while unrelated commands remain serialized.
+        """
+        task = asyncio.current_task()
+        if task is not None and self._lifecycle_owner is task:
+            self._lifecycle_depth += 1
+            try:
+                yield
+            finally:
+                self._lifecycle_depth -= 1
+            return
+
+        async with self._lifecycle_lock:
+            self._lifecycle_owner = task
+            self._lifecycle_depth = 1
+            try:
+                yield
+            finally:
+                self._lifecycle_depth = 0
+                self._lifecycle_owner = None
 
     # --------------------------------------------------
     # DEPENDENCY ANALYSIS
@@ -237,6 +280,24 @@ class PluginManager:
         if supervisor is None:
             return 0
         cancelled = await supervisor.cancel_plugin(plugin_name)
+        snapshot = getattr(supervisor, "snapshot", None)
+        pending = []
+        if callable(snapshot):
+            pending = [
+                info
+                for info in snapshot(include_done=False)
+                if getattr(info, "plugin", None) == plugin_name
+                and getattr(info, "status", None) == "running"
+            ]
+        if pending:
+            names = ", ".join(
+                str(getattr(info, "name", "unnamed"))
+                for info in pending
+            )
+            raise RuntimeError(
+                f"Plugin {plugin_name} still has running task(s) after "
+                f"cancellation: {names}"
+            )
         if cancelled:
             log.debug("[PLUGIN] cancelled %d task(s) for %s", cancelled, plugin_name)
         return cancelled
@@ -362,6 +423,7 @@ class PluginManager:
     # CORE (ASYNC)
     # --------------------------------------------------
 
+    @_serialized_lifecycle
     async def load(self, name, _stack=None):
         """
         Load a plugin and its dependencies.
@@ -454,6 +516,7 @@ class PluginManager:
             self.failed_plugins.setdefault(name, str(exc))
             raise
 
+    @_serialized_lifecycle
     async def unload(self, name, force=False, *, allow_core=False):
         """
         Unload a plugin and clean up all associated resources.
@@ -476,12 +539,21 @@ class PluginManager:
                 return False, msg
 
         async with self._lock:
-            module = self.plugins.pop(name, None)
+            module = self.plugins.get(name)
             if module is None:
                 return False, f"Plugin {name} is not loaded"
 
             try:
-                # Remove event handlers with error handling
+                # Keep the plugin registered until its hook and supervised
+                # workers have stopped. Otherwise a cancellation timeout can
+                # leave an old worker running while a fresh module is loaded.
+                if hasattr(module, "on_unload"):
+                    await self._run_hook(module.on_unload)
+
+                await self._cancel_plugin_tasks(name)
+
+                # Remove event handlers with error handling only after the
+                # plugin has finished its own cleanup.
                 removed_handlers = 0
                 for event, handler in self._event_handlers.pop(name, []):
                     try:
@@ -500,17 +572,6 @@ class PluginManager:
                     log.debug("[PLUGIN] removed %d event handlers from %s",
                               removed_handlers, name)
 
-                # Run unload hook with error handling
-                if hasattr(module, "on_unload"):
-                    try:
-                        await self._run_hook(module.on_unload)
-                    except Exception as e:
-                        log.exception("[PLUGIN] on_unload failed for %s: %s",
-                                      name, e)
-                        # Don't fail the entire unload, continue with cleanup
-
-                await self._cancel_plugin_tasks(name)
-
                 # Remove commands
                 COMMANDS.remove_by_plugin(name)
 
@@ -520,8 +581,10 @@ class PluginManager:
                     debug_leaks()
 
                 # Cleanup metadata
+                self.plugins.pop(name, None)
                 self.meta.pop(name, None)
                 self.plugin_sources.pop(name, None)
+                self.failed_plugins.pop(name, None)
 
                 # Deterministically detach from import system (no GC reliance)
                 self._detach_module(module, name)
@@ -531,10 +594,9 @@ class PluginManager:
 
             except Exception as e:
                 log.exception("[PLUGIN] error during unload of %s", name)
-                # Attempt to restore plugin reference for recovery
-                self.plugins[name] = module
                 return False, f"Error unloading {name}: {e}"
 
+    @_serialized_lifecycle
     async def reload(self, name, auto=False):
         """
         Reload a plugin and optionally its dependents.
@@ -692,6 +754,55 @@ class PluginManager:
             )
         return self._topological_sort(loaded)
 
+    @_serialized_lifecycle
+    async def unload_all(self) -> tuple[bool, str]:
+        """Unload every loaded plugin once, dependents before dependencies.
+
+        Shutdown must run plugin ``on_unload`` hooks so plugins can checkpoint
+        state, leave rooms and stop workers before the database is closed.
+        Failures are collected per plugin while the remaining plugins still get
+        a cleanup attempt.
+        """
+        if not self.plugins:
+            self._ready = False
+            return True, "No plugins were loaded"
+
+        try:
+            unload_order = list(reversed(self._loaded_dependency_order()))
+        except Exception as exc:
+            log.exception(
+                "[PLUGIN] invalid dependency graph during unload_all; "
+                "falling back to reverse name order"
+            )
+            unload_order = sorted(self.plugins, reverse=True)
+            graph_error = str(exc)
+        else:
+            graph_error = None
+
+        unload_errors = []
+        for plugin_name in unload_order:
+            success, message = await self.unload(
+                plugin_name,
+                force=True,
+                allow_core=True,
+            )
+            if not success:
+                unload_errors.append(f"{plugin_name}: {message}")
+
+        self._ready = False
+        errors = list(unload_errors)
+        if graph_error:
+            errors.insert(0, f"dependency graph: {graph_error}")
+
+        if errors:
+            return False, (
+                f"Unloaded {len(unload_order) - len(unload_errors)} of "
+                f"{len(unload_order)} plugins with {len(errors)} error(s): "
+                + "; ".join(errors)
+            )
+        return True, f"All {len(unload_order)} plugins unloaded successfully"
+
+    @_serialized_lifecycle
     async def reload_all(self) -> tuple[bool, str]:
         """Reload every currently loaded plugin exactly once.
 
@@ -750,14 +861,17 @@ class PluginManager:
             )
         return True, f"✅ All {len(load_order)} plugins reloaded successfully"
 
+    @_serialized_lifecycle
     async def load_all(self):
         """
         Load all available plugins in dependency order.
         """
         discovered = self.discover()
+        discovered_set = set(discovered)
+        for plugin_name in list(self.failed_plugins):
+            if plugin_name not in discovered_set:
+                self.failed_plugins.pop(plugin_name, None)
         loaded = set(self.plugins).intersection(discovered)
-        for plugin_name in loaded:
-            self.failed_plugins.pop(plugin_name, None)
         failed = set()
 
         # Simple topological sort: try to load plugins with their
@@ -795,15 +909,30 @@ class PluginManager:
                 len(failed),
             )
 
+        remaining_failures = {
+            plugin_name
+            for plugin_name in discovered
+            if plugin_name in self.failed_plugins
+        }
         log.info(
             "[PLUGIN] load_all complete: %d/%d loaded, %d failed",
             len(loaded),
             len(discovered),
-            len(failed),
+            len(remaining_failures),
         )
-        if failed:
-            log.warning("[PLUGIN] failed: %s", ", ".join(sorted(failed)))
+        if remaining_failures:
+            log.warning(
+                "[PLUGIN] failed: %s",
+                ", ".join(sorted(remaining_failures)),
+            )
+            return False, (
+                f"Loaded {len(loaded)} of {len(discovered)} plugins; "
+                f"{len(remaining_failures)} failure(s): "
+                + ", ".join(sorted(remaining_failures))
+            )
+        return True, f"All {len(discovered)} plugins loaded successfully"
 
+    @_serialized_lifecycle
     async def cleanup_room_state(self, room_jid: str) -> dict[str, dict]:
         """Ask loaded plugins to clean state for a deleted room.
 
@@ -856,6 +985,7 @@ class PluginManager:
             room_jid=room_jid,
         )
 
+    @_serialized_lifecycle
     async def restart_tasks(self, name: str) -> tuple[bool, str, int]:
         """Restart supervised background tasks for one loaded plugin.
 
@@ -879,10 +1009,13 @@ class PluginManager:
         try:
             await self._run_hook(hook)
         except Exception as exc:
+            self.failed_plugins[name] = f"task restart: {exc}"
             log.exception("[PLUGIN] task restart failed for %s", name)
             return False, f"Error restarting tasks for {name}: {exc}", cancelled
+        self.failed_plugins.pop(name, None)
         return True, f"Plugin {name} tasks restarted", cancelled
 
+    @_serialized_lifecycle
     async def call_on_ready(self):
         """
         Call on_ready() hook for all loaded plugins.
@@ -897,15 +1030,42 @@ class PluginManager:
             log.exception("[PLUGIN] invalid dependency graph before on_ready")
             order = list(self.plugins)
 
+        ready_failures = set()
         try:
             for name in order:
                 module = self.plugins.get(name)
-                if module is not None and hasattr(module, "on_ready"):
-                    try:
-                        log.debug("[PLUGIN] calling on_ready: %s", name)
-                        await self._run_hook(module.on_ready)
-                    except Exception:
-                        log.exception("[PLUGIN] 🔴 on_ready failed: %s", name)
+                if module is None:
+                    continue
+
+                blocked_by = sorted(
+                    dep
+                    for dep in self.meta.get(name, {}).get("requires", [])
+                    if dep in ready_failures
+                )
+                if blocked_by:
+                    detail = (
+                        "on_ready blocked by failed dependency: "
+                        + ", ".join(blocked_by)
+                    )
+                    self.failed_plugins[name] = detail
+                    ready_failures.add(name)
+                    log.error("[PLUGIN] 🔴 %s: %s", name, detail)
+                    continue
+
+                hook = getattr(module, "on_ready", None)
+                if hook is None:
+                    self.failed_plugins.pop(name, None)
+                    continue
+                try:
+                    log.debug("[PLUGIN] calling on_ready: %s", name)
+                    await self._run_hook(hook)
+                except Exception as exc:
+                    detail = f"on_ready: {type(exc).__name__}: {exc}"
+                    self.failed_plugins[name] = detail
+                    ready_failures.add(name)
+                    log.exception("[PLUGIN] 🔴 on_ready failed: %s", name)
+                else:
+                    self.failed_plugins.pop(name, None)
         finally:
             self._ready = True
 

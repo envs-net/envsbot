@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "plugins",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Runtime plugin management",
     "category": "core",
 }
@@ -316,9 +316,30 @@ async def plugin_load(bot, sender, nick, args, msg, is_room):
     target = args[0].lower()
 
     if target == "all":
-        await bot.bot_plugins.load_all()
-        await audit_event(bot, "plugins_load_all", actor=sender, target="plugins")
-        bot.reply(msg, "All plugins loaded (in dependency order).")
+        result = await bot.bot_plugins.load_all()
+        if isinstance(result, tuple) and len(result) >= 2:
+            success, message = bool(result[0]), str(result[1])
+        else:
+            raw_failures = getattr(bot.bot_plugins, "failed_plugins", {})
+            failures = raw_failures if isinstance(raw_failures, dict) else {}
+            success = not failures
+            message = (
+                "All plugins loaded successfully"
+                if success
+                else f"Plugin loading completed with {len(failures)} failure(s)"
+            )
+        await audit_event(
+            bot,
+            "plugins_load_all",
+            actor=sender,
+            target="plugins",
+            details={"success": success},
+        )
+        bot.reply(msg, message)
+        return
+
+    if target in getattr(bot.bot_plugins, "plugins", {}):
+        bot.reply(msg, f"Plugin '{target}' is already loaded.")
         return
 
     try:

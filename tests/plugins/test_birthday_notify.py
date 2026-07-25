@@ -364,6 +364,26 @@ async def test_birthday_check_loop_lifecycle(monkeypatch, bot):
 
 
 @pytest.mark.asyncio
+async def test_birthday_lifecycle_propagates_critical_startup_failures(
+    monkeypatch,
+    bot,
+):
+    def fail_task(*_args, **_kwargs):
+        raise RuntimeError("task creation failed")
+
+    monkeypatch.setattr(birthday_notify, "create_plugin_task", fail_task)
+    with pytest.raises(RuntimeError, match="task creation failed"):
+        await birthday_notify.on_ready(bot)
+
+    def fail_event(*_args, **_kwargs):
+        raise RuntimeError("event failed")
+
+    monkeypatch.setattr(bot.bot_plugins, "register_event", fail_event)
+    with pytest.raises(RuntimeError, match="event failed"):
+        await birthday_notify.on_load(bot)
+
+
+@pytest.mark.asyncio
 async def test_birthday_cache(monkeypatch, bot):
     # test _set_cached_bday and _get_cached_bday
     val = "2000-02-02"
