@@ -151,7 +151,11 @@ def _unverified_tls_context() -> ssl.SSLContext:
 
 
 def parse_https_certificate_target(value: object) -> tuple[str, int]:
-    """Return a normalized HTTPS hostname and the supported port 443."""
+    """Return a normalized HTTPS hostname and TCP port.
+
+    Bare domains default to port 443. Explicit HTTPS ports are accepted as
+    long as they are valid TCP ports.
+    """
     target = str(value or "").strip()
     if not target:
         raise ValueError("Website cannot be empty")
@@ -164,12 +168,16 @@ def parse_https_certificate_target(value: object) -> tuple[str, int]:
     hostname = parsed.hostname
     if not hostname:
         raise ValueError("website must include a hostname")
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    if authority.endswith(":"):
+        raise ValueError("website contains an invalid port")
     try:
-        port = parsed.port or 443
+        parsed_port = parsed.port
     except ValueError as exc:
         raise ValueError("website contains an invalid port") from exc
-    if port != 443:
-        raise ValueError("only HTTPS port 443 is supported")
+    port = 443 if parsed_port is None else parsed_port
+    if not 1 <= port <= 65535:
+        raise ValueError("website port must be between 1 and 65535")
 
     try:
         normalized = hostname.encode("idna").decode("ascii").lower()
@@ -451,13 +459,30 @@ async def _probe_unverified_https_certificate(
 async def diagnose_https_certificate(
     hostname: str,
     *,
-    port: int = 443,
+    port: int | None = None,
     timeout_seconds: float = 5.0,
 ) -> str | None:
     """Check one public HTTPS endpoint with normal CA and hostname validation."""
-    hostname, parsed_port = parse_https_certificate_target(hostname)
-    if port != parsed_port:
-        raise ValueError("only HTTPS port 443 is supported")
+    raw_target = str(hostname or "").strip()
+    parsed_target = urlsplit(
+        raw_target if "://" in raw_target else f"//{raw_target}"
+    )
+    try:
+        target_has_explicit_port = parsed_target.port is not None
+    except ValueError as exc:
+        raise ValueError("website contains an invalid port") from exc
+
+    hostname, parsed_port = parse_https_certificate_target(raw_target)
+    if port is None:
+        port = parsed_port
+    else:
+        if not isinstance(port, int) or isinstance(port, bool):
+            raise ValueError("website port must be between 1 and 65535")
+        if not 1 <= port <= 65535:
+            raise ValueError("website port must be between 1 and 65535")
+        if target_has_explicit_port and port != parsed_port:
+            raise ValueError("website target and port argument disagree")
+
     timeout_seconds = max(1.0, min(30.0, float(timeout_seconds)))
     try:
         async with asyncio.timeout(timeout_seconds):

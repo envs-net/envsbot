@@ -17,8 +17,8 @@ Commands:
     {prefix}date [nick]
     {prefix}utc
     {prefix}ts <unix_timestamp>
-    {prefix}cert <domain|https-url>
-    {prefix}check <domain|https-url>
+    {prefix}cert <domain[:port]|https-url>
+    {prefix}check <domain[:port]|https-url>
 """
 
 import pytz
@@ -53,7 +53,7 @@ HTTPS_CERTIFICATE_TIMEOUT_SECONDS = max(
 )
 PLUGIN_META = {
     "name": "tools",
-    "version": "0.5.2",
+    "version": "0.5.3",
     "description":
     "Utility commands: ping/pong, message echo, timezone-aware time/date"
     " lookups, Unix timestamp conversion, and HTTPS certificate checks",
@@ -113,10 +113,11 @@ async def get_tools_store(bot):
     role=Role.USER,
     aliases=["certificate", "check"],
     short="Check an HTTPS TLS certificate and its remaining lifetime.",
-    usage="{prefix}cert <domain|https-url>",
+    usage="{prefix}cert <domain[:port]|https-url>",
     examples=[
         "{prefix}cert example.org",
         "{prefix}check https://example.org",
+        "{prefix}cert example.org:8443",
     ],
     category="utility",
     context="any",
@@ -132,7 +133,8 @@ async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(
             msg,
             "❌ Missing website\n"
-            f"Usage: {config.get('prefix', ',')}cert <domain|https-url>",
+            f"Usage: {config.get('prefix', ',')}cert "
+            "<domain[:port]|https-url>",
         )
         return
 
@@ -161,10 +163,11 @@ async def certificate_command(bot, sender_jid, nick, args, msg, is_room):
         else:
             status = "🔴"
 
+    display_target = hostname if port == 443 else f"{hostname}:{port}"
     bot.reply(
         msg,
         [
-            f"🔐 TLS certificate check for {hostname}",
+            f"🔐 TLS certificate check for {display_target}",
             f"{status} {certificate}",
         ],
     )

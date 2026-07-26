@@ -126,6 +126,27 @@ async def test_certificate_command_uses_shared_https_probe(
         f"✅ {certificate_result}",
     ]
 
+    bot.reply.reset_mock()
+    diagnose.reset_mock()
+    await tools.certificate_command(
+        bot,
+        "jid",
+        "nick",
+        ["https://Example.ORG:8443/path"],
+        simple_msg,
+        True,
+    )
+
+    diagnose.assert_awaited_once_with(
+        "example.org",
+        port=8443,
+        timeout_seconds=tools.HTTPS_CERTIFICATE_TIMEOUT_SECONDS,
+    )
+    assert bot.reply.call_args.args[1] == [
+        "🔐 TLS certificate check for example.org:8443",
+        f"✅ {certificate_result}",
+    ]
+
 
 @pytest.mark.asyncio
 async def test_certificate_command_handles_disabled_missing_and_invalid(

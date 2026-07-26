@@ -20,7 +20,7 @@ Check an HTTPS TLS certificate and its remaining lifetime.
 Role: `user`<br>
 Context: `room, MUC PM or private chat`<br>
 Category: `utility`<br>
-Usage: `,cert <domain|https-url>`
+Usage: `,cert <domain[:port]|https-url>`
 
 Aliases: `,certificate`, `,check`
 
@@ -28,6 +28,7 @@ Examples:
 
 - `,cert example.org` — Check an HTTPS TLS certificate and its remaining lifetime.
 - `,check https://example.org` — Check an HTTPS TLS certificate and its remaining lifetime.
+- `,cert example.org:8443` — Check an HTTPS TLS certificate and its remaining lifetime.
 
 ### `,date`
 

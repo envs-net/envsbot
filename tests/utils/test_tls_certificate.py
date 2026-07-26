@@ -216,10 +216,22 @@ def test_parse_https_certificate_target():
     assert certificate.parse_https_certificate_target(
         "https://www.example.org/page?q=1"
     ) == ("www.example.org", 443)
+    assert certificate.parse_https_certificate_target(
+        "Example.ORG:8443/path"
+    ) == ("example.org", 8443)
+    assert certificate.parse_https_certificate_target(
+        "https://www.example.org:9443/page?q=1"
+    ) == ("www.example.org", 9443)
     with pytest.raises(ValueError, match="only HTTPS"):
         certificate.parse_https_certificate_target("http://example.org")
-    with pytest.raises(ValueError, match="port 443"):
-        certificate.parse_https_certificate_target("https://example.org:8443")
+    with pytest.raises(ValueError, match="invalid port"):
+        certificate.parse_https_certificate_target("https://example.org:abc")
+    with pytest.raises(ValueError, match="invalid port"):
+        certificate.parse_https_certificate_target("https://example.org:65536")
+    with pytest.raises(ValueError, match="between 1 and 65535"):
+        certificate.parse_https_certificate_target("https://example.org:0")
+    with pytest.raises(ValueError, match="invalid port"):
+        certificate.parse_https_certificate_target("https://example.org:")
 
 
 def test_certificate_verification_message_classifies_common_failures():
@@ -456,6 +468,46 @@ async def test_https_certificate_diagnosis_uses_public_endpoint(monkeypatch):
         443,
         5.0,
     )
+
+
+@pytest.mark.asyncio
+async def test_https_certificate_diagnosis_uses_explicit_port(monkeypatch):
+    async def immediate_to_thread(func, *args):
+        return func(*args)
+
+    addresses = Mock(
+        return_value=[(certificate.socket.AF_INET, "8.8.8.8")]
+    )
+    probe = AsyncMock(return_value=certificate.VALID_HTTPS_CERTIFICATE_MESSAGE)
+    monkeypatch.setattr(certificate.asyncio, "to_thread", immediate_to_thread)
+    monkeypatch.setattr(certificate, "_public_endpoint_addresses", addresses)
+    monkeypatch.setattr(certificate, "_probe_https_certificate", probe)
+
+    result = await certificate.diagnose_https_certificate(
+        "https://example.org:8443/path",
+        timeout_seconds=7.0,
+    )
+
+    assert result == certificate.VALID_HTTPS_CERTIFICATE_MESSAGE
+    addresses.assert_called_once_with("example.org", 8443)
+    probe.assert_awaited_once_with(
+        "8.8.8.8",
+        certificate.socket.AF_INET,
+        "example.org",
+        8443,
+        7.0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_https_certificate_diagnosis_validates_port_override():
+    with pytest.raises(ValueError, match="disagree"):
+        await certificate.diagnose_https_certificate(
+            "example.org:8443",
+            port=9443,
+        )
+    with pytest.raises(ValueError, match="between 1 and 65535"):
+        await certificate.diagnose_https_certificate("example.org", port=0)
 
 
 def test_public_endpoint_addresses_filters_non_public_networks(monkeypatch):
