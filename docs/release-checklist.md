@@ -124,7 +124,9 @@ findings that have been reviewed and are clearly false positives.
 
 ## Tagging
 
-Update the version in `pyproject.toml` and `utils/version.py` if needed, then create and push the tag:
+Update the version in `utils/version.py` if needed. The package metadata in
+`pyproject.toml` reads the same value dynamically, so no second version field
+needs to be maintained. Then create and push the tag:
 
 ```bash
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
