@@ -310,11 +310,18 @@ function idlerpg_room_entry($slug, $dir, $summary = []) {
 
 function idlerpg_available_rooms() {
     $rooms = [];
-    foreach (idlerpg_export_base_dirs() as $base_dir) {
+    $base_dirs = idlerpg_export_base_dirs();
+    $normalized_base_dirs = array_map(
+        fn($dir) => rtrim((string) (realpath($dir) ?: $dir), '/'),
+        $base_dirs
+    );
+
+    foreach ($base_dirs as $base_dir) {
         if (!is_dir($base_dir)) {
             continue;
         }
 
+        $base_contains_room_exports = false;
         $index = idlerpg_load_json(rtrim($base_dir, '/') . '/index.json', ['rooms' => []]);
         $summaries = is_array($index['rooms'] ?? null) ? $index['rooms'] : [];
         foreach ($summaries as $summary) {
@@ -326,26 +333,42 @@ function idlerpg_available_rooms() {
                 continue;
             }
             $entry = idlerpg_room_entry($slug, rtrim($base_dir, '/') . '/' . $slug, $summary);
-            if ($entry !== null && !isset($rooms[$slug])) {
-                $rooms[$slug] = $entry;
+            if ($entry !== null) {
+                $base_contains_room_exports = true;
+                if (!isset($rooms[$slug])) {
+                    $rooms[$slug] = $entry;
+                }
             }
         }
 
         $entries = scandir($base_dir);
         if (is_array($entries)) {
             foreach ($entries as $entry_name) {
-                $slug = idlerpg_safe_room_slug($entry_name);
-                if ($slug === '' || isset($rooms[$slug])) {
+                if ($entry_name === '.' || $entry_name === '..') {
                     continue;
                 }
-                $entry = idlerpg_room_entry($slug, rtrim($base_dir, '/') . '/' . $slug);
+
+                $entry_dir = rtrim($base_dir, '/') . '/' . $entry_name;
+                $normalized_entry_dir = rtrim((string) (realpath($entry_dir) ?: $entry_dir), '/');
+                if (in_array($normalized_entry_dir, $normalized_base_dirs, true)) {
+                    continue;
+                }
+
+                $slug = idlerpg_safe_room_slug($entry_name);
+                if ($slug === '') {
+                    continue;
+                }
+                $entry = idlerpg_room_entry($slug, $entry_dir);
                 if ($entry !== null) {
-                    $rooms[$slug] = $entry;
+                    $base_contains_room_exports = true;
+                    if (!isset($rooms[$slug])) {
+                        $rooms[$slug] = $entry;
+                    }
                 }
             }
         }
 
-        if (idlerpg_export_files_exist($base_dir)) {
+        if (!$base_contains_room_exports && idlerpg_export_files_exist($base_dir)) {
             $room_payload = idlerpg_load_json(rtrim($base_dir, '/') . '/room.json', []);
             $slug = idlerpg_safe_room_slug($room_payload['slug'] ?? basename($base_dir));
             if ($slug === '') {
@@ -1432,7 +1455,6 @@ details.season summary { cursor: pointer; font-weight: 700; }
         <aside>
             <div class="card"><h2>Quick start</h2><ul class="compact-list"><li><code>,idlerpg register &lt;name&gt; &lt;class&gt;</code></li><li><code>,idlerpg login</code></li><li><code>,idlerpg status</code></li><li><code>,idlerpg top</code></li></ul></div>
             <div class="card"><h2>Current game</h2><p class="muted"><?php echo h(count($players)); ?> players, <?php echo h($online_count); ?> online. <?php echo $quest ? 'A ' . h($active_quest_type) . ' quest is active.' : 'No quest is active.'; ?></p><?php if ($current_season_ends_at > 0): ?><p class="muted">Season ends in <?php echo h(idlerpg_ttl($current_season_remaining)); ?>.</p><?php endif; ?></div>
-            <div class="card"><h2>Data setup</h2><p class="muted">Use the complete room export under <code>data/&lt;room-slug&gt;/</code> or set <code>IDLERPG_DATA_DIR</code>. Open <a href="<?php echo h(idlerpg_view_url($view, ['debug' => 1])); ?>"><code>debug=1</code></a> to inspect paths.</p></div>
             <div class="card"><h2>Map legend</h2><p class="muted">
                 Blue circles = online, red circles = offline, orange circles = active quest participants.
                 <?php if ($has_quest_route): ?>Orange squares and lines show the current grid-quest route.

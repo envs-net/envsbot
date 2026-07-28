@@ -804,7 +804,7 @@ async def _handle_export(bot, sender_jid: str, msg, is_room: bool) -> None:
         _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can refresh IdleRPG exports.")
         return
     data = await _dep_state._get_data(bot)
-    _dep_export._export_public_state(data)
+    await _dep_state._refresh_public_export(bot, data)
     root = _dep_export._export_root()
     _dep_formatting._reply(bot, msg, f"📤 IdleRPG export refreshed for {room_jid}: {root / _dep_formatting._room_slug(room_jid)}")
 
@@ -1153,6 +1153,8 @@ async def idlerpg_command(bot, sender_jid, nick, args, msg, is_room):
         )
         if handled_toggle:
             await _dep_tasks._sync_tasks_to_enabled_rooms(bot)
+            if subcmd in {"on", "off"}:
+                await _dep_state._refresh_public_export(bot)
             return
 
     if not args:

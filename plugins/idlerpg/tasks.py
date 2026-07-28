@@ -321,10 +321,12 @@ async def restart_tasks(bot):
     for room_jid in list(_dep_config.ROOM_TASKS):
         await _cancel_room_task(room_jid)
     await _start_enabled_room_tasks(bot)
+    await _dep_state._refresh_public_export(bot)
 
 
 async def on_ready(bot):
     await _start_enabled_room_tasks(bot)
+    await _dep_state._refresh_public_export(bot)
 
 
 async def on_load(bot):

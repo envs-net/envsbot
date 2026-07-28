@@ -34,7 +34,33 @@ async def _get_data(bot) -> dict[str, Any]:
 async def _set_data(bot, data: dict[str, Any]) -> None:
     store = await _dep_formatting.get_idlerpg_store(bot)
     await store.set_global(_dep_constants.IDLERPG_DATA_KEY, data)
-    _dep_export._export_public_state(data)
+    await _refresh_public_export(bot, data)
+
+
+async def _refresh_public_export(
+    bot,
+    data: dict[str, Any] | None = None,
+) -> None:
+    """Refresh exports using the effective room-feature state.
+
+    Export maintenance is best-effort and must never make a game-state write
+    or tick fail merely because feature state cannot be read temporarily.
+    """
+    if not _dep_config.EXPORT_ENABLED:
+        return
+    if data is None:
+        data = await _get_data(bot)
+    rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
+    room_jids = rooms.keys() if isinstance(rooms, dict) else ()
+    try:
+        enabled_rooms = await _enabled_rooms(bot, room_jids)
+    except Exception:
+        _dep_config.log.debug(
+            "[IDLERPG] Could not resolve enabled rooms for public export",
+            exc_info=True,
+        )
+        return
+    _dep_export._export_public_state(data, enabled_rooms)
 
 
 async def _flush_idlerpg_store(bot) -> None:
@@ -311,11 +337,12 @@ async def _sender_can_manage_room(bot, sender_jid: str | None, room_jid: str | N
         return False
 
 
-async def _enabled_rooms(bot) -> dict[str, bool]:
+async def _enabled_rooms(bot, room_jids=()) -> dict[str, bool]:
     return await _core._get_enabled_rooms(
         bot,
         _dep_constants.IDLERPG_ENABLED_KEY,
         _dep_constants.PLUGIN_NAME,
+        room_jids,
     )
 
 # Explicit module dependencies; module-qualified access keeps cyclic domain

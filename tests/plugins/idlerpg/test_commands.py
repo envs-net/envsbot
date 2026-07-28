@@ -7,8 +7,12 @@ from .helpers import (
     types,
 )
 import random
+from plugins.idlerpg import commands as idlerpg_commands
 from plugins.idlerpg import config as idlerpg_config
 from plugins.idlerpg import formatting as idlerpg_formatting
+from plugins.idlerpg import state as idlerpg_state
+from plugins.idlerpg import tasks as idlerpg_tasks
+from core_plugins import _core
 from .helpers import _register_alice
 
 
@@ -54,6 +58,67 @@ async def test_enabled_shows_room_feature_state(monkeypatch):
     bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY]["room@conf"] = False
     await idlerpg.idlerpg_command(bot, "mod@envs.net", "Mod", ["enabled"], admin_pm, False)
     assert "IdleRPG is **disabled**" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_room_toggle_refreshes_public_export_after_state_change(monkeypatch):
+    bot = DummyBot()
+    calls = []
+
+    async def handle_toggle(*_args, **_kwargs):
+        calls.append("toggle")
+        return True
+
+    async def sync_tasks(_bot):
+        calls.append("tasks")
+
+    async def refresh_export(_bot):
+        calls.append("export")
+
+    monkeypatch.setattr(_core, "handle_room_toggle_command", handle_toggle)
+    monkeypatch.setattr(idlerpg_tasks, "_sync_tasks_to_enabled_rooms", sync_tasks)
+    monkeypatch.setattr(idlerpg_state, "_refresh_public_export", refresh_export)
+
+    await idlerpg_commands.idlerpg_command(
+        bot,
+        "admin@envs.net",
+        "Admin",
+        ["off"],
+        DummyMsg(resource="Admin"),
+        True,
+    )
+
+    assert calls == ["toggle", "tasks", "export"]
+
+
+@pytest.mark.asyncio
+async def test_enabled_status_does_not_rewrite_public_export(monkeypatch):
+    bot = DummyBot()
+    calls = []
+
+    async def handle_toggle(*_args, **_kwargs):
+        return True
+
+    async def sync_tasks(_bot):
+        calls.append("tasks")
+
+    async def refresh_export(_bot):
+        calls.append("export")
+
+    monkeypatch.setattr(_core, "handle_room_toggle_command", handle_toggle)
+    monkeypatch.setattr(idlerpg_tasks, "_sync_tasks_to_enabled_rooms", sync_tasks)
+    monkeypatch.setattr(idlerpg_state, "_refresh_public_export", refresh_export)
+
+    await idlerpg_commands.idlerpg_command(
+        bot,
+        "admin@envs.net",
+        "Admin",
+        ["enabled"],
+        DummyMsg(resource="Admin"),
+        True,
+    )
+
+    assert calls == ["tasks"]
 
 
 @pytest.mark.asyncio

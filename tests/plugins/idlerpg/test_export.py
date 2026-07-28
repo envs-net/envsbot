@@ -122,3 +122,106 @@ def test_website_public_base_url_is_exported_by_config_module():
 
     assert "WEBSITE_PUBLIC_BASE_URL" in idlerpg_config.__all__
     assert hasattr(idlerpg_config, "WEBSITE_PUBLIC_BASE_URL")
+
+
+def test_public_export_removes_disabled_room_directory(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    active_jid = "idlerpg@conference.envs.net"
+    disabled_jid = "lounge@conference.envs.net"
+    active_slug = idlerpg._room_slug(active_jid)
+    disabled_slug = idlerpg._room_slug(disabled_jid)
+    data = {
+        "rooms": {
+            active_jid: idlerpg._blank_room(),
+            disabled_jid: idlerpg._blank_room(),
+        }
+    }
+
+    idlerpg._export_public_state(data)
+    assert (tmp_path / active_slug).is_dir()
+    assert (tmp_path / disabled_slug).is_dir()
+
+    idlerpg._export_public_state(
+        data,
+        {active_jid: True, disabled_jid: False},
+    )
+
+    assert (tmp_path / active_slug).is_dir()
+    assert not (tmp_path / disabled_slug).exists()
+    index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
+    assert [entry["room"] for entry in index["rooms"]] == [active_jid]
+    assert json.loads((tmp_path / "leaderboard.json").read_text(encoding="utf-8"))["room"] == active_jid
+
+
+def test_public_export_cleans_stale_index_rooms_and_root_copies(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    stale_slug = "lounge_at_conference.envs.net"
+    stale_dir = tmp_path / stale_slug
+    stale_dir.mkdir()
+    (stale_dir / "room.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "index.json").write_text(
+        json.dumps({"rooms": [{"room": "lounge@conference.envs.net", "slug": stale_slug}]}),
+        encoding="utf-8",
+    )
+    for filename in (
+        "leaderboard.json",
+        "map.json",
+        "players.json",
+        "hall_of_fame.json",
+        "events.json",
+        "achievements.json",
+    ):
+        (tmp_path / filename).write_text("{}", encoding="utf-8")
+    unrelated = tmp_path / "assets"
+    unrelated.mkdir()
+
+    idlerpg._export_public_state({"rooms": {}}, {})
+
+    assert not stale_dir.exists()
+    assert unrelated.is_dir()
+    assert json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))["rooms"] == []
+    for filename in (
+        "leaderboard.json",
+        "map.json",
+        "players.json",
+        "hall_of_fame.json",
+        "events.json",
+        "achievements.json",
+    ):
+        assert not (tmp_path / filename).exists()
+
+
+@pytest.mark.asyncio
+async def test_refresh_public_export_uses_effective_enabled_rooms(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import state as idlerpg_state
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    bot = DummyBot()
+    active_jid = "room@conf"
+    disabled_jid = "lounge@conf"
+    bot.store.globals[idlerpg.IDLERPG_ENABLED_KEY] = {
+        active_jid: True,
+        disabled_jid: False,
+    }
+    data = {
+        "rooms": {
+            active_jid: idlerpg._blank_room(),
+            disabled_jid: idlerpg._blank_room(),
+        }
+    }
+    (tmp_path / idlerpg._room_slug(disabled_jid)).mkdir()
+
+    await idlerpg_state._refresh_public_export(bot, data)
+
+    assert (tmp_path / idlerpg._room_slug(active_jid)).is_dir()
+    assert not (tmp_path / idlerpg._room_slug(disabled_jid)).exists()
+    index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
+    assert [entry["room"] for entry in index["rooms"]] == [active_jid]

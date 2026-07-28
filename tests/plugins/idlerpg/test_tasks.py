@@ -15,6 +15,7 @@ from plugins.idlerpg import config as idlerpg_config
 from plugins.idlerpg import events as idlerpg_events
 from plugins.idlerpg import export as idlerpg_export
 from plugins.idlerpg import formatting as idlerpg_formatting
+from plugins.idlerpg import state as idlerpg_state
 from plugins.idlerpg import tasks as idlerpg_tasks
 from utils.task_supervisor import TaskSupervisor
 
@@ -166,7 +167,7 @@ async def test_tick_room_serializes_concurrent_announcements(monkeypatch):
 
     monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     monkeypatch.setattr(random, "random", lambda: 1.0)
-    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data, _enabled_rooms=None: None)
 
     await asyncio.gather(
         idlerpg._tick_room(bot, "room@conf", announce=True),
@@ -220,7 +221,7 @@ async def test_tick_announces_new_achievements(monkeypatch):
     monkeypatch.setattr(idlerpg_config, "GRID_BATTLE_ENABLED", False)
     monkeypatch.setattr(idlerpg_config, "EVENT_CHANCE", 0.0)
     monkeypatch.setattr(random, "random", lambda: 1.0)
-    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data, _enabled_rooms=None: None)
 
     await idlerpg._tick_room(bot, "room@conf", announce=True)
 
@@ -286,7 +287,7 @@ async def test_boss_achievement_is_announced_and_recorded_once(monkeypatch):
     rolls = iter([10_000, 0])
     monkeypatch.setattr(idlerpg_events.random, "randint", lambda _start, _stop: next(rolls))
     monkeypatch.setattr(idlerpg_events.random, "choice", lambda seq: seq[0])
-    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data, _enabled_rooms=None: None)
 
     await idlerpg._tick_room(bot, "room@conf", announce=True)
 
@@ -333,7 +334,7 @@ async def test_level_up_triggers_original_level_battle(monkeypatch):
     monkeypatch.setattr(random, "choice", lambda seq: seq[0])
     rolls = iter([9999, 0])
     monkeypatch.setattr(random, "randint", lambda _start, _stop: next(rolls))
-    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data: None)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda _data, _enabled_rooms=None: None)
 
     await idlerpg._tick_room(bot, "room@conf", announce=False)
 
@@ -353,11 +354,16 @@ def test_room_jid_from_task_name_ignores_topic_tasks():
 async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
     bot = DummyBot()
     started = 0
+    refreshed = 0
     cancelled: list[str] = []
 
     async def fake_start(_bot):
         nonlocal started
         started += 1
+
+    async def fake_refresh(_bot, _data=None):
+        nonlocal refreshed
+        refreshed += 1
 
     async def fake_cancel(room_jid):
         cancelled.append(room_jid)
@@ -365,9 +371,11 @@ async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
 
     monkeypatch.setattr(idlerpg_tasks, "_start_enabled_room_tasks", fake_start)
     monkeypatch.setattr(idlerpg_tasks, "_cancel_room_task", fake_cancel)
+    monkeypatch.setattr(idlerpg_state, "_refresh_public_export", fake_refresh)
 
     await idlerpg.on_ready(bot)
     assert started == 1
+    assert refreshed == 1
 
     idlerpg.ROOM_TASKS["a@conf"] = DummyTask(name="a")
     idlerpg.ROOM_TASKS["b@conf"] = DummyTask(name="b")
@@ -375,6 +383,7 @@ async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
     assert set(cancelled) == {"a@conf", "b@conf"}
     assert len(cancelled) == 2
     assert started == 2
+    assert refreshed == 2
 
     idlerpg.ROOM_TASKS["c@conf"] = DummyTask(name="c")
     await idlerpg.on_unload(bot)

@@ -13,6 +13,7 @@ expose private player JIDs.
 from __future__ import annotations
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -67,6 +68,67 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
+
+
+_ROOT_COMPATIBILITY_EXPORTS = (
+    "leaderboard.json",
+    "map.json",
+    "players.json",
+    "hall_of_fame.json",
+    "events.json",
+    "achievements.json",
+)
+
+
+def _safe_export_slug(value: Any) -> str:
+    slug = str(value or "").strip()
+    if not slug or len(slug) > 80:
+        return ""
+    return slug if re.fullmatch(r"[A-Za-z0-9_.-]+", slug) else ""
+
+
+def _remove_export_path(path: Path) -> None:
+    """Remove one generated export path without following directory symlinks."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _remove_export_path_safely(path: Path) -> None:
+    try:
+        _remove_export_path(path)
+    except OSError:
+        _dep_config.log.warning(
+            "[IDLERPG] Could not remove stale public export %s",
+            path,
+            exc_info=True,
+        )
+
+
+def _previous_export_slugs(root: Path) -> set[str]:
+    index_path = root / "index.json"
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    rooms = payload.get("rooms", []) if isinstance(payload, dict) else []
+    if not isinstance(rooms, list):
+        return set()
+    slugs: set[str] = set()
+    for entry in rooms:
+        if not isinstance(entry, dict):
+            continue
+        room_jid = str(entry.get("room") or "").strip()
+        slug = _safe_export_slug(entry.get("slug"))
+        if room_jid and slug == _dep_formatting._room_slug(room_jid):
+            slugs.add(slug)
+    return slugs
+
+
+def _remove_root_compatibility_exports(root: Path) -> None:
+    for filename in _ROOT_COMPATIBILITY_EXPORTS:
+        _remove_export_path_safely(root / filename)
 
 
 def _public_url(*parts: str) -> str:
@@ -364,7 +426,16 @@ def _export_room_state(
     return summary, room_payload
 
 
-def _export_public_state(data: dict[str, Any]) -> None:
+def _export_public_state(
+    data: dict[str, Any],
+    enabled_rooms: dict[str, bool] | None = None,
+) -> None:
+    """Write public data only for rooms where IdleRPG is effectively enabled.
+
+    ``enabled_rooms`` is supplied by the async room-feature layer.  ``None``
+    preserves the historical all-room behavior for direct/internal callers
+    that do not have a bot instance available.
+    """
     if not _dep_config.EXPORT_ENABLED:
         return
     try:
@@ -373,16 +444,43 @@ def _export_public_state(data: dict[str, Any]) -> None:
         rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
         if not isinstance(rooms, dict):
             rooms = {}
+
+        enabled = (
+            {str(room_jid) for room_jid, value in enabled_rooms.items() if value}
+            if isinstance(enabled_rooms, dict)
+            else {str(room_jid) for room_jid in rooms}
+        )
+        previous_slugs = _previous_export_slugs(root)
+        known_slugs = {
+            str(room_jid): _dep_formatting._room_slug(str(room_jid))
+            for room_jid in rooms
+        }
+
         summaries: list[dict[str, Any]] = []
+        current_slugs: set[str] = set()
         default_room_payload = None
         for room_jid, room in sorted(rooms.items()):
-            if not isinstance(room, dict):
+            room_jid = str(room_jid)
+            if room_jid not in enabled or not isinstance(room, dict):
                 continue
-            summary, room_payload = _export_room_state(root, str(room_jid), room, generated_at)
+            summary, room_payload = _export_room_state(root, room_jid, room, generated_at)
             summaries.append(summary)
+            current_slugs.add(str(summary["slug"]))
             if default_room_payload is None:
                 default_room_payload = room_payload
+
+        stale_slugs = previous_slugs - current_slugs
+        stale_slugs.update(
+            slug
+            for room_jid, slug in known_slugs.items()
+            if room_jid not in enabled
+        )
         _atomic_write_json(root / "index.json", {"generated_at": generated_at, "rooms": summaries})
+        for slug in sorted(stale_slugs):
+            safe_slug = _safe_export_slug(slug)
+            if safe_slug:
+                _remove_export_path_safely(root / safe_slug)
+
         if default_room_payload:
             _atomic_write_json(root / "leaderboard.json", {
                 "generated_at": generated_at,
@@ -417,6 +515,8 @@ def _export_public_state(data: dict[str, Any]) -> None:
                 "room": default_room_payload["room"],
                 "achievements": default_room_payload.get("achievement_catalog", _dep_leveling._achievement_catalog()),
             })
+        else:
+            _remove_root_compatibility_exports(root)
     except Exception:
         _dep_config.log.debug("[IDLERPG] Failed to export public state", exc_info=True)
 
