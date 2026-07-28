@@ -103,6 +103,11 @@ IDLERPG_DATA_DIR   Export base directory or a room-specific export directory.
 IDLERPG_ROOM_SLUG  Preferred room slug when no room is selected in the URL.
 ```
 
+When multiple rooms are exported, the selection order is: an explicit `room`
+query parameter, `IDLERPG_ROOM_SLUG`, `IDLERPG_DEFAULT_ROOM_SLUG` from
+`index.php`, and finally the first available room. A configured preferred room
+is used only when its slug exists in the current public export.
+
 Open `?debug=1` in the browser to inspect the selected data directory and all
 candidate paths.
 

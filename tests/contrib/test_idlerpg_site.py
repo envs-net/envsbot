@@ -225,7 +225,7 @@ def _export_tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _render(data_dir: Path, **query: str) -> str:
+def _render(data_dir: Path, *, site: Path = SITE, **query: str) -> str:
     env = dict(os.environ, IDLERPG_DATA_DIR=str(data_dir))
     result = subprocess.run(
         [
@@ -237,7 +237,7 @@ def _render(data_dir: Path, **query: str) -> str:
             "-r",
             "parse_str($argv[1], $_GET); include $argv[2];",
             urlencode(query),
-            str(SITE),
+            str(site),
         ],
         check=True,
         capture_output=True,
@@ -302,6 +302,26 @@ def test_idlerpg_site_rejects_unknown_or_unsafe_room_slug(tmp_path: Path) -> Non
     html = _render(data_dir, view="home", room="../../etc/passwd")
     assert "../../etc/passwd" not in html
     assert "alpha@conference.example.org" in html
+
+
+def test_idlerpg_site_prefers_configured_default_room(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    configured_site = tmp_path / "index.php"
+    source = SITE.read_text(encoding="utf-8")
+    configured_site.write_text(
+        source.replace(
+            "const IDLERPG_DEFAULT_ROOM_SLUG = 'room_at_conference.example.org';",
+            "const IDLERPG_DEFAULT_ROOM_SLUG = 'beta_at_conference.example.org';",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    html = _render(data_dir, site=configured_site, view="home")
+
+    assert "beta@conference.example.org" in html
+    assert "Carol" in html
+    assert "alpha@conference.example.org" in html  # still available in selector
 
 
 def test_idlerpg_site_commands_match_available_admin_commands(tmp_path: Path) -> None:

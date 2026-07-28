@@ -396,9 +396,14 @@ function idlerpg_room_slug($rooms = null) {
         return $requested;
     }
 
-    $env_slug = idlerpg_safe_room_slug(getenv('IDLERPG_ROOM_SLUG') ?: '');
-    if ($env_slug !== '' && (count($rooms) === 0 || isset($rooms[$env_slug]))) {
-        return $env_slug;
+    $preferred_slugs = [
+        idlerpg_safe_room_slug(getenv('IDLERPG_ROOM_SLUG') ?: ''),
+        idlerpg_safe_room_slug(IDLERPG_DEFAULT_ROOM_SLUG),
+    ];
+    foreach ($preferred_slugs as $preferred_slug) {
+        if ($preferred_slug !== '' && (count($rooms) === 0 || isset($rooms[$preferred_slug]))) {
+            return $preferred_slug;
+        }
     }
 
     if (count($rooms) > 0) {
