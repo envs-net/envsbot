@@ -207,6 +207,15 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "EVENT_RETENTION_DAYS": _to_int(item("event_retention_days", "idlerpg_event_retention_days", 90) or 0, 0),
         "EXPORT_EVENT_LIMIT": _to_int(item("export_event_limit", "idlerpg_export_event_limit", 50) or 50, 50),
         "EXPORT_ENABLED": _to_bool(item("export_enabled", "idlerpg_export_enabled", True), True),
+        "EXPORT_INTERVAL_SECONDS": _to_int(
+            item(
+                "export_interval_seconds",
+                "idlerpg_export_interval_seconds",
+                300,
+            )
+            or 0,
+            0,
+        ),
         "EXPORT_PATH": _to_str(item("export_path", "idlerpg_export_path", "data/idlerpg") or "data/idlerpg", "data/idlerpg"),
         "EXPORT_PUBLIC_BASE_URL": export_public_base_url,
         "WEBSITE_PUBLIC_BASE_URL": website_public_base_url,

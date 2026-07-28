@@ -199,6 +199,16 @@ def test_idlerpg_runtime_values_preserve_zero_chances_and_include_boss_options()
     assert values["BOSS_POWER_MAX_FACTOR"] == 1.4
 
 
+def test_idlerpg_runtime_values_include_export_interval_and_preserve_zero():
+    assert runtime._idlerpg_values({})["EXPORT_INTERVAL_SECONDS"] == 300
+    assert runtime._idlerpg_values({
+        "idlerpg": {"export_interval_seconds": 0}
+    })["EXPORT_INTERVAL_SECONDS"] == 0
+    assert runtime._idlerpg_values({
+        "idlerpg_export_interval_seconds": 900
+    })["EXPORT_INTERVAL_SECONDS"] == 900
+
+
 def test_idlerpg_runtime_values_cover_all_reloadable_config_constants():
     from plugins.idlerpg import config as idlerpg_config
 
