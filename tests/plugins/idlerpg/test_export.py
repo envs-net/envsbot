@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 
 from .helpers import (
     DummyBot,
@@ -35,6 +37,19 @@ def test_public_rules_include_new_options():
     assert rules["boss_min_level"] == idlerpg.BOSS_MIN_LEVEL
     assert rules["boss_reward_percent"] == idlerpg.BOSS_REWARD_PERCENT
     assert rules["boss_loss_percent"] == idlerpg.BOSS_LOSS_PERCENT
+    assert rules["export_interval_seconds"] == idlerpg.EXPORT_INTERVAL_SECONDS
+
+
+def test_atomic_export_is_web_readable_under_restrictive_umask(tmp_path):
+    export_path = tmp_path / "room_at_conf" / "players.json"
+    previous_umask = os.umask(0o077)
+    try:
+        idlerpg._atomic_write_json(export_path, {"players": []})
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(export_path.parent.stat().st_mode) == 0o755
+    assert stat.S_IMODE(export_path.stat().st_mode) == 0o644
 
 
 def test_public_player_record_does_not_expose_user_jid():
@@ -225,3 +240,65 @@ async def test_refresh_public_export_uses_effective_enabled_rooms(tmp_path, monk
     assert not (tmp_path / idlerpg._room_slug(disabled_jid)).exists()
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert [entry["room"] for entry in index["rooms"]] == [active_jid]
+
+
+@pytest.mark.asyncio
+async def test_automatic_public_export_respects_independent_interval(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import formatting as idlerpg_formatting
+    from plugins.idlerpg import state as idlerpg_state
+
+    now = 1_000
+    calls = []
+
+    async def enabled_rooms(_bot, room_jids=()):
+        return {str(room): True for room in room_jids}
+
+    def export_state(data, enabled):
+        calls.append((data, enabled))
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    monkeypatch.setattr(idlerpg_state, "_enabled_rooms", enabled_rooms)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", export_state)
+    idlerpg_state._reset_public_export_schedule()
+
+    data = {"rooms": {"room@conf": idlerpg._blank_room()}}
+    assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=False) is True
+    assert len(calls) == 1
+
+    now = 1_299
+    assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=False) is False
+    assert len(calls) == 1
+
+    now = 1_300
+    assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=False) is True
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_forced_public_export_bypasses_interval(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import formatting as idlerpg_formatting
+    from plugins.idlerpg import state as idlerpg_state
+
+    calls = []
+
+    async def enabled_rooms(_bot, room_jids=()):
+        return {str(room): True for room in room_jids}
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 2_000)
+    monkeypatch.setattr(idlerpg_state, "_enabled_rooms", enabled_rooms)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", lambda data, enabled: calls.append((data, enabled)))
+    idlerpg_state._reset_public_export_schedule()
+
+    data = {"rooms": {"room@conf": idlerpg._blank_room()}}
+    assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=False) is True
+    assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=False) is False
+    assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=True) is True
+    assert len(calls) == 2

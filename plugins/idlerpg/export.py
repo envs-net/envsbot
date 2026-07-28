@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import stat
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -63,10 +64,38 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
     }
 
 
+_PUBLIC_DIRECTORY_ACCESS = 0o055
+_PUBLIC_FILE_ACCESS = 0o044
+
+
+def _ensure_public_access(path: Path, required_bits: int) -> None:
+    """Add public read/traverse bits without removing existing permissions.
+
+    The bundled systemd unit intentionally runs the bot with ``UMask=0077``.
+    Public IdleRPG exports are the narrow exception: website workers must be
+    able to traverse generated directories and read the JSON files.
+    """
+    try:
+        current = stat.S_IMODE(path.stat().st_mode)
+        wanted = current | required_bits
+        if wanted != current:
+            path.chmod(wanted)
+    except OSError:
+        _dep_config.log.warning(
+            "[IDLERPG] Could not make public export path web-readable: %s",
+            path,
+            exc_info=True,
+        )
+
+
 def _atomic_write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_public_access(path.parent, _PUBLIC_DIRECTORY_ACCESS)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    # Set access on the temporary inode before replace(), so the final path is
+    # atomically published with web-readable permissions even under umask 0077.
+    _ensure_public_access(tmp, _PUBLIC_FILE_ACCESS)
     tmp.replace(path)
 
 
@@ -340,6 +369,7 @@ def _public_rules() -> dict[str, Any]:
         "event_log_limit": _dep_config.EVENT_LOG_LIMIT,
         "event_retention_days": _dep_config.EVENT_RETENTION_DAYS,
         "export_event_limit": _dep_config.EXPORT_EVENT_LIMIT,
+        "export_interval_seconds": _dep_config.EXPORT_INTERVAL_SECONDS,
         "export_top_limit": _dep_config.EXPORT_TOP_LIMIT,
     }
 

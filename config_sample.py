@@ -509,6 +509,11 @@ IDLERPG = {
     # web-readable directory instead of making the webserver read bot-internal
     # paths under /srv/envsbot.
     "export_enabled": True,
+    # Minimum delay between automatic export refreshes. Game ticks and state
+    # writes continue normally; manual `,idlerpg export`, startup and room
+    # enable/disable actions still refresh immediately. Set to 0 to export
+    # after every state change (legacy behavior).
+    "export_interval_seconds": 300,
     "export_path": "data/idlerpg",
     "export_public_base_url": "",
     # Human-facing website root used in chat output, for example

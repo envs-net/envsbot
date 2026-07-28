@@ -391,6 +391,7 @@ Manual refresh, limited to room owners/admins:
 ```python
 IDLERPG = {
     "export_enabled": True,
+    "export_interval_seconds": 300,
     "export_path": "data/idlerpg",
     "export_public_base_url": "",
     "website_public_base_url": "",
@@ -400,7 +401,8 @@ IDLERPG = {
 
 | Option | Default | Meaning |
 | --- | ---: | --- |
-| `export_enabled` | `True` | Writes public JSON files after game-state changes. Disable this when no website/status export is wanted. |
+| `export_enabled` | `True` | Enables the public JSON website/status export. Disable this when no public export is wanted. |
+| `export_interval_seconds` | `300` | Minimum interval between automatic export refreshes, independent of `tick_seconds`. Startup, room `on`/`off` and `,idlerpg export` still refresh immediately. Set to `0` for the legacy behavior of exporting after every state change. |
 | `export_path` | `"data/idlerpg"` | Base directory for JSON exports. Relative paths are resolved from the bot checkout/base directory. Room-specific data is written below `<export_path>/<room-slug>/`. |
 | `export_public_base_url` | `""` | Optional public URL for the JSON export base. This is used inside exported metadata and for raw data access. |
 | `website_public_base_url` | `""` | Optional human-facing IdleRPG website root used in chat output. When empty and `export_public_base_url` ends in `/data`, the parent URL is derived automatically. |
@@ -435,6 +437,7 @@ simplest option because PHP/nginx only needs to read files below the webroot:
 ```python
 IDLERPG = {
     "export_enabled": True,
+    "export_interval_seconds": 300,
     "export_path": "/var/www/envs.net/idlerpg/data",
     "export_public_base_url": "https://envs.net/idlerpg/data",
     "website_public_base_url": "https://envs.net/idlerpg",
@@ -455,13 +458,13 @@ Make sure the bot can write there and the webserver can read there. Example:
 sudo install -d -o envsbot -g www-data -m 0755 /var/www/envs.net/idlerpg/data
 ```
 
-If the bot uses a restrictive umask, add default ACLs so newly created room
-directories and JSON files stay readable by the webserver:
-
-```sh
-sudo setfacl -m u:envsbot:rwx,u:www-data:rx /var/www/envs.net/idlerpg/data
-sudo setfacl -d -m u:envsbot:rwx,u:www-data:rx /var/www/envs.net/idlerpg/data
-```
+The bundled systemd unit intentionally uses `UMask=0077` for private bot
+data. IdleRPG public exports explicitly add read/traverse access to generated
+room directories and JSON files, resulting in `0755` directories and `0644`
+files when no broader ACL or mode already exists. The pre-existing export base
+and all parent directories still need to be traversable by the webserver.
+Default ACLs remain useful when a deployment requires access for a specific
+webserver group instead of public read access.
 
 Variant B: keep the default bot runtime export below `/srv/envsbot/envsbot` and
 let PHP read it from there. This works too, but only if the PHP/webserver user can
@@ -680,7 +683,7 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 ### Export, map and seasons
 
 These options are documented in the sections above: `export_enabled`,
-`export_path`, `export_public_base_url`, `website_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
+`export_interval_seconds`, `export_path`, `export_public_base_url`, `website_public_base_url`, `export_top_limit`, `map_x`, `map_y`,
 `map_step_per_second`, `map_step_per_tick`, `grid_battle_enabled`,
 `quest_grid_step_seconds`, `quest_min_online_seconds`, `quest_grid_enabled`, `quest_grid_weight`,
 `quest_time_enabled`, `quest_time_weight`, `quest_time_min_duration`, `quest_time_max_duration`,

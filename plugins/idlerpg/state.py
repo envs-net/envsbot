@@ -31,23 +31,52 @@ async def _get_data(bot) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-async def _set_data(bot, data: dict[str, Any]) -> None:
+_NEXT_PUBLIC_EXPORT_AT = 0
+
+
+def _reset_public_export_schedule() -> None:
+    """Make the next automatic public export run immediately."""
+    global _NEXT_PUBLIC_EXPORT_AT
+    _NEXT_PUBLIC_EXPORT_AT = 0
+
+
+async def _set_data(
+    bot,
+    data: dict[str, Any],
+    *,
+    force_export: bool = False,
+) -> None:
     store = await _dep_formatting.get_idlerpg_store(bot)
     await store.set_global(_dep_constants.IDLERPG_DATA_KEY, data)
-    await _refresh_public_export(bot, data)
+    await _refresh_public_export(bot, data, force=force_export)
 
 
 async def _refresh_public_export(
     bot,
     data: dict[str, Any] | None = None,
-) -> None:
+    *,
+    force: bool = True,
+) -> bool:
     """Refresh exports using the effective room-feature state.
 
     Export maintenance is best-effort and must never make a game-state write
     or tick fail merely because feature state cannot be read temporarily.
     """
+    global _NEXT_PUBLIC_EXPORT_AT
+
     if not _dep_config.EXPORT_ENABLED:
-        return
+        return False
+
+    now = _dep_formatting._now()
+    interval = max(0, int(_dep_config.EXPORT_INTERVAL_SECONDS))
+    if not force and interval > 0 and now < _NEXT_PUBLIC_EXPORT_AT:
+        return False
+
+    # Reserve the next slot before awaiting room-feature state. This avoids two
+    # concurrent state writes both starting the same expensive filesystem export.
+    previous_next = _NEXT_PUBLIC_EXPORT_AT
+    _NEXT_PUBLIC_EXPORT_AT = now + interval if interval > 0 else now
+
     if data is None:
         data = await _get_data(bot)
     rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
@@ -55,12 +84,14 @@ async def _refresh_public_export(
     try:
         enabled_rooms = await _enabled_rooms(bot, room_jids)
     except Exception:
+        _NEXT_PUBLIC_EXPORT_AT = previous_next
         _dep_config.log.debug(
             "[IDLERPG] Could not resolve enabled rooms for public export",
             exc_info=True,
         )
-        return
+        return False
     _dep_export._export_public_state(data, enabled_rooms)
+    return True
 
 
 async def _flush_idlerpg_store(bot) -> None:

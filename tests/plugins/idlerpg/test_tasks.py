@@ -361,7 +361,7 @@ async def test_ready_restart_unload_delegate_to_task_helpers(monkeypatch):
         nonlocal started
         started += 1
 
-    async def fake_refresh(_bot, _data=None):
+    async def fake_refresh(_bot, _data=None, **_kwargs):
         nonlocal refreshed
         refreshed += 1
 

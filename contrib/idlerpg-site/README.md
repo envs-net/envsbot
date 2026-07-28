@@ -39,6 +39,7 @@ Example plugin config:
 ```python
 IDLERPG = {
     "export_enabled": True,
+    "export_interval_seconds": 300,
     "export_path": "/path/to/public/idlerpg/data",
     "export_public_base_url": "https://example.org/idlerpg/data",
     "website_public_base_url": "https://example.org/idlerpg",
@@ -115,6 +116,11 @@ candidate paths.
   slugs, but the web server should still use normal restrictive permissions.
 - The export is replaced atomically by EnvsBot, so no separate synchronization
   process is required when the webroot is the configured export path.
+- `export_interval_seconds` controls automatic refresh frequency independently
+  from the game-loop `tick_seconds`; manual exports and lifecycle changes remain
+  immediate.
+- Generated public export directories/files are made web-readable even when the
+  bundled systemd service runs with its restrictive `UMask=0077`.
 
 ## Privacy
 

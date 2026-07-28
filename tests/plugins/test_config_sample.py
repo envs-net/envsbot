@@ -28,6 +28,7 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.DUCKS["min_messages"] < sample.DUCKS["max_messages"]
     assert sample.PIN_PAGE_SIZE > 0
     assert sample.IDLERPG["tick_seconds"] > 0
+    assert sample.IDLERPG["export_interval_seconds"] == 300
     assert sample.IDLERPG["rp_base"] > 0
     assert sample.TRANSLATE_FROM == "auto"
     assert sample.TRANSLATE_TO is None

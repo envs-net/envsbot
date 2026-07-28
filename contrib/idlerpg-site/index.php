@@ -1375,7 +1375,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     'Events & battles' => ['event_chance', 'item_chance', 'battle_event_weight', 'team_battle_event_weight', 'boss_event_weight', 'item_event_weight', 'item_damage_event_weight', 'item_steal_event_weight', 'alignment_event_weight', 'critical_strike_chance', 'critical_strike_chance_good', 'critical_strike_chance_evil', 'item_drop_chance', 'level_battle_chance_below_25', 'level_battle_chance_at_25'],
                     'Bosses' => ['boss_min_players', 'boss_max_players', 'boss_min_level', 'boss_reward_percent', 'boss_loss_percent', 'boss_power_min_factor', 'boss_power_max_factor'],
                     'Items & achievements' => ['unique_items_enabled', 'unique_item_min_level', 'unique_item_chance', 'level_reward_min_level', 'season_achievement_gates_enabled'],
-                    'Seasons & history' => ['season_enabled', 'season_duration_days', 'season_reset_on_rollover', 'season_hof_size', 'event_log_limit', 'event_retention_days', 'export_event_limit', 'export_top_limit'],
+                    'Seasons & history' => ['season_enabled', 'season_duration_days', 'season_reset_on_rollover', 'season_hof_size', 'event_log_limit', 'event_retention_days', 'export_event_limit', 'export_interval_seconds', 'export_top_limit'],
                     'Announcements' => ['announce_login', 'announce_top_interval', 'announce_top_limit', 'update_room_topic', 'topic_update_interval', 'topic_custom_text'],
                 ];
                 $shown_rule_keys = [];

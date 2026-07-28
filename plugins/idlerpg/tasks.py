@@ -314,7 +314,7 @@ async def cleanup_room_state(bot, room_jid: str):
     rooms = data.get("rooms") if isinstance(data, dict) else None
     if isinstance(rooms, dict):
         rooms.pop(room_jid, None)
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, force_export=True)
 
 
 async def restart_tasks(bot):

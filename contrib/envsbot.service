@@ -13,6 +13,8 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/srv/envsbot/.venv/bin/envsbot
 Restart=on-failure
 RestartSec=5
+# Keep private bot state restrictive. The IdleRPG public exporter explicitly
+# makes only its generated public directories/files web-readable.
 UMask=0077
 
 # Basic hardening. Adjust ReadWritePaths when using a different data/log path.

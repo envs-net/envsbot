@@ -292,6 +292,18 @@ EXPORT_EVENT_LIMIT = int(
 EXPORT_ENABLED = bool(_cfg.get("export_enabled", config.get("idlerpg_export_enabled", True)))
 
 
+EXPORT_INTERVAL_SECONDS = max(
+    0,
+    int(
+        _cfg.get(
+            "export_interval_seconds",
+            config.get("idlerpg_export_interval_seconds", 300),
+        )
+        or 0
+    ),
+)
+
+
 EXPORT_PATH = str(_cfg.get("export_path", config.get("idlerpg_export_path", "data/idlerpg")) or "data/idlerpg")
 
 
@@ -495,6 +507,7 @@ __all__ = [
     'EVENT_RETENTION_DAYS',
     'EXPORT_EVENT_LIMIT',
     'EXPORT_ENABLED',
+    'EXPORT_INTERVAL_SECONDS',
     'EXPORT_PATH',
     'EXPORT_PUBLIC_BASE_URL',
     'WEBSITE_PUBLIC_BASE_URL',

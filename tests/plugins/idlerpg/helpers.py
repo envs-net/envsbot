@@ -99,6 +99,9 @@ def clear_idlerpg_state():
     getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
+    reset_export_schedule = getattr(idlerpg, "_reset_public_export_schedule", None)
+    if callable(reset_export_schedule):
+        reset_export_schedule()
     JOINED_ROOMS.clear()
     _core.JOINED_ROOMS = JOINED_ROOMS
     JOINED_ROOMS["room@conf"] = {
@@ -113,6 +116,9 @@ def clear_idlerpg_state():
     getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
+    reset_export_schedule = getattr(idlerpg, "_reset_public_export_schedule", None)
+    if callable(reset_export_schedule):
+        reset_export_schedule()
     JOINED_ROOMS.clear()
 
 
