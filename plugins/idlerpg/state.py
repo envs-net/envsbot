@@ -31,13 +31,12 @@ async def _get_data(bot) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-_NEXT_PUBLIC_EXPORT_AT = 0
+_PUBLIC_EXPORT_SCHEDULE: dict[str, int] = {"next_at": 0}
 
 
 def _reset_public_export_schedule() -> None:
     """Make the next automatic public export run immediately."""
-    global _NEXT_PUBLIC_EXPORT_AT
-    _NEXT_PUBLIC_EXPORT_AT = 0
+    _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
 
 
 async def _set_data(
@@ -62,20 +61,19 @@ async def _refresh_public_export(
     Export maintenance is best-effort and must never make a game-state write
     or tick fail merely because feature state cannot be read temporarily.
     """
-    global _NEXT_PUBLIC_EXPORT_AT
-
     if not _dep_config.EXPORT_ENABLED:
         return False
 
     now = _dep_formatting._now()
     interval = max(0, int(_dep_config.EXPORT_INTERVAL_SECONDS))
-    if not force and interval > 0 and now < _NEXT_PUBLIC_EXPORT_AT:
+    next_export_at = _PUBLIC_EXPORT_SCHEDULE["next_at"]
+    if not force and interval > 0 and now < next_export_at:
         return False
 
     # Reserve the next slot before awaiting room-feature state. This avoids two
     # concurrent state writes both starting the same expensive filesystem export.
-    previous_next = _NEXT_PUBLIC_EXPORT_AT
-    _NEXT_PUBLIC_EXPORT_AT = now + interval if interval > 0 else now
+    previous_next = next_export_at
+    _PUBLIC_EXPORT_SCHEDULE["next_at"] = now + interval if interval > 0 else now
 
     if data is None:
         data = await _get_data(bot)
@@ -84,7 +82,7 @@ async def _refresh_public_export(
     try:
         enabled_rooms = await _enabled_rooms(bot, room_jids)
     except Exception:
-        _NEXT_PUBLIC_EXPORT_AT = previous_next
+        _PUBLIC_EXPORT_SCHEDULE["next_at"] = previous_next
         _dep_config.log.debug(
             "[IDLERPG] Could not resolve enabled rooms for public export",
             exc_info=True,
