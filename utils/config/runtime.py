@@ -227,7 +227,7 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "MAP_STEP_PER_SECOND": _to_int(map_step_per_second or 0, 0),
         "MAP_STEP_PER_TICK": _to_int(map_step_per_second or 0, 0),
         "GRID_BATTLE_ENABLED": _to_bool(item("grid_battle_enabled", "idlerpg_grid_battle_enabled", True), True),
-        "QUEST_GRID_STEP_SECONDS": _to_int(item("quest_grid_step_seconds", "idlerpg_quest_grid_step_seconds", 2) or 2, 2),
+        "QUEST_GRID_STEP_SECONDS": _to_int(item("quest_grid_step_seconds", "idlerpg_quest_grid_step_seconds", 30) or 30, 30),
         "COUNT_COMMAND_MESSAGES": _to_bool(item("count_command_messages", "idlerpg_count_command_messages", False), False),
         "ANNOUNCE_LOGIN": _to_bool(item("announce_login", "idlerpg_announce_login", True), True),
         "ANNOUNCE_TOP_INTERVAL": _to_int(item("announce_top_interval", "idlerpg_announce_top_interval", 21600) or 0, 0),

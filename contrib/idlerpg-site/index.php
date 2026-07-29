@@ -1001,7 +1001,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     <section class="panel">
                         <h2>Active quest</h2>
                         <p><strong><?php echo h($quest['text'] ?? 'adventure'); ?></strong></p>
-                        <p class="muted"><?php echo h(ucfirst($active_quest_type)); ?> quest with <?php echo h(count($quest['questers'] ?? [])); ?> participants<?php if (!empty($quest['complete_at'])): ?> · <?php echo h(idlerpg_ttl(max(0, (int) $quest['complete_at'] - time()))); ?> remaining<?php endif; ?>.</p>
+                        <p class="muted"><?php echo h(ucfirst($active_quest_type)); ?> quest with <?php echo h(count($quest['questers'] ?? [])); ?> participants<?php if (!empty($quest['complete_at'])): ?> · <?php echo $active_quest_type === 'grid' ? 'deadline in ' : ''; ?><?php echo h(idlerpg_ttl(max(0, (int) $quest['complete_at'] - time()))); ?><?php echo $active_quest_type === 'time' ? ' remaining' : ''; ?><?php endif; ?>.</p>
                         <p><a href="<?php echo h(idlerpg_view_url('quest')); ?>">Open quest details and map →</a></p>
                     </section>
                 <?php endif; ?>
@@ -1180,13 +1180,13 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     <p>
                         <strong>Type:</strong> <?php echo h($quest_type); ?>-based
                         <?php if (!empty($quest['complete_at'])): ?>
-                            · <strong>Time left:</strong> <?php echo h(idlerpg_ttl($quest_remaining)); ?>
+                            · <strong><?php echo $quest_type === 'grid' ? 'Deadline' : 'Time left'; ?>:</strong> <?php echo h(idlerpg_ttl($quest_remaining)); ?>
                         <?php endif; ?>
                     </p>
                     <?php if ($quest_type === 'time'): ?>
                         <p class="muted">Time-based quest: every quester must remain online and avoid message or logout penalties until the timer ends. Random game events do not fail the quest.</p>
                     <?php elseif (is_array($quest['current_target'] ?? null)): ?>
-                        <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]</p>
+                        <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]. The quest completes as soon as all participants reach both route points; the displayed time is the deadline.</p>
                     <?php endif; ?>
                     <?php if (!empty($quest['questers']) && is_array($quest['questers'])): ?>
                         <table><thead><tr><th>#</th><th>Participant</th></tr></thead><tbody>

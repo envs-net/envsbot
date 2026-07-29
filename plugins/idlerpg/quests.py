@@ -115,8 +115,17 @@ def _complete_quest(room: dict[str, Any], quest: dict[str, Any], now: int, messa
         rewards = sorted({percent for _player, percent in reward_per_player})
         reward_text = f"{rewards[0]}%" if len(rewards) == 1 else f"{min(rewards)}-{max(rewards)}%"
         quest_label = "time-based quest" if _quest_type(quest) == "time" else "quest"
+        try:
+            started_at = int(quest.get("started_at", 0) or 0)
+        except (TypeError, ValueError):
+            started_at = 0
+        elapsed_text = (
+            f" in {_dep_formatting._duration(max(0, now - started_at))}"
+            if 0 < started_at <= now
+            else ""
+        )
         messages.append(
-            f"🧭 {', '.join(names)} completed their {quest_label}! "
+            f"🧭 {', '.join(names)} completed their {quest_label}{elapsed_text}! "
             f"{reward_text} of their burden is removed."
         )
         for player in completed_players:
@@ -329,6 +338,9 @@ def _start_grid_quest(
         f"This is a grid-based quest: participants must first reach "
         f"[{route[0][0]},{route[0][1]}] near {first_region}, then "
         f"[{route[1][0]},{route[1][1]}] near {second_region}. "
+        f"Directed movement advances every "
+        f"{_dep_formatting._duration(max(1, int(_dep_config.QUEST_GRID_STEP_SECONDS or 1)))}; "
+        f"the quest may finish early once both targets are reached. "
         f"Quest deadline in {_dep_formatting._duration_clock(duration)}.{url_part}"
     )
 

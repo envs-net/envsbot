@@ -405,7 +405,10 @@ IDLERPG = {
     # Legacy alias; prefer map_step_per_second for new configs.
     "map_step_per_tick": 1,
     "grid_battle_enabled": True,
-    "quest_grid_step_seconds": 2,
+    # Seconds between directed map steps for grid-quest participants. On the
+    # default 500x500 map, 30 seconds produces quests that usually take several
+    # hours instead of only a few minutes while remaining below the deadline.
+    "quest_grid_step_seconds": 30,
 
     # Quest timing. Classic IdleRPG has two quest types: grid quests, where
     # questers walk to map points, and time quests, where questers must avoid

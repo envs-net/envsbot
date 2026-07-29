@@ -268,6 +268,9 @@ def test_idlerpg_site_renders_complete_views(tmp_path: Path) -> None:
     for view, marker in expected.items():
         html = _render(data_dir, view=view, room="alpha_at_conference.example.org")
         assert marker in html
+        if view == "quest":
+            assert "<strong>Deadline:</strong>" in html
+            assert "the displayed time is the deadline" in html
 
 
 def test_idlerpg_site_profile_filters_and_room_switching(tmp_path: Path) -> None:

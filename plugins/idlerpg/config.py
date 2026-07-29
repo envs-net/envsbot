@@ -364,8 +364,8 @@ GRID_BATTLE_ENABLED = bool(
 
 
 QUEST_GRID_STEP_SECONDS = int(
-    _cfg.get("quest_grid_step_seconds", config.get("idlerpg_quest_grid_step_seconds", 2))
-    or 2
+    _cfg.get("quest_grid_step_seconds", config.get("idlerpg_quest_grid_step_seconds", 30))
+    or 30
 )
 
 

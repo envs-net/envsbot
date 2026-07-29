@@ -533,7 +533,7 @@ IDLERPG = {
     "map_y": 500,
     "map_step_per_second": 1,
     "grid_battle_enabled": True,
-    "quest_grid_step_seconds": 2,
+    "quest_grid_step_seconds": 30,
 }
 ```
 
@@ -544,7 +544,7 @@ IDLERPG = {
 | `map_step_per_second` | `1` | Grid step size for original-style per-second random walking. Set to `0` to keep coordinates static. |
 | `map_step_per_tick` | `1` | Legacy alias for `map_step_per_second`; kept for old configs. |
 | `grid_battle_enabled` | `True` | Allow original-style grid encounters when multiple online players meet on the same coordinate. |
-| `quest_grid_step_seconds` | `2` | Seconds per directed quest step. Higher values make grid quests slower. |
+| `quest_grid_step_seconds` | `30` | Seconds per directed quest step. On the default 500x500 map this normally keeps grid quests active for several hours; higher values make them slower. |
 
 ## Seasons and Hall of Fame
 

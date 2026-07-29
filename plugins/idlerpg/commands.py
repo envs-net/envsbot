@@ -456,16 +456,19 @@ async def _handle_quest(bot, msg, is_room: bool) -> None:
     quest_kind = _dep_quests._quest_type(quest)
     remaining = _dep_formatting._duration(int(quest.get("complete_at", 0) or 0) - _dep_formatting._now())
     if quest_kind == "time":
+        timing_text = f"Completes in {remaining}."
         detail = "Every quester must remain online and avoid message or logout penalties until the timer ends; random game events do not fail the quest."
     else:
+        timing_text = f"Deadline in {remaining}."
         target = _dep_map._active_quest_target(quest)
-        detail = f"Current target: [{target[0]},{target[1]}]." if target else "No active route target."
+        target_text = f"Current target: [{target[0]},{target[1]}]." if target else "No active route target."
+        detail = f"{target_text} The quest completes as soon as all participants reach both route points."
     quest_url = _dep_export._website_url("quest")
     _dep_formatting._reply(
         bot,
         msg,
         f"🧭 {', '.join(names)} are on a quest ({quest_kind}-based) to {quest.get('text', 'adventure')}. "
-        f"Completes in {remaining}. {detail}"
+        f"{timing_text} {detail}"
         + (f" See {quest_url} for details." if quest_url else ""),
     )
 

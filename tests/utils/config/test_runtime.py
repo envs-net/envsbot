@@ -86,6 +86,12 @@ def test_idlerpg_runtime_values_derive_or_override_website_url():
     assert explicit["WEBSITE_PUBLIC_BASE_URL"] == "https://example.org/idlerpg"
 
 
+def test_idlerpg_runtime_values_use_balanced_grid_quest_step_default():
+    values = runtime._idlerpg_values({"idlerpg": {}})
+
+    assert values["QUEST_GRID_STEP_SECONDS"] == 30
+
+
 def test_idlerpg_runtime_values_include_original_grid_options():
     values = runtime._idlerpg_values({
         "idlerpg": {

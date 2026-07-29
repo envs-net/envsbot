@@ -405,6 +405,8 @@ async def test_quest_and_runtime_state(monkeypatch):
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["quest"], msg, True)
     assert "are on a quest" in bot.replies[-1][0]
+    assert "Deadline in" in bot.replies[-1][0]
+    assert "completes as soon as all participants reach both route points" in bot.replies[-1][0]
 
 
 def test_idlerpg_achievements_titles_stats_and_regions():

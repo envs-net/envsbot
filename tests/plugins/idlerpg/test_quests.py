@@ -72,6 +72,27 @@ def test_complete_quest_reports_reward_range_and_resets_next_time():
     assert bob["next"] == 750
 
 
+def test_complete_quest_reports_elapsed_duration_when_start_time_is_known():
+    room = idlerpg._blank_room()
+    alice = _online_player("alice@envs.net", "Alice", next_ttl=1000)
+    room["players"] = {"alice@envs.net": alice}
+    messages: list[str] = []
+
+    quests._complete_quest(
+        room,
+        {
+            "active": True,
+            "type": "grid",
+            "questers": ["alice@envs.net"],
+            "started_at": 100,
+        },
+        1961,
+        messages,
+    )
+
+    assert messages[0] == "🧭 Alice completed their quest in 31m 1s! 25% of their burden is removed."
+
+
 def test_complete_quest_without_valid_questers_still_resets_state():
     room = idlerpg._blank_room()
     messages: list[str] = []
@@ -328,4 +349,6 @@ def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
     assert room["quest"]["type"] == "grid"
     assert room["quest"]["route"] == [[11, 12], [13, 14]]
     assert "grid-based quest" in messages[0]
+    assert "Directed movement advances every" in messages[0]
+    assert "may finish early once both targets are reached" in messages[0]
     assert "https://envs.net/idlerpg/?view=quest" in messages[0]
