@@ -10,6 +10,7 @@ import random
 from plugins.idlerpg import commands as idlerpg_commands
 from plugins.idlerpg import config as idlerpg_config
 from plugins.idlerpg import formatting as idlerpg_formatting
+from plugins.idlerpg import quests as idlerpg_quests
 from plugins.idlerpg import state as idlerpg_state
 from plugins.idlerpg import tasks as idlerpg_tasks
 from core_plugins import _core
@@ -392,6 +393,8 @@ async def test_quest_and_runtime_state(monkeypatch):
         JOINED_ROOMS["room@conf"]["nicks"][f"U{idx}"] = {"jid": jid, "affiliation": "member"}
     bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = data
     monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+    # This test verifies the grid-specific quest status wording.
+    monkeypatch.setattr(idlerpg_quests, "_choose_quest_type", lambda: "grid")
 
     messages = []
 
