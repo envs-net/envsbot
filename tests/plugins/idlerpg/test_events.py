@@ -156,6 +156,67 @@ def test_original_style_grid_battle_only_when_players_meet(monkeypatch):
     assert messages == []
 
 
+def test_grid_battle_does_not_make_grid_questers_fight_each_other(monkeypatch):
+    room = idlerpg._blank_room()
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "questers": ["alice@envs.net", "bob@envs.net"],
+        "route": [[42, 42], [84, 84]],
+    }
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    players = [("alice@envs.net", alice), ("bob@envs.net", bob)]
+    messages: list[str] = []
+
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "randint", lambda start, stop: stop)
+
+    assert idlerpg._maybe_run_grid_battle(players, messages, room) is False
+    assert messages == []
+
+
+def test_grid_quester_can_still_meet_non_quest_player(monkeypatch):
+    room = idlerpg._blank_room()
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "questers": ["alice@envs.net", "bob@envs.net"],
+        "route": [[42, 42], [84, 84]],
+    }
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    outsider = idlerpg._normalize_player(
+        "outsider@envs.net",
+        {"name": "Outsider", "level": 10, "next": 1000, "x": 42, "y": 42},
+    )
+    players = [
+        ("alice@envs.net", alice),
+        ("bob@envs.net", bob),
+        ("outsider@envs.net", outsider),
+    ]
+    messages: list[str] = []
+
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(random, "randint", lambda start, stop: stop)
+
+    assert idlerpg._maybe_run_grid_battle(players, messages, room) is True
+    assert any("Outsider" in message for message in messages)
+
+
 def test_boss_event_defeat_awards_and_records_event(monkeypatch):
     room = idlerpg._blank_room()
     players = []

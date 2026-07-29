@@ -112,6 +112,24 @@ def _grid_position(player: dict[str, Any]) -> tuple[int, int]:
     return (_dep_map._clamp_grid_coord(player.get("x", 0), _dep_config.MAP_X), _dep_map._clamp_grid_coord(player.get("y", 0), _dep_config.MAP_Y))
 
 
+def _active_grid_questers(room: dict[str, Any] | None) -> set[str]:
+    """Return participants protected from fighting their own grid-quest party."""
+    if not isinstance(room, dict):
+        return set()
+    quest = room.get("quest")
+    if not isinstance(quest, dict) or not quest.get("active"):
+        return set()
+
+    explicit_type = str(quest.get("type") or "").strip().lower()
+    is_grid_quest = explicit_type == "grid" or (
+        explicit_type not in {"grid", "time"}
+        and bool(_dep_map._quest_route_points(quest))
+    )
+    if not is_grid_quest:
+        return set()
+    return {str(jid) for jid in quest.get("questers", [])}
+
+
 def _maybe_run_grid_battle(
     players: list[tuple[str, dict[str, Any]]],
     messages: list[str],
@@ -120,12 +138,15 @@ def _maybe_run_grid_battle(
     """Run an original-style grid encounter if players occupy one point.
 
     Classic IdleRPG gives an encounter a 1 / online-player-count chance to
-    become a normal battle when two players meet on the grid.  At most one grid
+    become a normal battle when two players meet on the grid.  Members of the
+    same active grid-quest party are excluded because directed quest movement
+    deliberately keeps them together for long periods.  At most one grid
     battle is emitted per tick to keep room output manageable.
     """
     if not _dep_config.GRID_BATTLE_ENABLED or len(players) < 2:
         return False
 
+    protected_questers = _active_grid_questers(room)
     by_position: dict[tuple[int, int], list[tuple[str, dict[str, Any]]]] = {}
     for jid, player in players:
         by_position.setdefault(_grid_position(player), []).append((jid, player))
@@ -133,9 +154,20 @@ def _maybe_run_grid_battle(
     for occupants in by_position.values():
         if len(occupants) < 2:
             continue
+        eligible_pairs = [
+            (attacker, defender)
+            for index, attacker in enumerate(occupants)
+            for defender in occupants[index + 1 :]
+            if not (
+                attacker[0] in protected_questers
+                and defender[0] in protected_questers
+            )
+        ]
+        if not eligible_pairs:
+            continue
         if random.random() >= (1 / len(players)):
             continue
-        attacker, defender = random.sample(occupants, 2)
+        attacker, defender = random.choice(eligible_pairs)
         _run_duel_between(attacker[1], defender[1], messages, room)
         return True
     return False

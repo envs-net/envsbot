@@ -5,7 +5,7 @@ from __future__ import annotations
 
 PLUGIN_META = {
     "name": "idlerpg",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "description": "IdleRPG game for MUCs, inspired by the classic IRC game",
     "category": "games",
     "requires": ["rooms", "_core"],
