@@ -18,7 +18,7 @@ dist/
 # Static analysis and mutation testing
 .codeql/
 .codeql-db
-codeql-quality.*
+/codeql-quality.*
 mutants/
 
 # Runtime data and generated output
