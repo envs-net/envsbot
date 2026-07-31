@@ -9,10 +9,37 @@ def _unique_defs_by_name() -> dict[str, dict[str, Any]]:
     return {str(item.get("name")): dict(item) for item in _dep_constants.UNIQUE_ITEMS if item.get("name")}
 
 
+def _unique_item_tier(item: dict[str, Any] | None) -> int:
+    if not isinstance(item, dict):
+        return 0
+    try:
+        return max(1, int(item.get("tier", 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _unique_item_level(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _next_unique_upgrade_level(slot: str, tier: int) -> int | None:
+    levels = [
+        _unique_item_level(item.get("min_level"))
+        for item in _dep_constants.UNIQUE_ITEMS
+        if str(item.get("slot") or "") == str(slot)
+        and _unique_item_tier(item) > int(tier)
+    ]
+    return min(levels) if levels else None
+
+
 def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
     unique_items = player.get("unique_items")
     if not isinstance(unique_items, dict):
         return []
+    item_levels = player.get("items") if isinstance(player.get("items"), dict) else {}
     defs = _unique_defs_by_name()
     bonuses: list[dict[str, Any]] = []
     for slot, name in unique_items.items():
@@ -22,9 +49,14 @@ def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
         bonus = str(item.get("bonus") or "")
         if not bonus:
             continue
+        tier = _unique_item_tier(item)
         bonuses.append({
             "slot": str(slot),
             "name": str(name),
+            "tier": tier,
+            "item_level": _unique_item_level(item_levels.get(slot)),
+            "min_level": _unique_item_level(item.get("min_level")),
+            "next_upgrade_level": _next_unique_upgrade_level(str(item.get("slot") or slot), tier),
             "bonus": bonus,
             "bonus_percent": int(item.get("bonus_percent", 0) or 0),
         })
@@ -117,25 +149,48 @@ def _roll_weighted_item_level(player_level: int) -> int:
 def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
     if not _dep_config.UNIQUE_ITEMS_ENABLED:
         return None
-    level = int(player.get("level", 0) or 0)
+    level = _unique_item_level(player.get("level"))
     if level < _dep_config.UNIQUE_ITEM_MIN_LEVEL or random.random() >= _dep_config.UNIQUE_ITEM_CHANCE:
         return None
-    occupied_unique_slots = _unique_item_slots(player)
-    eligible = [
-        item
-        for item in _dep_constants.UNIQUE_ITEMS
-        if level >= int(item.get("min_level", 0) or 0)
-        and str(item.get("slot") or "") not in occupied_unique_slots
-    ]
+
+    unique_items = player.get("unique_items") if isinstance(player.get("unique_items"), dict) else {}
+    item_levels = player.get("items") if isinstance(player.get("items"), dict) else {}
+    defs = _unique_defs_by_name()
+    eligible: list[tuple[dict[str, Any], int, int, str]] = []
+    for raw_item in _dep_constants.UNIQUE_ITEMS:
+        item = dict(raw_item)
+        if level < _unique_item_level(item.get("min_level")):
+            continue
+        slot = str(item.get("slot") or "")
+        if not slot:
+            continue
+        low = _unique_item_level(item.get("min_item_level"))
+        high = _unique_item_level(item.get("max_item_level"))
+        if high < low:
+            continue
+        existing_name = str(unique_items.get(slot) or "")
+        if existing_name:
+            existing = defs.get(existing_name)
+            current_level = _unique_item_level(item_levels.get(slot))
+            if not existing or _unique_item_tier(item) <= _unique_item_tier(existing):
+                continue
+            low = max(low, current_level + 1)
+            if low > high:
+                continue
+        eligible.append((item, low, high, existing_name))
+
     if not eligible:
         return None
-    item = random.choice(eligible)
+    item, low, high, existing_name = random.choice(eligible)
     return {
         "name": str(item["name"]),
         "slot": str(item["slot"]),
-        "level": random.randint(int(item["min_item_level"]), int(item["max_item_level"])),
+        "tier": _unique_item_tier(item),
+        "min_level": _unique_item_level(item.get("min_level")),
+        "level": random.randint(low, high),
         "bonus": str(item.get("bonus") or ""),
         "bonus_percent": int(item.get("bonus_percent", 0) or 0),
+        "upgrade_from": existing_name,
     }
 
 
@@ -145,21 +200,49 @@ def _grant_level_item(player: dict[str, Any], room: dict[str, Any] | None = None
     unique_items = player.setdefault("unique_items", {})
     if unique:
         slot = str(unique["slot"])
-        level = int(unique["level"])
+        level = _unique_item_level(unique.get("level"))
         existing_unique = str(unique_items.get(slot) or "")
+        defs = _unique_defs_by_name()
+        candidate_def = defs.get(str(unique.get("name") or ""))
+        candidate_tier = _unique_item_tier(candidate_def or unique)
+        existing_level = _unique_item_level(items.get(slot))
         if existing_unique:
-            _dep_leveling._check_level_achievements(player, room)
-            return (
-                f"🌌 {_dep_formatting._display_player(player)} found {unique['name']}, a level {level} {slot}, "
-                f"near {_dep_map._player_region(player)}, but keeps {existing_unique}."
+            existing_def = defs.get(existing_unique)
+            existing_tier = _unique_item_tier(existing_def)
+            stronger = (
+                existing_def is not None
+                and candidate_def is not None
+                and candidate_tier > existing_tier
+                and level > existing_level
             )
-        items[slot] = max(int(items.get(slot, 0) or 0), level)
+            if not stronger:
+                _dep_leveling._check_level_achievements(player, room)
+                return (
+                    f"🌌 {_dep_formatting._display_player(player)} found {unique['name']}, a tier {candidate_tier} "
+                    f"level {level} {slot}, near {_dep_map._player_region(player)}, but keeps {existing_unique}."
+                )
+            items[slot] = level
+            unique_items[slot] = str(unique["name"])
+            _dep_leveling._award(player, "unique_item")
+            _dep_leveling._inc_stat(player, "unique_items_found", 1, room)
+            _dep_leveling._inc_stat(player, "unique_item_upgrades", 1, room)
+            bonus = str(unique.get("bonus", "")).replace("_", " ")
+            bonus_part = f" ({int(unique.get('bonus_percent', 0) or 0)}% {bonus})" if bonus else ""
+            return (
+                f"🌠 {_dep_formatting._display_player(player)} upgraded {existing_unique} "
+                f"(tier {existing_tier}, level {existing_level}) to {unique['name']} "
+                f"(tier {candidate_tier}, level {level}) near {_dep_map._player_region(player)}{bonus_part}!"
+            )
+        items[slot] = max(existing_level, level)
         unique_items[slot] = str(unique["name"])
         _dep_leveling._award(player, "unique_item")
         _dep_leveling._inc_stat(player, "unique_items_found", 1, room)
         bonus = str(unique.get("bonus", "")).replace("_", " ")
         bonus_part = f" ({int(unique.get('bonus_percent', 0) or 0)}% {bonus})" if bonus else ""
-        return f"🌌 {_dep_formatting._display_player(player)} found {unique['name']}, a level {level} {slot}, near {_dep_map._player_region(player)}{bonus_part}!"
+        return (
+            f"🌌 {_dep_formatting._display_player(player)} found {unique['name']}, a tier {candidate_tier} "
+            f"level {level} {slot}, near {_dep_map._player_region(player)}{bonus_part}!"
+        )
     item = random.choice(_dep_constants.ITEMS)
     gain = _roll_weighted_item_level(int(player.get("level", 0) or 0))
     existing_unique = str(unique_items.get(item) or "")

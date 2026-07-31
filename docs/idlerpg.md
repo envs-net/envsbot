@@ -141,7 +141,7 @@ The game loop can also trigger rare classic IdleRPG-style events:
 - critical strikes that add time to the defeated player's clock
 - level-up battles, with classic odds below/above level 25
 - rare item drops and swaps after battles
-- unique envs.net-flavoured items at higher levels
+- tiered envs.net-flavoured unique artifacts, including protected upgrades at high levels
 - item blessings that improve a random item
 - item damage events that fairly reduce an existing item a little
 - fair item swap/steal events where the old item is left behind
@@ -222,8 +222,13 @@ TTL reduction and can unlock the `Boss Slayer` / `Raid Veteran` achievements.
 If the party fails, each participant receives a small configured setback.
 
 Unique items use predefined envs.net-themed names and are exported in each
-player profile under `unique_items`. They never expose JIDs or private account
-data.
+player profile under `unique_items`. Every equipment slot, including gloves and
+leggings, can receive a bound unique artifact. Higher tiers unlock at levels 75,
+85, 100 and 125. A later drop may upgrade an occupied unique slot only when its
+catalog tier is higher and its rolled item level is strictly greater; equal,
+weaker or unknown items are never replaced. Unique artifacts remain protected
+from damage, theft and ordinary item swaps. They never expose JIDs or private
+account data.
 
 ## Event log
 
@@ -644,7 +649,7 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `level_battle_chance_at_25` | `1.0` | Chance that a level-up at level 25 or higher triggers a battle. |
 | `unique_items_enabled` | `True` | Enables rare named unique items. |
 | `unique_item_min_level` | `25` | Minimum character level before unique items may appear. |
-| `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item. Unique items may grant small bonuses such as battle power, godsend rewards, reduced penalties or stronger quest rewards. |
+| `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item or a strictly stronger tier upgrade. Unique artifacts cover all equipment slots and may grant small bonuses such as battle power, godsend rewards, reduced penalties or stronger quest rewards. |
 
 The event weights are relative. Raising `battle_event_weight`, for example,
 makes battle events more likely compared to item and alignment events.

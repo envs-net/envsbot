@@ -792,6 +792,8 @@ def test_unique_item_bonuses_and_achievement_catalog_export(tmp_path, monkeypatc
     public = idlerpg._player_public_record("room@conf", "alice@envs.net", player, rank=1)
     assert public["region"] == "Velbragh"
     assert public["unique_item_bonuses"][0]["bonus"] == "battle_bonus"
+    assert public["unique_item_bonuses"][0]["tier"] == 1
+    assert public["unique_item_bonuses"][0]["next_upgrade_level"] == 52
 
     monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
     room = idlerpg._blank_room()

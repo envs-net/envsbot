@@ -310,7 +310,10 @@ async def _handle_items(bot, sender_jid: str, args: list[str], msg, is_room: boo
         if unique:
             suffix = f" — {unique}"
             if bonus:
+                suffix += f" [tier {int(bonus.get('tier', 1) or 1)}]"
                 suffix += f" ({bonus['bonus_percent']}% {str(bonus['bonus']).replace('_', ' ')})"
+                if bonus.get("next_upgrade_level"):
+                    suffix += f"; next tier from level {int(bonus['next_upgrade_level'])}"
         lines.append(f"{name}: {level}{suffix}")
     _dep_formatting._reply(bot, msg, f"🎒 Items for {player['name']}\n" + "\n".join(lines))
 

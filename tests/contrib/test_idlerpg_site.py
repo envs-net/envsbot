@@ -72,6 +72,10 @@ def _player(name: str, *, rank: int, online: bool, level: int) -> dict[str, obje
             {
                 "slot": "weapon",
                 "name": "The Great Hammer of /bin/sh",
+                "tier": 1,
+                "item_level": 150,
+                "min_level": 40,
+                "next_upgrade_level": 52,
                 "bonus": "battle_bonus",
                 "bonus_percent": 8,
             }
@@ -283,6 +287,8 @@ def test_idlerpg_site_profile_filters_and_room_switching(tmp_path: Path) -> None
     )
     assert "Unique-item bonuses" in profile
     assert "The Great Hammer of /bin/sh" in profile
+    assert "tier 1" in profile
+    assert "next tier from lv.52" in profile
 
     filtered = _render(
         data_dir,

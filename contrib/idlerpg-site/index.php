@@ -1076,9 +1076,10 @@ details.season summary { cursor: pointer; font-weight: 700; }
                             <div>
                                 <h4>Equipment</h4>
                                 <?php if (count($profile_items) > 0): ?>
-                                    <table><thead><tr><th>Slot</th><th>Level</th><th>Bound unique item</th></tr></thead><tbody>
+                                    <table><thead><tr><th>Slot</th><th>Level</th><th>Tier</th><th>Bound unique item</th></tr></thead><tbody>
                                     <?php foreach ($profile_items as $slot => $level): ?>
-                                        <tr><td><?php echo h(idlerpg_human_key($slot)); ?></td><td><?php echo h(max(0, (int) $level)); ?></td><td><?php echo h($profile_unique_items[$slot] ?? ''); ?></td></tr>
+                                        <?php $slot_bonus = null; foreach ($profile_unique_bonuses as $candidate_bonus) { if (is_array($candidate_bonus) && (string) ($candidate_bonus['slot'] ?? '') === (string) $slot) { $slot_bonus = $candidate_bonus; break; } } ?>
+                                        <tr><td><?php echo h(idlerpg_human_key($slot)); ?></td><td><?php echo h(max(0, (int) $level)); ?></td><td><?php echo $slot_bonus ? 'T' . h((int) ($slot_bonus['tier'] ?? 1)) : ''; ?></td><td><?php echo h($profile_unique_items[$slot] ?? ''); ?></td></tr>
                                     <?php endforeach; ?>
                                     </tbody></table>
                                 <?php else: ?><p class="muted">No equipment exported.</p><?php endif; ?>
@@ -1088,7 +1089,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                                 <?php if (count($profile_unique_bonuses) > 0): ?>
                                     <ul class="compact-list">
                                     <?php foreach ($profile_unique_bonuses as $bonus): ?>
-                                        <li><strong><?php echo h($bonus['name'] ?? 'Unique item'); ?></strong> — <?php echo h(idlerpg_human_key($bonus['bonus'] ?? 'bonus')); ?> +<?php echo h($bonus['bonus_percent'] ?? 0); ?>%</li>
+                                        <li><strong><?php echo h($bonus['name'] ?? 'Unique item'); ?></strong> — tier <?php echo h((int) ($bonus['tier'] ?? 1)); ?>, <?php echo h(idlerpg_human_key($bonus['bonus'] ?? 'bonus')); ?> +<?php echo h($bonus['bonus_percent'] ?? 0); ?>%<?php if (!empty($bonus['next_upgrade_level'])): ?> · next tier from lv.<?php echo h((int) $bonus['next_upgrade_level']); ?><?php endif; ?></li>
                                     <?php endforeach; ?>
                                     </ul>
                                 <?php else: ?><p class="muted">No unique-item bonuses.</p><?php endif; ?>
