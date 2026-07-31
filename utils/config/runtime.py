@@ -147,6 +147,14 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "idlerpg_map_step_per_second",
         item("map_step_per_tick", "idlerpg_map_step_per_tick", 1),
     )
+    quest_grid_min_points = max(
+        2,
+        _to_int(item("quest_grid_min_points", "idlerpg_quest_grid_min_points", 2), 2),
+    )
+    quest_grid_max_points = max(
+        quest_grid_min_points,
+        _to_int(item("quest_grid_max_points", "idlerpg_quest_grid_max_points", 3), 3),
+    )
 
     return {
         "TICK_SECONDS": _to_int(item("tick_seconds", "idlerpg_tick_seconds", 60) or 60, 60),
@@ -170,6 +178,12 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "QUEST_GRID_WEIGHT": _to_float(item("quest_grid_weight", "idlerpg_quest_grid_weight", 0.5) or 0.0, 0.5),
         "QUEST_TIME_MIN_DURATION": _to_int(item("quest_time_min_duration", "idlerpg_quest_time_min_duration", 43200) or 43200, 43200),
         "QUEST_TIME_MAX_DURATION": _to_int(item("quest_time_max_duration", "idlerpg_quest_time_max_duration", 86400) or 86400, 86400),
+        "QUEST_MAX_PER_DAY": max(
+            0,
+            _to_int(item("quest_max_per_day", "idlerpg_quest_max_per_day", 2), 2),
+        ),
+        "QUEST_GRID_MIN_POINTS": quest_grid_min_points,
+        "QUEST_GRID_MAX_POINTS": quest_grid_max_points,
         "EVENT_CHANCE": _to_float(item("event_chance", "idlerpg_event_chance", 0.01), 0.01),
         "ITEM_CHANCE": _to_float(item("item_chance", "idlerpg_item_chance", 0.20), 0.20),
         "BATTLE_EVENT_WEIGHT": _to_float(item("battle_event_weight", "idlerpg_battle_event_weight", 0.55), 0.55),

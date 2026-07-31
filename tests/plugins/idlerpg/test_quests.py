@@ -337,8 +337,11 @@ def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
 
     assert room["quest"]["type"] == "time"
     assert room["quest"]["complete_at"] == 100 + idlerpg.QUEST_TIME_MIN_DURATION
+    assert room["quest"]["target"] == [0, 0]
     assert "time-based quest" in messages[0]
     assert "remain online and avoid message or logout penalties" in messages[0]
+    assert "map objective is [0,0]" in messages[0]
+    assert "informational and does not replace the timer" in messages[0]
     assert "https://envs.net/idlerpg/?view=quest" in messages[0]
 
     values = iter([11, 12, 13, 14])
@@ -350,5 +353,61 @@ def test_start_time_and_grid_quests_build_expected_state(monkeypatch):
     assert room["quest"]["route"] == [[11, 12], [13, 14]]
     assert "grid-based quest" in messages[0]
     assert "Directed movement advances every" in messages[0]
-    assert "may finish early once both targets are reached" in messages[0]
+    assert "may finish early once all route points are reached" in messages[0]
     assert "https://envs.net/idlerpg/?view=quest" in messages[0]
+
+
+def test_grid_route_supports_three_unique_points(monkeypatch):
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_MIN_POINTS", 3)
+    monkeypatch.setattr(idlerpg_config, "QUEST_GRID_MAX_POINTS", 3)
+    values = iter([1, 2, 3, 4, 5, 6])
+    monkeypatch.setattr(
+        quests.random,
+        "randint",
+        lambda low, high: 3 if (low, high) == (3, 3) else next(values),
+    )
+
+    assert quests._grid_route() == [[1, 2], [3, 4], [5, 6]]
+
+
+def test_inactive_quest_state_preserves_daily_count_and_waits_for_next_utc_day(monkeypatch):
+    now = 1_753_920_000  # 2025-07-31 00:00:00 UTC
+    monkeypatch.setattr(idlerpg_config, "QUEST_INTERVAL", 3600)
+    monkeypatch.setattr(idlerpg_config, "QUEST_MAX_PER_DAY", 2)
+    quest = {
+        "active": True,
+        "daily_date": quests._quest_day_key(now),
+        "daily_starts": 2,
+    }
+
+    state = quests._inactive_quest_state(quest, now)
+
+    assert state["daily_date"] == quests._quest_day_key(now)
+    assert state["daily_starts"] == 2
+    assert state["next_at"] == quests._next_utc_day(now)
+
+
+def test_daily_quest_limit_resets_on_next_utc_day(monkeypatch):
+    now = 1_753_920_000
+    monkeypatch.setattr(idlerpg_config, "QUEST_MAX_PER_DAY", 2)
+    quest = {
+        "active": False,
+        "next_at": now,
+        "daily_date": quests._quest_day_key(now),
+        "daily_starts": 2,
+    }
+
+    assert quests._quest_daily_limit_reached(quest, now) is True
+    assert quest["next_at"] == quests._next_utc_day(now)
+    assert quests._quest_daily_limit_reached(quest, now + 86400) is False
+
+    inactive = quests._inactive_quest_state(quest, now + 86400)
+    assert inactive["daily_date"] == quests._quest_day_key(now + 86400)
+    assert inactive["daily_starts"] == 0
+
+
+def test_daily_quest_limit_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(idlerpg_config, "QUEST_MAX_PER_DAY", 0)
+    quest = {"daily_date": "2026-07-31", "daily_starts": 999}
+
+    assert quests._quest_daily_limit_reached(quest, 1_753_920_000) is False

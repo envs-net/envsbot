@@ -46,6 +46,18 @@ def _quest_route_points(quest: dict[str, Any] | None) -> list[tuple[int, int]]:
     return points
 
 
+def _quest_time_target(quest: dict[str, Any] | None) -> tuple[int, int] | None:
+    if not isinstance(quest, dict) or not quest.get("active"):
+        return None
+    target = quest.get("target")
+    if not isinstance(target, list | tuple) or len(target) < 2:
+        return None
+    return (
+        _clamp_grid_coord(target[0], _dep_config.MAP_X),
+        _clamp_grid_coord(target[1], _dep_config.MAP_Y),
+    )
+
+
 def _active_quest_target(quest: dict[str, Any] | None) -> tuple[int, int] | None:
     points = _quest_route_points(quest)
     if not points:
@@ -176,18 +188,17 @@ def _render_ascii_map(
     grid = [["." for _ in range(width)] for _ in range(height)]
     legend: list[str] = []
 
-    if isinstance(quest, dict) and quest.get("active") and isinstance(quest.get("route"), list):
-        for point in quest.get("route", [])[:2]:
-            if not isinstance(point, list | tuple) or len(point) < 2:
-                continue
-            try:
-                x = float(point[0])
-                y = float(point[1])
-            except (TypeError, ValueError):
-                continue
-            col = max(0, min(width - 1, int((x / map_width) * (width - 1))))
-            row = max(0, min(height - 1, int((y / map_height) * (height - 1))))
-            grid[row][col] = "Q"
+    route_points = _quest_route_points(quest)
+    for x, y in route_points:
+        col = max(0, min(width - 1, int((x / map_width) * (width - 1))))
+        row = max(0, min(height - 1, int((y / map_height) * (height - 1))))
+        grid[row][col] = "Q"
+
+    time_target = _quest_time_target(quest) if not route_points else None
+    if time_target is not None:
+        col = max(0, min(width - 1, int((time_target[0] / map_width) * (width - 1))))
+        row = max(0, min(height - 1, int((time_target[1] / map_height) * (height - 1))))
+        grid[row][col] = "T"
 
     for index, (jid, player) in enumerate(players[:35]):
         marker = _map_marker(index)
@@ -215,8 +226,10 @@ def _render_ascii_map(
             lines.append(f"… and {len(legend) - 12} more players")
     else:
         lines.append("No players on the map yet.")
-    if isinstance(quest, dict) and quest.get("active") and quest.get("route"):
-        lines.append("Q = active quest route point")
+    if route_points:
+        lines.append("Q = active grid-quest route point")
+    elif time_target is not None:
+        lines.append("T = time-quest map objective")
     return lines
 
 # Explicit module dependencies; module-qualified access keeps cyclic domain

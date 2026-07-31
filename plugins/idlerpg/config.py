@@ -109,6 +109,24 @@ QUEST_TIME_MAX_DURATION = int(
 )
 
 
+QUEST_MAX_PER_DAY = max(
+    0,
+    int(_setting("quest_max_per_day", "idlerpg_quest_max_per_day", 2)),
+)
+
+
+QUEST_GRID_MIN_POINTS = max(
+    2,
+    int(_setting("quest_grid_min_points", "idlerpg_quest_grid_min_points", 2)),
+)
+
+
+QUEST_GRID_MAX_POINTS = max(
+    QUEST_GRID_MIN_POINTS,
+    int(_setting("quest_grid_max_points", "idlerpg_quest_grid_max_points", 3)),
+)
+
+
 EVENT_CHANCE = float(
     _setting("event_chance", "idlerpg_event_chance", 0.01)
 )
@@ -470,6 +488,9 @@ __all__ = [
     'QUEST_GRID_WEIGHT',
     'QUEST_TIME_MIN_DURATION',
     'QUEST_TIME_MAX_DURATION',
+    'QUEST_MAX_PER_DAY',
+    'QUEST_GRID_MIN_POINTS',
+    'QUEST_GRID_MAX_POINTS',
     'EVENT_CHANCE',
     'ITEM_CHANCE',
     'BATTLE_EVENT_WEIGHT',

@@ -86,10 +86,13 @@ def test_idlerpg_runtime_values_derive_or_override_website_url():
     assert explicit["WEBSITE_PUBLIC_BASE_URL"] == "https://example.org/idlerpg"
 
 
-def test_idlerpg_runtime_values_use_balanced_grid_quest_step_default():
+def test_idlerpg_runtime_values_use_balanced_quest_defaults():
     values = runtime._idlerpg_values({"idlerpg": {}})
 
     assert values["QUEST_GRID_STEP_SECONDS"] == 30
+    assert values["QUEST_GRID_MIN_POINTS"] == 2
+    assert values["QUEST_GRID_MAX_POINTS"] == 3
+    assert values["QUEST_MAX_PER_DAY"] == 2
 
 
 def test_idlerpg_runtime_values_include_original_grid_options():
@@ -98,6 +101,9 @@ def test_idlerpg_runtime_values_include_original_grid_options():
             "map_step_per_second": "2",
             "grid_battle_enabled": False,
             "quest_grid_step_seconds": "5",
+            "quest_grid_min_points": "3",
+            "quest_grid_max_points": "2",
+            "quest_max_per_day": "0",
         }
     })
 
@@ -105,6 +111,9 @@ def test_idlerpg_runtime_values_include_original_grid_options():
     assert values["MAP_STEP_PER_TICK"] == 2
     assert values["GRID_BATTLE_ENABLED"] is False
     assert values["QUEST_GRID_STEP_SECONDS"] == 5
+    assert values["QUEST_GRID_MIN_POINTS"] == 3
+    assert values["QUEST_GRID_MAX_POINTS"] == 3
+    assert values["QUEST_MAX_PER_DAY"] == 0
 
 
 def test_idlerpg_runtime_values_support_legacy_map_step_alias():

@@ -215,6 +215,8 @@ def test_quest_target_helpers_validate_route_and_online_state():
     JOINED_ROOMS["room@conf"] = {"nicks": {}}
     assert idlerpg._questers_at_target(room_players, quest, room_jid="room@conf") is False
     assert idlerpg._active_quest_target({"active": False, "route": [[1, 2]]}) is None
+    assert idlerpg._quest_time_target({"active": True, "type": "time", "target": [9, 10]}) == (9, 10)
+    assert idlerpg._quest_time_target({"active": False, "target": [9, 10]}) is None
 
 
 def test_weighted_item_roll_normalizes_low_levels_and_uses_exact_weights(monkeypatch):

@@ -1,6 +1,8 @@
 """Split module for plugins/idlerpg.py: quests."""
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 import random
 from typing import Any
 
@@ -87,6 +89,78 @@ def _quest_participants_online(
     return True
 
 
+def _quest_day_key(now: int) -> str:
+    return datetime.fromtimestamp(max(0, int(now)), timezone.utc).date().isoformat()
+
+
+def _quest_day_count(quest: dict[str, Any], now: int) -> int:
+    if str(quest.get("daily_date") or "") != _quest_day_key(now):
+        return 0
+    try:
+        return max(0, int(quest.get("daily_starts", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _next_utc_day(now: int) -> int:
+    current = datetime.fromtimestamp(max(0, int(now)), timezone.utc)
+    next_day = datetime.combine(current.date() + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    return int(next_day.timestamp())
+
+
+def _inactive_quest_state(quest: dict[str, Any], now: int) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "active": False,
+        "next_at": int(now) + _dep_config.QUEST_INTERVAL,
+    }
+    daily_date = str(quest.get("daily_date") or "")
+    if daily_date:
+        state["daily_date"] = _quest_day_key(now)
+        state["daily_starts"] = _quest_day_count(quest, now)
+        max_per_day = max(0, int(_dep_config.QUEST_MAX_PER_DAY or 0))
+        if max_per_day and state["daily_starts"] >= max_per_day:
+            state["next_at"] = max(int(state["next_at"]), _next_utc_day(now))
+    return state
+
+
+def _quest_daily_limit_reached(quest: dict[str, Any], now: int) -> bool:
+    max_per_day = max(0, int(_dep_config.QUEST_MAX_PER_DAY or 0))
+    if max_per_day <= 0:
+        return False
+    count = _quest_day_count(quest, now)
+    if count < max_per_day:
+        return False
+    quest["next_at"] = max(
+        int(quest.get("next_at", 0) or 0),
+        _next_utc_day(now),
+    )
+    return True
+
+
+def _random_map_point() -> list[int]:
+    return [
+        random.randint(0, max(0, int(_dep_config.MAP_X or 0))),
+        random.randint(0, max(0, int(_dep_config.MAP_Y or 0))),
+    ]
+
+
+def _grid_route() -> list[list[int]]:
+    minimum = max(2, int(_dep_config.QUEST_GRID_MIN_POINTS or 2))
+    maximum = max(minimum, int(_dep_config.QUEST_GRID_MAX_POINTS or minimum))
+    point_count = random.randint(minimum, maximum)
+    route: list[list[int]] = []
+    attempts = 0
+    max_unique = (max(0, int(_dep_config.MAP_X or 0)) + 1) * (
+        max(0, int(_dep_config.MAP_Y or 0)) + 1
+    )
+    while len(route) < point_count:
+        point = _random_map_point()
+        attempts += 1
+        if point not in route or len(route) >= max_unique or attempts > point_count * 20:
+            route.append(point)
+    return route
+
+
 def _quest_reward_players(
     room: dict[str, Any],
     quest: dict[str, Any],
@@ -130,7 +204,7 @@ def _complete_quest(room: dict[str, Any], quest: dict[str, Any], now: int, messa
         )
         for player in completed_players:
             messages.append(_dep_formatting._next_level_line(player))
-    room["quest"] = {"active": False, "next_at": now + _dep_config.QUEST_INTERVAL}
+    room["quest"] = _inactive_quest_state(quest, now)
 
 
 def _fail_quest(
@@ -166,7 +240,7 @@ def _fail_quest(
         messages.append(f"🧭 {base} {', '.join(penalized)} receive a p15 penalty.")
     else:
         messages.append(f"🧭 {base}")
-    room["quest"] = {"active": False, "next_at": now + _dep_config.QUEST_INTERVAL}
+    room["quest"] = _inactive_quest_state(quest, now)
 
 
 def _maybe_fail_time_quest_for_penalty(
@@ -284,6 +358,7 @@ def _start_time_quest(
     min_duration = max(1, int(_dep_config.QUEST_TIME_MIN_DURATION or 1))
     max_duration = max(min_duration, int(_dep_config.QUEST_TIME_MAX_DURATION or min_duration))
     duration = random.randint(min_duration, max_duration)
+    target = _random_map_point()
     room["quest"] = {
         "active": True,
         "type": "time",
@@ -291,6 +366,7 @@ def _start_time_quest(
         "text": quest_text,
         "started_at": now,
         "complete_at": now + duration,
+        "target": target,
     }
     names = _quester_names(room, questers)
     quest_url = _dep_export._website_url("quest")
@@ -298,7 +374,9 @@ def _start_time_quest(
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
         f"This is a time-based quest: every quester must remain online and avoid message or logout penalties "
-        f"for {_dep_formatting._duration_clock(duration)}."
+        f"for {_dep_formatting._duration_clock(duration)}. "
+        f"The map objective is [{target[0]},{target[1]}] near "
+        f"{_dep_map._map_region_name(target[0], target[1])}; it is informational and does not replace the timer."
         f"{url_part}"
     )
 
@@ -314,10 +392,7 @@ def _start_grid_quest(
     min_duration = max(1, int(_dep_config.QUEST_MIN_DURATION or 1))
     max_duration = max(min_duration, int(_dep_config.QUEST_MAX_DURATION or min_duration))
     duration = random.randint(min_duration, max_duration)
-    route = [
-        [random.randint(0, _dep_config.MAP_X), random.randint(0, _dep_config.MAP_Y)],
-        [random.randint(0, _dep_config.MAP_X), random.randint(0, _dep_config.MAP_Y)],
-    ]
+    route = _grid_route()
     room["quest"] = {
         "active": True,
         "type": "grid",
@@ -329,18 +404,19 @@ def _start_grid_quest(
         "route_index": 0,
     }
     names = _quester_names(room, questers)
-    first_region = _dep_map._map_region_name(route[0][0], route[0][1])
-    second_region = _dep_map._map_region_name(route[1][0], route[1][1])
+    route_text = ", then ".join(
+        f"Q{index} [{point[0]},{point[1]}] near "
+        f"{_dep_map._map_region_name(point[0], point[1])}"
+        for index, point in enumerate(route, start=1)
+    )
     quest_url = _dep_export._website_url("quest")
     url_part = f" See {quest_url} to monitor their journey." if quest_url else ""
     messages.append(
         f"🧭 {', '.join(names)} have been chosen to {quest_text}. "
-        f"This is a grid-based quest: participants must first reach "
-        f"[{route[0][0]},{route[0][1]}] near {first_region}, then "
-        f"[{route[1][0]},{route[1][1]}] near {second_region}. "
+        f"This is a grid-based quest with {len(route)} route points: {route_text}. "
         f"Directed movement advances every "
         f"{_dep_formatting._duration(max(1, int(_dep_config.QUEST_GRID_STEP_SECONDS or 1)))}; "
-        f"the quest may finish early once both targets are reached. "
+        f"the quest may finish early once all route points are reached. "
         f"Quest deadline in {_dep_formatting._duration_clock(duration)}.{url_part}"
     )
 
@@ -361,6 +437,8 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
 
     if now < int(quest.get("next_at", now + _dep_config.QUEST_INTERVAL) or 0):
         return
+    if _quest_daily_limit_reached(quest, now):
+        return
 
     quest_type = _choose_quest_type()
     if quest_type is None:
@@ -379,10 +457,15 @@ async def _maybe_run_quest(room: dict[str, Any], room_jid: str, messages: list[s
     random.shuffle(candidates)
     questers = candidates[:4]
     quest_text = random.choice(_dep_constants.QUEST_TEXTS)
+    daily_starts = _quest_day_count(quest, now) + 1
     if quest_type == "time":
         _start_time_quest(room, room_jid, questers, quest_text, now, messages)
     else:
         _start_grid_quest(room, room_jid, questers, quest_text, now, messages)
+    active_quest = room.get("quest")
+    if isinstance(active_quest, dict):
+        active_quest["daily_date"] = _quest_day_key(now)
+        active_quest["daily_starts"] = daily_starts
 
 # Explicit module dependencies; module-qualified access keeps cyclic domain
 # relationships visible without copying names into sibling namespaces.

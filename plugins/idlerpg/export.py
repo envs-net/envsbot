@@ -316,6 +316,9 @@ def _public_rules() -> dict[str, Any]:
         "map_step_per_tick": _dep_config.MAP_STEP_PER_TICK,
         "grid_battle_enabled": _dep_config.GRID_BATTLE_ENABLED,
         "quest_grid_step_seconds": _dep_config.QUEST_GRID_STEP_SECONDS,
+        "quest_grid_min_points": _dep_config.QUEST_GRID_MIN_POINTS,
+        "quest_grid_max_points": _dep_config.QUEST_GRID_MAX_POINTS,
+        "quest_max_per_day": _dep_config.QUEST_MAX_PER_DAY,
         "quest_time_enabled": _dep_config.QUEST_TIME_ENABLED,
         "quest_grid_enabled": _dep_config.QUEST_GRID_ENABLED,
         "quest_time_weight": _dep_config.QUEST_TIME_WEIGHT,
@@ -395,6 +398,7 @@ def _export_room_state(
     active_quest = None
     if quest.get("active"):
         current_target = _dep_map._active_quest_target(quest)
+        time_target = _dep_map._quest_time_target(quest)
         active_quest = {
             "type": _dep_quests._quest_type(quest),
             "text": quest.get("text", "adventure"),
@@ -403,6 +407,7 @@ def _export_room_state(
             "route": quest.get("route", []),
             "route_index": int(quest.get("route_index", 0) or 0),
             "current_target": list(current_target) if current_target is not None else None,
+            "target": list(time_target) if time_target is not None else None,
             "questers": [
                 _dep_formatting._display_player(player)
                 for jid in quest.get("questers", [])

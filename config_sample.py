@@ -417,12 +417,18 @@ IDLERPG = {
     "quest_min_level": 40,
     "quest_min_online_seconds": 36000,
     "quest_interval": 21600,
-    # Grid quest deadline. If the route is not completed in time, all online
-    # users receive a p15 quest penalty.
+    # Maximum number of automatically started quests per UTC calendar day.
+    # Use 1 for a quieter room, 2 for the default cadence, or 0 for unlimited.
+    "quest_max_per_day": 2,
+    # Grid quest deadline. If the route is not completed in time, the selected
+    # quest party receives a p15 quest penalty.
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
     "quest_grid_enabled": True,
     "quest_grid_weight": 0.5,
+    # Grid quests randomly use between two and three ordered route points.
+    "quest_grid_min_points": 2,
+    "quest_grid_max_points": 3,
     # Time quest duration. Any penalty against a quester fails the quest.
     "quest_time_enabled": True,
     "quest_time_weight": 0.5,

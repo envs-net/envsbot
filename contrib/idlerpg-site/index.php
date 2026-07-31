@@ -771,6 +771,8 @@ if ($quest) {
 }
 $quest_route = $quest && is_array($quest['route'] ?? null) ? $quest['route'] : [];
 $has_quest_route = count($quest_route) > 0;
+$quest_target = $quest && is_array($quest['target'] ?? null) ? $quest['target'] : null;
+$has_quest_target = is_array($quest_target) && count($quest_target) >= 2;
 $quest_player_lookup = idlerpg_quest_player_lookup($quest);
 $room_map = is_array($room_payload['map'] ?? null) ? $room_payload['map'] : [];
 $map_width = max(1, (int) ($map_payload['width'] ?? $map_payload['map_x'] ?? $room_map['width'] ?? 500));
@@ -1184,9 +1186,15 @@ details.season summary { cursor: pointer; font-weight: 700; }
                         <?php endif; ?>
                     </p>
                     <?php if ($quest_type === 'time'): ?>
-                        <p class="muted">Time-based quest: every quester must remain online and avoid message or logout penalties until the timer ends. Random game events do not fail the quest.</p>
+                        <p class="muted">
+                            Time-based quest: every quester must remain online and avoid message or logout penalties until the timer ends.
+                            Random game events do not fail the quest.
+                            <?php if ($has_quest_target): ?>
+                                The map objective is [<?php echo h((int) idlerpg_point_coord($quest_target, 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest_target, 'y')); ?>]; it is informational and does not replace the timer.
+                            <?php endif; ?>
+                        </p>
                     <?php elseif (is_array($quest['current_target'] ?? null)): ?>
-                        <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]. The quest completes as soon as all participants reach both route points; the displayed time is the deadline.</p>
+                        <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]. The quest completes as soon as all participants reach every route point; the displayed time is the deadline.</p>
                     <?php endif; ?>
                     <?php if (!empty($quest['questers']) && is_array($quest['questers'])): ?>
                         <table><thead><tr><th>#</th><th>Participant</th></tr></thead><tbody>
@@ -1205,8 +1213,10 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     Blue circles = online, red circles = offline, orange circles = active quest participants.
                     <?php if ($has_quest_route): ?>
                         The current grid-quest route is shown as orange squares connected by an orange line.
+                    <?php elseif ($quest && $active_quest_type === 'time' && $has_quest_target): ?>
+                        The time-quest objective is shown as one orange square marked T.
                     <?php elseif ($quest && $active_quest_type === 'time'): ?>
-                        The current quest is time-based, so no route is drawn on the map.
+                        The current time quest has no exported map objective.
                     <?php elseif ($quest && $active_quest_type === 'grid'): ?>
                         The current quest is grid-based, but no route coordinates are available in the export yet.
                     <?php else: ?>
@@ -1253,6 +1263,15 @@ details.season summary { cursor: pointer; font-weight: 700; }
                             <text class="map-label" x="270" y="390" transform="rotate(-5 270 390)">Tower of</text>
                             <text class="map-label" x="270" y="415" transform="rotate(-5 270 415)">Anh-Allor</text>
                             <text class="map-label" x="410" y="468" transform="rotate(-5 410 468)">Irnalveh</text>
+
+                            <?php if ($has_quest_target && $active_quest_type === 'time'): ?>
+                                <?php $tx = idlerpg_point_coord($quest_target, 'x'); $ty = idlerpg_point_coord($quest_target, 'y'); ?>
+                                <g>
+                                    <title>Time-quest objective [<?php echo h((int) $tx); ?>,<?php echo h((int) $ty); ?>]</title>
+                                    <rect class="quest-point" x="<?php echo h($tx - 5); ?>" y="<?php echo h($ty - 5); ?>" width="10" height="10"/>
+                                    <text x="<?php echo h($tx + 7); ?>" y="<?php echo h($ty - 7); ?>" class="map-small-label">T</text>
+                                </g>
+                            <?php endif; ?>
 
                             <?php if ($has_quest_route): ?>
                                 <?php
@@ -1376,7 +1395,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                 $rule_groups = [
                     'Leveling & penalties' => ['tick_seconds', 'rp_base', 'rp_step', 'penalty_step', 'message_penalty', 'logout_penalty', 'logout_grace_seconds', 'max_penalty'],
                     'World map' => ['map_x', 'map_y', 'map_step_per_second', 'map_step_per_tick', 'grid_battle_enabled', 'manual_duel_max_distance', 'manual_duel_cooldown_seconds'],
-                    'Quests' => ['quest_time_enabled', 'quest_grid_enabled', 'quest_time_weight', 'quest_grid_weight', 'quest_time_min_duration', 'quest_time_max_duration', 'quest_grid_step_seconds', 'quest_min_level', 'quest_min_online_seconds', 'quest_interval', 'quest_min_duration', 'quest_max_duration'],
+                    'Quests' => ['quest_time_enabled', 'quest_grid_enabled', 'quest_time_weight', 'quest_grid_weight', 'quest_time_min_duration', 'quest_time_max_duration', 'quest_grid_step_seconds', 'quest_grid_min_points', 'quest_grid_max_points', 'quest_max_per_day', 'quest_min_level', 'quest_min_online_seconds', 'quest_interval', 'quest_min_duration', 'quest_max_duration'],
                     'Events & battles' => ['event_chance', 'item_chance', 'battle_event_weight', 'team_battle_event_weight', 'boss_event_weight', 'item_event_weight', 'item_damage_event_weight', 'item_steal_event_weight', 'alignment_event_weight', 'critical_strike_chance', 'critical_strike_chance_good', 'critical_strike_chance_evil', 'item_drop_chance', 'level_battle_chance_below_25', 'level_battle_chance_at_25'],
                     'Bosses' => ['boss_min_players', 'boss_max_players', 'boss_min_level', 'boss_reward_percent', 'boss_loss_percent', 'boss_power_min_factor', 'boss_power_max_factor'],
                     'Items & achievements' => ['unique_items_enabled', 'unique_item_min_level', 'unique_item_chance', 'level_reward_min_level', 'season_achievement_gates_enabled'],
@@ -1463,7 +1482,8 @@ details.season summary { cursor: pointer; font-weight: 700; }
             <div class="card"><h2>Map legend</h2><p class="muted">
                 Blue circles = online, red circles = offline, orange circles = active quest participants.
                 <?php if ($has_quest_route): ?>Orange squares and lines show the current grid-quest route.
-                <?php elseif ($quest && $active_quest_type === 'time'): ?>The current quest is time-based and therefore has no map route.
+                <?php elseif ($quest && $active_quest_type === 'time' && $has_quest_target): ?>One orange square marked T shows the time-quest objective.
+                <?php elseif ($quest && $active_quest_type === 'time'): ?>The current time quest has no exported map objective.
                 <?php else: ?>Route markers appear when a grid quest is active.<?php endif; ?>
             </p></div>
             <div class="card"><h2>Privacy</h2><p class="muted">This website reads only the public IdleRPG export. Raw player JIDs and bot administration data are not required.</p></div>

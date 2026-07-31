@@ -38,6 +38,9 @@ def test_public_rules_include_new_options():
     assert rules["boss_reward_percent"] == idlerpg.BOSS_REWARD_PERCENT
     assert rules["boss_loss_percent"] == idlerpg.BOSS_LOSS_PERCENT
     assert rules["export_interval_seconds"] == idlerpg.EXPORT_INTERVAL_SECONDS
+    assert rules["quest_max_per_day"] == idlerpg.QUEST_MAX_PER_DAY
+    assert rules["quest_grid_min_points"] == idlerpg.QUEST_GRID_MIN_POINTS
+    assert rules["quest_grid_max_points"] == idlerpg.QUEST_GRID_MAX_POINTS
 
 
 def test_atomic_export_is_web_readable_under_restrictive_umask(tmp_path):
@@ -122,12 +125,14 @@ def test_active_quest_export_omits_stale_private_jids(tmp_path):
         "questers": ["alice@example.org", "stale@example.org"],
         "route": [],
         "route_index": 0,
+        "target": [12, 34],
     }
 
     _summary, payload = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
     exported = json.dumps(payload, sort_keys=True)
 
     assert payload["quest"]["questers"] == ["Alice"]
+    assert payload["quest"]["target"] == [12, 34]
     assert "alice@example.org" not in exported
     assert "stale@example.org" not in exported
 

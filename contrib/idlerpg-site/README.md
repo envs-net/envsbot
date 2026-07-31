@@ -57,7 +57,7 @@ The standalone site includes:
   achievements and player-specific events
 - achievement catalog with unlock counts, percentages and linked earners
 - current time-based or grid-based quest details and participants
-- complete SVG world map with every exported player and grid-quest route
+- complete SVG world map with every exported player, grid-quest route and time-quest objective
 - searchable, filterable and paginated event history
 - current season details and full historic season rankings
 - Hall of Fame champion history
@@ -74,12 +74,14 @@ The self-contained SVG map uses:
 - red circles for offline players
 - orange circles for active quest participants
 - numbered orange waypoints and a dashed route for grid quests
+- one orange T marker for the informational objective of a time quest
 - collision-aware player labels
 - clickable markers linked to public player profiles
 - hover text with position, level and current state
 
-Time-based quests intentionally have no route because they are completed by
-remaining penalty-free until their deadline.
+Time-based quests remain timer-based and are completed by staying online and
+penalty-free. Their single map objective is informational and does not replace
+the timer.
 
 ## Multiple rooms
 
