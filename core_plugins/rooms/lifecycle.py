@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from contextlib import suppress
 from functools import partial
 
 from utils.config import config
@@ -444,11 +443,19 @@ async def on_unload(bot):
     global _ROOM_HEALTH_TASK
     bot._reload_rooms = dict(JOINED_ROOMS)
 
-    if _ROOM_HEALTH_TASK is not None and not _ROOM_HEALTH_TASK.done():
-        _ROOM_HEALTH_TASK.cancel()
-        with suppress(asyncio.CancelledError):
-            await _ROOM_HEALTH_TASK
+    health_task = _ROOM_HEALTH_TASK
     _ROOM_HEALTH_TASK = None
+    if health_task is not None and not health_task.done():
+        health_task.cancel()
+        (result,) = await asyncio.gather(health_task, return_exceptions=True)
+        if isinstance(result, BaseException) and not isinstance(
+            result,
+            asyncio.CancelledError,
+        ):
+            log.warning(
+                "[ROOMS] Room health task failed while unloading",
+                exc_info=(type(result), result, result.__traceback__),
+            )
 
     for room_jid, data in tuple(JOINED_ROOMS.items()):
         try:

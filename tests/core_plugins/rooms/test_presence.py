@@ -1,3 +1,5 @@
+import asyncio
+
 from .helpers import (
     AsyncMock,
     BOT_JID,
@@ -328,6 +330,18 @@ async def test_on_load_restores_reload_rooms_and_registers_presence_handler(fake
 
 @pytest.mark.asyncio
 async def test_on_unload_leaves_rooms_and_preserves_reload_snapshot(fake_bot):
+    task_stopped = asyncio.Event()
+
+    async def room_health_loop():
+        try:
+            await asyncio.Future()
+        finally:
+            task_stopped.set()
+
+    health_task = asyncio.create_task(room_health_loop())
+    await asyncio.sleep(0)
+    rooms_lifecycle._ROOM_HEALTH_TASK = health_task
+
     rooms.JOINED_ROOMS.update({
         "room1@conf": {"nick": "BotOne"},
         "room2@conf": {"nick": "BotTwo"},
@@ -336,6 +350,9 @@ async def test_on_unload_leaves_rooms_and_preserves_reload_snapshot(fake_bot):
 
     await rooms.on_unload(fake_bot)
 
+    assert task_stopped.is_set()
+    assert health_task.cancelled()
+    assert rooms_lifecycle._ROOM_HEALTH_TASK is None
     assert fake_bot._reload_rooms == {
         "room1@conf": {"nick": "BotOne"},
         "room2@conf": {"nick": "BotTwo"},
