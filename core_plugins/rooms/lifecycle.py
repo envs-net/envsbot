@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import suppress
 from functools import partial
 
 from utils.config import config
@@ -445,10 +446,8 @@ async def on_unload(bot):
 
     if _ROOM_HEALTH_TASK is not None and not _ROOM_HEALTH_TASK.done():
         _ROOM_HEALTH_TASK.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await _ROOM_HEALTH_TASK
-        except asyncio.CancelledError:
-            pass
     _ROOM_HEALTH_TASK = None
 
     for room_jid, data in tuple(JOINED_ROOMS.items()):
