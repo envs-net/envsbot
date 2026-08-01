@@ -359,6 +359,9 @@ XKCD_HTTP_TIMEOUT = 10
 
 # ================= DUCK GAME =================
 
+# Global defaults for rooms with the Ducks plugin enabled. Room owners/admins
+# and bot moderators can override gameplay pacing for one room through a MUC
+# private chat with `,duck config`; see docs/plugins/ducks.md for examples.
 DUCKS = {
     "min_messages": 150,
     "max_messages": 500,

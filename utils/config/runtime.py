@@ -295,12 +295,29 @@ def _rss_values(cfg: Mapping[str, object]) -> dict[str, object]:
 
 def _duck_values(cfg: Mapping[str, object]) -> dict[str, object]:
     duck_cfg = _cfg_group(cfg, "ducks")
+    min_messages = max(1, _to_int(duck_cfg.get("min_messages", 150), 150))
+    max_messages = max(
+        min_messages,
+        _to_int(duck_cfg.get("max_messages", 500), 500),
+    )
     return {
         "duck_cfg": duck_cfg,
-        "DUCK_SPAWN_CHANCE": duck_cfg.get("spawn_chance", 20),
-        "MAX_DUCKS_PER_DAY": duck_cfg.get("max_ducks_per_day", 3),
-        "DUCK_TIMEOUT": duck_cfg.get("timeout", 0),
-        "DUCK_STATE_SAVE_EVERY": max(1, _to_int(duck_cfg.get("state_save_every", 1), 1)),
+        "DEFAULT_MIN_MESSAGES": min_messages,
+        "DEFAULT_MAX_MESSAGES": max_messages,
+        "DUCK_SPAWN_CHANCE": max(
+            1,
+            _to_int(duck_cfg.get("spawn_chance", 20), 20),
+        ),
+        "MAX_DUCKS_PER_DAY": max(
+            0,
+            _to_int(duck_cfg.get("max_ducks_per_day", 3), 3),
+        ),
+        "DUCK_TIMEOUT": max(0, _to_int(duck_cfg.get("timeout", 0), 0)),
+        "COUNT_COMMAND_MESSAGES": _to_bool(duck_cfg.get("count_commands"), False),
+        "DUCK_STATE_SAVE_EVERY": max(
+            1,
+            _to_int(duck_cfg.get("state_save_every", 1), 1),
+        ),
     }
 
 

@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `info`
 
+## Overview
+
 Lookup and display vCard of a MUC occupant by MUC JID only
 
 ## Commands

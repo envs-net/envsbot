@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `utility`
 
+## Overview
+
 Room polls with voting, history and auto-close
 
 ## Commands

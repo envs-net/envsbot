@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `utility`
 
+## Overview
+
 Store and deliver messages for users when they join a room again.
 
 ## Commands

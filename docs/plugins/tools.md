@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `utility`
 
+## Overview
+
 Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Unix timestamp conversion, and HTTPS certificate checks
 
 ## Commands

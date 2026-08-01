@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `games`
 
+## Overview
+
 Roll dice with optional modifiers and success conditions.
 
 ## Commands

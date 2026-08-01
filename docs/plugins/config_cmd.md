@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `core`
 Category: `core`
 
+## Overview
+
 Safe config inspection, validation and reload commands.
 
 ## Commands

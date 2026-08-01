@@ -23,7 +23,7 @@ python scripts/generate_commands_md.py
 | [`users`](users.md) | `core` | `core` | User management with caching, nick lookup and logging |
 | [`birthday_notify`](birthday_notify.md) | `plugins` | `info` | Automatic birthday notifications in rooms (opt-in per room) |
 | [`dice`](dice.md) | `plugins` | `games` | Roll dice with optional modifiers and success conditions. |
-| [`ducks`](ducks.md) | `plugins` | `games` | Duck game for MUCs with room toggles and leaderboards |
+| [`ducks`](ducks.md) | `plugins` | `games` | Spawns ducks after room activity so users can befriend or trap them, with persistent room leaderboards and configurable pacing. |
 | [`idlerpg`](idlerpg.md) | `plugins` | `games` | IdleRPG game for MUCs, inspired by the classic IRC game |
 | [`info`](info.md) | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. |
 | [`karma`](karma.md) | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- |

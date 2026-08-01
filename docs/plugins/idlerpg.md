@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `games`
 
+## Overview
+
 IdleRPG game for MUCs, inspired by the classic IRC game
 
 ## Commands

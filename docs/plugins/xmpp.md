@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `tools`
 
+## Overview
+
 XMPP utility tools (ping, diagnostics, service discovery, DNS SRV, etc.)
 
 ## Commands

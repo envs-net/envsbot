@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `info`
 
+## Overview
+
 Wikipedia, Fediverse, Urban Dictionary and acronym lookup.
 
 ## Commands

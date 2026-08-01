@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `utility`
 
+## Overview
+
 Pin room messages with paging, search, tags, important pins and non-reply fallback.
 
 ## Commands

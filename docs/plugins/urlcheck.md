@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `info`
 
+## Overview
+
 URL title and YouTube info fetcher for groupchats
 
 ## Commands

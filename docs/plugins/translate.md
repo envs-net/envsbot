@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `utility`
 
+## Overview
+
 Translate text or replied-to messages with optional source-language auto-detection.
 
 ## Translation forms and message contexts

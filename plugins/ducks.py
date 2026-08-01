@@ -6,12 +6,14 @@ and room/user statistics are stored persistently.
 
 This plugin only works in:
 - public MUCs
-- MUC private messages for on/off/status
+- MUC private messages for on/off/status and per-room configuration
 
 It does not support normal 1:1 direct messages.
 
 Commands:
     {prefix}duck on|off|status        - Enable/disable ducks in this room
+                                        (MUC DM only)
+    {prefix}duck config ...           - Inspect or override room pacing
                                         (MUC DM only)
     {prefix}duck befriend             - Befriend the current duck
     {prefix}duck trap|bang            - Trap the current duck
@@ -32,6 +34,7 @@ import logging
 import random
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import date
 from functools import partial
 
@@ -46,6 +49,7 @@ from core_plugins._core import (
     _ensure_user_exists,
     _is_public_muc,
     get_real_jid,
+    muc_pm_sender_can_manage_room,
 )
 
 from utils.task_supervisor import create_plugin_task
@@ -53,8 +57,11 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "ducks",
-    "version": "1.4.2",
-    "description": "Duck game for MUCs with room toggles and leaderboards",
+    "version": "1.4.3",
+    "description": (
+        "Spawns ducks after room activity so users can befriend or trap them, "
+        "with persistent room leaderboards and configurable pacing."
+    ),
     "category": "games",
     "requires": ["rooms", "_core"],
 }
@@ -66,6 +73,24 @@ DUCKS_INDEX_KEY = "DUCKS_ROOM_INDEX"
 DUCKS_LAST_KEY = "DUCKS_LAST"
 DUCKS_DAILY_KEY = "DUCKS_DAILY"
 DUCKS_STATE_KEY = "DUCKS_STATE"
+DUCKS_ROOM_CONFIG_KEY = "DUCKS_ROOM_CONFIG"
+
+ROOM_CONFIG_FIELDS = (
+    "min_messages",
+    "max_messages",
+    "spawn_chance",
+    "max_ducks_per_day",
+    "timeout",
+    "count_commands",
+)
+ROOM_CONFIG_INT_MINIMUMS = {
+    "min_messages": 1,
+    "max_messages": 1,
+    "spawn_chance": 1,
+    "max_ducks_per_day": 0,
+    "timeout": 0,
+}
+ROOM_CONFIG_CACHE: dict[str, dict[str, int | bool]] = {}
 
 duck_cfg = config.get("ducks", {})
 DEFAULT_MIN_MESSAGES = duck_cfg.get("min_messages", 150)
@@ -147,6 +172,298 @@ async def get_ducks_store(bot):
     return bot.db.users.plugin("ducks")
 
 
+def _room_key(room_jid: object) -> str:
+    return str(room_jid or "").split("/", 1)[0].strip().lower()
+
+
+def _coerce_int(value: object, default: int, minimum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
+def _coerce_bool(value: object, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _default_duck_settings() -> dict[str, int | bool]:
+    min_messages = _coerce_int(DEFAULT_MIN_MESSAGES, 150, 1)
+    max_messages = _coerce_int(DEFAULT_MAX_MESSAGES, 500, 1)
+    return {
+        "min_messages": min_messages,
+        "max_messages": max(min_messages, max_messages),
+        "spawn_chance": _coerce_int(DUCK_SPAWN_CHANCE, 20, 1),
+        "max_ducks_per_day": _coerce_int(MAX_DUCKS_PER_DAY, 3, 0),
+        "timeout": _coerce_int(DUCK_TIMEOUT, 0, 0),
+        "count_commands": _coerce_bool(COUNT_COMMAND_MESSAGES, False),
+    }
+
+
+def _parse_room_config_value(name: str, raw_value: object) -> int | bool:
+    if name not in ROOM_CONFIG_FIELDS:
+        raise ValueError(
+            "Unknown setting. Valid settings: " + ", ".join(ROOM_CONFIG_FIELDS)
+        )
+    if name == "count_commands":
+        text = str(raw_value or "").strip().lower()
+        if text not in {
+            "1", "true", "yes", "on", "enabled",
+            "0", "false", "no", "off", "disabled",
+        }:
+            raise ValueError("count_commands must be true/on or false/off")
+        return _coerce_bool(text)
+
+    minimum = ROOM_CONFIG_INT_MINIMUMS[name]
+    try:
+        value = int(str(raw_value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
+def _normalize_room_overrides(raw: object) -> dict[str, int | bool]:
+    if not isinstance(raw, Mapping):
+        return {}
+    normalized: dict[str, int | bool] = {}
+    for name in ROOM_CONFIG_FIELDS:
+        if name not in raw:
+            continue
+        try:
+            normalized[name] = _parse_room_config_value(name, raw[name])
+        except ValueError:
+            log.warning(
+                "[DUCKS] Ignoring invalid room setting %s=%r",
+                name,
+                raw[name],
+            )
+    return normalized
+
+
+def _effective_duck_settings(
+    overrides: Mapping[str, int | bool] | None = None,
+) -> dict[str, int | bool]:
+    settings = _default_duck_settings()
+    if overrides:
+        settings.update({
+            name: overrides[name]
+            for name in ROOM_CONFIG_FIELDS
+            if name in overrides
+        })
+    settings["max_messages"] = max(
+        int(settings["min_messages"]),
+        int(settings["max_messages"]),
+    )
+    return settings
+
+
+def _validate_effective_room_settings(settings: Mapping[str, int | bool]) -> None:
+    if int(settings["max_messages"]) < int(settings["min_messages"]):
+        raise ValueError("max_messages must be greater than or equal to min_messages")
+
+
+async def _get_room_config_overrides(bot, room_jid: str) -> dict[str, int | bool]:
+    room = _room_key(room_jid)
+    if room in ROOM_CONFIG_CACHE:
+        return dict(ROOM_CONFIG_CACHE[room])
+
+    store = await get_ducks_store(bot)
+    data = await store.get_global(DUCKS_ROOM_CONFIG_KEY, default={})
+    raw = {}
+    if isinstance(data, Mapping):
+        matching = next(
+            (value for key, value in data.items() if _room_key(key) == room),
+            {},
+        )
+        raw = matching
+    overrides = _normalize_room_overrides(raw)
+    ROOM_CONFIG_CACHE[room] = overrides
+    return dict(overrides)
+
+
+async def _get_room_duck_settings(bot, room_jid: str) -> dict[str, int | bool]:
+    overrides = await _get_room_config_overrides(bot, room_jid)
+    return _effective_duck_settings(overrides)
+
+
+async def _store_room_config_overrides(
+    bot,
+    room_jid: str,
+    overrides: Mapping[str, int | bool],
+) -> None:
+    room = _room_key(room_jid)
+    normalized = _normalize_room_overrides(overrides)
+    _validate_effective_room_settings({**_default_duck_settings(), **normalized})
+
+    store = await get_ducks_store(bot)
+    data = await store.get_global(DUCKS_ROOM_CONFIG_KEY, default={})
+    if not isinstance(data, dict):
+        data = {}
+    matching = next((key for key in data if _room_key(key) == room), None)
+    if matching is not None and matching != room:
+        data.pop(matching, None)
+    if normalized:
+        data[room] = normalized
+    else:
+        data.pop(room, None)
+    await store.set_global(DUCKS_ROOM_CONFIG_KEY, data)
+    ROOM_CONFIG_CACHE[room] = normalized
+
+
+def _format_room_config(
+    room_jid: str,
+    settings: Mapping[str, int | bool],
+    overrides: Mapping[str, int | bool],
+) -> str:
+    lines = [f"🦆 Duck settings for {room_jid}:"]
+    for name in ROOM_CONFIG_FIELDS:
+        value = settings[name]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif name == "spawn_chance":
+            rendered = f"1 in {value}"
+        elif name == "max_ducks_per_day" and int(value) == 0:
+            rendered = "unlimited"
+        elif name == "timeout":
+            rendered = "disabled" if int(value) == 0 else f"{value}s"
+        else:
+            rendered = str(value)
+        source = "room override" if name in overrides else "global default"
+        lines.append(f"• {name}: {rendered} ({source})")
+    prefix = str(config.get("prefix", ","))
+    lines.append(
+        f"Use `{prefix}duck config set|unset|reset` in this MUC PM."
+    )
+    return "\n".join(lines)
+
+
+async def _reset_room_cycle_after_config_change(
+    bot, room_jid: str, settings: Mapping[str, int | bool]
+) -> None:
+    room = _room_key(room_jid)
+    pending = SPAWN_TASKS.pop(room, None)
+    if pending is not None:
+        pending.cancel()
+    PENDING_DUCKS.discard(room)
+    await _reset_room_cycle(bot, room, settings=settings)
+
+
+async def _handle_room_config_command(bot, msg, is_room: bool, args: list[str]) -> bool:
+    if not args or str(args[0]).lower() != "config":
+        return False
+
+    allowed, room_jid, reason = await muc_pm_sender_can_manage_room(
+        bot, msg, is_room
+    )
+    if not allowed:
+        if reason and reason.startswith("⛔ Only room admins/owners"):
+            reason = (
+                "⛔ Only room admins/owners or bot moderators can change "
+                "room-specific duck settings."
+            )
+        _duck_reply(bot, msg, reason or "⛔ Room permission check failed.")
+        return True
+
+    room = _room_key(room_jid)
+    tail = [str(part).strip() for part in args[1:]]
+    action = tail[0].lower() if tail else "show"
+
+    if action in {"show", "status"}:
+        overrides = await _get_room_config_overrides(bot, room)
+        settings = _effective_duck_settings(overrides)
+        _duck_reply(bot, msg, _format_room_config(room, settings, overrides))
+        return True
+
+    if action == "set":
+        if len(tail) != 3:
+            prefix = str(config.get("prefix", ","))
+            _duck_reply(
+                bot,
+                msg,
+                f"Usage: {prefix}duck config set <setting> <value>",
+            )
+            return True
+        name = tail[1].lower()
+        try:
+            value = _parse_room_config_value(name, tail[2])
+            overrides = await _get_room_config_overrides(bot, room)
+            candidate = dict(overrides)
+            candidate[name] = value
+            effective = {**_default_duck_settings(), **candidate}
+            _validate_effective_room_settings(effective)
+            await _store_room_config_overrides(bot, room, candidate)
+        except ValueError as exc:
+            _duck_reply(bot, msg, f"❌ {exc}")
+            return True
+        await _reset_room_cycle_after_config_change(bot, room, effective)
+        _duck_reply(bot, msg, f"✅ {name} set to {value} for {room}.")
+        return True
+
+    if action == "unset":
+        if len(tail) != 2:
+            prefix = str(config.get("prefix", ","))
+            _duck_reply(
+                bot,
+                msg,
+                f"Usage: {prefix}duck config unset <setting>",
+            )
+            return True
+        name = tail[1].lower()
+        if name not in ROOM_CONFIG_FIELDS:
+            _duck_reply(
+                bot,
+                msg,
+                "❌ Unknown setting. Valid settings: "
+                + ", ".join(ROOM_CONFIG_FIELDS),
+            )
+            return True
+        overrides = await _get_room_config_overrides(bot, room)
+        if name not in overrides:
+            _duck_reply(bot, msg, f"ℹ️ {name} already uses the global default.")
+            return True
+        candidate = dict(overrides)
+        candidate.pop(name, None)
+        effective = {**_default_duck_settings(), **candidate}
+        try:
+            _validate_effective_room_settings(effective)
+        except ValueError as exc:
+            _duck_reply(bot, msg, f"❌ {exc}; adjust the related override first.")
+            return True
+        await _store_room_config_overrides(bot, room, candidate)
+        await _reset_room_cycle_after_config_change(bot, room, effective)
+        _duck_reply(bot, msg, f"✅ {name} reset to the global default for {room}.")
+        return True
+
+    if action == "reset" and len(tail) == 1:
+        effective = _default_duck_settings()
+        await _store_room_config_overrides(bot, room, {})
+        await _reset_room_cycle_after_config_change(bot, room, effective)
+        _duck_reply(bot, msg, f"✅ All duck settings reset to global defaults for {room}.")
+        return True
+
+    _duck_reply(
+        bot,
+        msg,
+        (
+            f"Usage: {config.get('prefix', ',')}duck config "
+            "[show|set <setting> <value>|unset <setting>|reset]"
+        ),
+    )
+    return True
+
+
 def _duck_reply(bot, msg, text: str):
     bot.reply(
         msg,
@@ -160,18 +477,22 @@ def _today_str() -> str:
     return date.today().isoformat()
 
 
-def _get_random_threshold() -> int:
-    min_msgs = int(DEFAULT_MIN_MESSAGES)
-    max_msgs = int(DEFAULT_MAX_MESSAGES)
-    if max_msgs < min_msgs:
-        max_msgs = min_msgs
+def _get_random_threshold(
+    settings: Mapping[str, int | bool] | None = None,
+) -> int:
+    effective = settings or _default_duck_settings()
+    min_msgs = int(effective["min_messages"])
+    max_msgs = max(min_msgs, int(effective["max_messages"]))
     return random.randint(min_msgs, max_msgs)
 
 
-def _ensure_threshold(room_jid: str) -> int:
+def _ensure_threshold(
+    room_jid: str,
+    settings: Mapping[str, int | bool] | None = None,
+) -> int:
     threshold = NEXT_DUCK_THRESHOLDS.get(room_jid)
     if threshold is None:
-        threshold = _get_random_threshold()
+        threshold = _get_random_threshold(settings)
         NEXT_DUCK_THRESHOLDS[room_jid] = threshold
     return threshold
 
@@ -182,13 +503,15 @@ async def _get_duck_cycle_state(bot) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-async def _load_room_cycle(bot, room_jid: str):
+async def _load_room_cycle(bot, room_jid: str, settings=None):
     """Load the per-room duck cycle from persistent storage.
 
     Only the spawn cycle is persisted. Active/pending ducks are intentionally
     kept in memory only, because restoring already visible ducks after a bot
     restart would be surprising and fragile.
     """
+    if settings is None:
+        settings = await _get_room_duck_settings(bot, room_jid)
     data = await _get_duck_cycle_state(bot)
     room_state = data.get(room_jid, {})
 
@@ -208,13 +531,15 @@ async def _load_room_cycle(bot, room_jid: str):
         message_count = 0
 
     if next_threshold <= 0:
-        next_threshold = _get_random_threshold()
+        next_threshold = _get_random_threshold(settings)
 
     MESSAGE_COUNTS[room_jid] = message_count
     NEXT_DUCK_THRESHOLDS[room_jid] = next_threshold
 
 
-async def _save_room_cycle(bot, room_jid: str):
+async def _save_room_cycle(bot, room_jid: str, settings=None):
+    if settings is None:
+        settings = await _get_room_duck_settings(bot, room_jid)
     store = await get_ducks_store(bot)
     data = await store.get_global(DUCKS_STATE_KEY, default={})
     if not isinstance(data, dict):
@@ -226,16 +551,18 @@ async def _save_room_cycle(bot, room_jid: str):
 
     data[room_jid] = {
         "message_count": message_count,
-        "next_threshold": int(_ensure_threshold(room_jid)),
+        "next_threshold": int(_ensure_threshold(room_jid, settings)),
         "updated_at": time.time(),
     }
     await store.set_global(DUCKS_STATE_KEY, data)
 
 
-async def _reset_room_cycle(bot, room_jid: str):
+async def _reset_room_cycle(bot, room_jid: str, settings=None):
+    if settings is None:
+        settings = await _get_room_duck_settings(bot, room_jid)
     MESSAGE_COUNTS[room_jid] = 0
-    NEXT_DUCK_THRESHOLDS[room_jid] = _get_random_threshold()
-    await _save_room_cycle(bot, room_jid)
+    NEXT_DUCK_THRESHOLDS[room_jid] = _get_random_threshold(settings)
+    await _save_room_cycle(bot, room_jid, settings=settings)
 
 
 async def _get_daily_duck_data(bot):
@@ -388,9 +715,11 @@ async def _get_user_stats(bot, target: str):
     return totals if found else None
 
 
-async def _expire_duck(bot, room_jid):
+async def _expire_duck(bot, room_jid, timeout_seconds=None):
     try:
-        await asyncio.sleep(DUCK_TIMEOUT)
+        if timeout_seconds is None:
+            timeout_seconds = int(_default_duck_settings()["timeout"])
+        await asyncio.sleep(timeout_seconds)
 
         if room_jid not in ACTIVE_DUCKS:
             return
@@ -426,15 +755,17 @@ async def _spawn_duck_after_delay(bot, room_jid, delay):
         if room_jid not in PENDING_DUCKS:
             return
 
+        settings = await _get_room_duck_settings(bot, room_jid)
+        max_ducks_per_day = int(settings["max_ducks_per_day"])
         daily_count = await _get_daily_duck_count(bot, room_jid)
-        if MAX_DUCKS_PER_DAY > 0 and daily_count >= MAX_DUCKS_PER_DAY:
+        if max_ducks_per_day > 0 and daily_count >= max_ducks_per_day:
             log.info("[DUCKS] Daily duck limit reached in %s", room_jid)
-            await _reset_room_cycle(bot, room_jid)
+            await _reset_room_cycle(bot, room_jid, settings=settings)
             return
 
         PENDING_DUCKS.discard(room_jid)
         ACTIVE_DUCKS[room_jid] = time.time()
-        await _reset_room_cycle(bot, room_jid)
+        await _reset_room_cycle(bot, room_jid, settings=settings)
 
         await _increment_daily_duck_count(bot, room_jid)
 
@@ -442,10 +773,11 @@ async def _spawn_duck_after_delay(bot, room_jid, delay):
         if old_expire:
             old_expire.cancel()
 
-        if DUCK_TIMEOUT > 0:
+        timeout_seconds = int(settings["timeout"])
+        if timeout_seconds > 0:
             EXPIRE_TASKS[room_jid] = create_plugin_task(bot,
                 "ducks",
-                _expire_duck(bot, room_jid),
+                _expire_duck(bot, room_jid, timeout_seconds),
                 name=f"duck-expire-{room_jid}",
             )
 
@@ -471,15 +803,19 @@ async def _spawn_duck_after_delay(bot, room_jid, delay):
         SPAWN_TASKS.pop(room_jid, None)
 
 
-async def _maybe_schedule_duck(bot, room_jid):
+async def _maybe_schedule_duck(bot, room_jid, settings=None):
     if room_jid in ACTIVE_DUCKS or room_jid in PENDING_DUCKS:
         return
 
-    if room_jid not in NEXT_DUCK_THRESHOLDS:
-        await _load_room_cycle(bot, room_jid)
+    if settings is None:
+        settings = await _get_room_duck_settings(bot, room_jid)
 
+    if room_jid not in NEXT_DUCK_THRESHOLDS:
+        await _load_room_cycle(bot, room_jid, settings=settings)
+
+    max_ducks_per_day = int(settings["max_ducks_per_day"])
     daily_count = await _get_daily_duck_count(bot, room_jid)
-    if MAX_DUCKS_PER_DAY > 0 and daily_count >= MAX_DUCKS_PER_DAY:
+    if max_ducks_per_day > 0 and daily_count >= max_ducks_per_day:
         return
 
     if MESSAGE_COUNTS[room_jid] == -1:
@@ -487,21 +823,21 @@ async def _maybe_schedule_duck(bot, room_jid):
 
     MESSAGE_COUNTS[room_jid] += 1
 
-    threshold = _ensure_threshold(room_jid)
+    threshold = _ensure_threshold(room_jid, settings)
     if (
         MESSAGE_COUNTS[room_jid] % DUCK_STATE_SAVE_EVERY == 0
         or MESSAGE_COUNTS[room_jid] >= threshold
     ):
-        await _save_room_cycle(bot, room_jid)
+        await _save_room_cycle(bot, room_jid, settings=settings)
 
     if MESSAGE_COUNTS[room_jid] < threshold:
         return
 
-    if random.randint(1, DUCK_SPAWN_CHANCE) != 1:
+    if random.randint(1, int(settings["spawn_chance"])) != 1:
         return
 
     MESSAGE_COUNTS[room_jid] = -1
-    await _save_room_cycle(bot, room_jid)
+    await _save_room_cycle(bot, room_jid, settings=settings)
 
     delay = random.randint(5, 20)
     PENDING_DUCKS.add(room_jid)
@@ -641,14 +977,22 @@ async def _subcommand(bot, msg, sub, args, room_jid):
     "duck",
     role=Role.USER,
     short="Start or interact with the duck game.",
-    usage="{prefix}duck <on|off|status|befriend|trap|bang|friends|top|enemies|stats [jid|nickname]>",
+    usage=(
+        "{prefix}duck <on|off|status|config|befriend|trap|bang|friends|top|"
+        "enemies|stats [jid|nickname]>"
+    ),
     subcommands=[
         help_subcommand(
             "befriend",
             "{prefix}duck befriend",
             "Befriend the active duck before it leaves.",
             aliases=("bef",),
-            examples=[help_example("{prefix}duck befriend", "Attempt to befriend the current room duck.")],
+            examples=[
+                help_example(
+                    "{prefix}duck befriend",
+                    "Attempt to befriend the current room duck.",
+                )
+            ],
             context="groupchat",
         ),
         help_subcommand(
@@ -666,29 +1010,73 @@ async def _subcommand(bot, msg, sub, args, room_jid):
             "friends",
             "{prefix}duck friends",
             "List the room's most successful duck friends.",
-            examples=[help_example("{prefix}duck friends", "Show the duck-friend leaderboard.")],
+            examples=[
+                help_example(
+                    "{prefix}duck friends",
+                    "Show the duck-friend leaderboard.",
+                )
+            ],
             context="groupchat",
         ),
         help_subcommand(
             "top",
             "{prefix}duck top",
             "Show the combined duck game leaderboard.",
-            examples=[help_example("{prefix}duck top", "Show the best duck players in the room.")],
+            examples=[
+                help_example(
+                    "{prefix}duck top",
+                    "Show the best duck players in the room.",
+                )
+            ],
             context="groupchat",
         ),
         help_subcommand(
             "enemies",
             "{prefix}duck enemies",
             "List the room's most successful duck trappers.",
-            examples=[help_example("{prefix}duck enemies", "Show the duck-enemy leaderboard.")],
+            examples=[
+                help_example(
+                    "{prefix}duck enemies",
+                    "Show the duck-enemy leaderboard.",
+                )
+            ],
             context="groupchat",
         ),
         help_subcommand(
             "stats",
             "{prefix}duck stats [jid|nickname]",
             "Show duck game statistics for yourself or another player.",
-            examples=[help_example("{prefix}duck stats", "Show your duck game statistics.")],
+            examples=[
+                help_example(
+                    "{prefix}duck stats",
+                    "Show your duck game statistics.",
+                )
+            ],
             context="groupchat",
+        ),
+        help_subcommand(
+            "config",
+            "{prefix}duck config [show|set <setting> <value>|unset <setting>|reset]",
+            "Show or override duck pacing for this room.",
+            examples=[
+                help_example(
+                    "{prefix}duck config",
+                    "Show effective duck settings for this room.",
+                ),
+                help_example(
+                    "{prefix}duck config set min_messages 40",
+                    "Override one room setting.",
+                ),
+                help_example(
+                    "{prefix}duck config unset min_messages",
+                    "Return one setting to the global default.",
+                ),
+                help_example(
+                    "{prefix}duck config reset",
+                    "Remove every room-specific duck override.",
+                ),
+            ],
+            context="MUC PM",
         ),
         *room_toggle_subcommands("duck", "the duck game"),
     ],
@@ -732,6 +1120,9 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
                 expire_task.cancel()
         return
 
+    if await _handle_room_config_command(bot, msg, is_room, args):
+        return
+
     is_muc_pm = _is_muc_pm(msg)
     is_public_room = _is_public_muc(msg, is_room)
 
@@ -756,6 +1147,7 @@ async def duck_command(bot, sender_jid, nick, args, msg, is_room):
             (
                 f"🦆 Usage: {config.get('prefix', ',')}duck "
                 "befriend|trap|bang|friends|top|enemies|stats [jid|nickname]"
+                " (room settings: duck config in MUC PM)"
             ),
         )
         return
@@ -832,12 +1224,13 @@ async def on_message(bot, msg):
         if msg.get("type") != "groupchat":
             return
 
-        if not COUNT_COMMAND_MESSAGES:
+        room_jid = msg["from"].bare
+        settings = await _get_room_duck_settings(bot, room_jid)
+
+        if not bool(settings["count_commands"]):
             prefix = config.get("prefix", ",")
             if body.startswith(prefix):
                 return
-
-        room_jid = msg["from"].bare
 
         if not await _is_enabled_for_room(bot, DUCKS_KEY, "ducks", room_jid):
             return
@@ -846,7 +1239,7 @@ async def on_message(bot, msg):
         if bot_nick and bot_nick == msg.get("mucnick"):
             return
 
-        await _maybe_schedule_duck(bot, room_jid)
+        await _maybe_schedule_duck(bot, room_jid, settings=settings)
 
     except Exception:
         log.exception("[DUCKS] Error in on_message")
@@ -895,6 +1288,7 @@ async def on_unload(bot):
     PENDING_DUCKS.clear()
     MESSAGE_COUNTS.clear()
     NEXT_DUCK_THRESHOLDS.clear()
+    ROOM_CONFIG_CACHE.clear()
 
     log.info("[DUCKS] Plugin unloaded")
 
@@ -904,10 +1298,7 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
     target = str(room_jid or "").split("/", 1)[0].strip().lower()
     summary = {"data": 0, "tasks": 0, "runtime": 0}
 
-    for mapping_name, mapping in (
-        ("spawn", SPAWN_TASKS),
-        ("expire", EXPIRE_TASKS),
-    ):
+    for mapping in (SPAWN_TASKS, EXPIRE_TASKS):
         task = mapping.pop(room_jid, None)
         if task and not task.done():
             task.cancel()
@@ -917,12 +1308,19 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
         if room_jid in mapping:
             mapping.pop(room_jid, None)
             summary["runtime"] += 1
+    ROOM_CONFIG_CACHE.pop(target, None)
     if room_jid in PENDING_DUCKS:
         PENDING_DUCKS.discard(room_jid)
         summary["runtime"] += 1
 
     store = await get_ducks_store(bot)
-    for key in (DUCKS_INDEX_KEY, DUCKS_LAST_KEY, DUCKS_DAILY_KEY, DUCKS_STATE_KEY):
+    for key in (
+        DUCKS_INDEX_KEY,
+        DUCKS_LAST_KEY,
+        DUCKS_DAILY_KEY,
+        DUCKS_STATE_KEY,
+        DUCKS_ROOM_CONFIG_KEY,
+    ):
         state = await store.get_global(key, default={})
         if not isinstance(state, dict):
             continue

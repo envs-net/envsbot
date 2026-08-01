@@ -345,3 +345,25 @@ def test_runtime_refresh_updates_xmpp_compliance_limit(monkeypatch):
 
     assert xmpp.XMPP_COMPLIANCE_MAX_READ_BYTES == 131072
     assert any("plugins.xmpp" in line for line in refreshed)
+
+
+def test_duck_runtime_values_refresh_all_global_defaults():
+    values = runtime._duck_values({
+        "ducks": {
+            "min_messages": "40",
+            "max_messages": "20",
+            "spawn_chance": "7",
+            "max_ducks_per_day": "0",
+            "timeout": "300",
+            "count_commands": "yes",
+            "state_save_every": "5",
+        }
+    })
+
+    assert values["DEFAULT_MIN_MESSAGES"] == 40
+    assert values["DEFAULT_MAX_MESSAGES"] == 40
+    assert values["DUCK_SPAWN_CHANCE"] == 7
+    assert values["MAX_DUCKS_PER_DAY"] == 0
+    assert values["DUCK_TIMEOUT"] == 300
+    assert values["COUNT_COMMAND_MESSAGES"] is True
+    assert values["DUCK_STATE_SAVE_EVERY"] == 5

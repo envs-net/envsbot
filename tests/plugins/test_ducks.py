@@ -73,6 +73,7 @@ def clear_ducks_state():
     ducks.NEXT_DUCK_THRESHOLDS.clear()
     ducks.SPAWN_TASKS.clear()
     ducks.EXPIRE_TASKS.clear()
+    ducks.ROOM_CONFIG_CACHE.clear()
     yield
     ducks.ACTIVE_DUCKS.clear()
     ducks.PENDING_DUCKS.clear()
@@ -80,6 +81,7 @@ def clear_ducks_state():
     ducks.NEXT_DUCK_THRESHOLDS.clear()
     ducks.SPAWN_TASKS.clear()
     ducks.EXPIRE_TASKS.clear()
+    ducks.ROOM_CONFIG_CACHE.clear()
 
 
 def true_func(*a, **k):
@@ -399,7 +401,7 @@ async def test_duck_cycle_state_helpers_persist_and_sanitize(monkeypatch):
     bot.ducks_store._globals[ducks.DUCKS_STATE_KEY] = {
         room: {"message_count": "-1", "next_threshold": "bad"}
     }
-    monkeypatch.setattr(ducks, "_get_random_threshold", lambda: 7)
+    monkeypatch.setattr(ducks, "_get_random_threshold", lambda settings=None: 7)
 
     await ducks._load_room_cycle(bot, room)
     assert ducks.MESSAGE_COUNTS[room] == 0
@@ -436,7 +438,7 @@ async def test_maybe_schedule_duck_skips_active_pending_daily_limit_and_schedule
     room = "room@conf"
     calls = []
 
-    async def fake_load(bot_arg, room_arg):
+    async def fake_load(bot_arg, room_arg, settings=None):
         calls.append(("load", room_arg))
         ducks.MESSAGE_COUNTS[room_arg] = 0
         ducks.NEXT_DUCK_THRESHOLDS[room_arg] = 3
@@ -471,7 +473,7 @@ async def test_maybe_schedule_duck_counts_saves_and_schedules(monkeypatch):
     saved_counts = []
     created = []
 
-    async def fake_save(bot_arg, room_arg):
+    async def fake_save(bot_arg, room_arg, settings=None):
         saved_counts.append(ducks.MESSAGE_COUNTS[room_arg])
 
     def fake_create_task(bot_arg, plugin_name, coro, name=None):
@@ -512,7 +514,7 @@ async def test_spawn_duck_after_delay_limit_success_and_cleanup(monkeypatch):
     old_expire = types.SimpleNamespace(cancelled=False)
     old_expire.cancel = lambda: setattr(old_expire, "cancelled", True)
 
-    async def fake_reset(bot_arg, room_arg):
+    async def fake_reset(bot_arg, room_arg, settings=None):
         reset_calls.append(room_arg)
 
     async def fake_increment(bot_arg, room_arg):
@@ -585,12 +587,13 @@ async def test_cleanup_room_state_removes_duck_runtime_tasks_and_store():
     ducks.MESSAGE_COUNTS[other] = 1
 
     for key in (ducks.DUCKS_INDEX_KEY, ducks.DUCKS_LAST_KEY,
-                ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY):
+                ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY,
+                ducks.DUCKS_ROOM_CONFIG_KEY):
         bot.ducks_store._globals[key] = {"Room@Conf": {"value": key}, other: {}}
 
     summary = await ducks.cleanup_room_state(bot, room)
 
-    assert summary == {"data": 4, "tasks": 1, "runtime": 4}
+    assert summary == {"data": 5, "tasks": 1, "runtime": 4}
     assert spawn_task.cancelled is True
     assert expire_task.cancelled is False
     assert room not in ducks.SPAWN_TASKS
@@ -601,7 +604,8 @@ async def test_cleanup_room_state_removes_duck_runtime_tasks_and_store():
     assert room not in ducks.NEXT_DUCK_THRESHOLDS
     assert ducks.MESSAGE_COUNTS[other] == 1
     for key in (ducks.DUCKS_INDEX_KEY, ducks.DUCKS_LAST_KEY,
-                ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY):
+                ducks.DUCKS_DAILY_KEY, ducks.DUCKS_STATE_KEY,
+                ducks.DUCKS_ROOM_CONFIG_KEY):
         assert bot.ducks_store._globals[key] == {other: {}}
 
 class _PendingTask:
@@ -644,3 +648,169 @@ async def test_ducks_runtime_state_global_and_room():
         "expire_tasks": 1,
         "tracked_rooms": 1,
     }
+
+
+def _medium_settings(**overrides):
+    settings = {
+        "min_messages": 150,
+        "max_messages": 500,
+        "spawn_chance": 20,
+        "max_ducks_per_day": 3,
+        "timeout": 0,
+        "count_commands": False,
+    }
+    settings.update(overrides)
+    return settings
+
+
+@pytest.mark.asyncio
+async def test_room_duck_settings_merge_persistent_overrides_and_cache():
+    bot = DummyBot()
+    room = "Room@Conf"
+    bot.ducks_store._globals[ducks.DUCKS_ROOM_CONFIG_KEY] = {
+        "ROOM@CONF": {
+            "min_messages": "40",
+            "max_messages": 150,
+            "spawn_chance": "10",
+            "count_commands": "true",
+            "unknown": 99,
+        }
+    }
+
+    settings = await ducks._get_room_duck_settings(bot, room)
+
+    assert settings == _medium_settings(
+        min_messages=40,
+        max_messages=150,
+        spawn_chance=10,
+        count_commands=True,
+    )
+    bot.ducks_store._globals[ducks.DUCKS_ROOM_CONFIG_KEY]["ROOM@CONF"][
+        "min_messages"
+    ] = 99
+    assert (await ducks._get_room_duck_settings(bot, room))["min_messages"] == 40
+
+
+@pytest.mark.asyncio
+async def test_duck_command_routes_room_config_from_muc_pm(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(groupchat=False)
+
+    async def allowed(*args, **kwargs):
+        return True, "room@conf", None
+
+    monkeypatch.setattr(ducks, "handle_room_toggle_command", AsyncMock(return_value=False))
+    monkeypatch.setattr(ducks, "muc_pm_sender_can_manage_room", allowed)
+    monkeypatch.setattr(
+        ducks,
+        "_reset_room_cycle_after_config_change",
+        AsyncMock(),
+    )
+
+    await ducks.duck_command(
+        bot,
+        "sender@example.test",
+        "Owner",
+        ["config", "set", "timeout", "300"],
+        msg,
+        False,
+    )
+
+    assert bot.ducks_store._globals[ducks.DUCKS_ROOM_CONFIG_KEY] == {
+        "room@conf": {"timeout": 300}
+    }
+    assert "timeout set to 300" in bot._replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_duck_room_config_command_set_unset_reset(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(groupchat=False)
+
+    async def allowed(*args, **kwargs):
+        return True, "room@conf", None
+
+    monkeypatch.setattr(ducks, "muc_pm_sender_can_manage_room", allowed)
+    monkeypatch.setattr(ducks, "_reset_room_cycle_after_config_change", AsyncMock())
+
+    assert await ducks._handle_room_config_command(
+        bot, msg, False, ["config", "set", "min_messages", "40"]
+    )
+    stored = bot.ducks_store._globals[ducks.DUCKS_ROOM_CONFIG_KEY]["room@conf"]
+    assert stored == {"min_messages": 40}
+    assert "min_messages set to 40" in bot._replies[-1][0]
+
+    await ducks._handle_room_config_command(bot, msg, False, ["config"])
+    assert "min_messages: 40 (room override)" in bot._replies[-1][0]
+    assert "spawn_chance: 1 in 20 (global default)" in bot._replies[-1][0]
+    assert ",duck config set|unset|reset" in bot._replies[-1][0]
+
+    await ducks._handle_room_config_command(
+        bot, msg, False, ["config", "unset", "min_messages"]
+    )
+    assert bot.ducks_store._globals[ducks.DUCKS_ROOM_CONFIG_KEY] == {}
+
+    await ducks._handle_room_config_command(
+        bot, msg, False, ["config", "set", "max_ducks_per_day", "2"]
+    )
+    await ducks._handle_room_config_command(bot, msg, False, ["config", "reset"])
+    assert bot.ducks_store._globals[ducks.DUCKS_ROOM_CONFIG_KEY] == {}
+    assert "All duck settings reset" in bot._replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_duck_room_config_command_rejects_invalid_values_and_permissions(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(groupchat=False)
+
+    async def denied(*args, **kwargs):
+        return False, "room@conf", "⛔ no"
+
+    monkeypatch.setattr(ducks, "muc_pm_sender_can_manage_room", denied)
+    await ducks._handle_room_config_command(bot, msg, False, ["config"])
+    assert bot._replies[-1][0] == "⛔ no"
+
+    async def allowed(*args, **kwargs):
+        return True, "room@conf", None
+
+    monkeypatch.setattr(ducks, "muc_pm_sender_can_manage_room", allowed)
+    await ducks._handle_room_config_command(
+        bot, msg, False, ["config", "set", "spawn_chance", "0"]
+    )
+    assert "must be at least 1" in bot._replies[-1][0]
+
+    await ducks._handle_room_config_command(
+        bot, msg, False, ["config", "set", "min_messages", "600"]
+    )
+    assert "max_messages must be greater" in bot._replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_on_message_uses_room_count_commands_override(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    msg.get = lambda key, default=None: {
+        "body": ",duck stats",
+        "from": msg.from_,
+        "type": "groupchat",
+        "mucnick": "alice",
+    }.get(key, default)
+    schedule = AsyncMock()
+    monkeypatch.setattr(ducks, "_maybe_schedule_duck", schedule)
+    monkeypatch.setattr(ducks, "_is_enabled_for_room", AsyncMock(return_value=True))
+
+    monkeypatch.setattr(
+        ducks,
+        "_get_room_duck_settings",
+        AsyncMock(return_value=_medium_settings(count_commands=False)),
+    )
+    await ducks.on_message(bot, msg)
+    schedule.assert_not_awaited()
+
+    monkeypatch.setattr(
+        ducks,
+        "_get_room_duck_settings",
+        AsyncMock(return_value=_medium_settings(count_commands=True)),
+    )
+    await ducks.on_message(bot, msg)
+    schedule.assert_awaited_once()

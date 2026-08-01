@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `fun`
 
+## Overview
+
 XKCD comic fetcher and broadcaster with full indexing
 
 ## Commands

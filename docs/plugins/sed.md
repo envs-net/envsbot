@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `tools`
 
+## Overview
+
 Message correction using sed-like syntax
 
 ## Commands

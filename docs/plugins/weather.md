@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `info`
 
+## Overview
+
 Gives weather according to users location or an explicit city/ZIP code
 
 ## Commands

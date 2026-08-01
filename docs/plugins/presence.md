@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `core`
 Category: `info`
 
+## Overview
+
 Bot presence and status management
 
 ## Commands

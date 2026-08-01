@@ -161,3 +161,27 @@ def test_generate_plugin_doc_renders_structured_help_and_described_examples():
     assert "Description: Delete a pending invitation." in generated
     assert "Aliases: `,rooms invite del`, `,rooms invite remove`, `,rooms invite rm`" in generated
     assert "`,rooms invite delete 7` — Delete pending invitation 7." in generated
+
+
+def test_generated_plugin_docs_start_with_overview_sections():
+    plugin_docs = generate_plugin_docs()
+
+    assert plugin_docs
+    detailed_docs = {name: text for name, text in plugin_docs.items() if name != "README.md"}
+    assert detailed_docs
+    assert all("\n## Overview\n" in text for text in detailed_docs.values())
+
+
+def test_generated_ducks_docs_include_room_profiles_and_overrides():
+    ducks_doc = generate_plugin_docs()["ducks.md"]
+
+    assert "## Duck pacing and configuration" in ducks_doc
+    assert "### Example for a small or quiet room" in ducks_doc
+    assert "### Example for a large or very active room" in ducks_doc
+    assert '"min_messages": 150' in ducks_doc
+    assert '"min_messages": 40' in ducks_doc
+    assert '"min_messages": 500' in ducks_doc
+    assert "`,duck config set min_messages 40`" in ducks_doc
+    assert "`,duck config reset`" in ducks_doc
+    assert "state_save_every" in ducks_doc
+    assert "cannot be overridden per room" in ducks_doc

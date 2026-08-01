@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `info`
 
+## Overview
+
 RSS/Atom feed watcher and poster
 
 ## RSS templates

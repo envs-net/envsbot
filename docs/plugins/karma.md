@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `fun`
 
+## Overview
+
 Room-local karma tracking with nick++ / nick--
 
 ## Commands

@@ -87,7 +87,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `users` | `core` | `core` | User management with caching, nick lookup and logging | [`docs/plugins/users.md`](plugins/users.md) |
 | `birthday_notify` | `plugins` | `info` | Automatic birthday notifications in rooms (opt-in per room) | [`docs/plugins/birthday_notify.md`](plugins/birthday_notify.md) |
 | `dice` | `plugins` | `games` | Roll dice with optional modifiers and success conditions. | [`docs/plugins/dice.md`](plugins/dice.md) |
-| `ducks` | `plugins` | `games` | Duck game for MUCs with room toggles and leaderboards | [`docs/plugins/ducks.md`](plugins/ducks.md) |
+| `ducks` | `plugins` | `games` | Spawns ducks after room activity so users can befriend or trap them, with persistent room leaderboards and configurable pacing. | [`docs/plugins/ducks.md`](plugins/ducks.md) |
 | `idlerpg` | `plugins` | `games` | IdleRPG game for MUCs, inspired by the classic IRC game | [`docs/plugins/idlerpg.md`](plugins/idlerpg.md) |
 | `info` | `plugins` | `info` | Wikipedia, Fediverse, Urban Dictionary and acronym lookup. | [`docs/plugins/info.md`](plugins/info.md) |
 | `karma` | `plugins` | `fun` | Room-local karma tracking with nick++ / nick-- | [`docs/plugins/karma.md`](plugins/karma.md) |

@@ -9,6 +9,8 @@ python scripts/generate_commands_md.py
 Source: `plugins`
 Category: `info`
 
+## Overview
+
 Automatic birthday notifications in rooms (opt-in per room)
 
 ## Commands
