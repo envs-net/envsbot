@@ -175,9 +175,6 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
             'KARMA_DELAY_SECONDS = 10',
             'TELL_DELIVERY_DELAY_SECONDS = 2',
             'XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.2',
-            'ROOM_REJOIN_ENABLED = False',
-            'ROOM_REJOIN_CHECK_INTERVAL_SECONDS = 90',
-            'ROOM_REJOIN_MAX_BACKOFF_SECONDS = 900',
             'ROOM_PLUGIN_DEFAULTS = {"pin": False, "xkcd": True}',
             'BACKUP_DIR = "data/backups"',
             'BACKUP_KEEP = 8',
@@ -204,9 +201,6 @@ def test_load_config_maps_operator_tuning_keys(tmp_path, monkeypatch):
     assert result["karma_delay_seconds"] == 10
     assert result["tell_delivery_delay_seconds"] == 2
     assert result["xkcd_index_request_delay_seconds"] == 0.2
-    assert result["room_rejoin_enabled"] is False
-    assert result["room_rejoin_check_interval_seconds"] == 90
-    assert result["room_rejoin_max_backoff_seconds"] == 900
     assert result["room_plugin_defaults"]["pin"] is False
     assert result["room_plugin_defaults"]["xkcd"] is True
     assert result["room_plugin_defaults"]["dice"] is True

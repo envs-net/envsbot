@@ -38,9 +38,6 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.TRANSLATE_MAX_RESPONSE_BYTES > 0
     assert sample.MESSAGE_CACHE_SIZE > 0
     assert sample.XKCD_CHECK_INTERVAL > 0
-    assert sample.ROOM_REJOIN_ENABLED is True
-    assert sample.ROOM_REJOIN_CHECK_INTERVAL_SECONDS == 60
-    assert sample.ROOM_REJOIN_MAX_BACKOFF_SECONDS == 1800
     assert sample.ROOM_PLUGIN_DEFAULTS == {
         "birthday_notify": False,
         "dice": True,

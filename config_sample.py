@@ -133,17 +133,6 @@ COMMAND_RATE_LIMIT_NOTIFY_COOLDOWN_SECONDS = 10.0
 COMMAND_RATE_LIMIT_BYPASS_ROLE = "moderator"
 
 
-# ================= ROOM JOIN HEALTH =================
-
-# Periodically compare autojoin rooms with the confirmed XEP-0045 runtime
-# state. Missing memberships are repaired automatically with exponential
-# backoff. Intentional `,rooms leave` actions remain left until an explicit
-# join/sync or the next bot restart.
-ROOM_REJOIN_ENABLED = True
-ROOM_REJOIN_CHECK_INTERVAL_SECONDS = 60
-ROOM_REJOIN_MAX_BACKOFF_SECONDS = 1800
-
-
 # ================= HTTP DEFAULTS =================
 
 # Generic HTTP timeout and User-Agent used by plugins unless a plugin-specific

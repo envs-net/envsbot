@@ -363,10 +363,27 @@ async def test_on_unload_leaves_rooms_and_preserves_reload_snapshot(fake_bot):
     assert rooms.JOINED_ROOMS == {}
 
 
+@pytest.mark.parametrize(
+    ("failures", "expected_delay"),
+    [
+        (1, 60.0),
+        (2, 120.0),
+        (3, 240.0),
+        (4, 300.0),
+        (5, 300.0),
+        (99, 300.0),
+    ],
+)
+def test_room_rejoin_backoff_uses_fixed_retry_schedule(
+    failures,
+    expected_delay,
+):
+    assert rooms_lifecycle._rejoin_backoff(failures) == expected_delay
+
+
 @pytest.mark.asyncio
 async def test_autojoin_timeout_is_retried_without_phantom_room_state(
     fake_bot,
-    monkeypatch,
 ):
     room_jid = "news@conference.example.org"
     fake_bot.db.rooms.list = AsyncMock(
@@ -375,12 +392,6 @@ async def test_autojoin_timeout_is_retried_without_phantom_room_state(
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock(
         side_effect=TimeoutError()
     )
-    monkeypatch.setitem(
-        rooms_lifecycle.config,
-        "room_rejoin_check_interval_seconds",
-        60,
-    )
-
     await rooms.autojoin_rooms(fake_bot)
 
     assert room_jid not in rooms.JOINED_ROOMS
@@ -396,7 +407,6 @@ async def test_autojoin_timeout_is_retried_without_phantom_room_state(
 @pytest.mark.asyncio
 async def test_reconcile_autojoin_rooms_rejoins_missing_membership(
     fake_bot,
-    monkeypatch,
 ):
     room_jid = "news@conference.example.org"
     fake_bot.db.rooms.list = AsyncMock(
@@ -406,8 +416,6 @@ async def test_reconcile_autojoin_rooms_rejoins_missing_membership(
         return_value=[]
     )
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
-    monkeypatch.setitem(rooms_lifecycle.config, "room_rejoin_enabled", True)
-
     summary = await rooms.reconcile_autojoin_rooms(fake_bot, now=100)
 
     assert summary == {

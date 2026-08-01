@@ -81,8 +81,6 @@ def _validate_numeric_ranges(cfg, errors):
         "poll_max_options",
         "poll_max_question_len",
         "reminder_max_age_days",
-        "room_rejoin_check_interval_seconds",
-        "room_rejoin_max_backoff_seconds",
         "rss_global_query_interval",
         "rss_broken_error_threshold",
         "rss_list_page_size",

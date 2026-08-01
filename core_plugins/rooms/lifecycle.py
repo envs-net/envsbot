@@ -21,43 +21,18 @@ from .state import JOINED_ROOMS, _LEAVING_ROOMS, _jid_bare, _maybe_await_result,
 
 _ROOM_HEALTH_TASK = None
 _ROOM_HEALTH_TASK_NAME = "rooms-autojoin-health"
+_ROOM_HEALTH_CHECK_INTERVAL_SECONDS = 60.0
+_ROOM_REJOIN_BACKOFF_SECONDS = (60.0, 120.0, 240.0, 300.0)
 _REJOIN_STATE: dict[str, dict[str, object]] = {}
 
 
-def _room_rejoin_interval() -> float:
-    """Return the configured room membership check interval."""
-    try:
-        return max(
-            5.0,
-            float(config.get("room_rejoin_check_interval_seconds", 60) or 60),
-        )
-    except (TypeError, ValueError):
-        return 60.0
-
-
-def _room_rejoin_max_backoff() -> float:
-    """Return the maximum delay between failed rejoin attempts."""
-    try:
-        return max(
-            _room_rejoin_interval(),
-            float(config.get("room_rejoin_max_backoff_seconds", 1800) or 1800),
-        )
-    except (TypeError, ValueError):
-        return 1800.0
-
-
-def _room_rejoin_enabled() -> bool:
-    """Return whether automatic room membership repair is enabled."""
-    return bool(config.get("room_rejoin_enabled", True))
-
-
 def _rejoin_backoff(failures: int) -> float:
-    """Return exponential rejoin backoff for *failures*."""
-    exponent = max(0, int(failures) - 1)
-    return min(
-        _room_rejoin_max_backoff(),
-        _room_rejoin_interval() * (2**exponent),
+    """Return the fixed retry delay for a consecutive join failure."""
+    index = min(
+        max(1, int(failures)) - 1,
+        len(_ROOM_REJOIN_BACKOFF_SECONDS) - 1,
     )
+    return _ROOM_REJOIN_BACKOFF_SECONDS[index]
 
 
 def _record_join_failure(
@@ -221,9 +196,6 @@ async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str
         "deferred": 0,
         "intentional": 0,
     }
-    if not _room_rejoin_enabled():
-        return summary
-
     muc = bot.plugin["xep_0045"]
     rooms_db = bot.db.rooms
     if muc is None or rooms_db is None:
@@ -312,7 +284,7 @@ def _touch_room_health_task(bot) -> None:
 async def room_join_health_loop(bot) -> None:
     """Periodically verify autojoin coverage and repair missing rooms."""
     while True:
-        await asyncio.sleep(_room_rejoin_interval())
+        await asyncio.sleep(_ROOM_HEALTH_CHECK_INTERVAL_SECONDS)
         try:
             summary = await reconcile_autojoin_rooms(bot)
         except asyncio.CancelledError:
