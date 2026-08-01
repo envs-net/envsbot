@@ -1,11 +1,178 @@
 """Split module for core_plugins/rooms.py: lifecycle."""
 
-from functools import partial
-from utils.config import config
+from __future__ import annotations
 
-from .invites import cleanup_expired_room_invites, load_pending_room_invites, on_room_invite, on_room_invite_message
+import asyncio
+import time
+from functools import partial
+
+from utils.config import config
+from utils.task_supervisor import create_plugin_task
+
+from .invites import (
+    cleanup_expired_room_invites,
+    load_pending_room_invites,
+    on_room_invite,
+    on_room_invite_message,
+)
 from .presence import on_muc_presence
-from .state import JOINED_ROOMS, _LEAVING_ROOMS, log
+from .state import JOINED_ROOMS, _LEAVING_ROOMS, _jid_bare, _maybe_await_result, log
+
+
+_ROOM_HEALTH_TASK = None
+_ROOM_HEALTH_TASK_NAME = "rooms-autojoin-health"
+_REJOIN_STATE: dict[str, dict[str, object]] = {}
+
+
+def _room_rejoin_interval() -> float:
+    """Return the configured room membership check interval."""
+    try:
+        return max(
+            5.0,
+            float(config.get("room_rejoin_check_interval_seconds", 60) or 60),
+        )
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def _room_rejoin_max_backoff() -> float:
+    """Return the maximum delay between failed rejoin attempts."""
+    try:
+        return max(
+            _room_rejoin_interval(),
+            float(config.get("room_rejoin_max_backoff_seconds", 1800) or 1800),
+        )
+    except (TypeError, ValueError):
+        return 1800.0
+
+
+def _room_rejoin_enabled() -> bool:
+    """Return whether automatic room membership repair is enabled."""
+    return bool(config.get("room_rejoin_enabled", True))
+
+
+def _rejoin_backoff(failures: int) -> float:
+    """Return exponential rejoin backoff for *failures*."""
+    exponent = max(0, int(failures) - 1)
+    return min(
+        _room_rejoin_max_backoff(),
+        _room_rejoin_interval() * (2**exponent),
+    )
+
+
+def _record_join_failure(
+    room_jid: str,
+    error: BaseException,
+    *,
+    now: float | None = None,
+) -> float:
+    """Record one failed room join and return its retry delay."""
+    current = _REJOIN_STATE.get(room_jid, {})
+    failures = int(current.get("failures", 0) or 0) + 1
+    delay = _rejoin_backoff(failures)
+    timestamp = time.time() if now is None else float(now)
+    _REJOIN_STATE[room_jid] = {
+        "failures": failures,
+        "next_attempt": timestamp + delay,
+        "last_error": f"{type(error).__name__}: {error}",
+    }
+    return delay
+
+
+def _clear_join_failure(room_jid: str) -> None:
+    """Clear automatic rejoin state after a confirmed join."""
+    _REJOIN_STATE.pop(room_jid, None)
+
+
+def _mark_room_joined(
+    bot,
+    room_jid: str,
+    nick: str,
+    autojoin: bool | None,
+    status,
+) -> None:
+    """Refresh both runtime room mirrors after a successful join."""
+    room_info = JOINED_ROOMS.get(room_jid)
+    if not isinstance(room_info, dict):
+        room_info = {
+            "nick": nick,
+            "autojoin": autojoin,
+            "status": status,
+            "affiliation": "unknown",
+            "role": "unknown",
+            "nicks": {},
+        }
+        JOINED_ROOMS[room_jid] = room_info
+
+    room_info["nick"] = str(room_info.get("nick") or nick)
+    room_info["autojoin"] = autojoin
+    room_info["status"] = status
+    room_info["confirmed"] = True
+    room_info.setdefault("affiliation", "unknown")
+    room_info.setdefault("role", "unknown")
+    room_info.setdefault("nicks", {})
+
+    bot.presence.joined_rooms[room_jid] = str(room_info["nick"])
+    _clear_join_failure(room_jid)
+
+
+async def _join_room(
+    bot,
+    muc,
+    room_jid: str,
+    nick: str,
+    autojoin: bool | None,
+    status,
+) -> None:
+    """Join one room and update all runtime mirrors on success."""
+    _LEAVING_ROOMS.discard(room_jid)
+    await muc.join_muc(
+        room_jid,
+        nick,
+        pshow=bot.presence.status["show"],
+        pstatus=bot.presence.status["status"],
+    )
+    _mark_room_joined(bot, room_jid, nick, autojoin, status)
+
+
+async def _muc_joined_room_snapshot(muc) -> set[str] | None:
+    """Return Slixmpp's current joined-room keys when available."""
+    getter = getattr(muc, "get_joined_rooms", None)
+    if not callable(getter):
+        return None
+    try:
+        joined = await _maybe_await_result(getter())
+    except Exception:
+        log.debug("[ROOMS] Could not read XEP-0045 joined-room state", exc_info=True)
+        return None
+    if not isinstance(joined, (list, tuple, set, frozenset)):
+        return None
+    return {_jid_bare(room) for room in joined if _jid_bare(room)}
+
+
+def _room_join_is_confirmed(
+    bot,
+    room_jid: str,
+    muc_joined_rooms: set[str] | None,
+) -> bool:
+    """Return True when all available runtime mirrors confirm membership."""
+    room_info = JOINED_ROOMS.get(room_jid)
+    if not isinstance(room_info, dict):
+        return False
+
+    presence_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", {})
+    if not isinstance(presence_rooms, dict) or room_jid not in presence_rooms:
+        return False
+
+    runtime_nick = str(room_info.get("nick") or "")
+    presence_nick = str(presence_rooms.get(room_jid) or "")
+    if runtime_nick and presence_nick and runtime_nick != presence_nick:
+        return False
+    if room_info.get("confirmed") is False:
+        return False
+    if muc_joined_rooms is not None and room_jid not in muc_joined_rooms:
+        return False
+    return True
 
 
 async def autojoin_rooms(bot):
@@ -22,70 +189,201 @@ async def autojoin_rooms(bot):
 
     rows = await rooms_db.list()
     for room_jid, nick, autojoin, status in rows:
-        if not autojoin:
+        room_jid = _jid_bare(room_jid)
+        if not autojoin or not room_jid:
             continue
-        _LEAVING_ROOMS.discard(room_jid)
         log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
         try:
-            await muc.join_muc(
+            await _join_room(bot, muc, room_jid, str(nick), autojoin, status)
+        except TimeoutError as exc:
+            delay = _record_join_failure(room_jid, exc)
+            log.warning(
+                "[ROOMS] 🟡️ Autojoin timed out for %s; automatic retry in %ds",
                 room_jid,
-                nick,
-                pshow=bot.presence.status["show"],
-                pstatus=bot.presence.status["status"],
+                int(delay),
             )
-            room_info = JOINED_ROOMS.get(room_jid)
-            if room_info:
-                room_info["autojoin"] = autojoin
-                room_info["status"] = status
-            else:
-                room_info = {
-                    "nick": nick,
-                    "autojoin": autojoin,
-                    "status": status,
-                    "affiliation": "unknown",
-                    "role": "unknown",
-                    "nicks": {},
-                }
-                JOINED_ROOMS[room_jid] = room_info
+        except Exception as exc:
+            delay = _record_join_failure(room_jid, exc)
+            log.exception(
+                "[ROOMS] 🔴 Couldn't join room %s; automatic retry in %ds",
+                room_jid,
+                int(delay),
+            )
 
-            # ``join_muc()`` may deliver our own MUC presence before it
-            # returns. In that case ``on_muc_presence()`` has already created
-            # JOINED_ROOMS and the old ``else``-only update skipped the
-            # PresenceManager mirror. Keep the routing/presence state in sync
-            # after every successful join, regardless of event ordering.
-            runtime_nick = str(room_info.get("nick") or nick)
-            bot.presence.joined_rooms[room_jid] = runtime_nick
+
+async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str, int]:
+    """Repair missing memberships for rooms configured with autojoin enabled."""
+    summary = {
+        "configured": 0,
+        "healthy": 0,
+        "rejoined": 0,
+        "failed": 0,
+        "deferred": 0,
+        "intentional": 0,
+    }
+    if not _room_rejoin_enabled():
+        return summary
+
+    muc = bot.plugin["xep_0045"]
+    rooms_db = bot.db.rooms
+    if muc is None or rooms_db is None:
+        return summary
+
+    rows = await rooms_db.list()
+    autojoin_rows = []
+    for raw_room_jid, nick, autojoin, status in rows:
+        room_jid = _jid_bare(raw_room_jid)
+        if autojoin and room_jid:
+            autojoin_rows.append((room_jid, str(nick), autojoin, status))
+
+    configured_rooms = {row[0] for row in autojoin_rows}
+    summary["configured"] = len(autojoin_rows)
+    for room_jid in tuple(_REJOIN_STATE):
+        if room_jid not in configured_rooms:
+            _REJOIN_STATE.pop(room_jid, None)
+
+    muc_joined_rooms = await _muc_joined_room_snapshot(muc)
+    timestamp = time.time() if now is None else float(now)
+
+    for room_jid, nick, autojoin, status in autojoin_rows:
+        if room_jid in _LEAVING_ROOMS:
+            summary["intentional"] += 1
+            continue
+
+        if _room_join_is_confirmed(bot, room_jid, muc_joined_rooms):
+            summary["healthy"] += 1
+            _clear_join_failure(room_jid)
+            continue
+
+        # Remove incomplete or stale mirrors so delivery code does not treat
+        # the room as usable while a repair attempt is still pending.
+        JOINED_ROOMS.pop(room_jid, None)
+        presence_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", None)
+        if isinstance(presence_rooms, dict):
+            presence_rooms.pop(room_jid, None)
+
+        retry_state = _REJOIN_STATE.get(room_jid, {})
+        next_attempt = float(retry_state.get("next_attempt", 0) or 0)
+        if timestamp < next_attempt:
+            summary["deferred"] += 1
+            continue
+
+        failures = int(retry_state.get("failures", 0) or 0)
+        log.warning(
+            "[ROOMS] 🟡️ Autojoin membership missing for %s; "
+            "attempting rejoin as %s (previous_failures=%d)",
+            room_jid,
+            nick,
+            failures,
+        )
+        try:
+            await _join_room(bot, muc, room_jid, nick, autojoin, status)
+        except TimeoutError as exc:
+            delay = _record_join_failure(room_jid, exc, now=timestamp)
+            summary["failed"] += 1
+            log.warning(
+                "[ROOMS] 🟡️ Rejoin timed out for %s; next retry in %ds",
+                room_jid,
+                int(delay),
+            )
+        except Exception as exc:
+            delay = _record_join_failure(room_jid, exc, now=timestamp)
+            summary["failed"] += 1
+            log.exception(
+                "[ROOMS] 🔴 Rejoin failed for %s; next retry in %ds",
+                room_jid,
+                int(delay),
+            )
+        else:
+            summary["rejoined"] += 1
+            log.info("[ROOMS] ✅ Rejoined autojoin room %s as %s", room_jid, nick)
+
+    return summary
+
+
+def _touch_room_health_task(bot) -> None:
+    """Refresh the supervisor heartbeat for the room health worker."""
+    supervisor = getattr(bot, "tasks", None)
+    heartbeat = getattr(supervisor, "heartbeat", None)
+    if callable(heartbeat):
+        heartbeat("rooms", _ROOM_HEALTH_TASK_NAME)
+
+
+async def room_join_health_loop(bot) -> None:
+    """Periodically verify autojoin coverage and repair missing rooms."""
+    while True:
+        await asyncio.sleep(_room_rejoin_interval())
+        try:
+            summary = await reconcile_autojoin_rooms(bot)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            log.exception("[ROOMS] 🔴 Couldn't join room %s", room_jid)
+            log.exception("[ROOMS] Automatic room membership check failed")
+        else:
+            missing = summary["rejoined"] + summary["failed"] + summary["deferred"]
+            if missing:
+                log.info(
+                    "[ROOMS] Join health: configured=%d healthy=%d rejoined=%d "
+                    "failed=%d deferred=%d intentional=%d",
+                    summary["configured"],
+                    summary["healthy"],
+                    summary["rejoined"],
+                    summary["failed"],
+                    summary["deferred"],
+                    summary["intentional"],
+                )
+        _touch_room_health_task(bot)
+
+
+def start_room_join_health_task(bot):
+    """Ensure the supervised room membership worker is running."""
+    global _ROOM_HEALTH_TASK
+    if _ROOM_HEALTH_TASK is not None and not _ROOM_HEALTH_TASK.done():
+        return _ROOM_HEALTH_TASK
+    _ROOM_HEALTH_TASK = create_plugin_task(
+        bot,
+        "rooms",
+        room_join_health_loop(bot),
+        name=_ROOM_HEALTH_TASK_NAME,
+    )
+    return _ROOM_HEALTH_TASK
+
+
+async def restart_tasks(bot):
+    """Restore the automatic room membership health worker."""
+    start_room_join_health_task(bot)
 
 
 async def on_ready(bot):
-    """Load pending room invites after the database is ready."""
+    """Load pending invites and start automatic room membership repair."""
     await load_pending_room_invites(bot)
     await cleanup_expired_room_invites(bot)
+    start_room_join_health_task(bot)
 
 
 async def on_load(bot):
-
     # --- add event handlers ---
     bot.bot_plugins.register_event(
         "rooms",
         "groupchat_presence",
-        partial(on_muc_presence, bot))
+        partial(on_muc_presence, bot),
+    )
     bot.bot_plugins.register_event(
         "rooms",
         "message",
-        partial(on_room_invite_message, bot))
+        partial(on_room_invite_message, bot),
+    )
     bot.bot_plugins.register_event(
         "rooms",
         "groupchat_invite",
-        partial(on_room_invite, bot))
+        partial(on_room_invite, bot),
+    )
     bot.bot_plugins.register_event(
         "rooms",
         "groupchat_direct_invite",
-        partial(on_room_invite, bot))
+        partial(on_room_invite, bot),
+    )
 
-    # get muc and rooms_db with guard
     muc = bot.plugin["xep_0045"]
     rooms_db = bot.db.rooms
     if muc is None or rooms_db is None:
@@ -96,15 +394,12 @@ async def on_load(bot):
         log.error("[ROOMS] 🔴 missing runtime dependencies: %s", detail)
         raise RuntimeError(f"rooms plugin dependencies unavailable: {detail}")
 
-    # Case 1: reload → restore previous runtime state
     reload_rooms = getattr(bot, "_reload_rooms", None)
-
     if reload_rooms is not None:
         del bot._reload_rooms
-
         for room, data in tuple(reload_rooms.items()):
-            # --- Get room data from DB ---
-            db_room = await rooms_db.get(room)
+            room_jid = _jid_bare(room)
+            db_room = await rooms_db.get(room_jid)
             if db_room:
                 _, db_nick, db_autojoin, db_status = db_room
             else:
@@ -112,47 +407,58 @@ async def on_load(bot):
                 db_autojoin = None
                 db_status = None
 
-            # --- Runtime truth from slixmpp
-            raw_nick = (data.get("nick")
-                        or db_nick
-                        or config.get("nick")
-                        or "envsbot")
-            nick = str(raw_nick)
-
-            # Use runtime state if available, fallback to DB
+            nick = str(
+                data.get("nick")
+                or db_nick
+                or config.get("nick")
+                or "envsbot"
+            )
             autojoin = data.get("autojoin")
             if autojoin is None:
                 autojoin = db_autojoin
-
             status = data.get("status") or db_status or None
 
-            # --- rebuild runtime state ---
-            JOINED_ROOMS[room] = {
-                "nick": nick,
-                "autojoin": autojoin,
-                "status": status,
-                "affiliation": "unknown",
-                "role": "unknown",
-                "nicks": {}
-            }
-
-            await muc.join_muc(
-                room,
-                nick,
-                pshow=bot.presence.status["show"],
-                pstatus=bot.presence.status["status"]
-            )
-
-            bot.presence.joined_rooms[room] = nick
+            try:
+                await _join_room(bot, muc, room_jid, nick, autojoin, status)
+            except Exception as exc:
+                if autojoin:
+                    delay = _record_join_failure(room_jid, exc)
+                    log.warning(
+                        "[ROOMS] Reload join failed for %s; automatic retry in %ds",
+                        room_jid,
+                        int(delay),
+                        exc_info=True,
+                    )
+                else:
+                    log.warning(
+                        "[ROOMS] Reload join failed for non-autojoin room %s",
+                        room_jid,
+                        exc_info=True,
+                    )
     else:
-        # Case 2: normal startup → use config
         await autojoin_rooms(bot)
 
 
 async def on_unload(bot):
+    global _ROOM_HEALTH_TASK
     bot._reload_rooms = dict(JOINED_ROOMS)
 
-    for room_jid, data in tuple(JOINED_ROOMS.items()):
-        bot.plugin["xep_0045"].leave_muc(room_jid, data["nick"])
+    if _ROOM_HEALTH_TASK is not None and not _ROOM_HEALTH_TASK.done():
+        _ROOM_HEALTH_TASK.cancel()
+        try:
+            await _ROOM_HEALTH_TASK
+        except asyncio.CancelledError:
+            pass
+    _ROOM_HEALTH_TASK = None
 
+    for room_jid, data in tuple(JOINED_ROOMS.items()):
+        try:
+            await _maybe_await_result(
+                bot.plugin["xep_0045"].leave_muc(room_jid, data["nick"])
+            )
+        except Exception:
+            log.warning("[ROOMS] Error leaving room %s during unload", room_jid, exc_info=True)
+
+    JOINED_ROOMS.clear()
     bot.presence.joined_rooms.clear()
+    _REJOIN_STATE.clear()

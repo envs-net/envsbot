@@ -397,7 +397,7 @@ async def test_post_entry_to_rooms_awaits_send_and_reports_counts(
 
     assert await rss_formatting._post_entry_to_rooms(
         bot, [joined, failed, absent], "[RSS] entry"
-    ) == (1, 2)
+    ) == (1, 3)
     assert [message["mto"] for message in bot.sent_messages] == [joined, failed]
 
 
@@ -410,6 +410,7 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
     store[rss.RSS_KEY] = {
         url: {"rooms": [room], "users": {}, "last_id": "old-entry"}
     }
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, room, True)
     calls = []
 
     async def fake_post(_bot, _store, rooms, feed_url, context):
@@ -739,6 +740,45 @@ async def test_post_new_entries_retains_cursor_when_room_delivery_fails(
     assert store[rss.RSS_KEY][url]["posted_count"] == 0
     assert "last_posted" not in store[rss.RSS_KEY][url]
 
+
+
+
+@pytest.mark.asyncio
+async def test_post_new_entries_waits_for_all_rooms_before_any_delivery(
+    monkeypatch, make_bot
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/room.xml"
+    joined_room = "joined@conference.example.org"
+    missing_room = "missing@conference.example.org"
+    feed = {
+        "title": "Room Feed",
+        "link": "https://example.org/",
+        "rooms": [joined_room, missing_room],
+        "users": {"alice@example.org": {"role": "trusted"}},
+        "last_id": "old-entry",
+        "posted_count": 0,
+    }
+    store[rss.RSS_KEY] = {url: feed}
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, joined_room, True)
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [joined_room, missing_room],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    # Do not partially deliver and then duplicate successful destinations on
+    # the retry.  The entry is sent once, to every destination, after repair.
+    assert bot.sent_messages == []
+    assert store[rss.RSS_KEY][url]["last_id"] == "old-entry"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 0
 
 @pytest.mark.asyncio
 async def test_post_new_entries_reloads_direct_subscribers_after_fetch(make_bot):

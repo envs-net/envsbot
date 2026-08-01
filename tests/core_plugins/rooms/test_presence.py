@@ -10,6 +10,7 @@ from .helpers import (
     patch,
     pytest,
     rooms,
+    rooms_lifecycle,
 )
 
 
@@ -311,6 +312,7 @@ async def test_on_load_restores_reload_rooms_and_registers_presence_handler(fake
         "affiliation": "unknown",
         "role": "unknown",
         "nicks": {},
+        "confirmed": True,
     }
     assert rooms.JOINED_ROOMS["room2@conf"]["nick"] == "DbNick2"
     assert rooms.JOINED_ROOMS["room2@conf"]["autojoin"] is False
@@ -341,3 +343,115 @@ async def test_on_unload_leaves_rooms_and_preserves_reload_snapshot(fake_bot):
     fake_bot.plugin["xep_0045"].leave_muc.assert_any_call("room1@conf", "BotOne")
     fake_bot.plugin["xep_0045"].leave_muc.assert_any_call("room2@conf", "BotTwo")
     assert fake_bot.presence.joined_rooms == {}
+    assert rooms.JOINED_ROOMS == {}
+
+
+@pytest.mark.asyncio
+async def test_autojoin_timeout_is_retried_without_phantom_room_state(
+    fake_bot,
+    monkeypatch,
+):
+    room_jid = "news@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[(room_jid, "BotNick", True, "online")]
+    )
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock(
+        side_effect=TimeoutError()
+    )
+    monkeypatch.setitem(
+        rooms_lifecycle.config,
+        "room_rejoin_check_interval_seconds",
+        60,
+    )
+
+    await rooms.autojoin_rooms(fake_bot)
+
+    assert room_jid not in rooms.JOINED_ROOMS
+    assert room_jid not in fake_bot.presence.joined_rooms
+    assert rooms_lifecycle._REJOIN_STATE[room_jid]["failures"] == 1
+
+    summary = await rooms.reconcile_autojoin_rooms(fake_bot, now=30)
+
+    assert summary["deferred"] == 1
+    assert fake_bot.plugin["xep_0045"].join_muc.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reconcile_autojoin_rooms_rejoins_missing_membership(
+    fake_bot,
+    monkeypatch,
+):
+    room_jid = "news@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[(room_jid, "BotNick", True, "online")]
+    )
+    fake_bot.plugin["xep_0045"].get_joined_rooms = MagicMock(
+        return_value=[]
+    )
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+    monkeypatch.setitem(rooms_lifecycle.config, "room_rejoin_enabled", True)
+
+    summary = await rooms.reconcile_autojoin_rooms(fake_bot, now=100)
+
+    assert summary == {
+        "configured": 1,
+        "healthy": 0,
+        "rejoined": 1,
+        "failed": 0,
+        "deferred": 0,
+        "intentional": 0,
+    }
+    assert rooms.JOINED_ROOMS[room_jid]["confirmed"] is True
+    assert fake_bot.presence.joined_rooms[room_jid] == "BotNick"
+    fake_bot.plugin["xep_0045"].join_muc.assert_awaited_once_with(
+        room_jid,
+        "BotNick",
+        pshow="chat",
+        pstatus="online",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_autojoin_rooms_keeps_confirmed_membership(
+    fake_bot,
+):
+    room_jid = "news@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[(room_jid, "BotNick", True, "online")]
+    )
+    fake_bot.plugin["xep_0045"].get_joined_rooms = MagicMock(
+        return_value=[room_jid]
+    )
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+    rooms.JOINED_ROOMS[room_jid] = {
+        "nick": "BotNick",
+        "autojoin": True,
+        "status": "online",
+        "confirmed": True,
+        "nicks": {},
+    }
+    fake_bot.presence.joined_rooms[room_jid] = "BotNick"
+
+    summary = await rooms.reconcile_autojoin_rooms(fake_bot, now=100)
+
+    assert summary["healthy"] == 1
+    assert summary["rejoined"] == 0
+    fake_bot.plugin["xep_0045"].join_muc.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_autojoin_rooms_respects_intentional_leave(fake_bot):
+    room_jid = "news@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[(room_jid, "BotNick", True, "online")]
+    )
+    fake_bot.plugin["xep_0045"].get_joined_rooms = MagicMock(
+        return_value=[]
+    )
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+    rooms._LEAVING_ROOMS.add(room_jid)
+
+    summary = await rooms.reconcile_autojoin_rooms(fake_bot, now=100)
+
+    assert summary["intentional"] == 1
+    fake_bot.plugin["xep_0045"].join_muc.assert_not_awaited()

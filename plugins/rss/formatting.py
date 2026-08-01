@@ -232,6 +232,18 @@ async def _post_new_entries(bot, store, url, feed_title,
             entry_date=_entry_date(entry),
         )
 
+        missing_rooms = [
+            room for room in active_rooms if room not in JOINED_ROOMS
+        ]
+        if missing_rooms:
+            log.warning(
+                "[RSS] Deferring %s entry=%s until the bot has rejoined: %s",
+                url,
+                entry_id,
+                ", ".join(missing_rooms),
+            )
+            break
+
         room_delivered, room_attempted = await _post_rss_entry_to_rooms(
             bot, store, active_rooms, url, context
         )
@@ -367,9 +379,13 @@ async def _post_entry_to_rooms(bot, rooms, msg) -> tuple[int, int]:
     delivered = 0
     attempted = 0
     for room in rooms:
-        if room not in JOINED_ROOMS:
-            continue
         attempted += 1
+        if room not in JOINED_ROOMS:
+            log.warning(
+                "[RSS] Room delivery deferred because the bot is not joined: %s",
+                room,
+            )
+            continue
         try:
             message = bot.make_message(
                 mto=room,

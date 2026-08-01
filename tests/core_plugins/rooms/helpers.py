@@ -1,4 +1,5 @@
 import core_plugins.rooms as rooms
+import core_plugins.rooms.lifecycle as rooms_lifecycle
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import types
@@ -59,13 +60,17 @@ def cleanup_joined_rooms():
     """Ensure room runtime globals are clean for each test."""
     orig = dict(rooms.JOINED_ROOMS)
     orig_leaving = set(rooms._LEAVING_ROOMS)
+    orig_rejoin = dict(rooms_lifecycle._REJOIN_STATE)
     rooms.JOINED_ROOMS.clear()
     rooms._LEAVING_ROOMS.clear()
+    rooms_lifecycle._REJOIN_STATE.clear()
     yield
     rooms.JOINED_ROOMS.clear()
     rooms.JOINED_ROOMS.update(orig)
     rooms._LEAVING_ROOMS.clear()
     rooms._LEAVING_ROOMS.update(orig_leaving)
+    rooms_lifecycle._REJOIN_STATE.clear()
+    rooms_lifecycle._REJOIN_STATE.update(orig_rejoin)
 
 
 @pytest.fixture
@@ -201,6 +206,7 @@ class ExplodingMappingPlugin:
 
 __all__ = [
     "rooms",
+    "rooms_lifecycle",
     "pytest",
     "MagicMock",
     "AsyncMock",

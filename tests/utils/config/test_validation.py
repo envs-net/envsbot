@@ -548,3 +548,19 @@ def test_validate_config_rejects_invalid_default_pagination():
         config_mod.validate_config(cfg, require_required_keys=True)
 
     assert "default_pagination: expected 'all' or positive integer" in str(exc.value)
+
+
+def test_validate_config_rejects_invalid_room_rejoin_settings():
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(
+            {
+                "room_rejoin_enabled": "yes",
+                "room_rejoin_check_interval_seconds": 0,
+                "room_rejoin_max_backoff_seconds": -1,
+            }
+        )
+
+    message = str(exc.value)
+    assert "room_rejoin_enabled: expected bool" in message
+    assert "room_rejoin_check_interval_seconds: must be greater than 0" in message
+    assert "room_rejoin_max_backoff_seconds: must be greater than 0" in message

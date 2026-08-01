@@ -165,6 +165,7 @@ async def on_muc_presence(bot, pres):
         # context and directed presence broadcasts. Refresh both from the
         # authoritative self-presence so missing state heals automatically.
         if jid_bare == bot.boundjid.bare:
+            room_info["confirmed"] = True
             if affiliation is not None:
                 room_info["affiliation"] = affiliation
             if role is not None:
