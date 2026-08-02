@@ -64,6 +64,32 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
     }
 
 
+def _public_artifact_catalog() -> list[dict[str, Any]]:
+    """Return the complete public artifact catalog in game-defined order."""
+    catalog: list[dict[str, Any]] = []
+    for raw_item in _dep_constants.UNIQUE_ITEMS:
+        item = dict(raw_item)
+        slot = str(item.get("slot") or "")
+        tier = _dep_items._unique_item_tier(item)
+        catalog_min_level = _dep_items._unique_item_level(item.get("min_level"))
+        catalog.append({
+            "name": str(item.get("name") or ""),
+            "slot": slot,
+            "tier": tier,
+            "min_level": catalog_min_level,
+            "effective_min_level": max(
+                _dep_items._unique_item_level(_dep_config.UNIQUE_ITEM_MIN_LEVEL),
+                catalog_min_level,
+            ),
+            "min_item_level": _dep_items._unique_item_level(item.get("min_item_level")),
+            "max_item_level": _dep_items._unique_item_level(item.get("max_item_level")),
+            "next_upgrade_level": _dep_items._next_unique_upgrade_level(slot, tier),
+            "bonus": str(item.get("bonus") or ""),
+            "bonus_percent": int(item.get("bonus_percent", 0) or 0),
+        })
+    return catalog
+
+
 _PUBLIC_DIRECTORY_ACCESS = 0o055
 _PUBLIC_FILE_ACCESS = 0o044
 
@@ -106,6 +132,7 @@ _ROOT_COMPATIBILITY_EXPORTS = (
     "hall_of_fame.json",
     "events.json",
     "achievements.json",
+    "artifacts.json",
 )
 
 
@@ -310,6 +337,7 @@ def _public_rules() -> dict[str, Any]:
         "logout_penalty": _dep_config.LOGOUT_PENALTY,
         "logout_grace_seconds": _dep_config.LOGOUT_GRACE_SECONDS,
         "max_penalty": _dep_config.MAX_PENALTY,
+        "count_command_messages": _dep_config.COUNT_COMMAND_MESSAGES,
         "map_x": _dep_config.MAP_X,
         "map_y": _dep_config.MAP_Y,
         "map_step_per_second": _dep_config.MAP_STEP_PER_SECOND,
@@ -349,6 +377,17 @@ def _public_rules() -> dict[str, Any]:
         "boss_power_max_factor": _dep_config.BOSS_POWER_MAX_FACTOR,
         "manual_duel_max_distance": _dep_config.MANUAL_DUEL_MAX_DISTANCE,
         "manual_duel_cooldown_seconds": _dep_config.MANUAL_DUEL_COOLDOWN_SECONDS,
+        "battle_win_min_percent": _dep_config.BATTLE_WIN_MIN_PERCENT,
+        "battle_loss_min_percent": _dep_config.BATTLE_LOSS_MIN_PERCENT,
+        "critical_min_percent": _dep_config.CRITICAL_MIN_PERCENT,
+        "critical_max_percent": _dep_config.CRITICAL_MAX_PERCENT,
+        "godsend_min_percent": _dep_config.GODSEND_MIN_PERCENT,
+        "godsend_max_percent": _dep_config.GODSEND_MAX_PERCENT,
+        "calamity_min_percent": _dep_config.CALAMITY_MIN_PERCENT,
+        "calamity_max_percent": _dep_config.CALAMITY_MAX_PERCENT,
+        "alignment_bonus_percent": _dep_config.ALIGNMENT_BONUS_PERCENT,
+        "quest_reward_percent": _dep_config.QUEST_REWARD_PERCENT,
+        "team_battle_percent": _dep_config.TEAM_BATTLE_PERCENT,
         "announce_login": _dep_config.ANNOUNCE_LOGIN,
         "announce_top_interval": _dep_config.ANNOUNCE_TOP_INTERVAL,
         "announce_top_limit": _dep_config.ANNOUNCE_TOP_LIMIT,
@@ -358,6 +397,8 @@ def _public_rules() -> dict[str, Any]:
         "unique_items_enabled": _dep_config.UNIQUE_ITEMS_ENABLED,
         "unique_item_min_level": _dep_config.UNIQUE_ITEM_MIN_LEVEL,
         "unique_item_chance": _dep_config.UNIQUE_ITEM_CHANCE,
+        "unique_bonus_cap_percent": _dep_constants.UNIQUE_BONUS_CAP_PERCENT,
+        "alignment_item_power_factors": dict(_dep_constants.ALIGNMENT_ITEM_POWER_FACTORS),
         "level_reward_min_level": _dep_config.LEVEL_REWARD_MIN_LEVEL,
         "quest_min_level": _dep_config.QUEST_MIN_LEVEL,
         "quest_min_online_seconds": _dep_config.QUEST_MIN_ONLINE_SECONDS,
@@ -431,6 +472,8 @@ def _export_room_state(
         "events": events,
         "hall_of_fame": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:],
         "achievement_catalog": _dep_leveling._achievement_catalog(),
+        "equipment_slots": list(_dep_constants.ITEMS),
+        "artifact_catalog": _public_artifact_catalog(),
         "rules": _public_rules(),
     }
     _atomic_write_json(room_dir / "room.json", room_payload)
@@ -447,6 +490,12 @@ def _export_room_state(
     _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:]})
     _atomic_write_json(room_dir / "events.json", {"generated_at": generated_at, "room": room_jid, "events": events})
     _atomic_write_json(room_dir / "achievements.json", {"generated_at": generated_at, "room": room_jid, "achievements": _dep_leveling._achievement_catalog()})
+    _atomic_write_json(room_dir / "artifacts.json", {
+        "generated_at": generated_at,
+        "room": room_jid,
+        "equipment_slots": room_payload["equipment_slots"],
+        "artifacts": room_payload["artifact_catalog"],
+    })
     profiles_dir = room_dir / "profiles"
     for profile in all_profiles:
         _atomic_write_json(profiles_dir / f"{_dep_formatting._slug(profile['name'])}.json", profile)
@@ -457,6 +506,7 @@ def _export_room_state(
         "players_online": room_payload["players_online"],
         "leaderboard_url": _public_url(slug, "leaderboard.json"),
         "map_url": _public_url(slug, "map.json"),
+        "artifacts_url": _public_url(slug, "artifacts.json"),
     }
     return summary, room_payload
 
@@ -549,6 +599,12 @@ def _export_public_state(
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "achievements": default_room_payload.get("achievement_catalog", _dep_leveling._achievement_catalog()),
+            })
+            _atomic_write_json(root / "artifacts.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "equipment_slots": default_room_payload["equipment_slots"],
+                "artifacts": default_room_payload["artifact_catalog"],
             })
         else:
             _remove_root_compatibility_exports(root)

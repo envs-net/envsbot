@@ -973,13 +973,21 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
     assert summary["leaderboard_url"].endswith("/room_at_conf/leaderboard.json")
     assert "_room_payload" not in summary
     assert room_payload["achievement_catalog"] == idlerpg._achievement_catalog()
+    assert room_payload["equipment_slots"] == list(idlerpg.ITEMS)
+    assert room_payload["artifact_catalog"] == idlerpg._public_artifact_catalog()
 
     import json
     room_payload = json.loads((tmp_path / "room_at_conf" / "room.json").read_text())
     assert room_payload["achievement_catalog"] == idlerpg._achievement_catalog()
+    assert room_payload["equipment_slots"] == list(idlerpg.ITEMS)
+    assert room_payload["artifact_catalog"] == idlerpg._public_artifact_catalog()
     assert room_payload["map"] == {"width": idlerpg.MAP_X, "height": idlerpg.MAP_Y}
     assert room_payload["events"][0]["players"] == ["Alice"]
     assert "jid" not in room_payload["players"][0]
+
+    artifacts_payload = json.loads((tmp_path / "room_at_conf" / "artifacts.json").read_text())
+    assert artifacts_payload["equipment_slots"] == list(idlerpg.ITEMS)
+    assert artifacts_payload["artifacts"] == idlerpg._public_artifact_catalog()
 
 
 @pytest.mark.asyncio

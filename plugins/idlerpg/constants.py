@@ -5,7 +5,7 @@ from __future__ import annotations
 
 PLUGIN_META = {
     "name": "idlerpg",
-    "version": "1.0.10",
+    "version": "1.0.11",
     "description": "IdleRPG game for MUCs, inspired by the classic IRC game",
     "category": "games",
     "requires": ["rooms", "_core"],
@@ -71,6 +71,14 @@ ITEMS = (
     "set of leggings",
     "pair of boots",
 )
+
+
+ALIGNMENT_ITEM_POWER_FACTORS = {
+    "good": 1.10,
+    "neutral": 1.00,
+    "evil": 0.90,
+}
+UNIQUE_BONUS_CAP_PERCENT = 35
 
 
 UNIQUE_ITEMS = (
@@ -251,6 +259,8 @@ __all__ = [
     'PLUGIN_NAME',
     'ACHIEVEMENTS',
     'ITEMS',
+    'ALIGNMENT_ITEM_POWER_FACTORS',
+    'UNIQUE_BONUS_CAP_PERCENT',
     'UNIQUE_ITEMS',
     'MAP_REGIONS',
     'CALAMITIES',

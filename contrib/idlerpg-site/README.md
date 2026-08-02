@@ -26,11 +26,13 @@ public/idlerpg/data/<room-slug>/map.json
 public/idlerpg/data/<room-slug>/events.json
 public/idlerpg/data/<room-slug>/hall_of_fame.json
 public/idlerpg/data/<room-slug>/achievements.json
+public/idlerpg/data/<room-slug>/artifacts.json
 public/idlerpg/data/<room-slug>/profiles/*.json
 ```
 
 The website primarily uses the room-specific exports. `room.json` provides the
-season, public rules, achievement catalog and complete fallback state; the
+season, public rules, achievement catalog, equipment slots, artifact catalog
+and complete fallback state; the
 specialized JSON files keep individual views usable if one optional file is
 missing.
 

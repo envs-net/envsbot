@@ -6,6 +6,7 @@ from .helpers import (
 )
 import random
 from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import constants as idlerpg_constants
 from plugins.idlerpg import items as idlerpg_items
 
 
@@ -295,7 +296,29 @@ def test_unique_bonus_export_includes_tier_and_next_upgrade_level():
     assert bonus["tier"] == 1
     assert bonus["item_level"] == 120
     assert bonus["min_level"] == 35
+    assert bonus["effective_min_level"] == 35
     assert bonus["next_upgrade_level"] == 75
+
+
+def test_next_unique_upgrade_level_respects_global_minimum(monkeypatch):
+    monkeypatch.setattr(idlerpg_config, "UNIQUE_ITEM_MIN_LEVEL", 100)
+
+    assert idlerpg._next_unique_upgrade_level("pair of gloves", 1) == 100
+    assert idlerpg._next_unique_upgrade_level("ring", 1) == 100
+
+
+def test_alignment_item_power_factors_and_unique_bonus_cap(monkeypatch):
+    player = {
+        "alignment": "good",
+        "unique_items": {"weapon": "The Cluehammer of Production"},
+        "items": {"weapon": 1200},
+    }
+
+    assert idlerpg._alignment_item_sum_factor(player) == 1.10
+    player["alignment"] = "evil"
+    assert idlerpg._alignment_item_sum_factor(player) == 0.90
+    monkeypatch.setattr(idlerpg_constants, "UNIQUE_BONUS_CAP_PERCENT", 10)
+    assert idlerpg._unique_bonus_percent(player, "battle_bonus") == 10
 
 
 @pytest.mark.asyncio

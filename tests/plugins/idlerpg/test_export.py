@@ -41,6 +41,46 @@ def test_public_rules_include_new_options():
     assert rules["quest_max_per_day"] == idlerpg.QUEST_MAX_PER_DAY
     assert rules["quest_grid_min_points"] == idlerpg.QUEST_GRID_MIN_POINTS
     assert rules["quest_grid_max_points"] == idlerpg.QUEST_GRID_MAX_POINTS
+    assert rules["count_command_messages"] == idlerpg.COUNT_COMMAND_MESSAGES
+    assert rules["battle_win_min_percent"] == idlerpg.BATTLE_WIN_MIN_PERCENT
+    assert rules["battle_loss_min_percent"] == idlerpg.BATTLE_LOSS_MIN_PERCENT
+    assert rules["critical_min_percent"] == idlerpg.CRITICAL_MIN_PERCENT
+    assert rules["critical_max_percent"] == idlerpg.CRITICAL_MAX_PERCENT
+    assert rules["godsend_min_percent"] == idlerpg.GODSEND_MIN_PERCENT
+    assert rules["godsend_max_percent"] == idlerpg.GODSEND_MAX_PERCENT
+    assert rules["calamity_min_percent"] == idlerpg.CALAMITY_MIN_PERCENT
+    assert rules["calamity_max_percent"] == idlerpg.CALAMITY_MAX_PERCENT
+    assert rules["alignment_bonus_percent"] == idlerpg.ALIGNMENT_BONUS_PERCENT
+    assert rules["quest_reward_percent"] == idlerpg.QUEST_REWARD_PERCENT
+    assert rules["team_battle_percent"] == idlerpg.TEAM_BATTLE_PERCENT
+    assert rules["unique_bonus_cap_percent"] == idlerpg.UNIQUE_BONUS_CAP_PERCENT
+    assert rules["alignment_item_power_factors"] == idlerpg.ALIGNMENT_ITEM_POWER_FACTORS
+
+
+def test_public_artifact_catalog_covers_every_equipment_slot():
+    catalog = idlerpg._public_artifact_catalog()
+
+    assert len(catalog) == len(idlerpg.UNIQUE_ITEMS)
+    assert {item["slot"] for item in catalog} == set(idlerpg.ITEMS)
+    assert all(item["name"] for item in catalog)
+    assert all(item["tier"] >= 1 for item in catalog)
+    assert all(item["effective_min_level"] >= idlerpg.UNIQUE_ITEM_MIN_LEVEL for item in catalog)
+    assert all(item["min_item_level"] <= item["max_item_level"] for item in catalog)
+    assert all(item["bonus"] and item["bonus_percent"] > 0 for item in catalog)
+
+    gloves = next(item for item in catalog if item["name"] == "The Gloves of Quiet Keystrokes")
+    assert gloves == {
+        "name": "The Gloves of Quiet Keystrokes",
+        "slot": "pair of gloves",
+        "tier": 1,
+        "min_level": 35,
+        "effective_min_level": 35,
+        "min_item_level": 100,
+        "max_item_level": 140,
+        "next_upgrade_level": 75,
+        "bonus": "message_penalty_reduction",
+        "bonus_percent": 5,
+    }
 
 
 def test_atomic_export_is_web_readable_under_restrictive_umask(tmp_path):
@@ -196,6 +236,7 @@ def test_public_export_cleans_stale_index_rooms_and_root_copies(tmp_path, monkey
         "hall_of_fame.json",
         "events.json",
         "achievements.json",
+        "artifacts.json",
     ):
         (tmp_path / filename).write_text("{}", encoding="utf-8")
     unrelated = tmp_path / "assets"
@@ -213,6 +254,7 @@ def test_public_export_cleans_stale_index_rooms_and_root_copies(tmp_path, monkey
         "hall_of_fame.json",
         "events.json",
         "achievements.json",
+        "artifacts.json",
     ):
         assert not (tmp_path / filename).exists()
 

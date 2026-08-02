@@ -32,7 +32,7 @@ def _next_unique_upgrade_level(slot: str, tier: int) -> int | None:
         if str(item.get("slot") or "") == str(slot)
         and _unique_item_tier(item) > int(tier)
     ]
-    return min(levels) if levels else None
+    return max(_unique_item_level(_dep_config.UNIQUE_ITEM_MIN_LEVEL), min(levels)) if levels else None
 
 
 def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
@@ -56,6 +56,10 @@ def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
             "tier": tier,
             "item_level": _unique_item_level(item_levels.get(slot)),
             "min_level": _unique_item_level(item.get("min_level")),
+            "effective_min_level": max(
+                _unique_item_level(_dep_config.UNIQUE_ITEM_MIN_LEVEL),
+                _unique_item_level(item.get("min_level")),
+            ),
             "next_upgrade_level": _next_unique_upgrade_level(str(item.get("slot") or slot), tier),
             "bonus": bonus,
             "bonus_percent": int(item.get("bonus_percent", 0) or 0),
@@ -76,7 +80,7 @@ def _unique_bonus_percent(player: dict[str, Any], bonus: str) -> int:
         for item in _unique_bonuses(player)
         if item.get("bonus") == bonus
     )
-    return max(0, min(35, total))
+    return max(0, min(int(_dep_constants.UNIQUE_BONUS_CAP_PERCENT), total))
 
 
 def _adjust_percent_amount(amount: int, player: dict[str, Any], bonus: str, *, increase: bool = False) -> int:
@@ -101,12 +105,9 @@ def _item_sum(player: dict[str, Any]) -> int:
 
 
 def _alignment_item_sum_factor(player: dict[str, Any]) -> float:
-    alignment = str(player.get("alignment") or "n")[:1].lower()
-    if alignment == "g":
-        return 1.10
-    if alignment == "e":
-        return 0.90
-    return 1.0
+    alignment = str(player.get("alignment") or "neutral").strip().lower()
+    key = {"g": "good", "n": "neutral", "e": "evil"}.get(alignment[:1], "neutral")
+    return float(_dep_constants.ALIGNMENT_ITEM_POWER_FACTORS[key])
 
 
 def _battle_power(player: dict[str, Any]) -> int:
