@@ -354,6 +354,7 @@ def test_idlerpg_site_commands_match_available_admin_commands(tmp_path: Path) ->
         ",idlerpg export",
         ",idlerpg season end",
         ",idlerpg season reset",
+        ",idlerpg season discard confirm",
         ",idlerpg season extend",
         ",idlerpg season clear-end",
         ",idlerpg hof clear confirm",

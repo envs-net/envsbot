@@ -156,6 +156,12 @@ Aliases: `,idle`, `,irpg`
   - Examples:
     - `,idlerpg season reset` — Start a fresh season and reset every room character.
 
+- `,idlerpg season discard confirm`
+  - Description: Discard the active season without archiving it and fully reset all players.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg season discard confirm` — Delete a faulty current season without adding it to the Hall of Fame.
+
 - `,idlerpg season extend [duration|manual]`
   - Description: Extend the current season, use the configured default, or make it manual/endless.
   - Context: `room or MUC PM; room owner/admin`

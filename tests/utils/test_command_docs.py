@@ -63,6 +63,7 @@ def test_generated_idlerpg_docs_group_player_and_admin_commands():
     )
     assert "`,idlerpg register <character> <class>`" in idlerpg_doc
     assert "`,idlerpg season reset`" in idlerpg_doc
+    assert "`,idlerpg season discard confirm`" in idlerpg_doc
 
 
 def test_write_generated_docs_writes_exact_utf8_files(monkeypatch, tmp_path):

@@ -1509,6 +1509,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                         <li><code>,idlerpg export</code> — refresh the public website export</li>
                         <li><code>,idlerpg season end</code> — archive the ranking and start a new season without a player reset</li>
                         <li><code>,idlerpg season reset</code> — archive the ranking and start a new season with a full player reset</li>
+                        <li><code>,idlerpg season discard confirm</code> — discard a faulty active season without adding a Hall of Fame entry</li>
                         <li><code>,idlerpg season extend [duration|manual]</code> — extend the active season or make it endless</li>
                         <li><code>,idlerpg season clear-end</code> — remove an automatic end date</li>
                         <li><code>,idlerpg hof clear confirm</code> — clear Hall of Fame history</li>

@@ -603,6 +603,7 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     player["penalties"] = {"message": 60}
     player["pending_logout_penalty"] = {"amount": 90, "apply_at": 123456}
     player["logged_out_at"] = 123400
+    player["last_manual_duel_at"] = 123300
     player["stats"] = {
         "battles_won": 7,
         "battles_lost": 3,
@@ -629,6 +630,7 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     assert player["penalties"] == {}
     assert player["pending_logout_penalty"] == {}
     assert player["logged_out_at"] == 0
+    assert player["last_manual_duel_at"] == 0
     assert player["stats"] == {}
     assert player["achievements"] == []
     assert player["title"] == ""
@@ -636,6 +638,74 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["hof"], DummyMsg(), True)
     assert "Hall of Fame" in bot.replies[-1][0]
     assert "Alice" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_season_discard_confirm_skips_hall_of_fame_and_resets_current_state(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    now = 1_700_000_000
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
+    room["season"] = {"id": "faulty-season", "started_at": now - 100, "ends_at": 0}
+    room["hall_of_fame"] = [{"id": "good-season", "champion": "Alice"}]
+    room["events"] = [
+        {"ts": now - 101, "kind": "season", "text": "previous season ended"},
+        {"ts": now - 50, "kind": "game", "text": "faulty season event"},
+    ]
+    room["quest"] = {
+        "active": True,
+        "type": "time",
+        "questers": ["alice@envs.net"],
+        "complete_at": now + 3600,
+    }
+    player.update({
+        "level": 9,
+        "next": 12,
+        "idled": 999,
+        "stats": {"messages": 4},
+        "achievements": ["founder", "battle_winner"],
+        "title": "battle_winner",
+        "last_manual_duel_at": now - 10,
+    })
+    player["items"]["weapon"] = 77
+    player["unique_items"]["weapon"] = "The Great Hammer of /bin/sh"
+
+    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "discard"], msg, True)
+    assert "Usage" in bot.replies[-1][0]
+    assert room["season"]["id"] == "faulty-season"
+
+    await idlerpg.idlerpg_command(
+        bot,
+        "admin@envs.net",
+        "Admin",
+        ["season", "discard", "confirm"],
+        msg,
+        True,
+    )
+
+    assert "discarded without a Hall of Fame entry" in bot.replies[-1][0]
+    assert room["hall_of_fame"] == [{"id": "good-season", "champion": "Alice"}]
+    assert room["season"]["id"] != "faulty-season"
+    assert room["quest"] == {"active": False, "next_at": now + idlerpg.QUEST_INTERVAL}
+    assert player["level"] == 0
+    assert player["next"] == idlerpg._ttl_for_level(0)
+    assert player["items"] == {item: 0 for item in idlerpg.ITEMS}
+    assert player["unique_items"] == {}
+    assert player["stats"] == {}
+    assert player["achievements"] == []
+    assert player["title"] == ""
+    assert player["last_manual_duel_at"] == 0
+    assert not any(event.get("text") == "faulty season event" for event in room["events"])
+    assert any("was discarded" in event.get("text", "") for event in room["events"])
 
 
 @pytest.mark.asyncio
@@ -659,6 +729,7 @@ async def test_mutating_admin_commands_require_room_admin():
         ["push", "Alice", "9"],
         ["hof", "clear", "confirm"],
         ["season", "reset"],
+        ["season", "discard", "confirm"],
         ["season", "extend", "7"],
         ["announce", "top"],
         ["topic", "update"],
@@ -1565,6 +1636,7 @@ def test_usage_lists_every_primary_player_and_admin_command():
         ",idlerpg items|profile|achievements [character]",
         ",idlerpg season end",
         ",idlerpg season reset",
+        ",idlerpg season discard confirm",
         ",idlerpg season extend [duration|manual]",
         ",idlerpg season clear-end",
         ",idlerpg push <character> <duration>",
@@ -1595,6 +1667,7 @@ def test_structured_help_lists_all_mutating_admin_commands():
         "hof clear",
         "season end",
         "season reset",
+        "season discard",
         "season extend",
         "season clear-end",
         "announce top",

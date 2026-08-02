@@ -711,6 +711,24 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
     data = await _dep_state._get_data(bot)
     room = _dep_state._room_bucket(data, room_jid)
     subcmd = args[1].lower() if len(args) > 1 else "status"
+    if subcmd == "discard":
+        if len(args) != 3 or args[2].lower() != "confirm":
+            _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg season discard confirm")
+            return
+        if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+            _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can discard IdleRPG seasons.")
+            return
+        result = _dep_seasons._discard_season(room)
+        await _dep_state._set_data(bot, data, force_export=True)
+        await audit_event(bot, "idlerpg_season_discard", actor=sender_jid, target=room_jid, details=result)
+        _dep_formatting._reply(
+            bot,
+            msg,
+            f"🗑️ Season {result['id']} discarded without a Hall of Fame entry. "
+            f"Reset {result['reset_players']} players and removed {result['removed_events']} current-season events. "
+            f"New season: {result['new_season_id']}.",
+        )
+        return
     if subcmd in {"end", "finish", "reset"}:
         if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
             _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can end IdleRPG seasons.")
@@ -1051,6 +1069,13 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
             "{prefix}idlerpg season reset",
             "Archive the current ranking, start a new season and reset player progress.",
             examples=[help_example("{prefix}idlerpg season reset", "Start a fresh season and reset every room character.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        _admin_help_subcommand(
+            "season discard",
+            "{prefix}idlerpg season discard confirm",
+            "Discard the active season without archiving it and fully reset all players.",
+            examples=[help_example("{prefix}idlerpg season discard confirm", "Delete a faulty current season without adding it to the Hall of Fame.")],
             context="room or MUC PM; room owner/admin",
         ),
         _admin_help_subcommand(

@@ -59,9 +59,69 @@ def _reset_player_for_new_season(player: dict[str, Any]) -> None:
     player["penalties"] = {}
     player["pending_logout_penalty"] = {}
     player["logged_out_at"] = 0
+    player["last_manual_duel_at"] = 0
     player["stats"] = {}
     player["achievements"] = []
     player["title"] = ""
+
+
+def _discard_season(room: dict[str, Any]) -> dict[str, Any]:
+    """Discard the active season without creating a Hall of Fame snapshot."""
+    now = _dep_formatting._now()
+    season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
+    discarded_id = str(season.get("id") or "unknown")
+    try:
+        started_at = max(0, int(season.get("started_at", 0) or 0))
+    except (TypeError, ValueError):
+        started_at = 0
+
+    reset_players = 0
+    players = room.get("players", {})
+    if isinstance(players, dict):
+        for jid, player in players.items():
+            if isinstance(player, dict):
+                _reset_player_for_new_season(_dep_state._normalize_player(str(jid), player))
+                reset_players += 1
+
+    removed_events = 0
+    events = room.get("events", [])
+    if started_at > 0 and isinstance(events, list):
+        kept_events: list[Any] = []
+        for event in events:
+            if not isinstance(event, dict):
+                kept_events.append(event)
+                continue
+            try:
+                event_ts = int(event.get("ts", 0) or 0)
+            except (TypeError, ValueError):
+                kept_events.append(event)
+                continue
+            if event_ts > started_at:
+                removed_events += 1
+            else:
+                kept_events.append(event)
+        room["events"] = kept_events
+
+    room["quest"] = {"active": False, "next_at": now + _dep_config.QUEST_INTERVAL}
+    room["season"] = _blank_season(now)
+    room["last_tick"] = now
+    _dep_export._record_event(
+        room,
+        "season",
+        f"Season {discarded_id} was discarded without a Hall of Fame entry. Players were reset.",
+        data={
+            "season_id": discarded_id,
+            "discarded": True,
+            "reset_players": reset_players,
+            "removed_events": removed_events,
+        },
+    )
+    return {
+        "id": discarded_id,
+        "reset_players": reset_players,
+        "removed_events": removed_events,
+        "new_season_id": str(room["season"].get("id") or "unknown"),
+    }
 
 
 def _end_season(room_jid: str, room: dict[str, Any], *, reset_players: bool | None = None) -> dict[str, Any]:

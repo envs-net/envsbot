@@ -245,6 +245,7 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg export\n"
         f"{prefix}idlerpg season end\n"
         f"{prefix}idlerpg season reset\n"
+        f"{prefix}idlerpg season discard confirm\n"
         f"{prefix}idlerpg season extend [duration|manual]\n"
         f"{prefix}idlerpg season clear-end\n"
         f"{prefix}idlerpg hof clear confirm"

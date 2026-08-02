@@ -568,6 +568,7 @@ Room owners/admins can manually end, reset or adjust a season:
 ```text
 ,idlerpg season end
 ,idlerpg season reset
+,idlerpg season discard confirm
 ,idlerpg season extend [duration|manual]
 ,idlerpg season clear-end
 ,idlerpg hof clear confirm
@@ -576,8 +577,12 @@ Room owners/admins can manually end, reset or adjust a season:
 `season end` archives the current ranking and starts a new season without
 resetting player progress. `season reset` archives the ranking and resets player
 levels, items, timers, achievements and game statistics for a fresh season.
-Character identity and registration history remain intact. `season extend`
-extends the current season by a duration such as `30d`, `12h` or by the
+Character identity and registration history remain intact. `season discard confirm`
+is the emergency recovery command for a faulty active season: it does not add a
+Hall of Fame entry, removes events created after that season started, cancels the
+active quest and applies the same full player reset before starting a clean new
+season. Existing Hall of Fame entries remain untouched. `season extend` extends
+the current season by a duration such as `30d`, `12h` or by the
 configured season length when no duration is given. `season extend manual` and
 `season clear-end` remove the current end timestamp so the season runs until an
 admin ends or resets it.
