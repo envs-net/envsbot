@@ -594,17 +594,44 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
         True,
     )
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
-    room["players"]["alice@envs.net"]["level"] = 12
-    room["players"]["alice@envs.net"]["next"] = 5
+    player = room["players"]["alice@envs.net"]
+    player["level"] = 12
+    player["next"] = 5
+    player["idled"] = 1234
+    player["items"]["weapon"] = 42
+    player["unique_items"]["weapon"] = "The Great Hammer of /bin/sh"
+    player["penalties"] = {"message": 60}
+    player["pending_logout_penalty"] = {"amount": 90, "apply_at": 123456}
+    player["logged_out_at"] = 123400
+    player["stats"] = {
+        "battles_won": 7,
+        "battles_lost": 3,
+        "quests_completed": 2,
+        "messages": 99,
+    }
+    player["achievements"] = ["founder", "battle_winner"]
+    player["title"] = "battle_winner"
 
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "end"], msg, True)
     assert "Champion: Alice" in bot.replies[-1][0]
     assert room["hall_of_fame"][-1]["champion"] == "Alice"
-    assert room["players"]["alice@envs.net"]["level"] == 12
+    assert player["level"] == 12
+    assert player["stats"]["battles_won"] == 7
 
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "reset"], msg, True)
     assert "Players were reset" in bot.replies[-1][0]
-    assert room["players"]["alice@envs.net"]["level"] == 0
+    assert room["hall_of_fame"][-1]["top"][0]["stats"]["battles_won"] == 7
+    assert player["level"] == 0
+    assert player["next"] == idlerpg._ttl_for_level(0)
+    assert player["idled"] == 0
+    assert player["items"] == {item: 0 for item in idlerpg.ITEMS}
+    assert player["unique_items"] == {}
+    assert player["penalties"] == {}
+    assert player["pending_logout_penalty"] == {}
+    assert player["logged_out_at"] == 0
+    assert player["stats"] == {}
+    assert player["achievements"] == []
+    assert player["title"] == ""
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["hof"], DummyMsg(), True)
     assert "Hall of Fame" in bot.replies[-1][0]

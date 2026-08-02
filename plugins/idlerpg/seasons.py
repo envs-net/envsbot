@@ -57,6 +57,9 @@ def _reset_player_for_new_season(player: dict[str, Any]) -> None:
     player["items"] = {item: 0 for item in _dep_constants.ITEMS}
     player["unique_items"] = {}
     player["penalties"] = {}
+    player["pending_logout_penalty"] = {}
+    player["logged_out_at"] = 0
+    player["stats"] = {}
     player["achievements"] = []
     player["title"] = ""
 
