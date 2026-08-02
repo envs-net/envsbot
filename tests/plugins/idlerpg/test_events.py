@@ -75,6 +75,30 @@ def test_pvp_battle_can_crit_and_drop_item(monkeypatch):
     assert any("Critical Strike" in line for line in messages)
     assert any("dropped their level 20 weapon" in line for line in messages)
     assert any("Bob reaches next level in" in line for line in messages)
+    assert alice["stats"]["battles_won"] == 1
+    assert bob["stats"]["battles_lost"] == 1
+
+
+def test_losing_attacker_records_battle_loss(monkeypatch):
+    alice = idlerpg._normalize_player(
+        "alice@envs.net",
+        {"name": "Alice", "level": 10, "next": 10000, "items": {"weapon": 1}},
+    )
+    bob = idlerpg._normalize_player(
+        "bob@envs.net",
+        {"name": "Bob", "level": 10, "next": 10000, "items": {"weapon": 20}},
+    )
+    rolls = iter([0, 999])
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(random, "random", lambda: 1.0)
+
+    messages: list[str] = []
+    winner, loser = idlerpg._run_duel_between(alice, bob, messages)
+
+    assert winner is bob
+    assert loser is alice
+    assert bob["stats"]["battles_won"] == 1
+    assert alice["stats"]["battles_lost"] == 1
 
 
 def test_team_battle_changes_clocks_and_awards(monkeypatch):
@@ -98,6 +122,8 @@ def test_team_battle_changes_clocks_and_awards(monkeypatch):
     assert players[0][1]["next"] < 10000
     assert players[3][1]["next"] > 10000
     assert "team_battle_winner" in players[0][1]["achievements"]
+    assert all(player["stats"]["team_battles_won"] == 1 for _jid, player in players[:3])
+    assert all(player["stats"]["team_battles_lost"] == 1 for _jid, player in players[3:])
 
 
 def test_random_event_uses_only_available_event_weights_for_small_rooms(monkeypatch):
@@ -248,6 +274,36 @@ def test_boss_event_defeat_awards_and_records_event(monkeypatch):
     assert all("boss_slayer" in player["achievements"] for _jid, player in players)
     assert room["events"][-1]["kind"] == "boss"
     assert room["events"][-1]["data"]["result"] == "defeated"
+
+
+def test_boss_event_failure_records_losses(monkeypatch):
+    room = idlerpg._blank_room()
+    players = []
+    for idx in range(3):
+        jid = f"boss{idx}@envs.net"
+        player = idlerpg._normalize_player(
+            jid,
+            {
+                "name": f"Boss{idx}",
+                "level": idlerpg.BOSS_MIN_LEVEL,
+                "next": 10000,
+                "items": {"weapon": 50},
+            },
+        )
+        players.append((jid, player))
+
+    monkeypatch.setattr(random, "sample", lambda seq, count: list(seq)[:count])
+    monkeypatch.setattr(random, "uniform", lambda _start, _stop: 1.0)
+    rolls = iter([0, 9999])
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+
+    messages: list[str] = []
+    assert idlerpg._run_boss_event(players, messages, room) is True
+
+    assert any("failed" in message for message in messages)
+    assert all(player["stats"]["bosses_failed"] == 1 for _jid, player in players)
+    assert room["events"][-1]["data"]["result"] == "failed"
 
 
 def test_boss_event_requires_enough_eligible_players():

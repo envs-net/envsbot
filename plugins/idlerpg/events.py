@@ -218,6 +218,7 @@ def _run_duel_between(
         _dep_leveling._award(winner, "battle_winner")
         _dep_leveling._inc_stat(winner, "battles_won", 1, room)
 
+    _dep_leveling._inc_stat(loser, "battles_lost", 1, room)
     _dep_items._maybe_critical_strike(winner, loser, messages)
     _dep_items._maybe_battle_item_drop(winner, loser, messages, room)
     return winner, loser
@@ -273,6 +274,7 @@ def _run_team_battle(
         _dep_leveling._inc_stat(player, "team_battles_won", 1, room)
     for _jid, player in losers:
         _dep_leveling._add_time(player, changed)
+        _dep_leveling._inc_stat(player, "team_battles_lost", 1, room)
     messages.append(
         f"🛡️ {', '.join(names_a)} [{roll_a}/{power_a}] have team battled "
         f"{', '.join(names_b)} [{roll_b}/{power_b}] and {'won' if team_a_won else 'lost'}! "
@@ -337,6 +339,7 @@ def _run_boss_event(
         changed_values = []
         for _jid, player in party:
             changed_values.append(_dep_leveling._add_time(player, _dep_items._percent_amount(player, _dep_config.BOSS_LOSS_PERCENT)))
+            _dep_leveling._inc_stat(player, "bosses_failed", 1, room)
         messages.append(
             f"🐉 {', '.join(party_names)} [{party_roll}/{party_power}] faced {boss_name} "
             f"[{boss_roll}/{boss_power}] and failed! "

@@ -82,7 +82,7 @@ def _player(name: str, *, rank: int, online: bool, level: int) -> dict[str, obje
         ]
         if name == "Alice"
         else [],
-        "stats": {"battles_won": 12, "quests_completed": 4},
+        "stats": {"quests_completed": 4, "battles_lost": 5, "battles_won": 12, "team_battles_lost": 2},
         "achievements": [
             {
                 "key": "founder",
@@ -289,6 +289,11 @@ def test_idlerpg_site_profile_filters_and_room_switching(tmp_path: Path) -> None
     assert "The Great Hammer of /bin/sh" in profile
     assert "tier 1" in profile
     assert "next tier from lv.52" in profile
+    assert "Battles Lost" in profile
+    assert "Team Battles Lost" in profile
+    assert profile.index("Battles Won") < profile.index("Battles Lost")
+    assert profile.index("Battles Lost") < profile.index("Team Battles Lost")
+    assert profile.index("Team Battles Lost") < profile.index("Quests Completed")
 
     filtered = _render(
         data_dir,

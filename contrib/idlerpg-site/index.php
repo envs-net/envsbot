@@ -488,6 +488,47 @@ function idlerpg_human_key($key) {
     return ucwords(trim(str_replace(['_', '-'], ' ', (string) $key)));
 }
 
+
+function idlerpg_ordered_stats($stats) {
+    if (!is_array($stats)) {
+        return [];
+    }
+
+    $preferred = [
+        'alignment_events',
+        'battles_won',
+        'battles_lost',
+        'team_battles_won',
+        'team_battles_lost',
+        'bosses_defeated',
+        'bosses_failed',
+        'quests_completed',
+        'quest_failures',
+        'manual_duels_started',
+        'manual_duels_received',
+        'godsends',
+        'calamities',
+        'item_blessings',
+        'item_damage_events',
+        'item_swaps_won',
+        'unique_items_found',
+        'unique_item_upgrades',
+        'messages',
+        'logouts',
+    ];
+
+    $ordered = [];
+    foreach ($preferred as $key) {
+        if (array_key_exists($key, $stats)) {
+            $ordered[$key] = $stats[$key];
+        }
+    }
+
+    $remaining = array_diff_key($stats, $ordered);
+    ksort($remaining, SORT_NATURAL | SORT_FLAG_CASE);
+    return $ordered + $remaining;
+}
+
 function idlerpg_rule_value($key, $value) {
     if (is_bool($value)) {
         return idlerpg_bool_label($value);
@@ -1028,7 +1069,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                 <?php if ($selected_profile): ?>
                     <?php
                     $profile_name = idlerpg_player_name($selected_profile);
-                    $profile_stats = is_array($selected_profile['stats'] ?? null) ? $selected_profile['stats'] : [];
+                    $profile_stats = idlerpg_ordered_stats(is_array($selected_profile['stats'] ?? null) ? $selected_profile['stats'] : []);
                     $profile_items = is_array($selected_profile['items'] ?? null) ? $selected_profile['items'] : [];
                     $profile_unique_items = is_array($selected_profile['unique_items'] ?? null) ? $selected_profile['unique_items'] : [];
                     $profile_unique_bonuses = is_array($selected_profile['unique_item_bonuses'] ?? null) ? $selected_profile['unique_item_bonuses'] : [];
