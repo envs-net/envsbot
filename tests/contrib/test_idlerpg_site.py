@@ -406,6 +406,7 @@ def test_idlerpg_site_commands_match_available_admin_commands(tmp_path: Path) ->
         ",idlerpg setlevel",
         ",idlerpg reset",
         ",idlerpg delete",
+        ",idlerpg delold",
         ",idlerpg export",
         ",idlerpg season end",
         ",idlerpg season reset",

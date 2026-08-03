@@ -199,6 +199,13 @@ Aliases: `,idle`, `,irpg`
   - Examples:
     - `,idlerpg delete Alice` — Delete Alice's room character.
 
+- `,idlerpg delold <days> [confirm]`
+  - Description: Preview or delete offline characters inactive for at least the given number of days.
+  - Context: `room or MUC PM; room owner/admin`
+  - Examples:
+    - `,idlerpg delold 90` — Preview characters inactive for at least 90 days.
+    - `,idlerpg delold 90 confirm` — Delete the previewed inactive characters.
+
 - `,idlerpg export`
   - Description: Refresh the room's public IdleRPG export as a room owner/admin.
   - Context: `room or MUC PM; room owner/admin`

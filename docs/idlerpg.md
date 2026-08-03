@@ -301,6 +301,7 @@ Room owners/admins can adjust characters:
 ,idlerpg setlevel <character> <level>
 ,idlerpg reset <character>
 ,idlerpg delete <character>
+,idlerpg delold <days> [confirm]
 ```
 
 Examples:
@@ -310,7 +311,15 @@ Examples:
 ,idlerpg setlevel Sven 12
 ,idlerpg reset Sven
 ,idlerpg delete Sven
+,idlerpg delold 90
+,idlerpg delold 90 confirm
 ```
+
+`delold` only targets characters that are currently offline and whose latest
+known activity is at least the requested number of days old. The first form is
+a preview; deletion requires the explicit `confirm` argument. Active quest
+participants and currently online characters are never selected, and archived
+Hall of Fame rankings are left unchanged.
 
 ## Diagnostics
 

@@ -1539,6 +1539,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                         <li><code>,idlerpg setlevel &lt;character&gt; &lt;level&gt;</code> — set a character level</li>
                         <li><code>,idlerpg reset &lt;character&gt;</code> — reset one character's progress and equipment</li>
                         <li><code>,idlerpg delete &lt;character&gt;</code> — delete another room character</li>
+                        <li><code>,idlerpg delold &lt;days&gt; [confirm]</code> — preview or delete offline characters inactive for the given number of days</li>
                         <li><code>,idlerpg announce top</code> — post the leaderboard</li>
                         <li><code>,idlerpg topic update [custom text]</code> — refresh the room topic</li>
                         <li><code>,idlerpg export</code> — refresh the public website export</li>

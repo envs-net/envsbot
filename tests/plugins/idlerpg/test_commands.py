@@ -1211,6 +1211,125 @@ async def test_remove_me_command_room_scope_missing_and_success():
     assert bot.audit_events[-1][0] == "idlerpg_remove_me"
     assert "character Alice removed" in bot.replies[-1][0]
 
+@pytest.mark.asyncio
+async def test_delold_requires_room_admin_and_valid_days():
+    bot = DummyBot()
+    room_msg = DummyMsg(resource="Admin")
+    private_msg = DummyMsg(bare="admin@envs.net", resource="Admin", mtype="chat")
+
+    await idlerpg._handle_delold(bot, "admin@envs.net", ["delold", "90"], private_msg, False)
+    assert "room-scoped" in bot.replies[-1][0]
+
+    await idlerpg._handle_delold(bot, "alice@envs.net", ["delold", "90"], room_msg, True)
+    assert "Only room owners/admins" in bot.replies[-1][0]
+
+    await idlerpg._handle_delold(bot, "admin@envs.net", ["delold", "0"], room_msg, True)
+    assert "Usage:" in bot.replies[-1][0]
+
+    await idlerpg._handle_delold(bot, "admin@envs.net", ["delold", "90", "yes"], room_msg, True)
+    assert "Usage:" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_delold_previews_and_deletes_only_old_offline_players():
+    now = idlerpg._now()
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    data = await idlerpg._get_data(bot)
+    room = idlerpg._room_bucket(data, "room@conf")
+
+    def player(name, *, age_days, logged_out=True):
+        last_activity = now - age_days * 86400
+        return idlerpg._normalize_player(
+            f"{name.lower()}@envs.net",
+            {
+                "jid": f"{name.lower()}@envs.net",
+                "name": name,
+                "class": "idler",
+                "created_at": last_activity - 86400,
+                "last_login": last_activity,
+                "last_seen": last_activity,
+                "logged_out_at": last_activity,
+                "logged_out": logged_out,
+            },
+        )
+
+    room["players"] = {
+        "old@envs.net": player("Old", age_days=120),
+        "recent@envs.net": player("Recent", age_days=10),
+        "alice@envs.net": player("Alice", age_days=120, logged_out=False),
+        "quester@envs.net": player("Quester", age_days=120),
+    }
+    room["hall_of_fame"] = [{"id": "season-one", "champion": "Old"}]
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "questers": ["quester@envs.net"],
+    }
+    idlerpg._rebuild_name_index(room)
+    await idlerpg._set_data(bot, data)
+
+    await idlerpg._handle_delold(bot, "admin@envs.net", ["delold", "90"], msg, True)
+    preview = bot.replies[-1][0]
+    assert "1 offline IdleRPG character" in preview
+    assert "Old (120d)" in preview
+    assert ",idlerpg delold 90 confirm" in preview
+    assert set(room["players"]) == {
+        "old@envs.net",
+        "recent@envs.net",
+        "alice@envs.net",
+        "quester@envs.net",
+    }
+
+    await idlerpg._handle_delold(
+        bot,
+        "admin@envs.net",
+        ["delold", "90", "confirm"],
+        msg,
+        True,
+    )
+
+    assert set(room["players"]) == {
+        "recent@envs.net",
+        "alice@envs.net",
+        "quester@envs.net",
+    }
+    assert room["hall_of_fame"] == [{"id": "season-one", "champion": "Old"}]
+    assert room["events"][-1]["kind"] == "admin"
+    assert room["events"][-1]["players"] == ["Old"]
+    assert bot.audit_events[-1][0] == "idlerpg_delold"
+    assert bot.audit_events[-1][3]["days"] == 90
+    assert bot.audit_events[-1][3]["characters"] == ["Old"]
+    assert "Removed 1 offline IdleRPG character" in bot.replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_delold_uses_latest_activity_timestamp():
+    now = idlerpg._now()
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    data = await idlerpg._get_data(bot)
+    room = idlerpg._room_bucket(data, "room@conf")
+    room["players"] = {
+        "alice@envs.net": idlerpg._normalize_player(
+            "alice@envs.net",
+            {
+                "name": "Alice",
+                "created_at": now - 200 * 86400,
+                "last_seen": now - 120 * 86400,
+                "last_login": now - 5 * 86400,
+                "logged_out": True,
+            },
+        )
+    }
+    idlerpg._rebuild_name_index(room)
+    await idlerpg._set_data(bot, data)
+
+    await idlerpg._handle_delold(bot, "admin@envs.net", ["delold", "90"], msg, True)
+
+    assert "No offline IdleRPG characters" in bot.replies[-1][0]
+    assert "alice@envs.net" in room["players"]
+
 
 @pytest.mark.asyncio
 async def test_on_load_registers_message_and_presence_handlers():
@@ -1643,6 +1762,7 @@ def test_usage_lists_every_primary_player_and_admin_command():
         ",idlerpg setlevel <character> <level>",
         ",idlerpg reset <character>",
         ",idlerpg delete <character>",
+        ",idlerpg delold <days> [confirm]",
         ",idlerpg export",
         ",idlerpg hof clear confirm",
     )
@@ -1663,6 +1783,7 @@ def test_structured_help_lists_all_mutating_admin_commands():
         "setlevel",
         "reset",
         "delete",
+        "delold",
         "export",
         "hof clear",
         "season end",

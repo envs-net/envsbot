@@ -240,6 +240,7 @@ def _usage(bot) -> str:
         f"{prefix}idlerpg setlevel <character> <level>\n"
         f"{prefix}idlerpg reset <character>\n"
         f"{prefix}idlerpg delete <character>\n"
+        f"{prefix}idlerpg delold <days> [confirm]\n"
         f"{prefix}idlerpg announce top\n"
         f"{prefix}idlerpg topic update [custom text]\n"
         f"{prefix}idlerpg export\n"

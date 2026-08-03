@@ -862,10 +862,145 @@ async def _handle_remove_me(bot, sender_jid: str, msg, is_room: bool) -> None:
     _dep_formatting._reply(bot, msg, f"🗑️ IdleRPG character {name} removed.")
 
 
+def _player_last_activity(player: dict[str, Any]) -> int:
+    """Return the latest trustworthy activity timestamp for stale-player cleanup."""
+    values: list[int] = []
+    for key in ("last_seen", "last_login", "logged_out_at", "created_at"):
+        try:
+            value = int(player.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            values.append(value)
+    return max(values, default=0)
+
+
+def _old_offline_players(
+    room: dict[str, Any],
+    room_jid: str,
+    *,
+    days: int,
+    now: int | None = None,
+) -> list[tuple[str, dict[str, Any], int]]:
+    """Return offline, non-quest players inactive for at least ``days`` days."""
+    now = int(now if now is not None else _dep_formatting._now())
+    cutoff_age = max(1, int(days)) * 86400
+    quest = room.get("quest", {}) if isinstance(room.get("quest"), dict) else {}
+    protected_questers = (
+        {str(jid) for jid in quest.get("questers", [])}
+        if quest.get("active")
+        else set()
+    )
+    result: list[tuple[str, dict[str, Any], int]] = []
+    players = room.get("players", {})
+    if not isinstance(players, dict):
+        return result
+    for jid, raw_player in players.items():
+        if not isinstance(raw_player, dict):
+            continue
+        player = _dep_state._normalize_player(str(jid), raw_player)
+        if str(jid) in protected_questers:
+            continue
+        if _dep_state._is_player_online(room_jid, str(jid), player):
+            continue
+        last_activity = _player_last_activity(player)
+        inactive_for = max(0, now - last_activity) if last_activity > 0 else 0
+        if last_activity > 0 and inactive_for >= cutoff_age:
+            result.append((str(jid), player, inactive_for))
+    result.sort(key=lambda item: (-item[2], _dep_formatting._display_player(item[1]).lower()))
+    return result
+
+
+async def _handle_delold(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> None:
+    room_jid = _dep_state._room_from_context(msg, is_room)
+    if not room_jid:
+        _dep_formatting._reply(bot, msg, "ℹ️ delold is room-scoped. Use it from a game room or MUC PM.")
+        return
+    if not await _dep_state._sender_can_manage_room(bot, sender_jid, room_jid):
+        _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can remove inactive IdleRPG characters.")
+        return
+    if len(args) < 2 or not str(args[1]).isdigit() or int(args[1]) < 1:
+        _dep_formatting._reply(
+            bot,
+            msg,
+            f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg delold <days> [confirm]",
+        )
+        return
+
+    days = int(args[1])
+    confirmed = len(args) == 3 and str(args[2]).lower() == "confirm"
+    if len(args) > 3 or (len(args) == 3 and not confirmed):
+        _dep_formatting._reply(
+            bot,
+            msg,
+            f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg delold <days> [confirm]",
+        )
+        return
+
+    data = await _dep_state._get_data(bot)
+    room = _dep_state._room_bucket(data, room_jid)
+    candidates = _old_offline_players(room, room_jid, days=days)
+    if not candidates:
+        _dep_formatting._reply(
+            bot,
+            msg,
+            f"ℹ️ No offline IdleRPG characters have been inactive for at least {days} days.",
+        )
+        return
+
+    preview = ", ".join(
+        f"{_dep_formatting._display_player(player)} ({_dep_formatting._duration(inactive_for)})"
+        for _jid, player, inactive_for in candidates[:20]
+    )
+    if len(candidates) > 20:
+        preview += f", … and {len(candidates) - 20} more"
+
+    candidate_noun = "character" if len(candidates) == 1 else "characters"
+    if not confirmed:
+        _dep_formatting._reply(
+            bot,
+            msg,
+            f"🧹 {len(candidates)} offline IdleRPG {candidate_noun} have been inactive for at least {days} days: "
+            f"{preview}\nRun {_dep_formatting._command_prefix(bot)}idlerpg delold {days} confirm to delete them.",
+        )
+        return
+
+    players = room.get("players", {})
+    removed_names: list[str] = []
+    for jid, player, _inactive_for in candidates:
+        if isinstance(players, dict) and players.pop(jid, None) is not None:
+            removed_names.append(_dep_formatting._display_player(player))
+    _dep_state._rebuild_name_index(room)
+    _dep_export._record_event(
+        room,
+        "admin",
+        f"Removed {len(removed_names)} offline character(s) inactive for at least {days} days.",
+        players=removed_names,
+    )
+    await _dep_state._set_data(bot, data, force_export=True)
+    await audit_event(
+        bot,
+        "idlerpg_delold",
+        actor=sender_jid,
+        target=room_jid,
+        details={"days": days, "removed": len(removed_names), "characters": removed_names},
+    )
+    removed_noun = "character" if len(removed_names) == 1 else "characters"
+    _dep_formatting._reply(
+        bot,
+        msg,
+        f"🗑️ Removed {len(removed_names)} offline IdleRPG {removed_noun} inactive for at least {days} days: "
+        + ", ".join(removed_names),
+    )
+
+
 async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> bool:
     subcmd = args[0].lower() if args else ""
-    if subcmd not in {"push", "setlevel", "reset", "delete", "remove"}:
+    if subcmd not in {"push", "setlevel", "reset", "delete", "remove", "delold"}:
         return False
+    if subcmd == "delold":
+        await _handle_delold(bot, sender_jid, args, msg, is_room)
+        return True
     room_jid = _dep_state._room_from_context(msg, is_room)
     if not room_jid:
         _dep_formatting._reply(bot, msg, "ℹ️ Admin actions are room-scoped. Use them from a game room or MUC PM.")
@@ -1119,6 +1254,16 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
             "Permanently delete another character as a room owner/admin.",
             aliases=("remove",),
             examples=[help_example("{prefix}idlerpg delete Alice", "Delete Alice's room character.")],
+            context="room or MUC PM; room owner/admin",
+        ),
+        _admin_help_subcommand(
+            "delold",
+            "{prefix}idlerpg delold <days> [confirm]",
+            "Preview or delete offline characters inactive for at least the given number of days.",
+            examples=[
+                help_example("{prefix}idlerpg delold 90", "Preview characters inactive for at least 90 days."),
+                help_example("{prefix}idlerpg delold 90 confirm", "Delete the previewed inactive characters."),
+            ],
             context="room or MUC PM; room owner/admin",
         ),
         _admin_help_subcommand(
