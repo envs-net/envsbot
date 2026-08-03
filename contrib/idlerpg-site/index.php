@@ -941,6 +941,18 @@ details.season summary { cursor: pointer; font-weight: 700; }
 .map-small-label { font-size: 11px; fill: #4b2d10; opacity: .8; }
 .marker { cursor: pointer; }
 .marker text { font-size: 12px; fill: #111; paint-order: stroke; stroke: #f3edbd; stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.world-map.map-density-compact .marker text,
+.world-map.map-density-dense .marker text { transition: opacity .12s ease; }
+.world-map.map-density-compact .marker:not(.quester) text,
+.world-map.map-density-dense .marker:not(.quester) text { visibility: hidden; opacity: 0; }
+.world-map.map-density-compact .marker text { font-size: 11px; }
+.world-map.map-density-dense .marker text { font-size: 10px; stroke-width: 3px; }
+.world-map.map-density-compact a:hover .marker text,
+.world-map.map-density-compact a:focus .marker text,
+.world-map.map-density-dense a:hover .marker text,
+.world-map.map-density-dense a:focus .marker text,
+.world-map.map-density-compact .marker.quester text,
+.world-map.map-density-dense .marker.quester text { visibility: visible; opacity: 1; }
 .world-map a:hover .marker circle, .world-map a:focus .marker circle { stroke-width: 2.4; }
 .world-map a:hover .marker text, .world-map a:focus .marker text { font-weight: 700; }
 .marker.online circle { fill: #2f80ff; }
@@ -1267,8 +1279,30 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     Labels are staggered when players stand close together; hover a marker for exact details.
                 </p>
                 <?php if (count($map_players) > 0): ?>
+                    <?php
+                    $visible_map_players = array_slice($map_players, 0, 120);
+                    $visible_map_player_count = count($visible_map_players);
+                    if ($visible_map_player_count <= 20) {
+                        $map_density_class = 'map-density-normal';
+                        $map_marker_radius = 4;
+                        $show_all_map_labels = true;
+                    } elseif ($visible_map_player_count <= 50) {
+                        $map_density_class = 'map-density-compact';
+                        $map_marker_radius = 3.5;
+                        $show_all_map_labels = false;
+                    } else {
+                        $map_density_class = 'map-density-dense';
+                        $map_marker_radius = 2.75;
+                        $show_all_map_labels = false;
+                    }
+                    ?>
+                    <?php if (!$show_all_map_labels): ?>
+                        <p class="muted map-density-note">
+                            Player names appear on hover or keyboard focus; active quest participants remain labeled.
+                        </p>
+                    <?php endif; ?>
                     <div class="map-wrap">
-                        <svg class="world-map" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map">
+                        <svg class="world-map <?php echo h($map_density_class); ?>" viewBox="0 0 <?php echo h($map_width); ?> <?php echo h($map_height); ?>" role="img" aria-label="IdleRPG world map with <?php echo h($visible_map_player_count); ?> players" data-player-count="<?php echo h($visible_map_player_count); ?>">
                             <defs>
                                 <pattern id="idlerpgNoise" width="32" height="32" patternUnits="userSpaceOnUse">
                                     <path d="M0 8 L8 0 M20 32 L32 20 M4 28 L28 4 M16 18 L18 16" stroke="#8a5a20" stroke-width="1" opacity=".28"/>
@@ -1334,7 +1368,6 @@ details.season summary { cursor: pointer; font-weight: 700; }
                             <?php endif; ?>
 
                             <?php
-                            $visible_map_players = $map_players;
                             $occupied_map_labels = [];
                             foreach ($visible_map_players as $player) {
                                 $marker_x = max(6, min($map_width - 6, max(0, min($map_width, idlerpg_player_coord($player, 'x')))));
@@ -1354,6 +1387,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                                 $raw_y = max(0, min($map_height, idlerpg_player_coord($player, 'y')));
                                 $x = max(6, min($map_width - 6, $raw_x));
                                 $y = max(6, min($map_height - 6, $raw_y));
+                                $on_quest = idlerpg_player_on_quest($player, $quest_player_lookup);
                                 $label = idlerpg_map_marker_label_layout(
                                     $x,
                                     $y,
@@ -1362,8 +1396,9 @@ details.season summary { cursor: pointer; font-weight: 700; }
                                     $map_height,
                                     $occupied_map_labels
                                 );
-                                $occupied_map_labels[] = $label['rect'];
-                                $on_quest = idlerpg_player_on_quest($player, $quest_player_lookup);
+                                if ($show_all_map_labels || $on_quest) {
+                                    $occupied_map_labels[] = $label['rect'];
+                                }
                                 $class = $on_quest
                                     ? 'marker quester'
                                     : (idlerpg_player_online($player) ? 'marker online' : 'marker offline');
@@ -1372,10 +1407,10 @@ details.season summary { cursor: pointer; font-weight: 700; }
                                     $marker_state .= ' · quest participant';
                                 }
                                 ?>
-                                <a href="<?php echo h(idlerpg_player_url($name)); ?>">
+                                <a href="<?php echo h(idlerpg_player_url($name)); ?>" aria-label="<?php echo h($name); ?>, level <?php echo h(idlerpg_player_level($player)); ?>, <?php echo h($marker_state); ?>">
                                     <g class="<?php echo h($class); ?>">
                                         <title><?php echo h($name); ?> [<?php echo h((int) $raw_x); ?>,<?php echo h((int) $raw_y); ?>] · lv.<?php echo h(idlerpg_player_level($player)); ?> · <?php echo h($marker_state); ?></title>
-                                        <circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="4"/>
+                                        <circle cx="<?php echo h($x); ?>" cy="<?php echo h($y); ?>" r="<?php echo h($map_marker_radius); ?>"/>
                                         <text x="<?php echo h($label['x']); ?>" y="<?php echo h($label['y']); ?>" text-anchor="<?php echo h($label['anchor']); ?>"><?php echo h($name); ?></text>
                                     </g>
                                 </a>

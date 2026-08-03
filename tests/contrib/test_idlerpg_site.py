@@ -277,6 +277,61 @@ def test_idlerpg_site_renders_complete_views(tmp_path: Path) -> None:
             assert "the displayed time is the deadline" in html
 
 
+
+@pytest.mark.parametrize(
+    ("player_count", "density_class", "marker_radius", "shows_density_note"),
+    [
+        (20, "map-density-normal", "4", False),
+        (21, "map-density-compact", "3.5", True),
+        (51, "map-density-dense", "2.75", True),
+        (100, "map-density-dense", "2.75", True),
+    ],
+)
+def test_idlerpg_site_adapts_map_density(
+    tmp_path: Path,
+    player_count: int,
+    density_class: str,
+    marker_radius: str,
+    shows_density_note: bool,
+) -> None:
+    players = [
+        _player(
+            f"Player{index:03d}",
+            rank=index + 1,
+            online=index % 3 != 0,
+            level=20 + (index % 30),
+        )
+        for index in range(player_count)
+    ]
+    slug = "crowded_at_conference.example.org"
+    _write_room(tmp_path, slug, "crowded@conference.example.org", players)
+
+    html = _render(tmp_path, view="map", room=slug)
+
+    assert f'class="world-map {density_class}"' in html
+    assert f'data-player-count="{player_count}"' in html
+    assert f'r="{marker_radius}"' in html
+    density_note = "Player names appear on hover or keyboard focus"
+    assert (density_note in html) is shows_density_note
+    assert 'aria-label="Player000, level 20, offline · quest participant"' in html
+    assert ".world-map.map-density-compact .marker:not(.quester) text" in html
+    assert ".world-map.map-density-dense .marker:not(.quester) text" in html
+
+
+def test_idlerpg_site_caps_map_markers_at_120(tmp_path: Path) -> None:
+    players = [
+        _player(f"Player{index:03d}", rank=index + 1, online=True, level=20)
+        for index in range(130)
+    ]
+    slug = "large_at_conference.example.org"
+    _write_room(tmp_path, slug, "large@conference.example.org", players)
+
+    html = _render(tmp_path, view="map", room=slug)
+
+    assert 'data-player-count="120"' in html
+    assert html.count('<g class="marker ') == 120
+    assert 'aria-label="Player119, level 20, online"' in html
+
 def test_idlerpg_site_profile_filters_and_room_switching(tmp_path: Path) -> None:
     data_dir = _export_tree(tmp_path)
     profile = _render(
