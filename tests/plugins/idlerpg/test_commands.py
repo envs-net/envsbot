@@ -637,7 +637,7 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     assert player["logged_out_at"] == 0
     assert player["last_manual_duel_at"] == 0
     assert player["stats"] == {}
-    assert player["achievements"] == []
+    assert player["achievements"] == ["founder"]
     assert player["title"] == ""
     assert len(room["season_events"]) == 1
     assert "ended. Champion: Alice" in room["season_events"][0]["text"]
@@ -711,7 +711,7 @@ async def test_season_discard_confirm_skips_hall_of_fame_and_resets_current_stat
     assert player["items"] == {item: 0 for item in idlerpg.ITEMS}
     assert player["unique_items"] == {}
     assert player["stats"] == {}
-    assert player["achievements"] == []
+    assert player["achievements"] == ["founder"]
     assert player["title"] == ""
     assert player["last_manual_duel_at"] == 0
     assert not any(event.get("text") == "faulty season event" for event in room["events"])

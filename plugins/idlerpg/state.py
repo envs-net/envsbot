@@ -141,6 +141,22 @@ async def _checkpoint_room_clock(bot, room_jid: str, *, flush: bool = False) -> 
     return max(0, now - previous)
 
 
+def _ensure_founder_achievements(room: dict[str, Any]) -> int:
+    """Backfill the permanent Founder achievement for registered characters."""
+    players = room.get("players", {})
+    if not isinstance(players, dict):
+        return 0
+
+    awarded = 0
+    for jid, player in players.items():
+        if not isinstance(player, dict):
+            continue
+        normalized = _normalize_player(str(jid), player)
+        if _dep_leveling._award(normalized, "founder"):
+            awarded += 1
+    return awarded
+
+
 def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     rooms = data.setdefault("rooms", {})
     if not isinstance(rooms, dict):
@@ -151,6 +167,7 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
         room = _blank_room()
         rooms[room_jid] = room
     room.setdefault("players", {})
+    _ensure_founder_achievements(room)
     room.setdefault("name_index", {})
     room.setdefault("quest", {"active": False, "next_at": _dep_formatting._now() + _dep_config.QUEST_INTERVAL})
     room.setdefault("season", _dep_seasons._blank_season(_dep_formatting._now()))

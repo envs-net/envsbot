@@ -61,7 +61,7 @@ def _reset_player_for_new_season(player: dict[str, Any]) -> None:
     player["logged_out_at"] = 0
     player["last_manual_duel_at"] = 0
     player["stats"] = {}
-    player["achievements"] = []
+    player["achievements"] = ["founder"]
     player["title"] = ""
 
 

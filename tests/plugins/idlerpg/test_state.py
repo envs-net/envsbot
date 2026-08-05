@@ -170,6 +170,36 @@ def test_idlerpg_player_normalization_and_lookup_edges(monkeypatch):
     assert idlerpg._find_player(room, "missing") == (None, None)
 
 
+def test_room_bucket_backfills_founder_for_registered_characters():
+    data = {
+        "rooms": {
+            "room@conf": {
+                "players": {
+                    "alice@envs.net": {
+                        "name": "Alice",
+                        "class": "sysadmin",
+                        "achievements": [],
+                    },
+                    "bob@envs.net": {
+                        "name": "Bob",
+                        "class": "idler",
+                        "achievements": ["founder", "battle_winner"],
+                    },
+                },
+            }
+        }
+    }
+
+    room = idlerpg._room_bucket(data, "room@conf")
+
+    assert room["players"]["alice@envs.net"]["achievements"] == ["founder"]
+    assert room["players"]["bob@envs.net"]["achievements"] == [
+        "battle_winner",
+        "founder",
+    ]
+    assert idlerpg._ensure_founder_achievements(room) == 0
+
+
 def test_normalize_player_does_not_consume_rng_for_existing_coordinates(monkeypatch):
     def fail_randint(_start, _stop):
         raise AssertionError("coordinate RNG should not be used when coordinates already exist")
