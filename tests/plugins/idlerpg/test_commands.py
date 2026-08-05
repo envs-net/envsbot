@@ -570,6 +570,7 @@ async def test_export_command_writes_public_files(tmp_path, monkeypatch):
     msg = DummyMsg()
     monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
     monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", True)
     await _register_alice(bot, msg)
 
     admin_msg = DummyMsg(resource="Admin")
@@ -1085,6 +1086,7 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
 
     monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 0)
     monkeypatch.setattr(idlerpg_config, "EXPORT_EVENT_LIMIT", 2)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", True)
     monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://example.org/idlerpg/data")
     summary, room_payload = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
     assert summary["leaderboard_url"].endswith("/room_at_conf/leaderboard.json")

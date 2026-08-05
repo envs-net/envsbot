@@ -38,6 +38,7 @@ def test_public_rules_include_new_options():
     assert rules["boss_reward_percent"] == idlerpg.BOSS_REWARD_PERCENT
     assert rules["boss_loss_percent"] == idlerpg.BOSS_LOSS_PERCENT
     assert rules["export_interval_seconds"] == idlerpg.EXPORT_INTERVAL_SECONDS
+    assert rules["export_full_season_events"] == idlerpg.EXPORT_FULL_SEASON_EVENTS
     assert rules["quest_max_per_day"] == idlerpg.QUEST_MAX_PER_DAY
     assert rules["quest_grid_min_points"] == idlerpg.QUEST_GRID_MIN_POINTS
     assert rules["quest_grid_max_points"] == idlerpg.QUEST_GRID_MAX_POINTS
@@ -190,6 +191,44 @@ def test_room_bucket_migrates_retained_current_season_events():
     room = idlerpg._room_bucket(data, "room@conf")
 
     assert [event["text"] for event in room["season_events"]] == ["current season"]
+
+
+def test_full_season_event_export_can_be_disabled_and_removes_stale_files(
+    tmp_path,
+    monkeypatch,
+):
+    from plugins.idlerpg import config as idlerpg_config
+
+    room_jid = "room@conf"
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "season-a", "started_at": 100, "ends_at": 0}
+    room["events"] = [{"ts": 101, "kind": "game", "text": "recent"}]
+    room["season_events"] = [
+        {"ts": 100, "kind": "game", "text": "first"},
+        {"ts": 101, "kind": "game", "text": "recent"},
+    ]
+
+    room_dir = tmp_path / "room_at_conf"
+    room_dir.mkdir()
+    (room_dir / "season_events.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "season_events.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", False)
+
+    idlerpg._export_public_state({"rooms": {room_jid: room}}, {room_jid: True})
+
+    assert (room_dir / "events.json").exists()
+    assert not (room_dir / "season_events.json").exists()
+    assert not (tmp_path / "season_events.json").exists()
+
+    index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
+    assert "season_events_url" not in index["rooms"][0]
+
+    room_payload = json.loads((room_dir / "room.json").read_text(encoding="utf-8"))
+    assert room_payload["rules"]["export_full_season_events"] is False
+    assert room_payload["season_events_total"] == 0
 
 
 def test_active_quest_export_omits_stale_private_jids(tmp_path):

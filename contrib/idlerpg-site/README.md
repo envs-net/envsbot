@@ -36,7 +36,10 @@ season, public rules, achievement catalog, equipment slots, artifact catalog
 and complete fallback state; the
 specialized JSON files keep individual views usable if one optional file is
 missing. `events.json` remains a compact recent-event feed, while
-`season_events.json` contains every event recorded during the active season.
+`season_events.json` is optional and is written only when
+`export_full_season_events` is enabled in the bot configuration. When present,
+it contains every event recorded during the active season; otherwise the site
+uses the limited `events.json` feed.
 
 Example plugin config:
 
@@ -44,6 +47,7 @@ Example plugin config:
 IDLERPG = {
     "export_enabled": True,
     "export_interval_seconds": 300,
+    "export_full_season_events": False,
     "export_path": "/path/to/public/idlerpg/data",
     "export_public_base_url": "https://example.org/idlerpg/data",
     "website_public_base_url": "https://example.org/idlerpg",

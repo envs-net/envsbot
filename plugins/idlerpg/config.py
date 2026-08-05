@@ -307,6 +307,14 @@ EXPORT_EVENT_LIMIT = int(
 )
 
 
+EXPORT_FULL_SEASON_EVENTS = bool(
+    _cfg.get(
+        "export_full_season_events",
+        config.get("idlerpg_export_full_season_events", False),
+    )
+)
+
+
 EXPORT_ENABLED = bool(_cfg.get("export_enabled", config.get("idlerpg_export_enabled", True)))
 
 
@@ -527,6 +535,7 @@ __all__ = [
     'EVENT_LOG_LIMIT',
     'EVENT_RETENTION_DAYS',
     'EXPORT_EVENT_LIMIT',
+    'EXPORT_FULL_SEASON_EVENTS',
     'EXPORT_ENABLED',
     'EXPORT_INTERVAL_SECONDS',
     'EXPORT_PATH',

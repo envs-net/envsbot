@@ -516,6 +516,10 @@ IDLERPG = {
     "event_log_limit": 200,
     "event_retention_days": 90,
     "export_event_limit": 50,
+    # Disabled by default for backward compatibility. Enable this to write
+    # season_events.json with every event from the active season in addition
+    # to the compact, limited events.json feed.
+    "export_full_season_events": False,
 
     # Public JSON export for the website. Prefer exporting directly into a
     # web-readable directory instead of making the webserver read bot-internal

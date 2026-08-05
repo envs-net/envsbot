@@ -248,14 +248,16 @@ Relevant settings:
 IDLERPG = {
     "event_log_limit": 200,
     "export_event_limit": 50,
+    "export_full_season_events": False,
 }
 ```
 
 `event_log_limit` controls the compact recent-event log used by bot commands.
 `export_event_limit` controls how many recent events are written to
-`events.json` for lightweight consumers. In addition, `season_events.json`
-contains every event recorded during the active season and is reset when a new
-season starts.
+`events.json` for lightweight consumers. When `export_full_season_events` is
+enabled, the bot additionally writes `season_events.json` with every event
+recorded during the active season. The full-season file is reset when a new
+season starts and removed when the option is disabled.
 
 ## Quests
 
@@ -681,7 +683,8 @@ makes battle events more likely compared to item and alignment events.
 | --- | ---: | --- |
 | `event_log_limit` | `200` | Maximum number of events kept in the compact recent-event log used by bot commands and `events.json`. |
 | `event_retention_days` | `90` | Maximum age in the compact recent-event log. Set to `0` to keep it by count only; the active-season export is unaffected. |
-| `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. The separate `season_events.json` export always contains the complete active-season history. |
+| `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. |
+| `export_full_season_events` | `False` | Also export the complete active-season history to `season_events.json`. When disabled, only the limited `events.json` feed is published and stale full-season files are removed. |
 
 Achievements are awarded automatically for long idling, level milestones,
 battles, quests, unique items, godsends, calamities and item collection.
