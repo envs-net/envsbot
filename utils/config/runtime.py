@@ -220,6 +220,14 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "EVENT_LOG_LIMIT": _to_int(item("event_log_limit", "idlerpg_event_log_limit", 200) or 200, 200),
         "EVENT_RETENTION_DAYS": _to_int(item("event_retention_days", "idlerpg_event_retention_days", 90) or 0, 0),
         "EXPORT_EVENT_LIMIT": _to_int(item("export_event_limit", "idlerpg_export_event_limit", 50) or 50, 50),
+        "EXPORT_FULL_SEASON_EVENTS": _to_bool(
+            item(
+                "export_full_season_events",
+                "idlerpg_export_full_season_events",
+                False,
+            ),
+            False,
+        ),
         "EXPORT_ENABLED": _to_bool(item("export_enabled", "idlerpg_export_enabled", True), True),
         "EXPORT_INTERVAL_SECONDS": _to_int(
             item(

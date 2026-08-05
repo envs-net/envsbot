@@ -224,6 +224,16 @@ def test_idlerpg_runtime_values_include_export_interval_and_preserve_zero():
     })["EXPORT_INTERVAL_SECONDS"] == 900
 
 
+def test_idlerpg_runtime_values_include_full_season_event_export():
+    assert runtime._idlerpg_values({})["EXPORT_FULL_SEASON_EVENTS"] is False
+    assert runtime._idlerpg_values({
+        "idlerpg": {"export_full_season_events": True}
+    })["EXPORT_FULL_SEASON_EVENTS"] is True
+    assert runtime._idlerpg_values({
+        "idlerpg_export_full_season_events": True
+    })["EXPORT_FULL_SEASON_EVENTS"] is True
+
+
 def test_idlerpg_runtime_values_cover_all_reloadable_config_constants():
     from plugins.idlerpg import config as idlerpg_config
 
