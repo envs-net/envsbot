@@ -104,6 +104,7 @@ def _discard_season(room: dict[str, Any]) -> dict[str, Any]:
 
     room["quest"] = {"active": False, "next_at": now + _dep_config.QUEST_INTERVAL}
     room["season"] = _blank_season(now)
+    _dep_export._reset_season_events(room)
     room["last_tick"] = now
     _dep_export._record_event(
         room,
@@ -139,6 +140,7 @@ def _end_season(room_jid: str, room: dict[str, Any], *, reset_players: bool | No
             if isinstance(player, dict):
                 _reset_player_for_new_season(_dep_state._normalize_player(str(jid), player))
     room["season"] = _blank_season(now)
+    _dep_export._reset_season_events(room)
     _dep_export._record_event(
         room,
         "season",

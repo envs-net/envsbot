@@ -577,6 +577,8 @@ async def test_export_command_writes_public_files(tmp_path, monkeypatch):
 
     assert (tmp_path / "index.json").exists()
     assert (tmp_path / "leaderboard.json").exists()
+    assert (tmp_path / "season_events.json").exists()
+    assert (tmp_path / "room_at_conf" / "season_events.json").exists()
     profile_payload = (tmp_path / "room_at_conf" / "profiles" / "Alice.json").read_text()
     assert '"played_for"' in profile_payload
     assert "alice@envs.net" not in profile_payload
@@ -616,6 +618,8 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "end"], msg, True)
     assert "Champion: Alice" in bot.replies[-1][0]
     assert room["hall_of_fame"][-1]["champion"] == "Alice"
+    assert len(room["season_events"]) == 1
+    assert "ended. Champion: Alice" in room["season_events"][0]["text"]
     assert player["level"] == 12
     assert player["stats"]["battles_won"] == 7
 
@@ -634,6 +638,8 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     assert player["stats"] == {}
     assert player["achievements"] == []
     assert player["title"] == ""
+    assert len(room["season_events"]) == 1
+    assert "ended. Champion: Alice" in room["season_events"][0]["text"]
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["hof"], DummyMsg(), True)
     assert "Hall of Fame" in bot.replies[-1][0]
@@ -659,6 +665,9 @@ async def test_season_discard_confirm_skips_hall_of_fame_and_resets_current_stat
     room["hall_of_fame"] = [{"id": "good-season", "champion": "Alice"}]
     room["events"] = [
         {"ts": now - 101, "kind": "season", "text": "previous season ended"},
+        {"ts": now - 50, "kind": "game", "text": "faulty season event"},
+    ]
+    room["season_events"] = [
         {"ts": now - 50, "kind": "game", "text": "faulty season event"},
     ]
     room["quest"] = {
@@ -706,6 +715,8 @@ async def test_season_discard_confirm_skips_hall_of_fame_and_resets_current_stat
     assert player["last_manual_duel_at"] == 0
     assert not any(event.get("text") == "faulty season event" for event in room["events"])
     assert any("was discarded" in event.get("text", "") for event in room["events"])
+    assert len(room["season_events"]) == 1
+    assert "was discarded" in room["season_events"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -1064,11 +1075,20 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
             {"name": "Alice", "level": 25, "next": 1000, "x": 300, "y": 200},
         )
     }
-    idlerpg._record_event(room, "level", "Alice reached level 25", players=["Alice"])
+    room["season"] = {"id": "season-a", "started_at": 1000, "ends_at": 2000}
+    room["events"] = [
+        {"ts": 1001, "kind": "game", "text": "first"},
+        {"ts": 1002, "kind": "game", "text": "second"},
+        {"ts": 1003, "kind": "game", "text": "third"},
+    ]
+    room["season_events"] = list(room["events"])
 
+    monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 0)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_EVENT_LIMIT", 2)
     monkeypatch.setattr(idlerpg_config, "EXPORT_PUBLIC_BASE_URL", "https://example.org/idlerpg/data")
     summary, room_payload = idlerpg._export_room_state(tmp_path, "room@conf", room, 1234)
     assert summary["leaderboard_url"].endswith("/room_at_conf/leaderboard.json")
+    assert summary["season_events_url"].endswith("/room_at_conf/season_events.json")
     assert "_room_payload" not in summary
     assert room_payload["achievement_catalog"] == idlerpg._achievement_catalog()
     assert room_payload["equipment_slots"] == list(idlerpg.ITEMS)
@@ -1080,8 +1100,22 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
     assert room_payload["equipment_slots"] == list(idlerpg.ITEMS)
     assert room_payload["artifact_catalog"] == idlerpg._public_artifact_catalog()
     assert room_payload["map"] == {"width": idlerpg.MAP_X, "height": idlerpg.MAP_Y}
-    assert room_payload["events"][0]["players"] == ["Alice"]
+    assert [event["text"] for event in room_payload["events"]] == ["second", "third"]
+    assert room_payload["season_events_total"] == 3
     assert "jid" not in room_payload["players"][0]
+
+    season_events_payload = json.loads((tmp_path / "room_at_conf" / "season_events.json").read_text())
+    assert season_events_payload["season"] == {
+        "id": "season-a",
+        "started_at": 1000,
+        "ends_at": 2000,
+    }
+    assert season_events_payload["events_total"] == 3
+    assert [event["text"] for event in season_events_payload["events"]] == [
+        "first",
+        "second",
+        "third",
+    ]
 
     artifacts_payload = json.loads((tmp_path / "room_at_conf" / "artifacts.json").read_text())
     assert artifacts_payload["equipment_slots"] == list(idlerpg.ITEMS)

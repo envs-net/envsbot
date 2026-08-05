@@ -131,6 +131,7 @@ _ROOT_COMPATIBILITY_EXPORTS = (
     "players.json",
     "hall_of_fame.json",
     "events.json",
+    "season_events.json",
     "achievements.json",
     "artifacts.json",
 )
@@ -263,6 +264,73 @@ def _prune_events(room: dict[str, Any]) -> None:
     room["events"] = pruned[-max(1, _dep_config.EVENT_LOG_LIMIT):]
 
 
+def _season_started_at(room: dict[str, Any]) -> int:
+    if not isinstance(room, dict):
+        return 0
+    season = room.get("season")
+    if not isinstance(season, dict):
+        return 0
+    try:
+        return max(0, int(season.get("started_at", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ensure_season_events(room: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the complete event store for the active season.
+
+    Older persisted rooms do not have ``season_events`` yet.  Seed that store
+    from the retained regular event log so upgrades preserve as much of the
+    current season history as is still available.  Once present, this list is
+    intentionally not capped by ``EVENT_LOG_LIMIT`` because the public
+    ``season_events.json`` export must contain every event from the active
+    season.
+    """
+    if not isinstance(room, dict):
+        return []
+
+    started_at = _season_started_at(room)
+    existing = room.get("season_events")
+    try:
+        stored_started_at = max(0, int(room.get("season_events_started_at", 0) or 0))
+    except (TypeError, ValueError):
+        stored_started_at = 0
+    if isinstance(existing, list) and stored_started_at == started_at:
+        return existing
+
+    source = existing if isinstance(existing, list) else room.get("events", [])
+    if not isinstance(source, list):
+        source = []
+
+    season_events: list[dict[str, Any]] = []
+    for event in source:
+        if not isinstance(event, dict):
+            continue
+        try:
+            event_ts = int(event.get("ts", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if started_at > 0 and event_ts < started_at:
+            continue
+        season_events.append(event)
+
+    room["season_events"] = season_events
+    room["season_events_started_at"] = started_at
+    return season_events
+
+
+def _reset_season_events(room: dict[str, Any]) -> None:
+    room["season_events"] = []
+    room["season_events_started_at"] = _season_started_at(room)
+
+
+def _current_season_events(room: dict[str, Any]) -> list[dict[str, Any]]:
+    events = _ensure_season_events(room)
+    public = [_event_public_record(event) for event in events if isinstance(event, dict)]
+    public.sort(key=lambda event: int(event.get("ts", 0) or 0))
+    return public
+
+
 def _record_event(
     room: dict[str, Any],
     kind: str,
@@ -275,6 +343,7 @@ def _record_event(
     if not isinstance(events, list):
         events = []
         room["events"] = events
+    season_events = _ensure_season_events(room)
     _prune_events(room)
     events = room["events"]
     entry: dict[str, Any] = {"ts": _dep_formatting._now(), "kind": _safe_event_kind(kind), "text": _sanitize_public_text(text)[:500]}
@@ -286,6 +355,7 @@ def _record_event(
     if clean_data:
         entry["data"] = clean_data
     events.append(entry)
+    season_events.append(dict(entry))
     _prune_events(room)
 
 
@@ -457,6 +527,7 @@ def _export_room_state(
         }
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
     events = _room_events(room, limit=_dep_config.EXPORT_EVENT_LIMIT)
+    season_events = _current_season_events(room)
     hall_of_fame = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
     room_payload = {
         "generated_at": generated_at,
@@ -470,6 +541,7 @@ def _export_room_state(
         "players": all_profiles,
         "quest": active_quest,
         "events": events,
+        "season_events_total": len(season_events),
         "hall_of_fame": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:],
         "achievement_catalog": _dep_leveling._achievement_catalog(),
         "equipment_slots": list(_dep_constants.ITEMS),
@@ -489,6 +561,17 @@ def _export_room_state(
     })
     _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:]})
     _atomic_write_json(room_dir / "events.json", {"generated_at": generated_at, "room": room_jid, "events": events})
+    _atomic_write_json(room_dir / "season_events.json", {
+        "generated_at": generated_at,
+        "room": room_jid,
+        "season": {
+            "id": str(season.get("id") or ""),
+            "started_at": int(season.get("started_at", 0) or 0),
+            "ends_at": int(season.get("ends_at", 0) or 0),
+        },
+        "events_total": len(season_events),
+        "events": season_events,
+    })
     _atomic_write_json(room_dir / "achievements.json", {"generated_at": generated_at, "room": room_jid, "achievements": _dep_leveling._achievement_catalog()})
     _atomic_write_json(room_dir / "artifacts.json", {
         "generated_at": generated_at,
@@ -507,6 +590,7 @@ def _export_room_state(
         "leaderboard_url": _public_url(slug, "leaderboard.json"),
         "map_url": _public_url(slug, "map.json"),
         "artifacts_url": _public_url(slug, "artifacts.json"),
+        "season_events_url": _public_url(slug, "season_events.json"),
     }
     return summary, room_payload
 
@@ -544,6 +628,7 @@ def _export_public_state(
         summaries: list[dict[str, Any]] = []
         current_slugs: set[str] = set()
         default_room_payload = None
+        default_room_season_events: list[dict[str, Any]] = []
         for room_jid, room in sorted(rooms.items()):
             room_jid = str(room_jid)
             if room_jid not in enabled or not isinstance(room, dict):
@@ -553,6 +638,7 @@ def _export_public_state(
             current_slugs.add(str(summary["slug"]))
             if default_room_payload is None:
                 default_room_payload = room_payload
+                default_room_season_events = _current_season_events(room)
 
         stale_slugs = previous_slugs - current_slugs
         stale_slugs.update(
@@ -594,6 +680,20 @@ def _export_public_state(
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "events": default_room_payload.get("events", []),
+            })
+            season = default_room_payload.get("season", {})
+            if not isinstance(season, dict):
+                season = {}
+            _atomic_write_json(root / "season_events.json", {
+                "generated_at": generated_at,
+                "room": default_room_payload["room"],
+                "season": {
+                    "id": str(season.get("id") or ""),
+                    "started_at": int(season.get("started_at", 0) or 0),
+                    "ends_at": int(season.get("ends_at", 0) or 0),
+                },
+                "events_total": len(default_room_season_events),
+                "events": default_room_season_events,
             })
             _atomic_write_json(root / "achievements.json", {
                 "generated_at": generated_at,

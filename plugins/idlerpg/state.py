@@ -18,6 +18,8 @@ def _blank_room() -> dict[str, Any]:
         "season": _dep_seasons._blank_season(now),
         "hall_of_fame": [],
         "events": [],
+        "season_events": [],
+        "season_events_started_at": now,
         "last_tick": now,
         "next_top_announce_at": now + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0,
         "next_topic_update_at": now + _dep_config.TOPIC_UPDATE_INTERVAL if _dep_config.TOPIC_UPDATE_INTERVAL > 0 else 0,
@@ -154,6 +156,7 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     room.setdefault("season", _dep_seasons._blank_season(_dep_formatting._now()))
     room.setdefault("hall_of_fame", [])
     room.setdefault("events", [])
+    _dep_export._ensure_season_events(room)
     _dep_export._prune_events(room)
     room.setdefault("last_tick", _dep_formatting._now())
     room.setdefault("next_top_announce_at", _dep_formatting._now() + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0)

@@ -754,6 +754,7 @@ $leaderboard_payload = idlerpg_load_json(idlerpg_data_file('leaderboard.json', $
 $players_payload = idlerpg_load_json(idlerpg_data_file('players.json', $data_dir), ['players' => []]);
 $map_payload = idlerpg_load_json(idlerpg_data_file('map.json', $data_dir), ['players' => [], 'width' => 500, 'height' => 500]);
 $events_payload = idlerpg_load_json(idlerpg_data_file('events.json', $data_dir), ['events' => []]);
+$season_events_payload = idlerpg_load_json(idlerpg_data_file('season_events.json', $data_dir), []);
 $hof_payload = idlerpg_load_json(idlerpg_data_file('hall_of_fame.json', $data_dir), ['seasons' => []]);
 $achievements_payload = idlerpg_load_json(idlerpg_data_file('achievements.json', $data_dir), ['achievements' => []]);
 
@@ -773,9 +774,13 @@ $map_players = is_array($map_payload['players'] ?? null)
 if (count($map_players) === 0 && count($players) > 0) {
     $map_players = $players;
 }
-$events = is_array($events_payload['events'] ?? null)
-    ? $events_payload['events']
-    : (is_array($room_payload['events'] ?? null) ? $room_payload['events'] : []);
+$has_season_event_export = array_key_exists('events', $season_events_payload)
+    && is_array($season_events_payload['events']);
+$events = $has_season_event_export
+    ? $season_events_payload['events']
+    : (is_array($events_payload['events'] ?? null)
+        ? $events_payload['events']
+        : (is_array($room_payload['events'] ?? null) ? $room_payload['events'] : []));
 usort($events, function ($a, $b) {
     return ((int) ($b['ts'] ?? 0)) <=> ((int) ($a['ts'] ?? 0));
 });
@@ -1220,7 +1225,10 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     <button type="submit">Filter</button>
                     <?php if ($event_query !== '' || $event_kind !== 'all' || $event_player !== ''): ?><a href="<?php echo h(idlerpg_view_url('events')); ?>">Reset</a><?php endif; ?>
                 </form>
-                <p class="muted"><?php echo h($event_pagination['total']); ?> matching events.</p>
+                <p class="muted">
+                    <?php echo h($event_pagination['total']); ?> matching events
+                    <?php if ($has_season_event_export): ?> from the complete current-season export<?php endif; ?>.
+                </p>
                 <?php idlerpg_render_events($event_pagination['items'], count($event_pagination['items'])); ?>
                 <?php idlerpg_render_pagination('events', $event_pagination, ['q' => $event_query, 'kind' => $event_kind, 'player' => $event_player]); ?>
             <?php endif; ?>

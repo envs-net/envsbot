@@ -183,7 +183,14 @@ def _write_room(root: Path, slug: str, room: str, players: list[dict[str, object
             "players": players,
             "quest": quest,
         },
-        "events.json": {"generated_at": now, "room": room, "events": events},
+        "events.json": {"generated_at": now, "room": room, "events": events[-1:]},
+        "season_events.json": {
+            "generated_at": now,
+            "room": room,
+            "season": payload["season"],
+            "events_total": len(events),
+            "events": events,
+        },
         "hall_of_fame.json": {
             "generated_at": now,
             "room": room,
@@ -364,6 +371,19 @@ def test_idlerpg_site_profile_filters_and_room_switching(tmp_path: Path) -> None
     assert "beta@conference.example.org" in beta
     assert "Carol" in beta
     assert "character=Alice" not in beta
+
+
+def test_idlerpg_site_uses_complete_current_season_event_export(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    html = _render(
+        data_dir,
+        view="events",
+        room="alpha_at_conference.example.org",
+    )
+
+    assert "complete current-season export" in html
+    assert "Alice unlocked Founder" in html
+    assert "The quest started" in html
 
 
 def test_idlerpg_site_rejects_unknown_or_unsafe_room_slug(tmp_path: Path) -> None:

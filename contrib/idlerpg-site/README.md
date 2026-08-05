@@ -24,6 +24,7 @@ public/idlerpg/data/<room-slug>/leaderboard.json
 public/idlerpg/data/<room-slug>/players.json
 public/idlerpg/data/<room-slug>/map.json
 public/idlerpg/data/<room-slug>/events.json
+public/idlerpg/data/<room-slug>/season_events.json
 public/idlerpg/data/<room-slug>/hall_of_fame.json
 public/idlerpg/data/<room-slug>/achievements.json
 public/idlerpg/data/<room-slug>/artifacts.json
@@ -34,7 +35,8 @@ The website primarily uses the room-specific exports. `room.json` provides the
 season, public rules, achievement catalog, equipment slots, artifact catalog
 and complete fallback state; the
 specialized JSON files keep individual views usable if one optional file is
-missing.
+missing. `events.json` remains a compact recent-event feed, while
+`season_events.json` contains every event recorded during the active season.
 
 Example plugin config:
 

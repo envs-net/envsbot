@@ -251,9 +251,11 @@ IDLERPG = {
 }
 ```
 
-`event_log_limit` controls how many events are kept in bot state per room.
+`event_log_limit` controls the compact recent-event log used by bot commands.
 `export_event_limit` controls how many recent events are written to
-`events.json` for the website.
+`events.json` for lightweight consumers. In addition, `season_events.json`
+contains every event recorded during the active season and is reset when a new
+season starts.
 
 ## Quests
 
@@ -372,12 +374,14 @@ For an envs.net-style installation in `/srv/envsbot/envsbot`, that means:
 /srv/envsbot/envsbot/data/idlerpg/map.json
 /srv/envsbot/envsbot/data/idlerpg/hall_of_fame.json
 /srv/envsbot/envsbot/data/idlerpg/events.json
+/srv/envsbot/envsbot/data/idlerpg/season_events.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/room.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/leaderboard.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/players.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/map.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/hall_of_fame.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/events.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/season_events.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/profiles/<character>.json
 ```
 
@@ -675,9 +679,9 @@ makes battle events more likely compared to item and alignment events.
 
 | Option | Default | Meaning |
 | --- | ---: | --- |
-| `event_log_limit` | `200` | Maximum number of room events kept in bot state. |
-| `event_retention_days` | `90` | Maximum age for retained room events. Set to `0` to keep by count only. |
-| `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. |
+| `event_log_limit` | `200` | Maximum number of events kept in the compact recent-event log used by bot commands and `events.json`. |
+| `event_retention_days` | `90` | Maximum age in the compact recent-event log. Set to `0` to keep it by count only; the active-season export is unaffected. |
+| `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. The separate `season_events.json` export always contains the complete active-season history. |
 
 Achievements are awarded automatically for long idling, level milestones,
 battles, quests, unique items, godsends, calamities and item collection.

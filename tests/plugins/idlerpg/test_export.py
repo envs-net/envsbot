@@ -142,6 +142,56 @@ def test_public_events_redact_private_jids_from_text_players_and_data():
     assert "[redacted-jid]" in payload
 
 
+def test_current_season_event_store_is_not_capped_by_recent_log(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    now = 1_000
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "season-a", "started_at": now, "ends_at": 0}
+    room["events"] = []
+    room["season_events"] = []
+    monkeypatch.setattr(idlerpg_config, "EVENT_LOG_LIMIT", 2)
+    monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 0)
+
+    for offset in range(4):
+        monkeypatch.setattr(idlerpg_formatting, "_now", lambda value=now + offset: value)
+        idlerpg._record_event(room, "game", f"event-{offset}")
+
+    assert [event["text"] for event in room["events"]] == ["event-2", "event-3"]
+    assert [event["text"] for event in room["season_events"]] == [
+        "event-0",
+        "event-1",
+        "event-2",
+        "event-3",
+    ]
+    assert [event["text"] for event in idlerpg._current_season_events(room)] == [
+        "event-0",
+        "event-1",
+        "event-2",
+        "event-3",
+    ]
+
+
+def test_room_bucket_migrates_retained_current_season_events():
+    data = {
+        "rooms": {
+            "room@conf": {
+                "players": {},
+                "season": {"id": "season-a", "started_at": 200, "ends_at": 0},
+                "events": [
+                    {"ts": 100, "kind": "old", "text": "previous season"},
+                    {"ts": 250, "kind": "game", "text": "current season"},
+                ],
+            }
+        }
+    }
+
+    room = idlerpg._room_bucket(data, "room@conf")
+
+    assert [event["text"] for event in room["season_events"]] == ["current season"]
+
+
 def test_active_quest_export_omits_stale_private_jids(tmp_path):
     room = idlerpg._blank_room()
     room["players"] = {
@@ -235,6 +285,7 @@ def test_public_export_cleans_stale_index_rooms_and_root_copies(tmp_path, monkey
         "players.json",
         "hall_of_fame.json",
         "events.json",
+        "season_events.json",
         "achievements.json",
         "artifacts.json",
     ):
@@ -253,6 +304,7 @@ def test_public_export_cleans_stale_index_rooms_and_root_copies(tmp_path, monkey
         "players.json",
         "hall_of_fame.json",
         "events.json",
+        "season_events.json",
         "achievements.json",
         "artifacts.json",
     ):
