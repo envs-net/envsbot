@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+from typing import Any
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -13,7 +14,7 @@ CONFIG_FILENAME = "config.py"
 LEGACY_CONFIG_FILENAME = "config.json"
 
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "prefix": ",",
     "loglevel": "INFO",
     "db": "bot.db",

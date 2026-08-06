@@ -257,7 +257,7 @@ def _validate_avatar(cfg, errors, warnings):
 
 def collect_config_warnings(cfg):
     """Return non-fatal config warnings."""
-    warnings = []
+    warnings: list[str] = []
 
     if not isinstance(cfg, dict):
         return warnings
@@ -284,7 +284,7 @@ def check_required_keys(cfg):
 
 
 def check_optional_keys(cfg):
-    errors = []
+    errors: list[str] = []
     for key, expected_type in OPTIONAL_CONFIG_TYPES.items():
         if key not in cfg:
             continue
