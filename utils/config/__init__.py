@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 from importlib import import_module
+from typing import Any
+
+from .errors import ConfigError as _ConfigError
+from .errors import exit_on_config_error as _exit_on_config_error
+from .loader import load_config as _load_config
 
 _PART_NAMES = ['defaults', 'errors', 'display', 'loader', 'validation', 'logging_setup', 'runtime']
 _PARTS = [import_module(f'{__name__}.{name}') for name in _PART_NAMES]
@@ -13,11 +18,9 @@ for _part, _names in zip(_PARTS, (_EXPORTS_BY_PART[name] for name in _PART_NAMES
             _SHARED[_name] = getattr(_part, _name)
 globals().update(_SHARED)
 
-# Backwards-compatible global config object.
-config = None
-_load_config = _SHARED["load_config"]
-_ConfigError = _SHARED["ConfigError"]
-_exit_on_config_error = _SHARED["exit_on_config_error"]
+# Backwards-compatible global config object.  The explicit imports above keep
+# the dynamic compatibility facade understandable to static type checkers.
+config: dict[str, Any] = {}
 try:
     config = _load_config(require_required_keys=False)
 except _ConfigError as e:

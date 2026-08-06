@@ -19,7 +19,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from utils.config import BASE_DIR, config, get_runtime_config_path
+from utils.config import config
+from utils.config.defaults import BASE_DIR
+from utils.config.loader import get_runtime_config_path
 from utils.file_security import (
     PRIVATE_FILE_MODE,
     ensure_private_directory,
