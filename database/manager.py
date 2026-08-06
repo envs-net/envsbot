@@ -268,11 +268,16 @@ class DatabaseManager:
         interval = max(60, int(config.get("database_maintenance_interval_seconds", 21600) or 21600))
         try:
             while not self._stop_event.is_set():
+                stop_requested = True
                 try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
-                    break
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=interval,
+                    )
                 except asyncio.TimeoutError:
-                    pass
+                    stop_requested = False
+                if stop_requested:
+                    break
                 try:
                     await self.run_maintenance()
                 except Exception:

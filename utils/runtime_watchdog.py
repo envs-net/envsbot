@@ -122,11 +122,16 @@ class RuntimeWatchdog:
         expected = loop.time() + interval
         try:
             while not self.stop_event.is_set():
+                stop_requested = True
                 try:
-                    await asyncio.wait_for(self.stop_event.wait(), timeout=interval)
-                    break
+                    await asyncio.wait_for(
+                        self.stop_event.wait(),
+                        timeout=interval,
+                    )
                 except asyncio.TimeoutError:
-                    pass
+                    stop_requested = False
+                if stop_requested:
+                    break
 
                 now = loop.time()
                 lag = max(0.0, now - expected)

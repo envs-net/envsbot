@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _MANAGED_HANDLER_ATTR = "_envsbot_managed_handler"
+log = logging.getLogger(__name__)
 
 
 def _remove_managed_handlers(root: logging.Logger) -> None:
@@ -18,7 +19,10 @@ def _remove_managed_handlers(root: logging.Logger) -> None:
         try:
             handler.close()
         except Exception:
-            pass
+            log.debug(
+                "[LOGGING] Could not close a managed handler during reload",
+                exc_info=True,
+            )
 
 
 def setup_logging(log_dir: Path | str = "logs") -> None:

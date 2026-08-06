@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
+
+
+log = logging.getLogger(__name__)
 
 
 def _duration(seconds: int | float) -> str:
@@ -92,7 +96,11 @@ async def build_daily_admin_report(bot: Any) -> str:
         try:
             usage = await command_usage.totals_since(now - 86400)
         except Exception:
-            pass
+            log.debug(
+                "[ADMIN_REPORT] Could not read command usage totals",
+                exc_info=True,
+            )
+            usage = {"uses": 0, "failures": 0}
 
     config = getattr(bot, "config", {}) or {}
     backup_name, backup_status = await _backup_state(

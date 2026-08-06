@@ -118,7 +118,9 @@ class PersistentOutbox:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         except asyncio.CancelledError:
-            pass
+            # The worker may already have been cancelled by the task
+            # supervisor during shutdown; the outbox is stopped either way.
+            return
 
     async def enqueue(
         self,
@@ -188,8 +190,12 @@ class PersistentOutbox:
         return min(maximum, initial * (2 ** max(0, int(attempts))))
 
     async def _send_one(self, queued: Any) -> None:
+        store = self.store
+        if store is None:
+            raise RuntimeError("outbox store is not initialized")
+
         if not self._room_ready(queued.destination, queued.message_type):
-            await self.store.defer(
+            await store.defer(
                 queued.id,
                 retry_delay_seconds=self._retry_delay(queued.attempts),
                 reason="destination room is not joined",
@@ -208,7 +214,7 @@ class PersistentOutbox:
         except Exception as exc:
             self.failed_attempts += 1
             self.last_error = f"{type(exc).__name__}: {exc}"
-            dead = await self.store.mark_failed(
+            dead = await store.mark_failed(
                 queued,
                 exc,
                 retry_delay_seconds=self._retry_delay(queued.attempts),
@@ -223,7 +229,7 @@ class PersistentOutbox:
                 )
             return
 
-        await self.store.mark_sent(queued.id)
+        await store.mark_sent(queued.id)
         self.delivered += 1
         self.last_delivery_at = int(time.time())
         self.last_error = None
@@ -258,9 +264,14 @@ class PersistentOutbox:
                     continue
                 self.wakeup.clear()
                 try:
-                    await asyncio.wait_for(self.wakeup.wait(), timeout=poll_seconds)
+                    await asyncio.wait_for(
+                        self.wakeup.wait(),
+                        timeout=poll_seconds,
+                    )
                 except asyncio.TimeoutError:
-                    pass
+                    # A poll timeout is the normal trigger for the next queue
+                    # scan when no producer explicitly wakes the worker.
+                    continue
         finally:
             self.wakeup.clear()
 

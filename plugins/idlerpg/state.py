@@ -80,7 +80,7 @@ async def _get_data(bot) -> dict[str, Any]:
                 if callable(flush):
                     result = flush()
                     if inspect.isawaitable(result):
-                        await result
+                        _ = await result
         elif not isinstance(data, dict):
             data = {}
 
@@ -103,22 +103,20 @@ _PUBLIC_EXPORT_RUNTIME: dict[str, Any] = {
     "files": 0,
     "bytes": 0,
 }
-_PUBLIC_EXPORT_LOCK: asyncio.Lock | None = None
-_PUBLIC_EXPORT_LOCK_LOOP = None
+_PUBLIC_EXPORT_LOCKS: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
 
 
 def _public_export_lock() -> asyncio.Lock:
-    global _PUBLIC_EXPORT_LOCK, _PUBLIC_EXPORT_LOCK_LOOP
     loop = asyncio.get_running_loop()
-    if _PUBLIC_EXPORT_LOCK is None or _PUBLIC_EXPORT_LOCK_LOOP is not loop:
-        _PUBLIC_EXPORT_LOCK = asyncio.Lock()
-        _PUBLIC_EXPORT_LOCK_LOOP = loop
-    return _PUBLIC_EXPORT_LOCK
+    lock = _PUBLIC_EXPORT_LOCKS.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _PUBLIC_EXPORT_LOCKS[loop] = lock
+    return lock
 
 
 def _reset_public_export_schedule() -> None:
     """Reset automatic scheduling and export diagnostics for tests/reloads."""
-    global _PUBLIC_EXPORT_LOCK, _PUBLIC_EXPORT_LOCK_LOOP
     _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
     _PUBLIC_EXPORT_RUNTIME.update({
         "running": False,
@@ -134,8 +132,7 @@ def _reset_public_export_schedule() -> None:
         "files": 0,
         "bytes": 0,
     })
-    _PUBLIC_EXPORT_LOCK = None
-    _PUBLIC_EXPORT_LOCK_LOOP = None
+    _PUBLIC_EXPORT_LOCKS.clear()
 
 
 def _public_export_runtime() -> dict[str, Any]:
