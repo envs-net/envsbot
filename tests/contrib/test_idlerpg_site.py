@@ -284,7 +284,6 @@ def test_idlerpg_site_renders_complete_views(tmp_path: Path) -> None:
             assert "the displayed time is the deadline" in html
 
 
-
 @pytest.mark.parametrize(
     ("player_count", "density_class", "marker_radius", "shows_density_note"),
     [

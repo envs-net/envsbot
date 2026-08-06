@@ -51,8 +51,6 @@ def test_generated_rss_docs_include_direct_and_filtered_list_guidance():
     assert "`,rss delete all user@example.org`" in rss_doc
 
 
-
-
 def test_generated_idlerpg_docs_group_player_and_admin_commands():
     idlerpg_doc = generate_plugin_docs()["idlerpg.md"]
 

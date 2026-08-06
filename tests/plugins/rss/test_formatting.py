@@ -741,8 +741,6 @@ async def test_post_new_entries_retains_cursor_when_room_delivery_fails(
     assert "last_posted" not in store[rss.RSS_KEY][url]
 
 
-
-
 @pytest.mark.asyncio
 async def test_post_new_entries_waits_for_all_rooms_before_any_delivery(
     monkeypatch, make_bot
