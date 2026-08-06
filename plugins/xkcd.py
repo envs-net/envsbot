@@ -31,7 +31,7 @@ from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
 from utils.formatting import page_size_for, parse_page_args
 
-from utils.task_supervisor import create_plugin_task
+from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -884,15 +884,20 @@ async def on_load(bot):
     INDEX_TASK = None
     CHECK_TASK = None
 
-    INDEX_TASK = create_plugin_task(bot,
+    INDEX_TASK = create_resilient_plugin_task(
+        bot,
         "xkcd",
-        build_full_index(bot),
+        lambda: build_full_index(bot),
         name="xkcd-index",
+        max_restarts=3,
+        fallback_creator=create_plugin_task,
     )
-    CHECK_TASK = create_plugin_task(bot,
+    CHECK_TASK = create_resilient_plugin_task(
+        bot,
         "xkcd",
-        xkcd_check_loop(bot),
+        lambda: xkcd_check_loop(bot),
         name="xkcd-check",
+        fallback_creator=create_plugin_task,
     )
 
     log.info("[XKCD] Plugin loaded, background tasks started")

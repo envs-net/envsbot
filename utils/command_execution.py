@@ -96,6 +96,35 @@ class CommandExecutor:
         except Exception:
             log.debug("[COMMAND] Failed to write command audit event", exc_info=True)
 
+    async def _record_usage(
+        self,
+        context: CommandExecutionContext,
+        *,
+        success: bool,
+        duration_ms: int,
+    ) -> None:
+        """Persist aggregate usage without retaining actor or message content."""
+        db = getattr(self.bot, "db", None)
+        store = getattr(db, "command_usage", None)
+        record = getattr(store, "record", None)
+        if not callable(record):
+            return
+        if context.is_room:
+            command_context = "room"
+        elif context.room:
+            command_context = "muc-pm"
+        else:
+            command_context = "direct"
+        try:
+            await record(
+                context.command_name,
+                context=command_context,
+                success=success,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            log.debug("[COMMAND] Failed to record usage statistics", exc_info=True)
+
     async def execute(self, cmd_obj: Any, context: CommandExecutionContext, msg: Any) -> None:
         """Run one command handler and handle all cross-cutting concerns."""
         handler = getattr(cmd_obj, "handler", None)
@@ -160,4 +189,9 @@ class CommandExecutor:
                 status=status,
                 duration_ms=duration_ms,
                 error=error_text,
+            )
+            await self._record_usage(
+                context,
+                success=status == "ok",
+                duration_ms=duration_ms,
             )

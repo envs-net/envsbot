@@ -465,3 +465,69 @@ async def test_stale_tasks_ignores_done_tasks_and_missing_heartbeats():
 
     assert supervisor.stale_tasks(max_age_seconds=0) == []
     await supervisor.cancel_task(running_without_heartbeat, timeout=1.0)
+
+@pytest.mark.asyncio
+async def test_resilient_task_restarts_then_recovers():
+    supervisor = TaskSupervisor()
+    calls = 0
+
+    async def worker():
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise RuntimeError(f"boom-{calls}")
+        return "ok"
+
+    task = supervisor.create_resilient(
+        "example",
+        worker,
+        name="resilient",
+        max_restarts=3,
+        initial_backoff=0,
+        max_backoff=0,
+    )
+    assert await task == "ok"
+    info = next(item for item in supervisor.snapshot() if item.name == "resilient")
+    assert info.status == "done"
+    assert info.restart_count == 2
+    assert info.circuit_state == "closed"
+    assert info.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_resilient_task_opens_circuit_after_restart_limit():
+    supervisor = TaskSupervisor()
+
+    async def worker():
+        raise RuntimeError("always broken")
+
+    task = supervisor.create_resilient(
+        "example",
+        worker,
+        name="broken",
+        max_restarts=1,
+        initial_backoff=0,
+        max_backoff=0,
+    )
+    result = await asyncio.gather(task, return_exceptions=True)
+    assert isinstance(result[0], RuntimeError)
+    assert "circuit open" in str(result[0])
+    info = next(item for item in supervisor.snapshot() if item.name == "broken")
+    assert info.status == "failed"
+    assert info.restart_count == 2
+    assert info.circuit_state == "open"
+
+@pytest.mark.asyncio
+async def test_clear_plugin_failures_resets_open_circuit_diagnostics():
+    supervisor = TaskSupervisor()
+
+    async def fail():
+        raise RuntimeError("broken")
+
+    task = supervisor.create("demo", fail(), name="worker")
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert supervisor.summary()[1] == 1
+    assert supervisor.clear_plugin_failures("demo") == 1
+    assert supervisor.summary()[1] == 0
+    assert supervisor.snapshot(include_done=True) == []

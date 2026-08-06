@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import urlparse
 
-from utils.task_supervisor import create_plugin_task
+from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
 
 from .config import (
     DEFAULT_POLL_INTERVAL,
@@ -112,9 +112,10 @@ async def ensure_task(bot, store, url, period, *, initial_delay=0.0):
     if url in CHECK_TASKS and not CHECK_TASKS[url].done():
         return
 
-    CHECK_TASKS[url] = create_plugin_task(bot,
+    CHECK_TASKS[url] = create_resilient_plugin_task(
+        bot,
         "rss",
-        rss_check_loop(
+        lambda: rss_check_loop(
             bot,
             store,
             url,
@@ -122,6 +123,7 @@ async def ensure_task(bot, store, url, period, *, initial_delay=0.0):
             initial_delay=initial_delay,
         ),
         name=f"rss-check-{url}",
+        fallback_creator=create_plugin_task,
     )
 async def restart_all_tasks(bot):
     store = bot.db.users.plugin("rss")

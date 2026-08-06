@@ -8,7 +8,7 @@ import plugins.tools as tools
 def bot():
     b = MagicMock()
     b.reply = MagicMock()
-    b.db.users.plugin = AsyncMock(return_value=MagicMock())
+    b.db.users.plugin = MagicMock(return_value=MagicMock())
     b.presence.emoji = MagicMock(return_value="😀")
     b.presence.status = {"show": "online", "status": "all good"}
     b.version = "1.2.3"

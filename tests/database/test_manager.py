@@ -28,6 +28,8 @@ async def test_database_manager_init_and_connect(tmp_db_path):
     assert "idlerpg_players" in table_names
     assert "idlerpg_seasons" in table_names
     assert "idlerpg_events" in table_names
+    assert "outbox_messages" in table_names
+    assert "command_usage" in table_names
     assert "schema_migrations" in table_names
 
     applied = await db.applied_migration_versions()
@@ -37,6 +39,8 @@ async def test_database_manager_init_and_connect(tmp_db_path):
         "0003_room_invites",
         "0004_message_cache",
         "0005_idlerpg_state",
+        "0006_outbox",
+        "0007_command_usage",
     }
     await db.close()
 
@@ -287,3 +291,23 @@ async def test_close_continues_when_background_flush_task_failed(tmp_path):
 
     assert db.conn is None
     assert db.users is None
+
+@pytest.mark.asyncio
+async def test_database_maintenance_optimizes_checkpoints_and_prunes(tmp_db_path, monkeypatch):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect()
+    try:
+        monkeypatch.setitem(sys.modules[DatabaseManager.__module__].config, "database_wal_enabled", True)
+        monkeypatch.setitem(sys.modules[DatabaseManager.__module__].config, "command_usage_retention_days", 1)
+        db.command_usage.prune = AsyncMock(return_value=2)
+
+        state = await db.run_maintenance()
+
+        assert state["runs"] == 1
+        assert state["failures"] == 0
+        assert state["last_run_at"] > 0
+        assert state["last_duration_ms"] >= 0
+        assert state["last_wal_checkpoint"] is not None
+        db.command_usage.prune.assert_awaited_once_with(retention_days=1)
+    finally:
+        await db.close()

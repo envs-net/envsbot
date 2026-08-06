@@ -212,3 +212,69 @@ easier to filter. Common examples are:
 
 Sensitive values and URLs with embedded credentials are passed through the
 central redaction helper before they are written to logs or audit details.
+
+## Persistent outbound queue
+
+RSS posts, reminders, tell deliveries and selected administrative messages can
+be transferred to the SQLite-backed outbox when immediate XMPP delivery is not
+possible. The queue resumes after reconnects and process restarts.
+
+```text
+,outbox status
+,outbox dead
+,outbox retry
+,outbox retry rss
+```
+
+`dead` deliberately omits message bodies. `doctor database` reports pending and
+dead counts, the oldest pending age and whether the worker is running.
+
+## Task circuits and systemd watchdog
+
+Restartable workers use exponential backoff. After the configured number of
+consecutive failures, the worker opens its circuit and sends one administrative
+notification. Inspect and reset it with:
+
+```text
+,tasks failed
+,tasks all
+,tasks restart rss
+,doctor tasks
+```
+
+The runtime watchdog reports current and maximum event-loop lag in `doctor
+tasks`. With the supplied systemd unit it also feeds `WatchdogSec`; a process
+that is alive but no longer scheduling the event loop is restarted by systemd.
+
+## Command usage statistics
+
+Aggregate command counters help identify commands that are heavily used, rare
+or never used without retaining caller identities or command arguments:
+
+```text
+,commandstats top 30
+,commandstats rare 90
+,commandstats unused
+```
+
+Counters are retained for `COMMAND_USAGE_RETENTION_DAYS` and pruned by automatic
+database maintenance.
+
+## Optional daily admin report
+
+The daily report is disabled by default and is delivered only over XMPP. It
+summarizes uptime, room joins, plugin/task failures, open circuits, outbox state,
+event-loop lag, database maintenance, latest backup verification and aggregate
+24-hour command counts.
+
+```python
+ADMIN_REPORT_ENABLED = True
+ADMIN_REPORT_JID = "admin@example.org"
+ADMIN_REPORT_TIME = "08:00"
+ADMIN_REPORT_TIMEZONE = "Europe/Berlin"
+```
+
+Use `,report status` to inspect the schedule and `,report now` for a manual
+report. `ADMIN_REPORT_BACKUP_SMOKE_TEST = True` additionally extracts and opens
+the latest backup in a temporary directory; it does not modify production
+files. No external metrics service or network listener is created.

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import random
 from functools import partial
-from utils.task_supervisor import create_plugin_task
+from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
 from .handlers import on_message, on_muc_presence
 from .state import _checkpoint_room_clock, _flush_idlerpg_store
 
@@ -113,11 +113,12 @@ async def _ensure_game_task_locked(bot, room_jid: str) -> asyncio.Task | None:
 
     await _cancel_duplicate_supervised_room_tasks(bot, room_jid)
     await _checkpoint_room_clock(bot, room_jid, flush=True)
-    _dep_config.ROOM_TASKS[room_jid] = create_plugin_task(
+    _dep_config.ROOM_TASKS[room_jid] = create_resilient_plugin_task(
         bot,
         _dep_constants.PLUGIN_NAME,
-        _game_loop(bot, room_jid),
+        lambda: _game_loop(bot, room_jid),
         name=room_jid,
+        fallback_creator=create_plugin_task,
     )
     await _cancel_duplicate_supervised_room_tasks(
         bot, room_jid, keep=_dep_config.ROOM_TASKS[room_jid]

@@ -572,6 +572,45 @@ def verify_backup(path: Path) -> dict[str, Any]:
     }
 
 
+def smoke_test_backup(path: Path) -> dict[str, Any]:
+    """Extract the archived database to a temporary location and verify it."""
+    path = path.resolve()
+    verify = verify_backup(path)
+    errors = list(verify.get("errors", []))
+    database_result: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="envsbot-backup-smoke-") as tmpdir:
+        target = Path(tmpdir) / "bot.db"
+        with zipfile.ZipFile(path) as archive:
+            members = _safe_members(archive)
+            if "bot.db" not in members:
+                errors.append("backup has no bot.db")
+            else:
+                _restore_entry(archive, "bot.db", target)
+        if target.exists():
+            try:
+                connection = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+                try:
+                    database_result = [
+                        str(row[0])
+                        for row in connection.execute("PRAGMA integrity_check;").fetchall()
+                    ]
+                finally:
+                    connection.close()
+            except Exception as exc:
+                errors.append(f"database open/integrity check failed: {exc}")
+            if database_result != ["ok"]:
+                errors.append(
+                    "database integrity check failed: "
+                    + ", ".join(database_result or ["no result"])
+                )
+    return {
+        "name": path.name,
+        "ok": not errors,
+        "errors": errors,
+        "database_integrity": database_result,
+    }
+
+
 def restore_plan(archive_path: Path) -> dict[str, Any]:
     """Return what restore_backup() would restore without writing files."""
     archive_path = archive_path.resolve()

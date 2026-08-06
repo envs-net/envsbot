@@ -309,3 +309,29 @@ URLs with credentials or long user-controlled strings.
 
 Avoid adding new cross-cutting helpers to individual plugins when a core module
 already owns the responsibility.
+
+## Durable delivery, runtime supervision and operational state
+
+Failed or temporarily deferred XMPP deliveries are owned by the central
+`PersistentOutbox`. The queue is stored in `outbox_messages`, uses atomic
+claiming, exponential retry backoff and a dead-letter state, and resumes after
+a process restart. Plugins should use `utils.outbox.durable_send()` or
+`bot.reply(..., persist=True, category=...)` for messages whose delivery must
+survive a disconnect. Message bodies remain private in the SQLite database and
+are included in managed backups.
+
+Long-running workers use `TaskSupervisor.create_resilient()` through
+`create_resilient_plugin_task()`. Repeated failures move a worker through
+closed, half-open and open circuit states. A successful `,tasks restart
+<plugin>` clears the old circuit diagnostics and starts a fresh worker.
+
+`RuntimeWatchdog` measures event-loop lag and sends native systemd `sd_notify`
+heartbeats without adding an external dependency. The application exposes this
+state only through local/XMPP diagnostics; no HTTP or external metrics endpoint
+is opened.
+
+Aggregate command usage is kept in `command_usage_daily`. It stores command
+names, daily counters and success/failure totals, but no sender JIDs, message
+bodies or command arguments. Operational settings shared by defaults, runtime
+reload and validation are declared in `utils.config.spec` to reduce duplicated
+configuration plumbing.

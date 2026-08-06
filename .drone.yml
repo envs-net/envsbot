@@ -4,17 +4,16 @@ type: docker
 name: pytest-3.12
 
 steps:
-- name: test
+- name: quality-and-test
   image: python:3.12
   commands:
     - python -m pip install --upgrade pip
     - pip install -r requirements.txt
     - pip install -r requirements-dev.txt
     - python -m pip check
-    - python -m compileall -q .
-    - python scripts/check_command_docs.py
+    - ./scripts/quality.sh
     - python -m build
-    - pytest
+    - pytest -W error::RuntimeWarning -W error::DeprecationWarning
 
 trigger:
   event:
@@ -28,17 +27,16 @@ type: docker
 name: pytest-3.13
 
 steps:
-- name: test
+- name: quality-and-test
   image: python:3.13
   commands:
     - python -m pip install --upgrade pip
     - pip install -r requirements.txt
     - pip install -r requirements-dev.txt
     - python -m pip check
-    - python -m compileall -q .
-    - python scripts/check_command_docs.py
+    - ./scripts/quality.sh
     - python -m build
-    - pytest
+    - pytest -W error::RuntimeWarning -W error::DeprecationWarning
 
 trigger:
   event:

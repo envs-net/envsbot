@@ -43,6 +43,16 @@ async def _idlerpg_state(db) -> None:
     await db.idlerpg.init()
 
 
+async def _outbox(db) -> None:
+    """Create persistent outbound message queue."""
+    await db.outbox.init()
+
+
+async def _command_usage(db) -> None:
+    """Create privacy-preserving command usage aggregates."""
+    await db.command_usage.init()
+
+
 async def _room_invites(db) -> None:
     """Create the pending room invite table and indexes."""
     await db.conn.execute(
@@ -88,6 +98,16 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0005_idlerpg_state",
         "Create normalized IdleRPG room, player, season and event tables",
         _idlerpg_state,
+    ),
+    Migration(
+        "0006_outbox",
+        "Create persistent outbound message queue",
+        _outbox,
+    ),
+    Migration(
+        "0007_command_usage",
+        "Create aggregate command usage statistics",
+        _command_usage,
     ),
 )
 

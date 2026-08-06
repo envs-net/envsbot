@@ -74,10 +74,11 @@ async def tell_store(bot, recv_jid, payload):
     await store.set(recv_jid, "tell_messages", messages)
 
 
-async def tell_fetch(bot, recv_jid):
+async def tell_fetch(bot, recv_jid, *, clear: bool = True):
     store = bot.db.users.plugin("tell")
     messages = await store.get(recv_jid, "tell_messages") or []
-    await store.set(recv_jid, "tell_messages", [])
+    if clear:
+        await store.set(recv_jid, "tell_messages", [])
     return messages
 
 
@@ -200,31 +201,53 @@ async def deliver_tell_messages(bot, msg):
     if not rec_jid:
         return
 
-    messages = await tell_fetch(bot, rec_jid)
+    messages = await tell_fetch(bot, rec_jid, clear=False)
     if not messages:
         return
 
     tzinfo = await get_user_tzinfo(bot, rec_jid)
+    remaining = []
     for entry in messages:
-        w = datetime.datetime.fromtimestamp(entry["timestamp"],
-                                            pytz.timezone("UTC")).astimezone(
-            tzinfo
-        )
+        w = datetime.datetime.fromtimestamp(
+            entry["timestamp"], pytz.timezone("UTC")
+        ).astimezone(tzinfo)
         timestr = w.strftime("%a, %d %b %H:%M %Z")
         await asyncio.sleep(TELL_DELIVERY_DELAY_SECONDS)
-        bot.reply(
-            {
-                "from": msg["from"],
-                "type": "groupchat",
-                "mucnick": nick,
-            },
-            f"[TELL] ({timestr}) {entry['send_nick']
-                                  } - {entry['recv_nick']}: {
-                                  entry['message']}",
-            mention=True,
+        reply_msg = {
+            "from": msg["from"],
+            "type": "groupchat",
+            "mucnick": nick,
+        }
+        body = (
+            f"[TELL] ({timestr}) {entry['send_nick']} - "
+            f"{entry['recv_nick']}: {entry['message']}"
         )
-        log.info(f"[TELL] Delivered tell message to {
-                 nick} ({rec_jid}): {entry['message']}")
+        try:
+            task = bot.reply(
+                reply_msg,
+                body,
+                mention=True,
+                persist=True,
+                category="tell",
+            )
+            accepted = True
+            if asyncio.isfuture(task) or asyncio.iscoroutine(task):
+                accepted = bool(await task)
+        except Exception:
+            accepted = False
+            log.exception("[TELL] Failed to send or queue tell message")
+        if accepted:
+            log.info(
+                "[TELL] Delivered or queued tell message to %s (%s)",
+                nick,
+                rec_jid,
+            )
+        else:
+            remaining.append(entry)
+
+
+    store = bot.db.users.plugin("tell")
+    await store.set(rec_jid, "tell_messages", remaining)
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:

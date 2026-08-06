@@ -15,22 +15,54 @@ log = logging.getLogger(__name__)
 class MessageMixin:
     """Common reply and safe-send helpers for the bot."""
 
-    async def _safe_send_message(self, message: Any) -> bool:
-        """Safely send a message with sync/async send() support.
+    async def _safe_send_message(
+        self,
+        message: Any,
+        *,
+        persist: bool = False,
+        category: str = "message",
+        dedupe_key: str | None = None,
+        max_attempts: int | None = None,
+    ) -> bool:
+        """Safely send a message and optionally persist transport failures.
 
-        Return ``True`` once the stanza was handed to Slixmpp and ``False``
-        when creating or sending it raised an exception.  Callers that need
-        reliable delivery bookkeeping (for example direct RSS subscriptions)
-        can therefore avoid marking an item as delivered after a failed send.
+        A durable enqueue counts as accepted for callers such as RSS and
+        reminders: their own cursor/state can advance because the central
+        outbox owns the remaining delivery retries.
         """
         try:
             result = message.send()
             if inspect.isawaitable(result):
                 result = await result
-            return result is not False
+            if result is not False:
+                return True
+            error: Exception = RuntimeError("Slixmpp did not accept the stanza")
         except Exception as exc:
+            error = exc
             log.exception("[BOT] Failed to send message: %s", exc)
-            return False
+
+        if persist:
+            outbox = getattr(self, "outbox", None)
+            enqueue = getattr(outbox, "enqueue_message", None)
+            if callable(enqueue):
+                try:
+                    queued_id = await enqueue(
+                        message,
+                        category=category,
+                        dedupe_key=dedupe_key,
+                        max_attempts=max_attempts,
+                    )
+                    if queued_id is not None:
+                        log.warning(
+                            "[OUTBOX] Queued failed message id=%s category=%s",
+                            queued_id,
+                            category,
+                        )
+                        return True
+                except Exception:
+                    log.exception("[OUTBOX] Failed to persist outbound message")
+        log.debug("[BOT] Message delivery failed without durable ownership: %s", error)
+        return False
 
     def _format_reply_body(self, msg: Any, text: str, mention: bool) -> str:
         """Build the outbound reply body without changing reply semantics."""
@@ -99,9 +131,27 @@ class MessageMixin:
         """Send a command usage reply."""
         self.reply_warn(msg, f"Usage: {usage}", **kwargs)
 
-    def _schedule_reply_send(self, message: Any) -> asyncio.Task[Any]:
+    def _schedule_reply_send(
+        self,
+        message: Any,
+        *,
+        persist: bool = False,
+        category: str = "reply",
+        dedupe_key: str | None = None,
+        max_attempts: int | None = None,
+    ) -> asyncio.Task[Any]:
         """Track one short-lived reply task until it finishes or shutdown drains it."""
-        task = asyncio.create_task(self._reply_send_wrapper(message))
+        if not persist and dedupe_key is None and max_attempts is None:
+            send_coro = self._reply_send_wrapper(message)
+        else:
+            send_coro = self._reply_send_wrapper(
+                message,
+                persist=persist,
+                category=category,
+                dedupe_key=dedupe_key,
+                max_attempts=max_attempts,
+            )
+        task = asyncio.create_task(send_coro)
         tasks = getattr(self, "_reply_tasks", None)
         if tasks is None:
             tasks = set()
@@ -166,13 +216,25 @@ class MessageMixin:
         rate_limit: bool = True,
         ephemeral: bool = False,
         no_store: bool | None = None,
-    ) -> None:
+        *,
+        persist: bool = False,
+        category: str = "reply",
+        dedupe_key: str | None = None,
+        max_attempts: int | None = None,
+    ) -> asyncio.Task[Any] | None:
         """Smart reply helper for plugins."""
         del rate_limit  # legacy parameter; command rate limiting happens in dispatch
         try:
             message, _body = self._build_reply_message(msg, text, mention, thread, ephemeral, no_store)
-            self._schedule_reply_send(message)
+            task = self._schedule_reply_send(
+                message,
+                persist=persist,
+                category=category,
+                dedupe_key=dedupe_key,
+                max_attempts=max_attempts,
+            )
             self._record_test_reply(msg, text if not isinstance(text, list) else "\n".join(text))
+            return task
         except Exception as exc:
             msg_type = msg.get("type", "chat")
             if msg_type == "groupchat":
@@ -181,10 +243,34 @@ class MessageMixin:
             else:
                 import envsbot as app
                 app.log.exception("[BOT] Error creating private reply: %s", exc)
+            return None
 
-    async def _reply_send_wrapper(self, message: Any) -> None:
+    async def _reply_send_wrapper(
+        self,
+        message: Any,
+        *,
+        persist: bool = False,
+        category: str = "reply",
+        dedupe_key: str | None = None,
+        max_attempts: int | None = None,
+    ) -> bool:
         """Wrapper to send messages asynchronously with error handling."""
         try:
-            await self._safe_send_message(message)
+            if not persist and dedupe_key is None and max_attempts is None:
+                return await self._safe_send_message(message)
+            return await self._safe_send_message(
+                message,
+                persist=persist,
+                category=category,
+                dedupe_key=dedupe_key,
+                max_attempts=max_attempts,
+            )
+        except TypeError as exc:
+            # Keep compatibility with reduced test doubles and older embedders.
+            text = str(exc)
+            if "unexpected keyword" not in text and "keyword argument" not in text:
+                raise
+            return await self._safe_send_message(message)
         except Exception as exc:
             log.exception("[BOT] Error in reply send wrapper: %s", exc)
+            return False

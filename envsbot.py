@@ -45,6 +45,8 @@ from utils.plugin_manager import PluginManager
 from utils.presence_manager import PresenceManager
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.task_supervisor import TaskSupervisor
+from utils.outbox import PersistentOutbox
+from utils.runtime_watchdog import RuntimeWatchdog
 from utils.version import __version__
 
 # === set up logging ===
@@ -129,11 +131,14 @@ class Bot(
         self.last_update_notified_version = None
         self.connection_start_time = None
         self.tasks = TaskSupervisor()
+        self.tasks.bot = self
         self.command_executor = CommandExecutor(self)
         self.message_cache = MessageCache(
             max_messages=int(config.get("message_cache_size", 100) or 100),
             max_age_days=int(config.get("message_cache_max_age_days", 30) or 0),
         )
+        self.outbox = PersistentOutbox(self)
+        self.watchdog = RuntimeWatchdog(self)
         self.room_state = room_state
         self._startup_backup_done = False
         self._shutdown_lock = asyncio.Lock()

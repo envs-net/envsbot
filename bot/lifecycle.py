@@ -174,11 +174,19 @@ class LifecycleMixin:
         await self.get_roster()
         await self.db.connect()
         await self.message_cache.start(self.db.message_cache)
+        outbox = getattr(self, "outbox", None)
+        outbox_store = getattr(self.db, "outbox", None)
+        outbox_start = getattr(outbox, "start", None)
+        if callable(outbox_start) and outbox_store is not None:
+            await outbox_start(outbox_store)
 
         await self.bot_plugins.load_all()
         await self.bot_plugins.call_on_ready()
         await self._create_startup_backup()
         await self._send_restart_notification()
+        watchdog_start = getattr(getattr(self, "watchdog", None), "start", None)
+        if callable(watchdog_start):
+            await watchdog_start()
 
         self.presence.broadcast()
         self.roster.auto_subscribe = True
@@ -225,6 +233,17 @@ class LifecycleMixin:
         """Best-effort ordered shutdown of tasks, cache and database."""
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self.accepting_commands = False
+
+        watchdog_status = "skipped"
+        try:
+            watchdog = getattr(self, "watchdog", None)
+            stop_watchdog = getattr(watchdog, "stop", None)
+            if callable(stop_watchdog):
+                await stop_watchdog()
+                watchdog_status = "ok"
+        except Exception:
+            watchdog_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=watchdog status=failed")
 
         reply_status = "skipped"
         reply_completed = 0
@@ -276,6 +295,19 @@ class LifecycleMixin:
             log.exception("[LIFECYCLE] event=shutdown phase=plugins status=failed")
         else:
             log.info("[LIFECYCLE] event=shutdown phase=plugins %s", kv(status=plugin_status))
+
+        outbox_status = "skipped"
+        try:
+            outbox = getattr(self, "outbox", None)
+            stop_outbox = getattr(outbox, "stop", None)
+            if callable(stop_outbox):
+                await stop_outbox(timeout=10.0)
+                outbox_status = "ok"
+        except Exception:
+            outbox_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=outbox status=failed")
+        else:
+            log.info("[LIFECYCLE] event=shutdown phase=outbox %s", kv(status=outbox_status))
 
         task_status = "skipped"
         cancelled = 0
@@ -334,6 +366,8 @@ class LifecycleMixin:
             and plugin_status in healthy_statuses
             and task_status in healthy_statuses
             and cache_status in healthy_statuses
+            and watchdog_status in healthy_statuses
+            and outbox_status in healthy_statuses
             else "partial"
         )
         log.info(
@@ -344,6 +378,8 @@ class LifecycleMixin:
                 plugins=plugin_status,
                 tasks=task_status,
                 message_cache=cache_status,
+                watchdog=watchdog_status,
+                outbox=outbox_status,
                 db=db_status,
             ),
         )

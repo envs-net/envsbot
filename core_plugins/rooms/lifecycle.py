@@ -7,7 +7,7 @@ import time
 from functools import partial
 
 from utils.config import config
-from utils.task_supervisor import create_plugin_task
+from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
 
 from .invites import (
     cleanup_expired_room_invites,
@@ -312,11 +312,12 @@ def start_room_join_health_task(bot):
     global _ROOM_HEALTH_TASK
     if _ROOM_HEALTH_TASK is not None and not _ROOM_HEALTH_TASK.done():
         return _ROOM_HEALTH_TASK
-    _ROOM_HEALTH_TASK = create_plugin_task(
+    _ROOM_HEALTH_TASK = create_resilient_plugin_task(
         bot,
         "rooms",
-        room_join_health_loop(bot),
+        lambda: room_join_health_loop(bot),
         name=_ROOM_HEALTH_TASK_NAME,
+        fallback_creator=create_plugin_task,
     )
     return _ROOM_HEALTH_TASK
 

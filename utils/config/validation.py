@@ -70,6 +70,14 @@ def _validate_jid(value, key, errors):
 def _validate_numeric_ranges(cfg, errors):
     positive_integer_keys = {
         "backup_keep",
+        "command_usage_retention_days",
+        "database_maintenance_interval_seconds",
+        "outbox_batch_size",
+        "outbox_inflight_timeout_seconds",
+        "outbox_max_attempts",
+        "outbox_retry_initial_seconds",
+        "outbox_retry_max_seconds",
+        "task_restart_max_attempts",
         "birthday_cache_ttl_seconds",
         "birthday_check_interval_seconds",
         "birthday_initial_scan_delay_seconds",
@@ -103,6 +111,13 @@ def _validate_numeric_ranges(cfg, errors):
     }
     positive_number_keys = {
         "http_timeout_seconds",
+        "outbox_poll_seconds",
+        "task_restart_initial_seconds",
+        "task_restart_max_seconds",
+        "task_restart_reset_seconds",
+        "watchdog_interval_seconds",
+        "watchdog_lag_failure_seconds",
+        "watchdog_lag_warning_seconds",
         "rss_fetch_timeout_seconds",
         "rss_retry_backoff_multiplier",
         "sed_regex_timeout",
@@ -193,6 +208,26 @@ def _validate_timezone(cfg, errors):
                 f"{key}: must be a valid IANA timezone, e.g. Europe/Berlin")
 
 
+def _validate_admin_report(cfg, errors):
+    value = cfg.get("admin_report_time")
+    if value is not None and isinstance(value, str):
+        try:
+            hour_text, minute_text = value.split(":", 1)
+            hour = int(hour_text)
+            minute = int(minute_text)
+        except (TypeError, ValueError):
+            errors.append("admin_report_time: expected HH:MM")
+        else:
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                errors.append("admin_report_time: expected a valid 24-hour HH:MM time")
+    timezone_name = cfg.get("admin_report_timezone")
+    if isinstance(timezone_name, str) and timezone_name and timezone_name not in AVAILABLE_TIMEZONES:
+        errors.append("admin_report_timezone: must be a valid IANA timezone")
+    destination = cfg.get("admin_report_jid")
+    if isinstance(destination, str) and destination.strip():
+        _validate_jid(destination, "admin_report_jid", errors)
+
+
 def _validate_avatar(cfg, errors, warnings):
     avatar = cfg.get("avatar")
     avatar_type = cfg.get("avatar_type")
@@ -266,6 +301,8 @@ def check_optional_keys(cfg):
                 allow_empty=key in {
                     "version_check_notify_jid",
                     "room_invite_notify_jid",
+                    "admin_report_jid",
+                    "admin_report_timezone",
                 },
             )
             continue
@@ -355,6 +392,7 @@ def validate_config(cfg, require_required_keys=False):
             _validate_jid(admin, f"admins[{idx}]", errors)
 
     _validate_timezone(cfg, errors)
+    _validate_admin_report(cfg, errors)
     _validate_avatar(cfg, errors, [])
     _validate_numeric_ranges(cfg, errors)
     _validate_room_plugin_defaults(cfg, errors)

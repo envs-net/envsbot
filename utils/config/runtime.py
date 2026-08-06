@@ -9,6 +9,7 @@ from typing import Any
 
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.redaction import redact_named
+from utils.config.spec import operational_startup_only_keys
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ STARTUP_ONLY_KEYS = {
     "db",
     "message_cache_size",
     "message_cache_max_age_days",
-}
+} | operational_startup_only_keys()
 
 _RATE_LIMIT_KEYS = {
     "command_rate_limit_capacity",
@@ -563,6 +564,14 @@ async def restart_reloadable_plugin_tasks(bot: Any, before: Mapping[str, object]
             "birthday_check_interval_seconds",
         },
         "idlerpg": {"idlerpg", "room_plugin_defaults"},
+        "reports": {
+            "admin_report_enabled",
+            "admin_report_jid",
+            "admin_report_time",
+            "admin_report_timezone",
+            "admin_report_backup_smoke_test",
+            "timezone",
+        },
         "rss": {
             "rss_global_query_interval",
             "rss_retry_initial_delay",

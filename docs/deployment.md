@@ -120,3 +120,41 @@ sudo systemctl start envsbot.service
 The bot runs schema migrations automatically on startup. Applied migrations can
 be inspected with the `bot status full` database section or directly from the
 `schema_migrations` table.
+
+## Watchdog-enabled systemd unit
+
+The supplied unit uses `Type=notify`, `NotifyAccess=main` and `WatchdogSec=60`.
+EnvsBot sends `READY=1` after startup and watchdog heartbeats while the event
+loop remains responsive. This detects a hung process that `Restart=on-failure`
+alone cannot recover.
+
+After replacing an older unit, reload systemd before restarting:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart envsbot.service
+sudo systemctl show envsbot.service -p Type -p WatchdogUSec
+```
+
+To disable watchdog handling completely, remove or override `WatchdogSec` in
+systemd as well as setting `WATCHDOG_ENABLED = False`; when systemd explicitly
+requests heartbeats, the bot keeps sending them to avoid an endless restart
+loop.
+
+The example unit also enables strict filesystem and kernel hardening. When the
+database, backup directory or IdleRPG public export lives outside
+`/srv/envsbot`, add every required writable location to `ReadWritePaths=`.
+
+## Deployment quality gate
+
+Development dependencies provide the local quality runner:
+
+```bash
+pip install -r requirements-dev.txt
+scripts/quality.sh
+```
+
+It checks Python compilation, generated command documentation, focused Ruff and
+mypy rules, the test suite with runtime and deprecation warnings treated as
+errors, and dependency advisories through `pip-audit`. CI runs the same
+categories before packaging.

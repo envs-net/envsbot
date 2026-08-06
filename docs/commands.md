@@ -80,10 +80,13 @@ Lower role values have more privileges. A command is visible when your role is s
 | `config_cmd` | `core` | `core` | Safe config inspection, validation and reload commands. | [`docs/plugins/config_cmd.md`](plugins/config_cmd.md) |
 | `doctor` | `core` | `core` | Operator health checks and runtime diagnostics. | [`docs/plugins/doctor.md`](plugins/doctor.md) |
 | `help` | `core` | `core` | Dynamic help for plugins and commands. | [`docs/plugins/help.md`](plugins/help.md) |
+| `outbox` | `core` | `core` | Inspect and retry durable outbound messages. | [`docs/plugins/outbox.md`](plugins/outbox.md) |
 | `plugins` | `core` | `core` | Runtime plugin management | [`docs/plugins/plugins.md`](plugins/plugins.md) |
 | `presence` | `core` | `info` | Bot presence and status management | [`docs/plugins/presence.md`](plugins/presence.md) |
+| `reports` | `core` | `core` | Optional daily admin health report. | [`docs/plugins/reports.md`](plugins/reports.md) |
 | `rooms` | `core` | `core` | Database-backed room management | [`docs/plugins/rooms.md`](plugins/rooms.md) |
 | `tasks` | `core` | `core` | Inspect supervised background tasks. | [`docs/plugins/tasks.md`](plugins/tasks.md) |
+| `usage` | `core` | `core` | Inspect aggregate command usage and find unused commands. | [`docs/plugins/usage.md`](plugins/usage.md) |
 | `users` | `core` | `core` | User management with caching, nick lookup and logging | [`docs/plugins/users.md`](plugins/users.md) |
 | `birthday_notify` | `plugins` | `info` | Automatic birthday notifications in rooms (opt-in per room) | [`docs/plugins/birthday_notify.md`](plugins/birthday_notify.md) |
 | `dice` | `plugins` | `games` | Roll dice with optional modifiers and success conditions. | [`docs/plugins/dice.md`](plugins/dice.md) |
@@ -129,6 +132,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,bot restart` | [`_admin`](plugins/_admin.md) | `owner` | `private chat / MUC PM` | Restart the bot process gracefully. |
 | `,bot shutdown` | [`_admin`](plugins/_admin.md) | `owner` | `private chat / MUC PM` | Stop the bot gracefully, optionally using a configured command. |
 | `,bot status` | [`_admin`](plugins/_admin.md) | `admin` | `private chat / MUC PM` | Show bot, runtime, XMPP rooms/direct contacts, plugin and database status. |
+| `,commandstats` | [`usage`](plugins/usage.md) | `admin` | `private chat / MUC PM` | Show aggregate command usage and commands that have never been used. |
 | `,config diff` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Show config values that differ from config_sample.py defaults. |
 | `,config reload` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Reload config.py into the running bot where possible. |
 | `,config search` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Search visible config keys and values. |
@@ -140,8 +144,10 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,doctor failed` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
 | `,doctor release` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata. |
 | `,doctor warnings` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |
+| `,outbox` | [`outbox`](plugins/outbox.md) | `admin` | `private chat / MUC PM` | Inspect pending and failed durable message deliveries. |
 | `,plugin diagnose` | [`plugins`](plugins/plugins.md) | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
 | `,plugin state` | [`plugins`](plugins/plugins.md) | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |
+| `,report` | [`reports`](plugins/reports.md) | `admin` | `private chat / MUC PM` | Show or send the optional daily operational report. |
 | `,restore` | [`backups`](plugins/backups.md) | `owner` | `private chat / MUC PM` | Restore a managed backup after explicit confirmation. |
 | `,tasks` | [`tasks`](plugins/tasks.md) | `admin` | `private chat / MUC PM` | Show supervised background task status. |
 | `,tasks failed` | [`tasks`](plugins/tasks.md) | `admin` | `private recommended` | Show failed supervised background tasks. |

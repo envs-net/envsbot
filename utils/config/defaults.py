@@ -365,6 +365,17 @@ PYTHON_CONFIG_KEY_MAP = {
 }
 
 
+from .spec import (
+    operational_defaults,
+    operational_python_key_map,
+    operational_types,
+)
+
+DEFAULT_CONFIG.update(operational_defaults())
+OPTIONAL_CONFIG_TYPES.update(operational_types())
+PYTHON_CONFIG_KEY_MAP.update(operational_python_key_map())
+
+
 NORMALIZED_CONFIG_KEYS = (
     set(DEFAULT_CONFIG)
     | set(REQUIRED_CONFIG_KEYS)
@@ -404,6 +415,38 @@ CONFIG_DISPLAY_SECTIONS = (
             "DATABASE_BUSY_TIMEOUT_MS",
             "DATABASE_WAL_ENABLED",
             "DATABASE_SHUTDOWN_TIMEOUT_SECONDS",
+            "DATABASE_MAINTENANCE_INTERVAL_SECONDS",
+            "COMMAND_USAGE_RETENTION_DAYS",
+            "WATCHDOG_ENABLED",
+            "WATCHDOG_INTERVAL_SECONDS",
+            "WATCHDOG_LAG_WARNING_SECONDS",
+            "WATCHDOG_LAG_FAILURE_SECONDS",
+            "TASK_RESTART_MAX_ATTEMPTS",
+            "TASK_RESTART_INITIAL_SECONDS",
+            "TASK_RESTART_MAX_SECONDS",
+            "TASK_RESTART_RESET_SECONDS",
+        ),
+    ),
+    (
+        "Persistent Outbox",
+        (
+            "OUTBOX_ENABLED",
+            "OUTBOX_POLL_SECONDS",
+            "OUTBOX_BATCH_SIZE",
+            "OUTBOX_MAX_ATTEMPTS",
+            "OUTBOX_RETRY_INITIAL_SECONDS",
+            "OUTBOX_RETRY_MAX_SECONDS",
+            "OUTBOX_INFLIGHT_TIMEOUT_SECONDS",
+        ),
+    ),
+    (
+        "Daily Admin Report",
+        (
+            "ADMIN_REPORT_ENABLED",
+            "ADMIN_REPORT_JID",
+            "ADMIN_REPORT_TIME",
+            "ADMIN_REPORT_TIMEZONE",
+            "ADMIN_REPORT_BACKUP_SMOKE_TEST",
         ),
     ),
     (

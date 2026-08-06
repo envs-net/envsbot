@@ -84,7 +84,7 @@ async def test_pin_command_add_as_reply(monkeypatch, bot, make_msg, room_jid):
     # ---- CRITICALLY PATCH _is_pin_add_command_body to return True ----
     monkeypatch.setattr(pin, "_is_pin_add_command_body", lambda body: True)
     # and ensure sender present for nick logic
-    pin.JOINED_ROOMS[room_jid] = {"nicks": {"alice": {}}}
+    monkeypatch.setitem(pin.JOINED_ROOMS, room_jid, {"nicks": {"alice": {}}})
     handled = await pin._handle_reply_pin_add(bot, msg)
     assert handled is True  # Should call _create_pin_entry
 

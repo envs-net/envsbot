@@ -1,9 +1,8 @@
 """Split module for plugins/reminder.py: formatting."""
 
-import inspect
-
 from bot.room_state import JOINED_ROOMS
 from core_plugins._core import _is_muc_pm, _normalize_bare_jid
+from utils.outbox import durable_send
 
 from .parsing import _timezone_lookup_jid
 from .store import _get_room_reminder_state
@@ -122,14 +121,4 @@ async def _send_reminder_message(bot, mto: str, mbody: str, mtype: str) -> bool:
         mtype=mtype,
     )
 
-    safe_send = getattr(bot, "_safe_send_message", None)
-    if callable(safe_send):
-        result = safe_send(msg)
-        if inspect.isawaitable(result):
-            result = await result
-        return result is not False
-
-    result = msg.send()
-    if inspect.isawaitable(result):
-        result = await result
-    return result is not False
+    return await durable_send(bot, msg, category="reminder")

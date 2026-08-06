@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from string import Template
 
 from slixmpp import JID
 
+from utils.outbox import durable_send
 from utils.config import config
 from utils.formatting import page_size_for, parse_page_args
 from bot.room_state import JOINED_ROOMS
@@ -380,28 +380,36 @@ async def _post_entry_to_rooms(bot, rooms, msg) -> tuple[int, int]:
     attempted = 0
     for room in rooms:
         attempted += 1
-        if room not in JOINED_ROOMS:
-            log.warning(
-                "[RSS] Room delivery deferred because the bot is not joined: %s",
-                room,
-            )
-            continue
         try:
+            if room not in JOINED_ROOMS:
+                outbox = getattr(bot, "outbox", None)
+                enqueue = getattr(outbox, "enqueue", None)
+                if callable(enqueue):
+                    queued = await enqueue(
+                        destination=room,
+                        body=msg,
+                        message_type="groupchat",
+                        category="rss",
+                    )
+                    if queued is not None:
+                        delivered += 1
+                        log.warning(
+                            "[RSS] Room delivery queued until rejoin: %s",
+                            room,
+                        )
+                        continue
+                log.warning(
+                    "[RSS] Room delivery deferred because the bot is not joined: %s",
+                    room,
+                )
+                continue
+
             message = bot.make_message(
                 mto=room,
                 mbody=msg,
                 mtype="groupchat",
             )
-            safe_send = getattr(bot, "_safe_send_message", None)
-            if callable(safe_send):
-                result = safe_send(message)
-                if inspect.isawaitable(result):
-                    result = await result
-            else:
-                result = message.send()
-                if inspect.isawaitable(result):
-                    result = await result
-            if result is not False:
+            if await durable_send(bot, message, category="rss"):
                 delivered += 1
         except Exception:
             log.exception("[RSS] Failed room delivery to %s", room)
@@ -426,17 +434,7 @@ async def _send_direct_rss_message(bot, user_jid: str, body: str) -> bool:
             mbody=body,
             mtype="chat",
         )
-        safe_send = getattr(bot, "_safe_send_message", None)
-        if callable(safe_send):
-            result = safe_send(message)
-            if inspect.isawaitable(result):
-                result = await result
-            return result is not False
-
-        result = message.send()
-        if inspect.isawaitable(result):
-            result = await result
-        return result is not False
+        return await durable_send(bot, message, category="rss")
     except Exception:
         log.exception("[RSS] Failed direct delivery to %s", user_jid)
         return False

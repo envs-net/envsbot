@@ -16,10 +16,13 @@ python scripts/generate_commands_md.py
 | [`config_cmd`](config_cmd.md) | `core` | `core` | Safe config inspection, validation and reload commands. |
 | [`doctor`](doctor.md) | `core` | `core` | Operator health checks and runtime diagnostics. |
 | [`help`](help.md) | `core` | `core` | Dynamic help for plugins and commands. |
+| [`outbox`](outbox.md) | `core` | `core` | Inspect and retry durable outbound messages. |
 | [`plugins`](plugins.md) | `core` | `core` | Runtime plugin management |
 | [`presence`](presence.md) | `core` | `info` | Bot presence and status management |
+| [`reports`](reports.md) | `core` | `core` | Optional daily admin health report. |
 | [`rooms`](rooms.md) | `core` | `core` | Database-backed room management |
 | [`tasks`](tasks.md) | `core` | `core` | Inspect supervised background tasks. |
+| [`usage`](usage.md) | `core` | `core` | Inspect aggregate command usage and find unused commands. |
 | [`users`](users.md) | `core` | `core` | User management with caching, nick lookup and logging |
 | [`birthday_notify`](birthday_notify.md) | `plugins` | `info` | Automatic birthday notifications in rooms (opt-in per room) |
 | [`dice`](dice.md) | `plugins` | `games` | Roll dice with optional modifiers and success conditions. |

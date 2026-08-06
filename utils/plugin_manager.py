@@ -71,6 +71,9 @@ CORE_PLUGIN_NAMES = {
     "doctor",
     "help",
     "plugins",
+    "outbox",
+    "reports",
+    "usage",
     "presence",
     "rooms",
     "tasks",
@@ -273,6 +276,25 @@ class PluginManager:
             task = asyncio.create_task(coro, name=name)
             return task
         return supervisor.create(plugin_name, coro, name=name)
+
+    def create_resilient_task(
+        self,
+        plugin_name,
+        factory,
+        *,
+        name=None,
+        max_restarts=None,
+    ):
+        """Create a supervised task with restart backoff and circuit breaking."""
+        supervisor = getattr(self.bot, "tasks", None)
+        if supervisor is None:
+            return asyncio.create_task(factory(), name=name)
+        return supervisor.create_resilient(
+            plugin_name,
+            factory,
+            name=name,
+            max_restarts=max_restarts,
+        )
 
     async def _cancel_plugin_tasks(self, plugin_name):
         """Cancel supervised tasks that belong to one plugin."""
@@ -1012,6 +1034,10 @@ class PluginManager:
             self.failed_plugins[name] = f"task restart: {exc}"
             log.exception("[PLUGIN] task restart failed for %s", name)
             return False, f"Error restarting tasks for {name}: {exc}", cancelled
+        supervisor = getattr(self.bot, "tasks", None)
+        clear_failures = getattr(supervisor, "clear_plugin_failures", None)
+        if callable(clear_failures) and not type(clear_failures).__module__.startswith("unittest.mock"):
+            clear_failures(name)
         self.failed_plugins.pop(name, None)
         return True, f"Plugin {name} tasks restarted", cancelled
 

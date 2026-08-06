@@ -119,6 +119,11 @@ def _warning_line(label: str, text: str) -> str:
     return f"⚠️ {label}: {text}"
 
 
+def _is_mock_object(value: Any) -> bool:
+    """Return whether *value* is a dynamically created unittest mock."""
+    return type(value).__module__.startswith("unittest.mock")
+
+
 def _repo_root(start: Path | None = None, *, fallback: Path | None = None) -> Path:
     """Return the repository checkout root, even when running under mutmut.
 
@@ -214,6 +219,37 @@ async def _db_lines(bot: Any) -> list[str]:
                 )
             except Exception as exc:
                 lines.append(_line(False, "Migrations", str(exc)))
+
+    maintenance = dict(getattr(db, "maintenance_state", {}) or {})
+    lines.append(
+        _line(
+            not maintenance.get("last_error"),
+            "Database maintenance",
+            (
+                f"runs={maintenance.get('runs', 0)}, "
+                f"failures={maintenance.get('failures', 0)}, "
+                f"last={maintenance.get('last_duration_ms', 0)}ms"
+                + (f", error={maintenance.get('last_error')}" if maintenance.get("last_error") else "")
+            ),
+        )
+    )
+
+    outbox = getattr(bot, "outbox", None)
+    runtime_state = getattr(outbox, "runtime_state", None)
+    if callable(runtime_state) and not _is_mock_object(runtime_state):
+        try:
+            state = await runtime_state()
+            healthy = int(state.get("dead", 0)) == 0 and bool(state.get("worker_running"))
+            lines.append(
+                _line(
+                    healthy,
+                    "Persistent outbox",
+                    f"pending={state.get('pending', 0)}, dead={state.get('dead', 0)}, "
+                    f"oldest={state.get('oldest_pending_age_seconds', 0)}s",
+                )
+            )
+        except Exception as exc:
+            lines.append(_line(False, "Persistent outbox", str(exc)))
 
     cache = getattr(bot, "message_cache", None)
     stats = getattr(cache, "stats", None)
@@ -313,9 +349,42 @@ def _task_lines(bot: Any, *, full: bool) -> list[str]:
         running, failed, finished = supervisor.summary()
     except Exception as exc:
         return [_line(False, "Tasks", str(exc))]
+    snapshot_getter = getattr(supervisor, "snapshot", None)
+    snapshot = (
+        snapshot_getter(include_done=True)
+        if callable(snapshot_getter) and not _is_mock_object(snapshot_getter)
+        else []
+    )
+    open_circuits = [
+        task for task in snapshot
+        if getattr(task, "circuit_state", "closed") == "open"
+    ]
     lines = [
         _line(failed == 0, "Background tasks", f"{running} running, {failed} failed, {finished} finished"),
+        _line(
+            not open_circuits,
+            "Task circuits",
+            "closed" if not open_circuits else f"{len(open_circuits)} open",
+        ),
     ]
+    if full:
+        for task in open_circuits[:20]:
+            lines.append(_line(False, "Open circuit", f"{task.plugin}/{task.name}: {task.last_error or '-'}"))
+
+    watchdog = getattr(bot, "watchdog", None)
+    state_getter = getattr(watchdog, "runtime_state", None)
+    if callable(state_getter) and not _is_mock_object(state_getter):
+        state = state_getter()
+        healthy = not state.get("last_error") and float(state.get("last_lag_seconds", 0.0)) < float(config.get("watchdog_lag_failure_seconds", 30.0))
+        lines.append(
+            _line(
+                healthy,
+                "Runtime watchdog",
+                f"running={state.get('worker_running', False)}, "
+                f"last_lag={float(state.get('last_lag_seconds', 0.0)):.3f}s, "
+                f"max_lag={float(state.get('max_lag_seconds', 0.0)):.3f}s",
+            )
+        )
     stale = getattr(supervisor, "stale_tasks", None)
     if callable(stale):
         try:

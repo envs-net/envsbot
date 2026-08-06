@@ -50,3 +50,21 @@ safety backup before overwriting files. Restart envsbot after restoring
 
 Backup archives contain secrets such as the bot password and optional API keys.
 Keep them private and include them in your normal server backup policy.
+
+## Automatic online maintenance
+
+The running bot performs lightweight online maintenance at
+`DB_MAINTENANCE_INTERVAL_SECONDS`:
+
+- `PRAGMA optimize`
+- a passive WAL checkpoint
+- pruning old aggregate command-usage rows
+
+The task never runs `VACUUM`; planned offline `VACUUM` remains the administrator
+procedure described above. Results and the last error are visible through
+`,doctor database` and the optional daily admin report.
+
+The optional report normally verifies the latest backup manifest and files.
+With `ADMIN_REPORT_BACKUP_SMOKE_TEST = True`, it also restores the archive into
+a temporary directory and opens the restored SQLite database. This provides a
+stronger recurring check without overwriting live files.

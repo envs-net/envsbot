@@ -47,7 +47,7 @@ from core_plugins._core import (
 # --------------------------------------------------------------------------
 from plugins.vcard import get_user_vcard as get_profile
 
-from utils.task_supervisor import create_plugin_task
+from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -715,10 +715,12 @@ async def on_ready(bot):
             except asyncio.CancelledError:
                 log.debug("[BIRTHDAY] Previous birthday check task cancelled")
 
-        _BIRTHDAY_CHECK_TASK = create_plugin_task(bot,
+        _BIRTHDAY_CHECK_TASK = create_resilient_plugin_task(
+            bot,
             "birthday_notify",
-            _birthday_check_loop(bot),
+            lambda: _birthday_check_loop(bot),
             name="birthday-check-loop",
+            fallback_creator=create_plugin_task,
         )
 
         log.info(

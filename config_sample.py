@@ -81,6 +81,35 @@ DATABASE_WAL_ENABLED = False
 # internal flush wait so the SQLite connection can close cleanly.
 DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
 
+# Periodic low-impact SQLite maintenance. The worker runs PRAGMA optimize,
+# checkpoints WAL when enabled and prunes old aggregate command statistics.
+DATABASE_MAINTENANCE_INTERVAL_SECONDS = 21600
+COMMAND_USAGE_RETENTION_DAYS = 365
+
+# Persistent outbound delivery queue. Failed RSS, reminder and admin-report
+# messages are stored in SQLite and retried across reconnects/restarts.
+OUTBOX_ENABLED = True
+OUTBOX_POLL_SECONDS = 5.0
+OUTBOX_BATCH_SIZE = 20
+OUTBOX_MAX_ATTEMPTS = 12
+OUTBOX_RETRY_INITIAL_SECONDS = 30
+OUTBOX_RETRY_MAX_SECONDS = 1800
+OUTBOX_INFLIGHT_TIMEOUT_SECONDS = 300
+
+# Event-loop monitor and native systemd watchdog integration. With the bundled
+# service unit, a process that is alive but no longer responsive is restarted.
+WATCHDOG_ENABLED = True
+WATCHDOG_INTERVAL_SECONDS = 20.0
+WATCHDOG_LAG_WARNING_SECONDS = 2.0
+WATCHDOG_LAG_FAILURE_SECONDS = 30.0
+
+# Automatic restart/backoff for protected long-running plugin workers. After
+# this many consecutive failures the circuit opens and an admin is notified.
+TASK_RESTART_MAX_ATTEMPTS = 5
+TASK_RESTART_INITIAL_SECONDS = 5.0
+TASK_RESTART_MAX_SECONDS = 300.0
+TASK_RESTART_RESET_SECONDS = 900.0
+
 # Number of recent messages retained per room or private conversation. The
 # cache is shared by all plugins, stored in SQLite and restored on restart.
 # Message bodies are therefore persisted in the bot database and included in
@@ -112,6 +141,20 @@ BACKUP_RETENTION_DAYS = 0
 # Create a managed backup once during each bot process start. This also covers
 # service restarts, because a restart starts a fresh bot process.
 BACKUP_ON_START = True
+
+
+# ================= DAILY ADMIN REPORT =================
+
+# Optional compact XMPP-only health report. No HTTP metrics endpoint is opened.
+ADMIN_REPORT_ENABLED = False
+# Empty uses VERSION_CHECK_NOTIFY_JID, ROOM_INVITE_NOTIFY_JID or OWNER.
+ADMIN_REPORT_JID = ""
+ADMIN_REPORT_TIME = "08:00"
+# Empty uses TIMEZONE.
+ADMIN_REPORT_TIMEZONE = ""
+# Optionally extract the newest backup into a temporary directory and run an
+# SQLite integrity check on the contained bot.db while building the report.
+ADMIN_REPORT_BACKUP_SMOKE_TEST = False
 
 
 # ================= COMMAND RATE LIMITS =================

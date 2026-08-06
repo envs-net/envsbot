@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any, Awaitable, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +36,8 @@ class TaskInfo:
     last_error: str | None
     heartbeat_at: str | None = None
     restart_count: int = 0
+    circuit_state: str = "closed"
+    next_restart_at: str | None = None
 
 
 def _is_test_mock(candidate: object) -> bool:
@@ -145,10 +147,43 @@ def create_plugin_task(
         raise
 
 
+def create_resilient_plugin_task(
+    bot: BotLike,
+    plugin: str,
+    factory: Callable[[], Awaitable[Any]],
+    *,
+    name: str | None = None,
+    max_restarts: int | None = None,
+    fallback_creator: Callable[..., asyncio.Task[Any]] | None = None,
+) -> asyncio.Task[Any]:
+    """Create a restartable supervised task when the runtime supports it."""
+    manager = getattr(bot, "bot_plugins", None)
+    creator = getattr(manager, "create_resilient_task", None)
+    if callable(creator) and not _is_test_mock(creator):
+        return creator(
+            plugin,
+            factory,
+            name=name,
+            max_restarts=max_restarts,
+        )
+    supervisor = getattr(bot, "tasks", None)
+    resilient = getattr(supervisor, "create_resilient", None)
+    if callable(resilient) and not _is_test_mock(resilient):
+        return resilient(
+            plugin,
+            factory,
+            name=name,
+            max_restarts=max_restarts,
+        )
+    creator = fallback_creator or create_plugin_task
+    return creator(bot, plugin, factory(), name=name)
+
+
 class TaskSupervisor:
     """Track plugin background tasks and cancel them on unload/shutdown."""
 
-    def __init__(self):
+    def __init__(self, bot: Any | None = None):
+        self.bot = bot
         self._tasks: dict[asyncio.Task[Any], dict[str, Any]] = {}
         self._by_plugin: dict[str, set[asyncio.Task[Any]]] = {}
 
@@ -182,11 +217,140 @@ class TaskSupervisor:
             # workers look stale even though they are healthy and still running.
             "heartbeat_at": None,
             "restart_count": 0,
+            "circuit_state": "closed",
+            "next_restart_at": None,
         }
         self._tasks[task] = meta
         self._by_plugin.setdefault(plugin, set()).add(task)
         task.add_done_callback(self._on_task_done)
         return task
+
+    def create_resilient(
+        self,
+        plugin: str,
+        factory: Callable[[], Awaitable[Any]],
+        *,
+        name: str | None = None,
+        max_restarts: int | None = None,
+        initial_backoff: float | None = None,
+        max_backoff: float | None = None,
+        reset_after: float | None = None,
+    ) -> asyncio.Task[Any]:
+        """Create a worker protected by restart backoff and a circuit breaker."""
+        config = getattr(self.bot, "config", {}) if self.bot is not None else {}
+        config = config or {}
+        restart_limit = max(0, int(
+            config.get("task_restart_max_attempts", 5)
+            if max_restarts is None else max_restarts
+        ))
+        initial = max(0.0, float(
+            config.get("task_restart_initial_seconds", 5.0)
+            if initial_backoff is None else initial_backoff
+        ))
+        maximum = max(initial, float(
+            config.get("task_restart_max_seconds", 300.0)
+            if max_backoff is None else max_backoff
+        ))
+        reset = max(0.0, float(
+            config.get("task_restart_reset_seconds", 900.0)
+            if reset_after is None else reset_after
+        ))
+        task_name = name or f"{plugin}-task"
+        return self.create(
+            plugin,
+            self._resilient_runner(
+                plugin,
+                task_name,
+                factory,
+                restart_limit=restart_limit,
+                initial_backoff=initial,
+                max_backoff=maximum,
+                reset_after=reset,
+            ),
+            name=task_name,
+        )
+
+    async def _notify_circuit_open(self, plugin: str, name: str, error: str) -> None:
+        if self.bot is None:
+            return
+        try:
+            from utils.admin_notify import notify_admin
+
+            await notify_admin(
+                self.bot,
+                "🔴 Background task circuit opened\n"
+                f"Plugin: {plugin}\nTask: {name}\nError: {error}",
+                category="task_failure",
+                dedupe_key=f"task-circuit:{plugin}:{name}:{error}",
+            )
+        except Exception:
+            log.exception("[TASKS] Failed to notify admin about open circuit")
+
+    async def _resilient_runner(
+        self,
+        plugin: str,
+        name: str,
+        factory: Callable[[], Awaitable[Any]],
+        *,
+        restart_limit: int,
+        initial_backoff: float,
+        max_backoff: float,
+        reset_after: float,
+    ) -> Any:
+        await asyncio.sleep(0)
+        consecutive = 0
+        while True:
+            started = asyncio.get_running_loop().time()
+            try:
+                result = await factory()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                run_seconds = asyncio.get_running_loop().time() - started
+                if reset_after and run_seconds >= reset_after:
+                    consecutive = 0
+                consecutive += 1
+                task = asyncio.current_task()
+                meta = self._tasks.get(task, {})
+                meta["restart_count"] = int(meta.get("restart_count") or 0) + 1
+                meta["last_error"] = f"{type(exc).__name__}: {exc}"
+                if consecutive > restart_limit:
+                    meta["circuit_state"] = "open"
+                    meta["next_restart_at"] = None
+                    error = str(meta["last_error"] or "unknown error")
+                    await self._notify_circuit_open(plugin, name, error)
+                    raise RuntimeError(
+                        f"task circuit open after {restart_limit} restart(s): {error}"
+                    ) from exc
+                delay = min(
+                    max_backoff,
+                    initial_backoff * (2 ** max(0, consecutive - 1)),
+                )
+                next_at = datetime.now(timezone.utc).timestamp() + delay
+                meta["circuit_state"] = "half-open"
+                meta["next_restart_at"] = datetime.fromtimestamp(
+                    next_at, timezone.utc
+                ).isoformat(timespec="seconds")
+                log.warning(
+                    "[TASKS] Restarting %s/%s in %.1fs after failure %d/%d: %s",
+                    plugin,
+                    name,
+                    delay,
+                    consecutive,
+                    restart_limit,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                meta["circuit_state"] = "closed"
+                meta["next_restart_at"] = None
+                continue
+            else:
+                task = asyncio.current_task()
+                meta = self._tasks.get(task, {})
+                meta["circuit_state"] = "closed"
+                meta["next_restart_at"] = None
+                meta["last_error"] = None
+                return result
 
     def _on_task_done(self, task: asyncio.Task[Any]) -> None:
         meta = self._tasks.get(task)
@@ -363,6 +527,25 @@ class TaskSupervisor:
                 self._prune_task_unless_failed(task)
         return len(running_tasks)
 
+    def clear_plugin_failures(self, plugin: str) -> int:
+        """Forget completed failure and open-circuit diagnostics for a plugin.
+
+        A successful manual task restart is an explicit circuit reset. Keeping
+        the old failed runner afterward would make ``tasks`` and ``doctor``
+        continue to report an open circuit even though a replacement worker is
+        running.
+        """
+        failed_tasks = [
+            task
+            for task, meta in tuple(self._tasks.items())
+            if meta.get("plugin") == plugin
+            and task.done()
+            and meta.get("last_error") is not None
+        ]
+        for task in failed_tasks:
+            self._forget_task(task)
+        return len(failed_tasks)
+
     async def cancel_all(self, *, timeout: float = 5.0) -> int:
         """Cancel all running supervised tasks.
 
@@ -407,6 +590,8 @@ class TaskSupervisor:
                     last_error=last_error,
                     heartbeat_at=meta.get("heartbeat_at"),
                     restart_count=int(meta.get("restart_count") or 0),
+                    circuit_state=str(meta.get("circuit_state") or "closed"),
+                    next_restart_at=meta.get("next_restart_at"),
                 )
             )
         return sorted(items, key=lambda item: (item.plugin, item.name))

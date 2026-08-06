@@ -1,0 +1,60 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from bot.room_state import JOINED_ROOMS
+from utils.outbox import PersistentOutbox, message_dedupe_key
+
+
+def test_message_dedupe_key_is_stable_and_hides_content():
+    key = message_dedupe_key("rss", "room@example.org", "secret body")
+    assert key == message_dedupe_key("rss", "room@example.org", "secret body")
+    assert "secret body" not in key
+    assert key.startswith("rss:")
+
+
+@pytest.mark.asyncio
+async def test_outbox_defers_unjoined_room_without_failure_attempt():
+    JOINED_ROOMS.clear()
+    bot = SimpleNamespace(config={})
+    runtime = PersistentOutbox(bot)
+    runtime.store = SimpleNamespace(defer=AsyncMock(), mark_failed=AsyncMock())
+    queued = SimpleNamespace(
+        id=1,
+        destination="room@conference.example.org",
+        message_type="groupchat",
+        attempts=0,
+    )
+
+    await runtime._send_one(queued)
+
+    runtime.store.defer.assert_awaited_once()
+    runtime.store.mark_failed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_sends_and_deletes_claimed_message():
+    JOINED_ROOMS["room@conference.example.org"] = {}
+    message = MagicMock()
+    bot = SimpleNamespace(
+        config={},
+        make_message=MagicMock(return_value=message),
+        _safe_send_message=AsyncMock(return_value=True),
+    )
+    runtime = PersistentOutbox(bot)
+    runtime.store = SimpleNamespace(mark_sent=AsyncMock(), mark_failed=AsyncMock())
+    queued = SimpleNamespace(
+        id=2,
+        destination="room@conference.example.org",
+        body="hello",
+        message_type="groupchat",
+        category="rss",
+        attempts=0,
+    )
+
+    await runtime._send_one(queued)
+
+    runtime.store.mark_sent.assert_awaited_once_with(2)
+    runtime.store.mark_failed.assert_not_awaited()
+    assert runtime.delivered == 1

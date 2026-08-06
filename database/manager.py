@@ -13,6 +13,8 @@ from .rooms import Rooms
 from .audit import AuditLog
 from .message_cache import MessageCacheStore
 from .idlerpg import IdleRPGStateStore
+from .outbox import OutboxStore
+from .command_usage import CommandUsageStore
 from .migrations import available_migrations
 
 # logger for this module
@@ -40,10 +42,21 @@ class DatabaseManager:
         self.audit = None
         self.message_cache = None
         self.idlerpg = None
+        self.outbox = None
+        self.command_usage = None
 
         self.flush_interval = flush_interval
 
         self._flush_task = None
+        self._maintenance_task = None
+        self.maintenance_state = {
+            "runs": 0,
+            "failures": 0,
+            "last_run_at": 0,
+            "last_duration_ms": 0,
+            "last_error": None,
+            "last_wal_checkpoint": None,
+        }
         self._running = False
         self._stop_event = asyncio.Event()
         self._close_lock = asyncio.Lock()
@@ -86,13 +99,18 @@ class DatabaseManager:
             self.audit = AuditLog(self.conn)
             self.message_cache = MessageCacheStore(self)
             self.idlerpg = IdleRPGStateStore(self)
+            self.outbox = OutboxStore(self)
+            self.command_usage = CommandUsageStore(self)
 
             await self._init_schema_migrations()
             await self.run_migrations()
             self._secure_database_files()
 
             self._running = True
-            self._flush_task = asyncio.create_task(self._flush_loop())
+            self._flush_task = asyncio.create_task(self._flush_loop(), name="database-flush")
+            self._maintenance_task = asyncio.create_task(
+                self._maintenance_loop(), name="database-maintenance"
+            )
         except Exception:
             conn = self.conn
             self.conn = None
@@ -101,6 +119,8 @@ class DatabaseManager:
             self.audit = None
             self.message_cache = None
             self.idlerpg = None
+            self.outbox = None
+            self.command_usage = None
             self._running = False
             if conn is not None:
                 try:
@@ -212,6 +232,54 @@ class DatabaseManager:
             if self.users:
                 await self._flush_with_retry()
 
+
+    async def run_maintenance(self) -> dict[str, object]:
+        """Run low-impact SQLite maintenance and return diagnostic state."""
+        import time
+
+        started = time.monotonic()
+        checkpoint = None
+        try:
+            await self.conn.execute("PRAGMA optimize;")
+            if config.get("database_wal_enabled", False):
+                cursor = await self.conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+                row = await cursor.fetchone()
+                checkpoint = tuple(row) if row is not None else None
+            retention_days = int(config.get("command_usage_retention_days", 365) or 0)
+            if self.command_usage is not None:
+                await self.command_usage.prune(retention_days=retention_days)
+            await self.conn.commit()
+        except Exception as exc:
+            self.maintenance_state["failures"] += 1
+            self.maintenance_state["last_error"] = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            self.maintenance_state["last_duration_ms"] = int(
+                (time.monotonic() - started) * 1000
+            )
+        self.maintenance_state["runs"] += 1
+        self.maintenance_state["last_run_at"] = int(time.time())
+        self.maintenance_state["last_error"] = None
+        self.maintenance_state["last_wal_checkpoint"] = checkpoint
+        return dict(self.maintenance_state)
+
+    async def _maintenance_loop(self) -> None:
+        """Periodically optimize SQLite and checkpoint WAL without blocking shutdown."""
+        interval = max(60, int(config.get("database_maintenance_interval_seconds", 21600) or 21600))
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
+                    break
+                except asyncio.TimeoutError:
+                    pass
+                try:
+                    await self.run_maintenance()
+                except Exception:
+                    log.exception("[DB] Periodic maintenance failed")
+        except asyncio.CancelledError:
+            raise
+
     async def _flush_with_retry(
         self,
         max_retries: int = 3,
@@ -276,6 +344,12 @@ class DatabaseManager:
         """Stop background tasks, flush caches, and close idempotently."""
         async with self._close_lock:
             self._stop_event.set()
+            maintenance_task = self._maintenance_task
+            self._maintenance_task = None
+            if maintenance_task is not None:
+                maintenance_task.cancel()
+                await asyncio.gather(maintenance_task, return_exceptions=True)
+
             flush_task = self._flush_task
             self._flush_task = None
             if flush_task is not None:
@@ -302,6 +376,8 @@ class DatabaseManager:
             self.audit = None
             self.message_cache = None
             self.idlerpg = None
+            self.outbox = None
+            self.command_usage = None
 
     async def execute(self, query: str, params: tuple | None = None,
                       auto_commit: bool = True):
