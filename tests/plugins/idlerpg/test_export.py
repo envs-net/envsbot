@@ -1,6 +1,9 @@
+import asyncio
 import json
 import os
 import stat
+import threading
+import time
 
 from .helpers import (
     DummyBot,
@@ -440,3 +443,110 @@ async def test_forced_public_export_bypasses_interval(monkeypatch):
     assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=False) is False
     assert await idlerpg_state._refresh_public_export(DummyBot(), data, force=True) is True
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_normalized_store_migrates_legacy_blob_and_clears_it():
+    from plugins.idlerpg import state as idlerpg_state
+
+    class NormalizedStore:
+        def __init__(self):
+            self.saved = []
+
+        async def load_state(self):
+            return {"rooms": {}}
+
+        async def save_state(self, data):
+            self.saved.append(data)
+
+    bot = DummyBot()
+    normalized = NormalizedStore()
+    bot.db.idlerpg = normalized
+    legacy = {"rooms": {"room@conf": idlerpg._blank_room()}}
+    bot.store.globals[idlerpg.IDLERPG_DATA_KEY] = legacy
+
+    loaded = await idlerpg_state._get_data(bot)
+
+    assert loaded is legacy
+    assert normalized.saved == [legacy]
+    assert idlerpg.IDLERPG_DATA_KEY not in bot.store.globals
+    assert bot.flush_count == 1
+    assert await idlerpg_state._get_data(bot) is legacy
+
+
+@pytest.mark.asyncio
+async def test_public_export_runs_in_worker_thread_and_records_metrics(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import state as idlerpg_state
+
+    main_thread = threading.get_ident()
+    worker_threads = []
+
+    async def enabled_rooms(_bot, room_jids=()):
+        return {str(room): True for room in room_jids}
+
+    def export_state(_data, _enabled):
+        worker_threads.append(threading.get_ident())
+        return {
+            "ok": True,
+            "rooms": 1,
+            "players": 2,
+            "events": 3,
+            "files": 4,
+            "bytes": 5,
+        }
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_state, "_enabled_rooms", enabled_rooms)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", export_state)
+    idlerpg_state._reset_public_export_schedule()
+
+    data = {"rooms": {"room@conf": idlerpg._blank_room()}}
+    assert await idlerpg_state._refresh_public_export(
+        DummyBot(), data, force=True
+    ) is True
+
+    assert worker_threads and worker_threads[0] != main_thread
+    metrics = idlerpg_state._public_export_runtime()
+    assert metrics["successes"] == 1
+    assert metrics["failures"] == 0
+    assert metrics["rooms"] == 1
+    assert metrics["players"] == 2
+    assert metrics["events"] == 3
+    assert metrics["files"] == 4
+    assert metrics["bytes"] == 5
+
+
+@pytest.mark.asyncio
+async def test_concurrent_automatic_exports_are_coalesced(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import formatting as idlerpg_formatting
+    from plugins.idlerpg import state as idlerpg_state
+
+    calls = []
+
+    async def enabled_rooms(_bot, room_jids=()):
+        return {str(room): True for room in room_jids}
+
+    def export_state(_data, _enabled):
+        calls.append(1)
+        time.sleep(0.05)
+        return {"ok": True}
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_000)
+    monkeypatch.setattr(idlerpg_state, "_enabled_rooms", enabled_rooms)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", export_state)
+    idlerpg_state._reset_public_export_schedule()
+
+    data = {"rooms": {"room@conf": idlerpg._blank_room()}}
+    first, second = await asyncio.gather(
+        idlerpg_state._refresh_public_export(DummyBot(), data, force=False),
+        idlerpg_state._refresh_public_export(DummyBot(), data, force=False),
+    )
+
+    assert sorted([first, second]) == [False, True]
+    assert len(calls) == 1

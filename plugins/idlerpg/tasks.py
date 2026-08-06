@@ -260,7 +260,7 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
                 announced.append(text)
 
 
-async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
+async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, object]:
     data = await _dep_state._get_data(bot)
     rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
     if not isinstance(rooms, dict):
@@ -284,13 +284,29 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         quest = bucket.get("quest", {})
         if isinstance(quest, dict) and quest.get("active"):
             active_quests += 1
-    return {
+    state: dict[str, object] = {
         "rooms": len(selected),
         "players": players,
         "online_players": online,
         "active_quests": active_quests,
         "tasks": len([task for task in _dep_config.ROOM_TASKS.values() if not task.done()]),
     }
+    export = _dep_state._public_export_runtime()
+    if int(export.get("last_started_at", 0) or 0) > 0 or int(
+        export.get("failures", 0) or 0
+    ) > 0:
+        state["export"] = export
+    normalized = getattr(getattr(bot, "db", None), "idlerpg", None)
+    stats = getattr(normalized, "stats", None)
+    if callable(stats):
+        try:
+            state["storage"] = await stats()
+        except Exception:
+            _dep_config.log.debug(
+                "[IDLERPG] Could not read normalized storage statistics",
+                exc_info=True,
+            )
+    return state
 
 
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
@@ -304,9 +320,35 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     quests = int(state.get("active_quests", 0) or 0)
     ok = tasks > 0 or rooms == 0
     icon = "✅" if ok else "⚠️"
-    return [
+    lines = [
         f"{icon} IdleRPG{scope}: rooms={rooms}, players={players}, online={online}, active_quests={quests}, tasks={tasks}"
     ]
+    storage = state.get("storage")
+    if isinstance(storage, dict):
+        lines.append(
+            "✅ IdleRPG storage: normalized SQLite "
+            f"rooms={int(storage.get('rooms', 0) or 0)}, "
+            f"players={int(storage.get('players', 0) or 0)}, "
+            f"seasons={int(storage.get('seasons', 0) or 0)}, "
+            f"events={int(storage.get('events', 0) or 0)}"
+        )
+    export = state.get("export")
+    if isinstance(export, dict) and (
+        int(export.get("last_started_at", 0) or 0) > 0
+        or int(export.get("failures", 0) or 0) > 0
+    ):
+        export_ok = not bool(export.get("last_error"))
+        export_icon = "✅" if export_ok else "⚠️"
+        lines.append(
+            f"{export_icon} IdleRPG export: "
+            f"duration={int(export.get('last_duration_ms', 0) or 0)}ms, "
+            f"rooms={int(export.get('rooms', 0) or 0)}, "
+            f"players={int(export.get('players', 0) or 0)}, "
+            f"events={int(export.get('events', 0) or 0)}, "
+            f"files={int(export.get('files', 0) or 0)}, "
+            f"bytes={int(export.get('bytes', 0) or 0)}"
+        )
+    return lines
 
 async def cleanup_room_state(bot, room_jid: str):
     await _cancel_room_task(room_jid)

@@ -205,9 +205,24 @@ Important state paths:
 - `database.rooms.RoomManager` stores known rooms and room feature state
 - `database.audit.AuditLog` stores operational audit events
 - `database.message_cache.MessageCacheStore` persists recent message bodies
+- `database.idlerpg.IdleRPGStateStore` normalizes IdleRPG rooms, players, seasons and events
 - `utils.message_cache.MessageCache` serves shared recent history from RAM
 - `utils.task_supervisor.TaskSupervisor` tracks long-running async tasks
 
+
+## IdleRPG normalized persistence
+
+`database.idlerpg.IdleRPGStateStore` keeps the active game model split across
+`idlerpg_rooms`, `idlerpg_players`, `idlerpg_seasons` and `idlerpg_events`.
+The plugin still works with one in-memory room dictionary, but persistence uses
+incremental row updates instead of rewriting one global JSON blob. The first
+load after migration imports legacy `users_runtime` state transactionally and
+then removes the old plugin-global value.
+
+Public JSON export is deliberately separate from database persistence. The
+async state layer takes an immutable snapshot, serializes and writes it through
+`asyncio.to_thread()`, and uses one export lock to coalesce overlapping
+automatic refreshes.
 
 ## Shared recent-message cache
 

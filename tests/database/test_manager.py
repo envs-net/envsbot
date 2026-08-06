@@ -24,6 +24,10 @@ async def test_database_manager_init_and_connect(tmp_db_path):
     assert "audit_log" in table_names
     assert "room_invites" in table_names
     assert "message_cache" in table_names
+    assert "idlerpg_rooms" in table_names
+    assert "idlerpg_players" in table_names
+    assert "idlerpg_seasons" in table_names
+    assert "idlerpg_events" in table_names
     assert "schema_migrations" in table_names
 
     applied = await db.applied_migration_versions()
@@ -32,6 +36,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
         "0002_audit_log",
         "0003_room_invites",
         "0004_message_cache",
+        "0005_idlerpg_state",
     }
     await db.close()
 

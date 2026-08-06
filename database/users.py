@@ -109,6 +109,10 @@ class PluginRuntimeStore:
         """
         await self.set(GLOBAL_JID, key, value)
 
+    async def delete_global(self, key):
+        """Delete one plugin-global value from the runtime cache."""
+        await self.delete(GLOBAL_JID, key)
+
     async def update_global(
         self,
         key,
@@ -235,8 +239,9 @@ class UserManager:
     - Parse JSON (handled by SQLite JSON1)
     """
 
-    def __init__(self, db):
+    def __init__(self, db, transaction_lock=None):
         self.db = db
+        self._transaction_lock = transaction_lock or asyncio.Lock()
         self._nick_index = {}
         self._nick_index_lock = asyncio.Lock()
 
@@ -530,7 +535,7 @@ class UserManager:
         changed size during iteration`` and accidental loss of writes created
         concurrently with the flush.
         """
-        async with self._flush_lock:
+        async with self._flush_lock, self._transaction_lock:
             # Persist nick index
             index = getattr(self, "_nick_index", None)
             if index is not None:

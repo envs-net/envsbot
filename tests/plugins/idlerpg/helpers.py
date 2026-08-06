@@ -18,6 +18,9 @@ class DummyStore:
     async def set_global(self, key, value):
         self.globals[key] = value
 
+    async def delete_global(self, key):
+        self.globals.pop(key, None)
+
 
 class DummyBot:
     def __init__(self):

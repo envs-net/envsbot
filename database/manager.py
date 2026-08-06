@@ -12,6 +12,7 @@ from .users import UserManager
 from .rooms import Rooms
 from .audit import AuditLog
 from .message_cache import MessageCacheStore
+from .idlerpg import IdleRPGStateStore
 from .migrations import available_migrations
 
 # logger for this module
@@ -38,6 +39,7 @@ class DatabaseManager:
         self.rooms = None
         self.audit = None
         self.message_cache = None
+        self.idlerpg = None
 
         self.flush_interval = flush_interval
 
@@ -45,6 +47,7 @@ class DatabaseManager:
         self._running = False
         self._stop_event = asyncio.Event()
         self._close_lock = asyncio.Lock()
+        self.transaction_lock = asyncio.Lock()
 
     async def connect(self):
         """Open the database connection and initialize tables safely."""
@@ -75,10 +78,14 @@ class DatabaseManager:
             if row["foreign_keys"] != 1:
                 raise RuntimeError("Failed to enable foreign keys")
 
-            self.users = UserManager(self.conn)
+            self.users = UserManager(
+                self.conn,
+                transaction_lock=self.transaction_lock,
+            )
             self.rooms = Rooms(self.conn)
             self.audit = AuditLog(self.conn)
             self.message_cache = MessageCacheStore(self)
+            self.idlerpg = IdleRPGStateStore(self)
 
             await self._init_schema_migrations()
             await self.run_migrations()
@@ -93,6 +100,7 @@ class DatabaseManager:
             self.rooms = None
             self.audit = None
             self.message_cache = None
+            self.idlerpg = None
             self._running = False
             if conn is not None:
                 try:
@@ -293,6 +301,7 @@ class DatabaseManager:
             self.rooms = None
             self.audit = None
             self.message_cache = None
+            self.idlerpg = None
 
     async def execute(self, query: str, params: tuple | None = None,
                       auto_commit: bool = True):

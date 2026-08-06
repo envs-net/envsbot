@@ -335,7 +335,9 @@ IdleRPG exposes runtime state for plugin diagnostics:
 ```
 
 The state includes room count, player count, online player count, active quests
-and running game-loop tasks.
+and running game-loop tasks. On installations using the current database schema,
+it also reports normalized SQLite row counts and the most recent public-export
+duration, file size and exported room/player/event counts.
 
 The supervised game-loop tasks are also visible through:
 
@@ -363,7 +365,18 @@ receiving godsends or suffering calamities.
 A player can select one unlocked achievement as their public title. The title is
 shown in profile/status output and in exported public JSON data.
 
-## Live export for the website
+## Persistence and live export
+
+IdleRPG state is persisted in normalized SQLite tables for rooms, players,
+seasons and events. Existing installations are migrated automatically from the
+legacy plugin-global JSON blob on first access after the database migration.
+The migration is transactional; after a successful copy the legacy blob is
+removed. No manual conversion command is required.
+
+The in-memory game model remains unchanged for command and tick performance,
+but database writes now update only changed room/player/season rows and newly
+created events. A long current-season event history therefore no longer causes
+one increasingly large JSON document to be rewritten on every tick.
 
 The plugin can export public game state as JSON for a website or status page.
 By default the files are written below `data/idlerpg` inside the bot checkout.
@@ -393,7 +406,10 @@ room-specific directories are useful when IdleRPG is enabled in multiple rooms.
 Public exports are intentionally privacy-reduced: they contain character names,
 classes, public game state, events and map positions, but no raw JIDs and no
 internal admin-only state. JSON files are written atomically to avoid half-written
-files being read by the website.
+files being read by the website. Snapshot creation happens before the export is
+queued; JSON serialization and filesystem work then run in a worker thread so a
+large export cannot block XMPP message processing. Concurrent automatic exports
+are coalesced by an export lock.
 For `idlerpg@conference.envs.net`, the room slug is usually:
 
 ```text

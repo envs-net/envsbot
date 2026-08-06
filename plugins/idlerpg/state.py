@@ -1,8 +1,11 @@
 """Split module for plugins/idlerpg.py: state."""
 
 from __future__ import annotations
+import asyncio
+import copy
 import inspect
 import random
+import time
 from typing import Any
 from core_plugins import _core
 from utils.command import Role
@@ -27,18 +30,116 @@ def _blank_room() -> dict[str, Any]:
     }
 
 
+async def _legacy_store(bot):
+    return await _dep_formatting.get_idlerpg_store(bot)
+
+
+def _normalized_store(bot):
+    db = getattr(bot, "db", None)
+    store = getattr(db, "idlerpg", None)
+    if callable(getattr(store, "load_state", None)) and callable(
+        getattr(store, "save_state", None)
+    ):
+        return store
+    return None
+
+
+def _cached_data(bot) -> dict[str, Any] | None:
+    value = getattr(bot, "_idlerpg_state_cache", None)
+    return value if isinstance(value, dict) else None
+
+
 async def _get_data(bot) -> dict[str, Any]:
-    store = await _dep_formatting.get_idlerpg_store(bot)
-    data = await store.get_global(_dep_constants.IDLERPG_DATA_KEY, default={})
-    return data if isinstance(data, dict) else {}
+    normalized = _normalized_store(bot)
+    if normalized is None:
+        store = await _legacy_store(bot)
+        data = await store.get_global(_dep_constants.IDLERPG_DATA_KEY, default={})
+        return data if isinstance(data, dict) else {}
+
+    cached = _cached_data(bot)
+    if cached is not None:
+        return cached
+
+    data = await normalized.load_state()
+    rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
+    if not isinstance(rooms, dict) or not rooms:
+        legacy = await _legacy_store(bot)
+        legacy_data = await legacy.get_global(
+            _dep_constants.IDLERPG_DATA_KEY,
+            default={},
+        )
+        if isinstance(legacy_data, dict) and isinstance(
+            legacy_data.get("rooms"), dict
+        ) and legacy_data["rooms"]:
+            data = legacy_data
+            await normalized.save_state(data)
+            delete_global = getattr(legacy, "delete_global", None)
+            if callable(delete_global):
+                await delete_global(_dep_constants.IDLERPG_DATA_KEY)
+                flush = getattr(getattr(bot, "db", None), "flush", None)
+                if callable(flush):
+                    result = flush()
+                    if inspect.isawaitable(result):
+                        await result
+        elif not isinstance(data, dict):
+            data = {}
+
+    setattr(bot, "_idlerpg_state_cache", data)
+    return data
 
 
 _PUBLIC_EXPORT_SCHEDULE: dict[str, int] = {"next_at": 0}
+_PUBLIC_EXPORT_RUNTIME: dict[str, Any] = {
+    "running": False,
+    "last_started_at": 0,
+    "last_finished_at": 0,
+    "last_duration_ms": 0,
+    "successes": 0,
+    "failures": 0,
+    "last_error": "",
+    "rooms": 0,
+    "players": 0,
+    "events": 0,
+    "files": 0,
+    "bytes": 0,
+}
+_PUBLIC_EXPORT_LOCK: asyncio.Lock | None = None
+_PUBLIC_EXPORT_LOCK_LOOP = None
+
+
+def _public_export_lock() -> asyncio.Lock:
+    global _PUBLIC_EXPORT_LOCK, _PUBLIC_EXPORT_LOCK_LOOP
+    loop = asyncio.get_running_loop()
+    if _PUBLIC_EXPORT_LOCK is None or _PUBLIC_EXPORT_LOCK_LOOP is not loop:
+        _PUBLIC_EXPORT_LOCK = asyncio.Lock()
+        _PUBLIC_EXPORT_LOCK_LOOP = loop
+    return _PUBLIC_EXPORT_LOCK
 
 
 def _reset_public_export_schedule() -> None:
-    """Make the next automatic public export run immediately."""
+    """Reset automatic scheduling and export diagnostics for tests/reloads."""
+    global _PUBLIC_EXPORT_LOCK, _PUBLIC_EXPORT_LOCK_LOOP
     _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
+    _PUBLIC_EXPORT_RUNTIME.update({
+        "running": False,
+        "last_started_at": 0,
+        "last_finished_at": 0,
+        "last_duration_ms": 0,
+        "successes": 0,
+        "failures": 0,
+        "last_error": "",
+        "rooms": 0,
+        "players": 0,
+        "events": 0,
+        "files": 0,
+        "bytes": 0,
+    })
+    _PUBLIC_EXPORT_LOCK = None
+    _PUBLIC_EXPORT_LOCK_LOOP = None
+
+
+def _public_export_runtime() -> dict[str, Any]:
+    return dict(_PUBLIC_EXPORT_RUNTIME)
 
 
 async def _set_data(
@@ -47,8 +148,13 @@ async def _set_data(
     *,
     force_export: bool = False,
 ) -> None:
-    store = await _dep_formatting.get_idlerpg_store(bot)
-    await store.set_global(_dep_constants.IDLERPG_DATA_KEY, data)
+    normalized = _normalized_store(bot)
+    if normalized is not None:
+        await normalized.save_state(data)
+        setattr(bot, "_idlerpg_state_cache", data)
+    else:
+        store = await _legacy_store(bot)
+        await store.set_global(_dep_constants.IDLERPG_DATA_KEY, data)
     await _refresh_public_export(bot, data, force=force_export)
 
 
@@ -58,40 +164,91 @@ async def _refresh_public_export(
     *,
     force: bool = True,
 ) -> bool:
-    """Refresh exports using the effective room-feature state.
+    """Refresh public JSON without blocking the XMPP event loop.
 
-    Export maintenance is best-effort and must never make a game-state write
-    or tick fail merely because feature state cannot be read temporarily.
+    A deep snapshot is created before yielding, then all JSON serialization and
+    filesystem work runs in a worker thread.  One lock serializes exports and
+    automatic callers re-check the interval after waiting so concurrent state
+    writes are coalesced into a single export.
     """
     if not _dep_config.EXPORT_ENABLED:
         return False
 
-    now = _dep_formatting._now()
     interval = max(0, int(_dep_config.EXPORT_INTERVAL_SECONDS))
-    next_export_at = _PUBLIC_EXPORT_SCHEDULE["next_at"]
-    if not force and interval > 0 and now < next_export_at:
-        return False
+    lock = _public_export_lock()
+    async with lock:
+        now = _dep_formatting._now()
+        next_export_at = _PUBLIC_EXPORT_SCHEDULE["next_at"]
+        if not force and interval > 0 and now < next_export_at:
+            return False
 
-    # Reserve the next slot before awaiting room-feature state. This avoids two
-    # concurrent state writes both starting the same expensive filesystem export.
-    previous_next = next_export_at
-    _PUBLIC_EXPORT_SCHEDULE["next_at"] = now + interval if interval > 0 else now
+        if data is None:
+            data = await _get_data(bot)
+        rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
+        room_jids = rooms.keys() if isinstance(rooms, dict) else ()
+        try:
+            enabled_rooms = await _enabled_rooms(bot, room_jids)
+        except Exception:
+            _dep_config.log.debug(
+                "[IDLERPG] Could not resolve enabled rooms for public export",
+                exc_info=True,
+            )
+            return False
 
-    if data is None:
-        data = await _get_data(bot)
-    rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
-    room_jids = rooms.keys() if isinstance(rooms, dict) else ()
-    try:
-        enabled_rooms = await _enabled_rooms(bot, room_jids)
-    except Exception:
-        _PUBLIC_EXPORT_SCHEDULE["next_at"] = previous_next
-        _dep_config.log.debug(
-            "[IDLERPG] Could not resolve enabled rooms for public export",
-            exc_info=True,
+        # deepcopy must happen before yielding to the worker so the worker never
+        # observes game-state mutations from later commands or ticks.
+        snapshot = copy.deepcopy(data)
+        started_at = _dep_formatting._now()
+        started_perf = time.perf_counter()
+        _PUBLIC_EXPORT_RUNTIME.update({
+            "running": True,
+            "last_started_at": started_at,
+            "last_error": "",
+        })
+        try:
+            result = await asyncio.to_thread(
+                _dep_export._export_public_state,
+                snapshot,
+                dict(enabled_rooms),
+            )
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+        finished_at = _dep_formatting._now()
+        duration_ms = max(0, int((time.perf_counter() - started_perf) * 1000))
+        result = result if isinstance(result, dict) else {"ok": True}
+        ok = bool(result.get("ok", True))
+        _PUBLIC_EXPORT_RUNTIME.update({
+            "running": False,
+            "last_finished_at": finished_at,
+            "last_duration_ms": duration_ms,
+            "last_error": str(result.get("error") or "")[:300],
+            "rooms": max(0, int(result.get("rooms", 0) or 0)),
+            "players": max(0, int(result.get("players", 0) or 0)),
+            "events": max(0, int(result.get("events", 0) or 0)),
+            "files": max(0, int(result.get("files", 0) or 0)),
+            "bytes": max(0, int(result.get("bytes", 0) or 0)),
+        })
+        counter = "successes" if ok else "failures"
+        _PUBLIC_EXPORT_RUNTIME[counter] = int(
+            _PUBLIC_EXPORT_RUNTIME.get(counter, 0) or 0
+        ) + 1
+        if ok:
+            _PUBLIC_EXPORT_SCHEDULE["next_at"] = (
+                finished_at + interval if interval > 0 else finished_at
+            )
+            return True
+
+        # Failed automatic exports may retry immediately on the next state write.
+        _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
+        _dep_config.log.warning(
+            "[IDLERPG] Public export failed: %s",
+            _PUBLIC_EXPORT_RUNTIME["last_error"] or "unknown error",
         )
         return False
-    _dep_export._export_public_state(data, enabled_rooms)
-    return True
 
 
 async def _flush_idlerpg_store(bot) -> None:

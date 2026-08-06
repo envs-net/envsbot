@@ -28,6 +28,21 @@ def _export_root() -> Path:
     return path
 
 
+def _export_tree_stats(root: Path) -> dict[str, int]:
+    """Return generated JSON file count and bytes for diagnostics."""
+    files = 0
+    total_bytes = 0
+    if root.is_dir():
+        for path in root.rglob("*.json"):
+            try:
+                if path.is_file():
+                    files += 1
+                    total_bytes += max(0, int(path.stat().st_size))
+            except OSError:
+                continue
+    return {"files": files, "bytes": total_bytes}
+
+
 def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
     title_key = str(player.get("title") or "")
     display_name = _dep_formatting._display_player(player)
@@ -607,15 +622,14 @@ def _export_room_state(
 def _export_public_state(
     data: dict[str, Any],
     enabled_rooms: dict[str, bool] | None = None,
-) -> None:
-    """Write public data only for rooms where IdleRPG is effectively enabled.
+) -> dict[str, Any]:
+    """Write a complete public export and return compact diagnostics.
 
-    ``enabled_rooms`` is supplied by the async room-feature layer.  ``None``
-    preserves the historical all-room behavior for direct/internal callers
-    that do not have a bot instance available.
+    This function is synchronous by design.  Async callers must run it in a
+    worker thread so filesystem and JSON work cannot block XMPP processing.
     """
     if not _dep_config.EXPORT_ENABLED:
-        return
+        return {"ok": True, "rooms": 0, "players": 0, "events": 0, "files": 0, "bytes": 0}
     try:
         root = _export_root()
         generated_at = _dep_formatting._now()
@@ -638,6 +652,8 @@ def _export_public_state(
         current_slugs: set[str] = set()
         default_room_payload = None
         default_room_season_events: list[dict[str, Any]] = []
+        exported_events = 0
+        exported_players = 0
         for room_jid, room in sorted(rooms.items()):
             room_jid = str(room_jid)
             if room_jid not in enabled or not isinstance(room, dict):
@@ -645,6 +661,10 @@ def _export_public_state(
             summary, room_payload = _export_room_state(root, room_jid, room, generated_at)
             summaries.append(summary)
             current_slugs.add(str(summary["slug"]))
+            exported_players += int(room_payload.get("players_total", 0) or 0)
+            exported_events += len(room_payload.get("events", []))
+            if _dep_config.EXPORT_FULL_SEASON_EVENTS:
+                exported_events += int(room_payload.get("season_events_total", 0) or 0)
             if default_room_payload is None:
                 default_room_payload = room_payload
                 if _dep_config.EXPORT_FULL_SEASON_EVENTS:
@@ -721,8 +741,28 @@ def _export_public_state(
             })
         else:
             _remove_root_compatibility_exports(root)
-    except Exception:
+
+        tree = _export_tree_stats(root)
+        return {
+            "ok": True,
+            "generated_at": generated_at,
+            "rooms": len(summaries),
+            "players": exported_players,
+            "events": exported_events,
+            **tree,
+        }
+    except Exception as exc:
         _dep_config.log.debug("[IDLERPG] Failed to export public state", exc_info=True)
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "rooms": 0,
+            "players": 0,
+            "events": 0,
+            "files": 0,
+            "bytes": 0,
+        }
+
 
 # Explicit module dependencies; module-qualified access keeps cyclic domain
 # relationships visible without copying names into sibling namespaces.

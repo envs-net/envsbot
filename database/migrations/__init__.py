@@ -38,6 +38,11 @@ async def _message_cache(db) -> None:
     await db.message_cache.init()
 
 
+async def _idlerpg_state(db) -> None:
+    """Create normalized IdleRPG state tables and indexes."""
+    await db.idlerpg.init()
+
+
 async def _room_invites(db) -> None:
     """Create the pending room invite table and indexes."""
     await db.conn.execute(
@@ -78,6 +83,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0004_message_cache",
         "Create persistent shared recent-message cache",
         _message_cache,
+    ),
+    Migration(
+        "0005_idlerpg_state",
+        "Create normalized IdleRPG room, player, season and event tables",
+        _idlerpg_state,
     ),
 )
 
