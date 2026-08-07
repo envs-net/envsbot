@@ -37,6 +37,7 @@ def service_paths(config: Mapping[str, Any]) -> dict[str, Path]:
         "working_directory": PROJECT_ROOT,
         "config": get_runtime_config_path().resolve(),
         "database": _resolve_runtime_path(config.get("db", "bot.db")),
+        "log_directory": _resolve_runtime_path(config.get("log_dir", "logs")),
         "backup_directory": _resolve_runtime_path(config.get("backup_dir", "data/backups")),
         "idlerpg_export": _idlerpg_export_path(config),
         "restart_notification": _resolve_runtime_path(
@@ -60,6 +61,7 @@ def _unique_writable_paths(config: Mapping[str, Any]) -> list[Path]:
     candidates = [
         paths["config"].parent,
         paths["database"].parent,
+        paths["log_directory"],
         paths["backup_directory"],
         paths["idlerpg_export"],
         paths["restart_notification"].parent,
@@ -182,7 +184,7 @@ def check_systemd_installation(
             ),
             f"{label} parent: {parent}",
         ))
-    for label in ("backup_directory", "idlerpg_export"):
+    for label in ("backup_directory", "idlerpg_export", "log_directory"):
         path = paths[label]
         parent = path if path.is_dir() else path.parent
         checks.append((

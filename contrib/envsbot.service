@@ -35,7 +35,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 AmbientCapabilities=
-ReadWritePaths=/etc/envsbot /var/lib/envsbot
+ReadWritePaths=/etc/envsbot /var/lib/envsbot /var/log/envsbot
 
 [Install]
 WantedBy=multi-user.target

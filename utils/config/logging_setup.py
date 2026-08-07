@@ -6,6 +6,8 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .defaults import BASE_DIR
+
 _MANAGED_HANDLER_ATTR = "_envsbot_managed_handler"
 log = logging.getLogger(__name__)
 
@@ -25,10 +27,14 @@ def _remove_managed_handlers(root: logging.Logger) -> None:
             )
 
 
-def setup_logging(log_dir: Path | str = "logs") -> None:
+def setup_logging(log_dir: Path | str | None = None) -> None:
     """Initialize envsbot logging without leaking handlers on reloads.
 
-    ``log_dir`` is injectable for tests. Pytest and embedding applications may
+    ``log_dir`` is injectable for tests. When omitted, ``LOG_DIR`` from the
+    runtime configuration is used. Relative paths are resolved below the
+    application root so manual starts and systemd use the same location.
+
+    Pytest and embedding applications may
     already own root handlers, so only handlers created by this function are
     replaced; unrelated capture or application handlers remain attached.
     """
@@ -40,7 +46,10 @@ def setup_logging(log_dir: Path | str = "logs") -> None:
         logging.INFO,
     )
 
-    directory = Path(log_dir)
+    configured_dir = log_dir if log_dir is not None else runtime_config.get("log_dir", "logs")
+    directory = Path(configured_dir).expanduser()
+    if not directory.is_absolute():
+        directory = (BASE_DIR / directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     log_file = directory / "envsbot.log"
 

@@ -11,7 +11,7 @@ runtime-writable configuration/state:
 ```bash
 sudo useradd --system --home /srv/envsbot --shell /usr/sbin/nologin envsbot
 sudo mkdir -p /srv/envsbot
-sudo install -d -o envsbot -g envsbot -m 0750 /etc/envsbot /var/lib/envsbot
+sudo install -d -o envsbot -g envsbot -m 0750 /etc/envsbot /var/lib/envsbot /var/log/envsbot
 ```
 
 Recommended layout:
@@ -20,6 +20,7 @@ Recommended layout:
 /srv/envsbot/              repository + virtualenv
 /etc/envsbot/config.py     runtime-editable config
 /var/lib/envsbot/          database, backups, exports and runtime state
+/var/log/envsbot/          rotating file logs (journald receives console logs too)
 ```
 
 Clone or copy the repository to `/srv/envsbot`, then create a virtualenv:
@@ -68,6 +69,7 @@ For the hardened unit, place mutable state below `/var/lib/envsbot`, for
 example:
 
 ```python
+LOG_DIR = "/var/log/envsbot"
 DB_FILE = "/var/lib/envsbot/bot.db"
 BACKUP_DIR = "/var/lib/envsbot/backups"
 RESTART_NOTIFICATION_FILE = "/var/lib/envsbot/restart_notification.json"
@@ -102,7 +104,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now envsbot.service
 ```
 
-`envsbot systemd check` also validates the configured database, backup, IdleRPG
+`envsbot systemd check` also validates the configured log, database, backup, IdleRPG
 export and restart-notification paths. The generated unit accepts optional local
 overrides from `/etc/default/envsbot` via `EnvironmentFile=`.
 
@@ -200,7 +202,7 @@ loop.
 
 The example unit also enables strict filesystem and kernel hardening. The
 application checkout itself is intentionally absent from `ReadWritePaths=`.
-`envsbot systemd render` derives only the runtime-writable config, database,
+`envsbot systemd render` derives only the runtime-writable config, log, database,
 backup, IdleRPG export and restart-notification directories from the active
 configuration. `envsbot systemd check` fails if those settings would force the
 whole application tree (or one of its parents) to become writable.

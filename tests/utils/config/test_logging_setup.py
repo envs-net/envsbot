@@ -25,3 +25,16 @@ def test_setup_logging_creates_log_dir_and_file(tmp_path, monkeypatch):
         h.level == logging.WARNING or h.level == logging.NOTSET
         for h in logger.handlers
     )
+
+
+def test_setup_logging_uses_configured_log_dir(tmp_path, monkeypatch):
+    log_dir = tmp_path / "configured-logs"
+    monkeypatch.setattr(
+        config_mod,
+        "config",
+        {"loglevel": "INFO", "log_dir": str(log_dir)},
+    )
+
+    config_mod.setup_logging()
+
+    assert (log_dir / "envsbot.log").is_file()

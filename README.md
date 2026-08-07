@@ -329,13 +329,14 @@ runtime-writable files from `/srv/envsbot`:
 /srv/envsbot/              application + virtualenv (read-only to the service)
 /etc/envsbot/config.py     runtime-editable configuration
 /var/lib/envsbot/          SQLite DB, backups, exports and runtime state
+/var/log/envsbot/          rotating file logs
 ```
 
 The supplied [`contrib/envsbot.service`](contrib/envsbot.service) uses
-`ProtectSystem=strict` and only grants writes to `/etc/envsbot` and
-`/var/lib/envsbot`. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and configure
-`DB_FILE`, `BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG
-`export_path` below `/var/lib/envsbot`.
+`ProtectSystem=strict` and only grants writes to `/etc/envsbot`,
+`/var/lib/envsbot` and `/var/log/envsbot`. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and configure
+`LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `BACKUP_DIR`,
+`RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below `/var/lib/envsbot`.
 
 Use the deployment helper before installing or replacing the unit. Select the
 same external config path that the service should keep using:

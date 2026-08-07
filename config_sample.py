@@ -59,6 +59,11 @@ XMPP_COMPLIANCE_MAX_READ_BYTES = 262144
 # Python logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.
 LOG_LEVEL = 'INFO'
 
+# Directory for the rotating envsbot.log file. Use an absolute path such as
+# /var/log/envsbot with the hardened systemd unit.
+# Startup-only: restart envsbot after changing this value.
+LOG_DIR = 'logs'
+
 # Command prefix used to trigger bot commands in rooms and direct chats.
 COMMAND_PREFIX = ','
 

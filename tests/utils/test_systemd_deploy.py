@@ -24,6 +24,8 @@ def test_render_systemd_unit_uses_runtime_paths(monkeypatch, tmp_path):
     config_file.write_text("# test\n", encoding="utf-8")
     external_backup = tmp_path / "external-backups"
     external_backup.mkdir()
+    external_logs = tmp_path / "external-logs"
+    external_logs.mkdir()
 
     monkeypatch.setattr(systemd_deploy, "PROJECT_ROOT", project)
     monkeypatch.setattr(systemd_deploy, "get_runtime_config_path", lambda: config_file)
@@ -32,6 +34,7 @@ def test_render_systemd_unit_uses_runtime_paths(monkeypatch, tmp_path):
     unit = systemd_deploy.render_systemd_unit(
         {
             "db": "data/bot.db",
+            "log_dir": str(external_logs),
             "backup_dir": str(external_backup),
             "restart_notification_file": "data/restart.json",
             "idlerpg": {"export_path": "data/idlerpg"},
@@ -45,7 +48,7 @@ def test_render_systemd_unit_uses_runtime_paths(monkeypatch, tmp_path):
     assert "ExecStart=/srv/envsbot/.venv/bin/envsbot" in unit
     assert "EnvironmentFile=-/etc/default/envsbot-local" in unit
     assert f"Environment=ENVSBOT_CONFIG={config_file}" in unit
-    assert f"ReadWritePaths={config_dir} {project / 'data'} {external_backup}" in unit
+    assert f"ReadWritePaths={config_dir} {project / 'data'} {external_logs} {external_backup}" in unit
     assert f"ReadWritePaths={project} " not in unit
     assert "WatchdogSec=60" in unit
     assert "ProtectSystem=strict" in unit
@@ -60,6 +63,7 @@ def test_check_systemd_installation_validates_service_account_permissions(
     (project / "data").mkdir(mode=0o700)
     (project / "data" / "backups").mkdir(mode=0o700)
     (project / "data" / "idlerpg").mkdir(mode=0o700)
+    (project / "logs").mkdir(mode=0o700)
     config_dir = tmp_path / "etc-envsbot"
     config_dir.mkdir(mode=0o700)
     config_file = config_dir / "config.py"

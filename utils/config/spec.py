@@ -169,6 +169,7 @@ CONFIG_FIELDS: dict[str, ConfigField] = {
     'xmpp_query_timeout_seconds': ConfigField(8, 'XMPP_QUERY_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Connection', description='XMPP query timeout used by diagnostic/info commands.'),
     'xmpp_compliance_max_read_bytes': ConfigField(262144, 'XMPP_COMPLIANCE_MAX_READ_BYTES', int, section='Connection', description='Maximum bytes read from compliance.conversations.im for ,xmpp compliance. The command only needs a small HTML preview containing the score marker.'),
     'loglevel': ConfigField('INFO', 'LOG_LEVEL', str, section='Bot Runtime', description='Python logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.'),
+    'log_dir': ConfigField('logs', 'LOG_DIR', str, startup_only=True, section='Bot Runtime', description='Directory for the rotating envsbot.log file. Use an absolute path such as /var/log/envsbot with the hardened systemd unit.'),
     'prefix': ConfigField(',', 'COMMAND_PREFIX', str, section='Bot Runtime', description='Command prefix used to trigger bot commands in rooms and direct chats.'),
     'timezone': ConfigField(MISSING, 'TIMEZONE', str, section='Bot Runtime', description='Default timezone for bot-side date/time handling.', sample='Europe/Berlin'),
     'db': ConfigField('bot.db', 'DB_FILE', str, startup_only=True, section='Bot Runtime', description='SQLite database file, relative to the bot directory unless absolute.', sample='data/bot.db'),
