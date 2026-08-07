@@ -297,6 +297,7 @@ def _validate_room_plugin_defaults(cfg, errors):
             )
 
 
+
 def validate_config(cfg, require_required_keys=False):
     """
     Validate envsbot configuration.

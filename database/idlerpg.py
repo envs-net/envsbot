@@ -103,80 +103,80 @@ class IdleRPGStateStore:
 
     async def init(self, *, commit: bool = True) -> None:
         """Create normalized state tables and lookup indexes."""
-        await self.db.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS idlerpg_rooms (
-                room_jid TEXT PRIMARY KEY,
-                state_json TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
+        del commit
+        async with self.db.transaction(label="idlerpg_init") as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS idlerpg_rooms (
+                    room_jid TEXT PRIMARY KEY,
+                    state_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """
             )
-            """
-        )
-        await self.db.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS idlerpg_players (
-                room_jid TEXT NOT NULL,
-                jid TEXT NOT NULL,
-                data_json TEXT NOT NULL,
-                updated_at INTEGER NOT NULL,
-                PRIMARY KEY (room_jid, jid),
-                FOREIGN KEY (room_jid)
-                    REFERENCES idlerpg_rooms(room_jid)
-                    ON DELETE CASCADE
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS idlerpg_players (
+                    room_jid TEXT NOT NULL,
+                    jid TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (room_jid, jid),
+                    FOREIGN KEY (room_jid)
+                        REFERENCES idlerpg_rooms(room_jid)
+                        ON DELETE CASCADE
+                )
+                """
             )
-            """
-        )
-        await self.db.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS idlerpg_seasons (
-                room_jid TEXT NOT NULL,
-                season_id TEXT NOT NULL,
-                active INTEGER NOT NULL DEFAULT 0,
-                position INTEGER NOT NULL DEFAULT 0,
-                started_at INTEGER NOT NULL DEFAULT 0,
-                data_json TEXT NOT NULL,
-                updated_at INTEGER NOT NULL,
-                PRIMARY KEY (room_jid, season_id),
-                FOREIGN KEY (room_jid)
-                    REFERENCES idlerpg_rooms(room_jid)
-                    ON DELETE CASCADE
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS idlerpg_seasons (
+                    room_jid TEXT NOT NULL,
+                    season_id TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 0,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    started_at INTEGER NOT NULL DEFAULT 0,
+                    data_json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (room_jid, season_id),
+                    FOREIGN KEY (room_jid)
+                        REFERENCES idlerpg_rooms(room_jid)
+                        ON DELETE CASCADE
+                )
+                """
             )
-            """
-        )
-        await self.db.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS idlerpg_events (
-                room_jid TEXT NOT NULL,
-                event_id TEXT NOT NULL,
-                ts INTEGER NOT NULL,
-                season_started_at INTEGER NOT NULL DEFAULT 0,
-                in_recent INTEGER NOT NULL DEFAULT 0,
-                data_json TEXT NOT NULL,
-                PRIMARY KEY (room_jid, event_id),
-                FOREIGN KEY (room_jid)
-                    REFERENCES idlerpg_rooms(room_jid)
-                    ON DELETE CASCADE
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS idlerpg_events (
+                    room_jid TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    ts INTEGER NOT NULL,
+                    season_started_at INTEGER NOT NULL DEFAULT 0,
+                    in_recent INTEGER NOT NULL DEFAULT 0,
+                    data_json TEXT NOT NULL,
+                    PRIMARY KEY (room_jid, event_id),
+                    FOREIGN KEY (room_jid)
+                        REFERENCES idlerpg_rooms(room_jid)
+                        ON DELETE CASCADE
+                )
+                """
             )
-            """
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_idlerpg_players_room "
-            "ON idlerpg_players(room_jid)"
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_idlerpg_seasons_room_active "
-            "ON idlerpg_seasons(room_jid, active, position)"
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_idlerpg_events_room_recent "
-            "ON idlerpg_events(room_jid, in_recent, ts)"
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_idlerpg_events_room_season "
-            "ON idlerpg_events(room_jid, season_started_at, ts)"
-        )
-        if commit:
-            await self.db.conn.commit()
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_idlerpg_players_room "
+                "ON idlerpg_players(room_jid)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_idlerpg_seasons_room_active "
+                "ON idlerpg_seasons(room_jid, active, position)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_idlerpg_events_room_recent "
+                "ON idlerpg_events(room_jid, in_recent, ts)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_idlerpg_events_room_season "
+                "ON idlerpg_events(room_jid, season_started_at, ts)"
+            )
 
     async def _load_state_locked(self) -> dict[str, Any]:
         room_rows = await self.db.fetch_all(
@@ -383,6 +383,255 @@ class IdleRPGStateStore:
             result.append(event)
         return result
 
+    async def _delete_stale_rooms(
+        self,
+        conn: Any,
+        stale_rooms: set[str],
+        room_hashes: dict[str, str],
+        player_hashes: dict[tuple[str, str], str],
+        season_hashes: dict[tuple[str, str], str],
+        recent_ids: dict[str, set[str]],
+    ) -> None:
+        for room_jid in sorted(stale_rooms):
+            await conn.execute(
+                "DELETE FROM idlerpg_rooms WHERE room_jid = ?",
+                (room_jid,),
+            )
+            room_hashes.pop(room_jid, None)
+            recent_ids.pop(room_jid, None)
+            for key in tuple(player_hashes):
+                if key[0] == room_jid:
+                    player_hashes.pop(key, None)
+            for key in tuple(season_hashes):
+                if key[0] == room_jid:
+                    season_hashes.pop(key, None)
+
+    async def _save_room_row(
+        self,
+        conn: Any,
+        room_jid: str,
+        room: dict[str, Any],
+        updated_at: int,
+        hashes: dict[str, str],
+    ) -> None:
+        room_state = {
+            str(key): value
+            for key, value in room.items()
+            if str(key) not in _ROOM_SEPARATE_KEYS
+        }
+        payload = _json_dump(room_state)
+        payload_hash = _digest(payload)
+        if self._room_hashes.get(room_jid) != payload_hash:
+            await conn.execute(
+                """
+                INSERT INTO idlerpg_rooms (room_jid, state_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(room_jid) DO UPDATE SET
+                    state_json = excluded.state_json,
+                    updated_at = excluded.updated_at
+                """,
+                (room_jid, payload, updated_at),
+            )
+        hashes[room_jid] = payload_hash
+
+    async def _save_players(
+        self,
+        conn: Any,
+        room_jid: str,
+        room: dict[str, Any],
+        updated_at: int,
+        hashes: dict[tuple[str, str], str],
+    ) -> None:
+        players_value = room.get("players")
+        players = players_value if isinstance(players_value, Mapping) else {}
+        current_keys = {
+            (room_jid, str(jid))
+            for jid, player in players.items()
+            if isinstance(player, dict)
+        }
+        old_keys = {key for key in self._player_hashes if key[0] == room_jid}
+        for key in sorted(old_keys - current_keys):
+            await conn.execute(
+                "DELETE FROM idlerpg_players WHERE room_jid = ? AND jid = ?",
+                key,
+            )
+            hashes.pop(key, None)
+
+        for raw_jid, player in sorted(players.items(), key=lambda item: str(item[0])):
+            if not isinstance(player, dict):
+                continue
+            jid = str(raw_jid)
+            payload = _json_dump(player)
+            payload_hash = _digest(payload)
+            key = (room_jid, jid)
+            if self._player_hashes.get(key) != payload_hash:
+                await conn.execute(
+                    """
+                    INSERT INTO idlerpg_players (
+                        room_jid, jid, data_json, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(room_jid, jid) DO UPDATE SET
+                        data_json = excluded.data_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (room_jid, jid, payload, updated_at),
+                )
+            hashes[key] = payload_hash
+
+    @staticmethod
+    def _season_rows(room: dict[str, Any]) -> tuple[int, list[tuple[str, bool, int, dict[str, Any]]]]:
+        current_value = room.get("season")
+        current = current_value if isinstance(current_value, Mapping) else {}
+        current_dict = dict(current)
+        started_at = _integer(current_dict.get("started_at"))
+        rows = [
+            (
+                _season_row_id(current_dict, fallback="active"),
+                True,
+                0,
+                current_dict,
+            )
+        ]
+        hall_value = room.get("hall_of_fame")
+        hall = hall_value if isinstance(hall_value, list) else []
+        for position, raw_season in enumerate(hall):
+            if not isinstance(raw_season, Mapping):
+                continue
+            season = dict(raw_season)
+            rows.append(
+                (
+                    _season_row_id(season, fallback=f"hof-{position}"),
+                    False,
+                    position,
+                    season,
+                )
+            )
+        return started_at, rows
+
+    async def _save_seasons(
+        self,
+        conn: Any,
+        room_jid: str,
+        rows: list[tuple[str, bool, int, dict[str, Any]]],
+        updated_at: int,
+        hashes: dict[tuple[str, str], str],
+    ) -> None:
+        current_keys = {(room_jid, value[0]) for value in rows}
+        old_keys = {key for key in self._season_hashes if key[0] == room_jid}
+        for key in sorted(old_keys - current_keys):
+            await conn.execute(
+                "DELETE FROM idlerpg_seasons WHERE room_jid = ? AND season_id = ?",
+                key,
+            )
+            hashes.pop(key, None)
+
+        for season_id, active, position, season in rows:
+            payload = _json_dump(season)
+            payload_hash = _digest(payload)
+            key = (room_jid, season_id)
+            composite_hash = _digest(f"{int(active)}:{position}:{payload_hash}")
+            if self._season_hashes.get(key) != composite_hash:
+                await conn.execute(
+                    """
+                    INSERT INTO idlerpg_seasons (
+                        room_jid, season_id, active, position,
+                        started_at, data_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(room_jid, season_id) DO UPDATE SET
+                        active = excluded.active,
+                        position = excluded.position,
+                        started_at = excluded.started_at,
+                        data_json = excluded.data_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        room_jid,
+                        season_id,
+                        int(active),
+                        position,
+                        _integer(season.get("started_at")),
+                        payload,
+                        updated_at,
+                    ),
+                )
+            hashes[key] = composite_hash
+
+    async def _save_events(
+        self,
+        conn: Any,
+        room_jid: str,
+        room: dict[str, Any],
+        current_started_at: int,
+        recent_by_room: dict[str, set[str]],
+    ) -> None:
+        prepared, recent_ids = self._prepare_events(room, current_started_at)
+        old_recent_ids = self._recent_event_ids.get(room_jid, set())
+        for event_id, event in prepared.items():
+            public_event = {
+                str(key): value
+                for key, value in event.items()
+                if str(key) not in {_EVENT_ID_KEY, _EVENT_SEASON_KEY, _EVENT_ROWID_KEY}
+            }
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO idlerpg_events (
+                    room_jid, event_id, ts, season_started_at,
+                    in_recent, data_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    room_jid,
+                    event_id,
+                    _integer(event.get("ts")),
+                    _integer(event.get(_EVENT_SEASON_KEY)),
+                    int(event_id in recent_ids),
+                    _json_dump(public_event),
+                ),
+            )
+        for event_id in sorted(old_recent_ids - recent_ids):
+            await conn.execute(
+                "UPDATE idlerpg_events SET in_recent = 0 "
+                "WHERE room_jid = ? AND event_id = ?",
+                (room_jid, event_id),
+            )
+        for event_id in sorted(recent_ids - old_recent_ids):
+            await conn.execute(
+                "UPDATE idlerpg_events SET in_recent = 1 "
+                "WHERE room_jid = ? AND event_id = ?",
+                (room_jid, event_id),
+            )
+        recent_by_room[room_jid] = set(recent_ids)
+        room.pop("_pending_events", None)
+
+    async def _save_room_state(
+        self,
+        conn: Any,
+        room_jid: str,
+        room: dict[str, Any],
+        room_hashes: dict[str, str],
+        player_hashes: dict[tuple[str, str], str],
+        season_hashes: dict[tuple[str, str], str],
+        recent_ids: dict[str, set[str]],
+    ) -> None:
+        updated_at = _integer(room.get("last_tick"))
+        await self._save_room_row(conn, room_jid, room, updated_at, room_hashes)
+        await self._save_players(conn, room_jid, room, updated_at, player_hashes)
+        current_started_at, seasons = self._season_rows(room)
+        await self._save_seasons(
+            conn,
+            room_jid,
+            seasons,
+            updated_at,
+            season_hashes,
+        )
+        await self._save_events(
+            conn,
+            room_jid,
+            room,
+            current_started_at,
+            recent_ids,
+        )
+
     async def save_state(
         self,
         data: Mapping[str, Any],
@@ -400,230 +649,56 @@ class IdleRPGStateStore:
                 for room_jid, room in rooms.items()
                 if isinstance(room, dict)
             }
-            requested_room_jids = (
-                None
-                if room_jids is None
-                else {str(room_jid) for room_jid in room_jids}
+            requested = (
+                None if room_jids is None else {str(room_jid) for room_jid in room_jids}
             )
             target_room_jids = (
                 current_room_jids
-                if requested_room_jids is None
-                else current_room_jids & requested_room_jids
+                if requested is None
+                else current_room_jids & requested
+            )
+            stale_rooms = (
+                set(self._room_hashes) - current_room_jids
+                if requested is None
+                else (set(self._room_hashes) & requested) - current_room_jids
             )
 
-            new_room_hashes = dict(self._room_hashes)
-            new_player_hashes = dict(self._player_hashes)
-            new_season_hashes = dict(self._season_hashes)
-            new_recent_ids = {
+            room_hashes = dict(self._room_hashes)
+            player_hashes = dict(self._player_hashes)
+            season_hashes = dict(self._season_hashes)
+            recent_ids = {
                 room: set(ids) for room, ids in self._recent_event_ids.items()
             }
 
             async with self.db.transaction(label="idlerpg_save_state") as conn:
-                stale_rooms = (
-                    set(self._room_hashes) - current_room_jids
-                    if requested_room_jids is None
-                    else (set(self._room_hashes) & requested_room_jids)
-                    - current_room_jids
+                await self._delete_stale_rooms(
+                    conn,
+                    stale_rooms,
+                    room_hashes,
+                    player_hashes,
+                    season_hashes,
+                    recent_ids,
                 )
-                for room_jid in sorted(stale_rooms):
-                    await conn.execute(
-                        "DELETE FROM idlerpg_rooms WHERE room_jid = ?",
-                        (room_jid,),
-                    )
-                    new_room_hashes.pop(room_jid, None)
-                    new_recent_ids.pop(room_jid, None)
-                    new_player_hashes = {
-                        key: value
-                        for key, value in new_player_hashes.items()
-                        if key[0] != room_jid
-                    }
-                    new_season_hashes = {
-                        key: value
-                        for key, value in new_season_hashes.items()
-                        if key[0] != room_jid
-                    }
-
                 for raw_room_jid, raw_room in sorted(
                     rooms.items(), key=lambda item: str(item[0])
                 ):
                     room_jid = str(raw_room_jid)
                     if not isinstance(raw_room, dict) or room_jid not in target_room_jids:
                         continue
-                    updated_at = _integer(raw_room.get("last_tick"))
-                    room_state = {
-                        str(key): value
-                        for key, value in raw_room.items()
-                        if str(key) not in _ROOM_SEPARATE_KEYS
-                    }
-                    room_payload = _json_dump(room_state)
-                    room_hash = _digest(room_payload)
-                    if self._room_hashes.get(room_jid) != room_hash:
-                        await conn.execute(
-                            """
-                            INSERT INTO idlerpg_rooms (
-                                room_jid, state_json, updated_at
-                            ) VALUES (?, ?, ?)
-                            ON CONFLICT(room_jid) DO UPDATE SET
-                                state_json = excluded.state_json,
-                                updated_at = excluded.updated_at
-                            """,
-                            (room_jid, room_payload, updated_at),
-                        )
-                    new_room_hashes[room_jid] = room_hash
-
-                    players = raw_room.get("players")
-                    players = players if isinstance(players, Mapping) else {}
-                    player_keys = {
-                        (room_jid, str(jid))
-                        for jid, player in players.items()
-                        if isinstance(player, dict)
-                    }
-                    old_player_keys = {
-                        key for key in self._player_hashes if key[0] == room_jid
-                    }
-                    for key in sorted(old_player_keys - player_keys):
-                        await conn.execute(
-                            "DELETE FROM idlerpg_players "
-                            "WHERE room_jid = ? AND jid = ?",
-                            key,
-                        )
-                        new_player_hashes.pop(key, None)
-                    for raw_jid, player in sorted(
-                        players.items(), key=lambda item: str(item[0])
-                    ):
-                        if not isinstance(player, dict):
-                            continue
-                        jid = str(raw_jid)
-                        payload = _json_dump(player)
-                        payload_hash = _digest(payload)
-                        key = (room_jid, jid)
-                        if self._player_hashes.get(key) != payload_hash:
-                            await conn.execute(
-                                """
-                                INSERT INTO idlerpg_players (
-                                    room_jid, jid, data_json, updated_at
-                                ) VALUES (?, ?, ?, ?)
-                                ON CONFLICT(room_jid, jid) DO UPDATE SET
-                                    data_json = excluded.data_json,
-                                    updated_at = excluded.updated_at
-                                """,
-                                (room_jid, jid, payload, updated_at),
-                            )
-                        new_player_hashes[key] = payload_hash
-
-                    current_season = raw_room.get("season")
-                    current_season = (
-                        current_season if isinstance(current_season, Mapping) else {}
+                    await self._save_room_state(
+                        conn,
+                        room_jid,
+                        raw_room,
+                        room_hashes,
+                        player_hashes,
+                        season_hashes,
+                        recent_ids,
                     )
-                    current_started_at = _integer(current_season.get("started_at"))
-                    seasons: list[tuple[str, bool, int, dict[str, Any]]] = []
-                    current_dict = dict(current_season)
-                    current_id = _season_row_id(
-                        current_dict,
-                        fallback="active",
-                    )
-                    seasons.append((current_id, True, 0, current_dict))
-                    hall = raw_room.get("hall_of_fame")
-                    hall = hall if isinstance(hall, list) else []
-                    for position, raw_season in enumerate(hall):
-                        if not isinstance(raw_season, Mapping):
-                            continue
-                        season_dict = dict(raw_season)
-                        season_id = _season_row_id(
-                            season_dict,
-                            fallback=f"hof-{position}",
-                        )
-                        seasons.append((season_id, False, position, season_dict))
 
-                    season_keys = {(room_jid, value[0]) for value in seasons}
-                    old_season_keys = {
-                        key for key in self._season_hashes if key[0] == room_jid
-                    }
-                    for key in sorted(old_season_keys - season_keys):
-                        await conn.execute(
-                            "DELETE FROM idlerpg_seasons "
-                            "WHERE room_jid = ? AND season_id = ?",
-                            key,
-                        )
-                        new_season_hashes.pop(key, None)
-                    for season_id, active, position, season_dict in seasons:
-                        payload = _json_dump(season_dict)
-                        payload_hash = _digest(payload)
-                        key = (room_jid, season_id)
-                        composite_hash = _digest(
-                            f"{int(active)}:{position}:{payload_hash}"
-                        )
-                        if self._season_hashes.get(key) != composite_hash:
-                            await conn.execute(
-                                """
-                                INSERT INTO idlerpg_seasons (
-                                    room_jid, season_id, active, position,
-                                    started_at, data_json, updated_at
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(room_jid, season_id) DO UPDATE SET
-                                    active = excluded.active,
-                                    position = excluded.position,
-                                    started_at = excluded.started_at,
-                                    data_json = excluded.data_json,
-                                    updated_at = excluded.updated_at
-                                """,
-                                (
-                                    room_jid,
-                                    season_id,
-                                    int(active),
-                                    position,
-                                    _integer(season_dict.get("started_at")),
-                                    payload,
-                                    updated_at,
-                                ),
-                            )
-                        new_season_hashes[key] = composite_hash
-
-                    prepared_events, recent_ids = self._prepare_events(
-                        raw_room, current_started_at
-                    )
-                    old_recent_ids = self._recent_event_ids.get(room_jid, set())
-                    for event_id, event in prepared_events.items():
-                        public_event = {
-                            str(key): value
-                            for key, value in event.items()
-                            if str(key) not in {_EVENT_ID_KEY, _EVENT_SEASON_KEY, _EVENT_ROWID_KEY}
-                        }
-                        await conn.execute(
-                            """
-                            INSERT OR IGNORE INTO idlerpg_events (
-                                room_jid, event_id, ts, season_started_at,
-                                in_recent, data_json
-                            ) VALUES (?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                room_jid,
-                                event_id,
-                                _integer(event.get("ts")),
-                                _integer(event.get(_EVENT_SEASON_KEY)),
-                                int(event_id in recent_ids),
-                                _json_dump(public_event),
-                            ),
-                        )
-                    for event_id in sorted(old_recent_ids - recent_ids):
-                        await conn.execute(
-                            "UPDATE idlerpg_events SET in_recent = 0 "
-                            "WHERE room_jid = ? AND event_id = ?",
-                            (room_jid, event_id),
-                        )
-                    for event_id in sorted(recent_ids - old_recent_ids):
-                        await conn.execute(
-                            "UPDATE idlerpg_events SET in_recent = 1 "
-                            "WHERE room_jid = ? AND event_id = ?",
-                            (room_jid, event_id),
-                        )
-                    new_recent_ids[room_jid] = set(recent_ids)
-                    raw_room.pop("_pending_events", None)
-
-            self._room_hashes = new_room_hashes
-            self._player_hashes = new_player_hashes
-            self._season_hashes = new_season_hashes
-            self._recent_event_ids = new_recent_ids
+            self._room_hashes = room_hashes
+            self._player_hashes = player_hashes
+            self._season_hashes = season_hashes
+            self._recent_event_ids = recent_ids
             self._cache_ready = True
         observe("idlerpg_save", time.perf_counter() - started_perf)
 

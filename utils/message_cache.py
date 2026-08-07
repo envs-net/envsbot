@@ -11,6 +11,8 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from typing import Any
 
+from utils.task_supervisor import ExpectedTaskExit
+
 log = logging.getLogger(__name__)
 
 _BATCH_DELAY_SECONDS = 0.1
@@ -154,8 +156,15 @@ class MessageCache:
     shutdown, so cached messages remain available after a restart.
     """
 
-    def __init__(self, max_messages: int = 100, max_age_days: int = 30):
+    def __init__(
+        self,
+        max_messages: int = 100,
+        max_age_days: int = 30,
+        *,
+        task_supervisor: Any | None = None,
+    ):
         self.max_messages = max(1, int(max_messages))
+        self.task_supervisor = task_supervisor
         self.max_age_days = max(0, int(max_age_days))
         self._messages: dict[str, deque[dict[str, Any]]] = {}
         self._by_stanza_id: dict[str, dict[str, dict[str, Any]]] = {}
@@ -213,10 +222,19 @@ class MessageCache:
 
         self._started = True
         self._closing = False
-        self._writer_task = asyncio.create_task(
-            self._writer_loop(),
-            name="message-cache-writer",
-        )
+        creator = getattr(self.task_supervisor, "create_resilient", None)
+        if callable(creator):
+            self._writer_task = creator(
+                "_core",
+                self._supervised_writer_loop,
+                name="message-cache-writer",
+                service=True,
+            )
+        else:
+            self._writer_task = asyncio.create_task(
+                self._writer_loop(),
+                name="message-cache-writer",
+            )
         log.info(
             "[MESSAGE_CACHE] event=start status=ok conversations=%d "
             "messages=%d max_per_conversation=%d",
@@ -340,9 +358,23 @@ class MessageCache:
         if stanza_id:
             index[str(stanza_id)] = entry
 
+    async def _supervised_writer_loop(self) -> None:
+        await self._writer_loop()
+        if self._closing:
+            raise ExpectedTaskExit("message cache writer stop requested")
+
+    def _writer_heartbeat(self) -> None:
+        heartbeat = getattr(self.task_supervisor, "heartbeat", None)
+        if callable(heartbeat):
+            heartbeat("_core", "message-cache-writer")
+
     async def _writer_loop(self) -> None:
         while True:
-            first = await self._queue.get()
+            self._writer_heartbeat()
+            try:
+                first = await asyncio.wait_for(self._queue.get(), timeout=300.0)
+            except TimeoutError:
+                continue
             if first is _STOP:
                 self._queue.task_done()
                 return

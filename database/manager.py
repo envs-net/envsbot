@@ -13,6 +13,7 @@ import aiosqlite
 from utils.config import config
 from utils.file_security import ensure_private_file
 from utils.logging_helpers import kv
+from utils.task_supervisor import ExpectedTaskExit
 
 from .audit import AuditLog
 from .command_usage import CommandUsageStore
@@ -49,9 +50,16 @@ class DatabaseManager:
     flush cached user data to the database.
     """
 
-    def __init__(self, path: str, flush_interval: int = 60):
+    def __init__(
+        self,
+        path: str,
+        flush_interval: int = 60,
+        *,
+        task_supervisor: Any | None = None,
+    ):
 
         self.path = path
+        self.task_supervisor = task_supervisor
         self.conn: aiosqlite.Connection | None = None
 
         self.users: UserManager | None = None
@@ -139,6 +147,41 @@ class DatabaseManager:
         async with self.transaction(label=label) as conn:
             return await conn.executemany(query, [tuple(row) for row in rows])
 
+    def _start_service(
+        self,
+        factory,
+        *,
+        name: str,
+        fallback_factory=None,
+    ) -> asyncio.Task[Any]:
+        """Start a core DB worker through the shared supervisor when available."""
+        supervisor = self.task_supervisor
+        creator = getattr(supervisor, "create_resilient", None)
+        if callable(creator):
+            return creator(
+                "_core",
+                factory,
+                name=name,
+                service=True,
+            )
+        fallback = fallback_factory or factory
+        return asyncio.create_task(fallback(), name=name)
+
+    def _heartbeat(self, name: str) -> None:
+        heartbeat = getattr(self.task_supervisor, "heartbeat", None)
+        if callable(heartbeat):
+            heartbeat("_core", name)
+
+    async def _supervised_flush_loop(self) -> None:
+        await self._flush_loop()
+        if self._stop_event.is_set():
+            raise ExpectedTaskExit("database flush stop requested")
+
+    async def _supervised_maintenance_loop(self) -> None:
+        await self._maintenance_loop()
+        if self._stop_event.is_set():
+            raise ExpectedTaskExit("database maintenance stop requested")
+
     async def connect(
         self,
         *,
@@ -175,12 +218,9 @@ class DatabaseManager:
             if row is None or int(row["foreign_keys"]) != 1:
                 raise RuntimeError("Failed to enable foreign keys")
 
-            self.users = UserManager(
-                conn,
-                transaction_lock=self.transaction_lock,
-            )
-            self.rooms = Rooms(conn, transaction_lock=self.transaction_lock)
-            self.audit = AuditLog(conn, transaction_lock=self.transaction_lock)
+            self.users = UserManager(self)
+            self.rooms = Rooms(self)
+            self.audit = AuditLog(self)
             self.message_cache = MessageCacheStore(self)
             self.idlerpg = IdleRPGStateStore(self)
             self.outbox = OutboxStore(self)
@@ -195,9 +235,15 @@ class DatabaseManager:
 
             self._running = True
             if start_background:
-                self._flush_task = asyncio.create_task(self._flush_loop(), name="database-flush")
-                self._maintenance_task = asyncio.create_task(
-                    self._maintenance_loop(), name="database-maintenance"
+                self._flush_task = self._start_service(
+                    self._supervised_flush_loop,
+                    name="database-flush",
+                    fallback_factory=self._flush_loop,
+                )
+                self._maintenance_task = self._start_service(
+                    self._supervised_maintenance_loop,
+                    name="database-maintenance",
+                    fallback_factory=self._maintenance_loop,
                 )
         except Exception:
             failed_conn = self.conn
@@ -378,7 +424,7 @@ class DatabaseManager:
                 )
                 raise _RollbackProbe
         except _RollbackProbe:
-            pass
+            return
 
     def _database_backup_path(self, *, pre_migration: bool = False) -> Path | None:
         raw = str(self.path or "")
@@ -514,6 +560,7 @@ class DatabaseManager:
         """Background loop that flushes data periodically with retry logic."""
         try:
             while not self._stop_event.is_set():
+                self._heartbeat("database-flush")
                 try:
                     await asyncio.wait_for(
                         self._stop_event.wait(),
@@ -580,6 +627,7 @@ class DatabaseManager:
         interval = max(60, int(config.get("database_maintenance_interval_seconds", 21600) or 21600))
         try:
             while not self._stop_event.is_set():
+                self._heartbeat("database-maintenance")
                 stop_requested = True
                 try:
                     await asyncio.wait_for(
@@ -664,27 +712,35 @@ class DatabaseManager:
         async with self.transaction_lock:
             await self._connection().execute("PRAGMA optimize;")
 
+    async def stop_background_tasks(self, *, timeout: float = 10.0) -> None:
+        """Gracefully stop supervised DB workers before global task cancellation."""
+        self._stop_event.set()
+        tasks = [
+            task
+            for task in (self._flush_task, self._maintenance_task)
+            if task is not None
+        ]
+        self._flush_task = None
+        self._maintenance_task = None
+        if not tasks:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=max(0.1, float(timeout)),
+            )
+        except TimeoutError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            log.warning("[DB] Timed out waiting for supervised database workers")
+
     async def close(self) -> None:
         """Stop background tasks, flush caches, and close idempotently."""
         async with self._close_lock:
-            self._stop_event.set()
-            maintenance_task = self._maintenance_task
-            self._maintenance_task = None
-            if maintenance_task is not None:
-                maintenance_task.cancel()
-                await asyncio.gather(maintenance_task, return_exceptions=True)
-
-            flush_task = self._flush_task
-            self._flush_task = None
-            if flush_task is not None:
-                try:
-                    await asyncio.wait_for(asyncio.shield(flush_task), timeout=5)
-                except TimeoutError:
-                    flush_task.cancel()
-                    await asyncio.gather(flush_task, return_exceptions=True)
-                    log.warning("[DB] Timed out waiting for background flush task")
-                except Exception:
-                    log.exception("[DB] Background flush task failed during shutdown")
+            await self.stop_background_tasks(timeout=5.0)
+            if self.users is not None:
+                await self._flush_with_retry(raise_on_failure=False)
 
             conn = self.conn
             self.conn = None

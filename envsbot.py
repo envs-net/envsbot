@@ -137,6 +137,7 @@ class Bot(
         self.message_cache = MessageCache(
             max_messages=int(config.get("message_cache_size", 100) or 100),
             max_age_days=int(config.get("message_cache_max_age_days", 30) or 0),
+            task_supervisor=self.tasks,
         )
         self.outbox = PersistentOutbox(self)
         self.watchdog = RuntimeWatchdog(self)
@@ -165,7 +166,10 @@ class Bot(
         for plugin_name in self.XMPP_PLUGINS:
             self.register_plugin(plugin_name)
 
-        self.db = DatabaseManager(config.get("db", "bot.db"))
+        self.db = DatabaseManager(
+            config.get("db", "bot.db"),
+            task_supervisor=self.tasks,
+        )
         self.bot_plugins = PluginManager(self)
 
         self.add_event_handler("session_start", self.on_start)

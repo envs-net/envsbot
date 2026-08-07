@@ -38,7 +38,7 @@ async def test_reminder_db_helpers(dummy_bot):
     assert isinstance(allrows, list)
     # Delete reminder
     await reminder._delete_reminder(dummy_bot, 1)
-    dummy_bot.db.execute.assert_called()
+    dummy_bot.db.write.assert_called()
 
 
 @pytest.mark.asyncio

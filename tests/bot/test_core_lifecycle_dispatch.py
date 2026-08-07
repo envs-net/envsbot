@@ -71,7 +71,9 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
     await bot.shutdown_runtime()
 
     assert bot.accepting_commands is False
-    assert events == ["plugins", "tasks:10.0", "cache", "db"]
+    # Supervised cache/DB workers must drain themselves before the global
+    # supervisor cancellation so queued persistence is not discarded.
+    assert events == ["plugins", "cache", "tasks:10.0", "db"]
 
 
 @pytest.mark.asyncio
@@ -105,7 +107,7 @@ async def test_shutdown_runtime_drains_reply_tasks_before_plugins():
 
     await bot.shutdown_runtime()
 
-    assert events == ["replies:3.0", "plugins", "tasks:10.0", "cache", "db"]
+    assert events == ["replies:3.0", "plugins", "cache", "tasks:10.0", "db"]
 
 
 @pytest.mark.asyncio

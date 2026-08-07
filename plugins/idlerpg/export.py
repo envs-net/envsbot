@@ -133,19 +133,45 @@ def _ensure_public_access(path: Path, required_bits: int) -> None:
         )
 
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
+def _json_export_bytes(payload: Any) -> bytes:
+    """Return the exact bytes used for one public JSON export file."""
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _content_digest_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _file_content_digest(path: Path) -> str | None:
+    try:
+        return _content_digest_bytes(path.read_bytes())
+    except OSError:
+        return None
+
+
+def _atomic_write_json(path: Path, payload: Any) -> str:
+    """Atomically publish JSON and return the SHA-256 of the exact bytes."""
     path.parent.mkdir(parents=True, exist_ok=True)
     _ensure_public_access(path.parent, _PUBLIC_DIRECTORY_ACCESS)
+    encoded = _json_export_bytes(payload)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.write_bytes(encoded)
     # Set access on the temporary inode before replace(), so the final path is
     # atomically published with web-readable permissions even under umask 0077.
     _ensure_public_access(tmp, _PUBLIC_FILE_ACCESS)
     tmp.replace(path)
+    return _content_digest_bytes(encoded)
 
 
 _DELTA_MANIFEST_NAME = ".envsbot-export-manifest"
-_DELTA_MANIFEST_VERSION = 1
+_DELTA_MANIFEST_VERSION = 2
+_GENERATION_MANIFEST_NAME = "generation.json"
+_GENERATION_FORMAT = "envsbot-generation-v1"
 
 
 def _stable_export_digest(payload: Any) -> str:
@@ -163,55 +189,164 @@ def _stable_export_digest(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _generation_id(files: dict[str, str]) -> str:
+    encoded = json.dumps(
+        dict(sorted(files.items())),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class _DeltaExportWriter:
-    """Publish only public JSON files whose semantic content changed."""
+    """Publish changed JSON and commit coherent public generations last.
+
+    Individual JSON files are still atomically replaced, but readers can now
+    use ``generation.json`` as a commit record.  Its exact per-file hashes are
+    published only after every file belonging to that generation is in place.
+    A reader that sees a hash mismatch simply retries against the next
+    generation instead of combining old and new export data.
+    """
 
     def __init__(self, root: Path):
         self.root = root
         self.previous = self._load_manifest()
-        self.current: dict[str, str] = {}
+        self.current: dict[str, dict[str, str]] = {}
         self.changed = 0
         self.skipped = 0
         self.deleted = 0
+        self._bootstrap_existing_generations()
 
-    def _load_manifest(self) -> dict[str, str]:
+    @staticmethod
+    def _has_valid_generation(directory: Path) -> bool:
+        path = directory / _GENERATION_MANIFEST_NAME
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return False
+        return bool(
+            isinstance(payload, dict)
+            and payload.get("format") == _GENERATION_FORMAT
+            and isinstance(payload.get("generation_id"), str)
+            and isinstance(payload.get("files"), dict)
+        )
+
+    def _existing_json_files(self) -> dict[str, str]:
+        """Hash the currently published legacy tree before the first update."""
+        if not self.root.is_dir():
+            return {}
+        files: dict[str, str] = {}
+        for path in sorted(self.root.rglob("*.json")):
+            if path.name == _GENERATION_MANIFEST_NAME or not path.is_file():
+                continue
+            digest = _file_content_digest(path)
+            if digest is not None:
+                files[self._relative(path)] = digest
+        return files
+
+    def _bootstrap_existing_generations(self) -> None:
+        """Commit the pre-update tree before introducing generation manifests.
+
+        Without this bootstrap, the first export after upgrading an existing
+        installation has a short interval where no generation marker exists and
+        readers could fall back to the legacy, non-snapshot read path while files
+        are already being replaced.  Publishing hashes of the untouched tree
+        first closes that one-time upgrade race.
+        """
+        existing = self._existing_json_files()
+        if not existing:
+            return
+
+        room_prefixes = sorted(
+            {
+                name.rsplit("/room.json", 1)[0]
+                for name in existing
+                if name.endswith("/room.json") and "/" in name
+            }
+        )
+        for prefix in room_prefixes:
+            directory = self.root / prefix
+            if self._has_valid_generation(directory):
+                continue
+            normalized = prefix.rstrip("/") + "/"
+            room_files = {
+                name[len(normalized):]: digest
+                for name, digest in existing.items()
+                if name.startswith(normalized)
+            }
+            self._publish_generation(directory, room_files)
+
+        if not self._has_valid_generation(self.root):
+            self._publish_generation(self.root, existing)
+
+    def _load_manifest(self) -> dict[str, dict[str, str]]:
         path = self.root / _DELTA_MANIFEST_NAME
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return {}
-        if not isinstance(payload, dict) or payload.get("version") != _DELTA_MANIFEST_VERSION:
+        if not isinstance(payload, dict):
             return {}
         files = payload.get("files")
         if not isinstance(files, dict):
             return {}
-        return {
-            str(name): str(digest)
-            for name, digest in files.items()
-            if isinstance(name, str) and isinstance(digest, str)
-        }
+
+        version = payload.get("version")
+        if version == _DELTA_MANIFEST_VERSION:
+            result: dict[str, dict[str, str]] = {}
+            for name, entry in files.items():
+                if not isinstance(name, str) or not isinstance(entry, dict):
+                    continue
+                semantic = entry.get("semantic")
+                content = entry.get("content")
+                if isinstance(semantic, str) and isinstance(content, str):
+                    result[name] = {"semantic": semantic, "content": content}
+            return result
+
+        # Seamless upgrade from the v1 semantic-only delta manifest.
+        if version == 1:
+            result = {}
+            for name, semantic in files.items():
+                if not isinstance(name, str) or not isinstance(semantic, str):
+                    continue
+                content = _file_content_digest(self.root / name)
+                if content:
+                    result[name] = {"semantic": semantic, "content": content}
+            return result
+        return {}
 
     def _relative(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
 
     def write(self, path: Path, payload: Any) -> bool:
         relative = self._relative(path)
-        digest = _stable_export_digest(payload)
-        self.current[relative] = digest
-        if path.is_file() and self.previous.get(relative) == digest:
-            self.skipped += 1
-            return False
-        _atomic_write_json(path, payload)
+        semantic = _stable_export_digest(payload)
+        previous = self.previous.get(relative)
+        if path.is_file() and previous and previous.get("semantic") == semantic:
+            content = _file_content_digest(path)
+            if content and content == previous.get("content"):
+                self.current[relative] = {"semantic": semantic, "content": content}
+                self.skipped += 1
+                return False
+
+        content = _atomic_write_json(path, payload)
+        self.current[relative] = {"semantic": semantic, "content": content}
         self.changed += 1
         return True
 
     def preserve(self, path: Path) -> None:
-        """Carry an unchanged file forward in the manifest without reading it."""
+        """Carry an unchanged file forward while retaining its exact hash."""
         relative = self._relative(path)
-        digest = self.previous.get(relative)
-        if digest and path.is_file():
-            self.current[relative] = digest
-            self.skipped += 1
+        previous = self.previous.get(relative)
+        if not path.is_file():
+            return
+        content = _file_content_digest(path)
+        if content is None:
+            return
+        semantic = (previous.get("semantic") if previous else None) or content
+        self.current[relative] = {"semantic": semantic, "content": content}
+        self.skipped += 1
 
     def remove(self, path: Path) -> bool:
         existed = path.exists() or path.is_symlink()
@@ -229,19 +364,86 @@ class _DeltaExportWriter:
         if not directory.is_dir():
             return
         for path in directory.glob("*.json"):
+            if path.name == _GENERATION_MANIFEST_NAME:
+                continue
             if path.name not in expected_names:
                 self.remove(path)
 
+    def _generation_files(self, prefix: str = "") -> dict[str, str]:
+        if not prefix:
+            return {
+                name: entry["content"]
+                for name, entry in sorted(self.current.items())
+            }
+        normalized = prefix.rstrip("/") + "/"
+        return {
+            name[len(normalized):]: entry["content"]
+            for name, entry in sorted(self.current.items())
+            if name.startswith(normalized)
+        }
+
+    def _publish_generation(self, directory: Path, files: dict[str, str]) -> None:
+        if not files:
+            _remove_export_path_safely(directory / _GENERATION_MANIFEST_NAME)
+            return
+        generation_id = _generation_id(files)
+        generation_path = directory / _GENERATION_MANIFEST_NAME
+        try:
+            previous = json.loads(generation_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            previous = {}
+        if (
+            isinstance(previous, dict)
+            and previous.get("format") == _GENERATION_FORMAT
+            and previous.get("generation_id") == generation_id
+        ):
+            return
+        _atomic_write_json(
+            generation_path,
+            {
+                "format": _GENERATION_FORMAT,
+                "generation_id": generation_id,
+                "generated_at": _dep_formatting._now(),
+                "files": dict(sorted(files.items())),
+            },
+        )
+
     def finish(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        files = dict(sorted(self.current.items()))
-        if files == dict(sorted(self.previous.items())):
-            return
+        files = {
+            name: dict(entry)
+            for name, entry in sorted(self.current.items())
+        }
         manifest = {
             "version": _DELTA_MANIFEST_VERSION,
             "files": files,
         }
-        _atomic_write_json(self.root / _DELTA_MANIFEST_NAME, manifest)
+        previous_sorted = {
+            name: dict(entry)
+            for name, entry in sorted(self.previous.items())
+        }
+        if files != previous_sorted:
+            # Internal state is safe to publish before the public commit marker.
+            # If the process dies here, the next export can reconstruct and
+            # republish generation.json without exposing a mixed snapshot.
+            _atomic_write_json(self.root / _DELTA_MANIFEST_NAME, manifest)
+
+        room_prefixes = sorted(
+            {
+                name.rsplit("/room.json", 1)[0]
+                for name in self.current
+                if name.endswith("/room.json") and "/" in name
+            }
+        )
+        for prefix in room_prefixes:
+            self._publish_generation(
+                self.root / prefix,
+                self._generation_files(prefix),
+            )
+
+        # Root generation is the final public commit marker and includes every
+        # file so compatibility manifests can safely reference room chunks.
+        self._publish_generation(self.root, self._generation_files())
 
 
 _ROOT_COMPATIBILITY_EXPORTS = (

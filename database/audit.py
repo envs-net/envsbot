@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -10,13 +9,13 @@ from typing import Any
 class AuditLog:
     """Persist and read admin/security-relevant bot events."""
 
-    def __init__(self, conn, transaction_lock=None):
-        self.conn = conn
-        self._transaction_lock = transaction_lock or asyncio.Lock()
+    def __init__(self, db):
+        self.db = db
 
     async def init(self, *, commit: bool = True):
         """Create the audit_log table if it does not exist."""
-        await self.conn.execute(
+        del commit
+        await self.db.write(
             """
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,10 +25,9 @@ class AuditLog:
                 target TEXT,
                 details TEXT DEFAULT '{}' NOT NULL
             )
-            """
+            """,
+            label="audit_init",
         )
-        if commit:
-            await self.conn.commit()
 
     async def append(
         self,
@@ -40,15 +38,14 @@ class AuditLog:
         details: dict[str, Any] | None = None,
     ) -> None:
         """Append one audit event."""
-        async with self._transaction_lock:
-            await self.conn.execute(
-                """
-                INSERT INTO audit_log (event, actor, target, details)
-                VALUES (?, ?, ?, ?)
-                """,
-                (event, actor, target, json.dumps(details or {}, sort_keys=True)),
-            )
-            await self.conn.commit()
+        await self.db.write(
+            """
+            INSERT INTO audit_log (event, actor, target, details)
+            VALUES (?, ?, ?, ?)
+            """,
+            (event, actor, target, json.dumps(details or {}, sort_keys=True)),
+            label="audit_append",
+        )
 
     def _filter_sql(
         self,
@@ -80,11 +77,10 @@ class AuditLog:
     ) -> int:
         """Return the number of audit events matching optional filters."""
         where_sql, params = self._filter_sql(actor=actor, target=target, event=event)
-        cursor = await self.conn.execute(
+        row = await self.db.fetch_one(
             f"SELECT COUNT(*) AS count FROM audit_log {where_sql}",
             tuple(params),
         )
-        row = await cursor.fetchone()
         return int(row["count"] if hasattr(row, "keys") else row[0])
 
     async def list(
@@ -101,7 +97,7 @@ class AuditLog:
         offset = max(0, int(offset))
         where_sql, params = self._filter_sql(actor=actor, target=target, event=event)
         params.extend([limit, offset])
-        cursor = await self.conn.execute(
+        return await self.db.fetch_all(
             f"""
             SELECT id, created_at, event, actor, target, details
             FROM audit_log
@@ -111,7 +107,6 @@ class AuditLog:
             """,
             tuple(params),
         )
-        return await cursor.fetchall()
 
 
     async def summary_since(self, *, hours: int = 24, limit: int = 8) -> dict[str, Any]:
@@ -122,15 +117,13 @@ class AuditLog:
         since_params = (since_modifier,)
 
         async def scalar(sql: str, params: tuple[object, ...] = since_params) -> int:
-            cursor = await self.conn.execute(sql, params)
-            row = await cursor.fetchone()
+            row = await self.db.fetch_one(sql, params)
             if row is None:
                 return 0
             return int(row[0])
 
         async def grouped(sql: str) -> list[dict[str, Any]]:
-            cursor = await self.conn.execute(sql, (since_modifier, limit))
-            rows = await cursor.fetchall()
+            rows = await self.db.fetch_all(sql, (since_modifier, limit))
             result: list[dict[str, Any]] = []
             for row in rows:
                 try:
@@ -246,19 +239,17 @@ class AuditLog:
     async def prune_older_than(self, days: int, *, dry_run: bool = False) -> int:
         """Delete audit events older than *days* and return affected count."""
         days = max(1, int(days))
-        cursor = await self.conn.execute(
+        row = await self.db.fetch_one(
             "SELECT COUNT(*) AS count FROM audit_log "
             "WHERE created_at < datetime('now', ?)",
             (f"-{days} days",),
         )
-        row = await cursor.fetchone()
         count = int(row["count"] if hasattr(row, "keys") else row[0])
         if dry_run or count == 0:
             return count
-        async with self._transaction_lock:
-            await self.conn.execute(
-                "DELETE FROM audit_log WHERE created_at < datetime('now', ?)",
-                (f"-{days} days",),
-            )
-            await self.conn.commit()
+        await self.db.write(
+            "DELETE FROM audit_log WHERE created_at < datetime('now', ?)",
+            (f"-{days} days",),
+            label="audit_prune",
+        )
         return count

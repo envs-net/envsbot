@@ -548,10 +548,11 @@ async def test_service_task_expected_exit_does_not_restart():
 
     assert await task is None
     assert calls == 1
-    info = next(item for item in supervisor.snapshot() if item.name == "expected-exit")
-    assert info.kind == "service"
-    assert info.restart_count == 0
-    assert info.circuit_state == "closed"
+    assert all(
+        item.name != "expected-exit"
+        for item in supervisor.snapshot(include_done=True)
+    )
+    assert supervisor.summary_by_kind()["services_finished"] == 0
 
 
 @pytest.mark.asyncio

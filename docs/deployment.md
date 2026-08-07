@@ -180,6 +180,7 @@ migrations are applied. Startup is refused when the database contains migration
 versions unknown to the running build, preventing an accidental downgrade from
 using a newer schema.
 
+
 ## Watchdog-enabled systemd unit
 
 The supplied unit uses `Type=notify`, `NotifyAccess=main` and `WatchdogSec=60`.

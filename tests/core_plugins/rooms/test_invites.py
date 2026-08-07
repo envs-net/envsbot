@@ -12,6 +12,7 @@ from .helpers import (
 from core_plugins.rooms import invites as rooms
 from core_plugins.rooms import lifecycle as lifecycle_module
 from utils.config import config
+from tests.database.helpers import SqliteDbAdapter
 from xml.etree import ElementTree as ET
 import time
 
@@ -182,7 +183,11 @@ async def test_room_invite_database_lifecycle(fake_bot, monkeypatch):
 
     monkeypatch.setitem(config, "room_invite_max_age_days", 1)
     conn = await aiosqlite.connect(":memory:")
-    fake_bot.db.conn = conn
+    adapter = SqliteDbAdapter(conn)
+    fake_bot.db.transaction = adapter.transaction
+    fake_bot.db.write = adapter.write
+    fake_bot.db.fetch_one = adapter.fetch_one
+    fake_bot.db.fetch_all = adapter.fetch_all
     try:
         await rooms.setup_room_invites_db(fake_bot)
         now = int(time.time())

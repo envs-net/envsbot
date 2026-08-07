@@ -325,22 +325,6 @@ class LifecycleMixin:
         else:
             log.info("[LIFECYCLE] event=shutdown phase=outbox %s", kv(status=outbox_status))
 
-        task_status = "skipped"
-        cancelled = 0
-        try:
-            tasks = getattr(self, "tasks", None)
-            cancel_all = getattr(tasks, "cancel_all", None)
-            if callable(cancel_all):
-                result = cancel_all(timeout=10.0)
-                if asyncio.iscoroutine(result):
-                    cancelled = int(await asyncio.wait_for(result, timeout=12.0) or 0)
-                task_status = "ok"
-        except Exception:
-            task_status = "failed"
-            log.exception("[LIFECYCLE] event=shutdown phase=tasks status=failed")
-        else:
-            log.info("[LIFECYCLE] event=shutdown phase=tasks %s", kv(status=task_status, cancelled=cancelled))
-
         cache_status = "skipped"
         try:
             message_cache = getattr(self, "message_cache", None)
@@ -358,6 +342,39 @@ class LifecycleMixin:
                 "[LIFECYCLE] event=shutdown phase=message_cache %s",
                 kv(status=cache_status),
             )
+
+        db_workers_status = "skipped"
+        try:
+            stop_db_workers = getattr(self.db, "stop_background_tasks", None)
+            if callable(stop_db_workers):
+                await stop_db_workers(timeout=5.0)
+                db_workers_status = "ok"
+        except Exception:
+            db_workers_status = "failed"
+            log.exception(
+                "[LIFECYCLE] event=shutdown phase=db_workers status=failed"
+            )
+        else:
+            log.info(
+                "[LIFECYCLE] event=shutdown phase=db_workers %s",
+                kv(status=db_workers_status),
+            )
+
+        task_status = "skipped"
+        cancelled = 0
+        try:
+            tasks = getattr(self, "tasks", None)
+            cancel_all = getattr(tasks, "cancel_all", None)
+            if callable(cancel_all):
+                result = cancel_all(timeout=10.0)
+                if asyncio.iscoroutine(result):
+                    cancelled = int(await asyncio.wait_for(result, timeout=12.0) or 0)
+                task_status = "ok"
+        except Exception:
+            task_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=tasks status=failed")
+        else:
+            log.info("[LIFECYCLE] event=shutdown phase=tasks %s", kv(status=task_status, cancelled=cancelled))
 
         db_status = "ok"
         db_timeout = _database_shutdown_timeout(getattr(self, "config", {}))
@@ -382,6 +399,7 @@ class LifecycleMixin:
             and plugin_status in healthy_statuses
             and task_status in healthy_statuses
             and cache_status in healthy_statuses
+            and db_workers_status in healthy_statuses
             and alerts_status in healthy_statuses
             and watchdog_status in healthy_statuses
             and outbox_status in healthy_statuses
@@ -395,6 +413,7 @@ class LifecycleMixin:
                 plugins=plugin_status,
                 tasks=task_status,
                 message_cache=cache_status,
+                db_workers=db_workers_status,
                 alerts=alerts_status,
                 watchdog=watchdog_status,
                 outbox=outbox_status,

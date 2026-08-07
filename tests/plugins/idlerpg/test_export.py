@@ -744,3 +744,125 @@ def test_chunked_season_export_appends_without_rewriting_old_chunks(tmp_path, mo
     assert manifest["last_rowid"] == 15
     assert [chunk["events"] for chunk in manifest["chunks"]] == [2, 2, 1]
     assert second["files_skipped"] > 0
+
+
+def _assert_generation_hashes(directory):
+    import hashlib
+
+    manifest = json.loads((directory / "generation.json").read_text(encoding="utf-8"))
+    assert manifest["format"] == "envsbot-generation-v1"
+    assert len(manifest["generation_id"]) == 64
+    assert manifest["files"]
+    for relative, expected in manifest["files"].items():
+        path = directory / relative
+        assert path.is_file(), relative
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
+    return manifest
+
+
+def test_delta_writer_bootstraps_generation_for_existing_legacy_tree(tmp_path):
+    from plugins.idlerpg import export as idlerpg_export
+
+    room_dir = tmp_path / "room_at_conf"
+    room_dir.mkdir(parents=True)
+    (tmp_path / "index.json").write_text('{"rooms": []}', encoding="utf-8")
+    (room_dir / "room.json").write_text('{"room": "room@conf"}', encoding="utf-8")
+    (room_dir / "players.json").write_text('{"players": []}', encoding="utf-8")
+
+    idlerpg_export._DeltaExportWriter(tmp_path)
+
+    root_manifest = _assert_generation_hashes(tmp_path)
+    room_manifest = _assert_generation_hashes(room_dir)
+    assert "index.json" in root_manifest["files"]
+    assert "room_at_conf/room.json" in root_manifest["files"]
+    assert set(room_manifest["files"]) == {"players.json", "room.json"}
+
+
+def test_public_export_commits_root_and_room_generation_manifests(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", False)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1234)
+
+    room_jid = "room@conf"
+    room = idlerpg._blank_room()
+    room["players"] = {
+        "alice@example.org": idlerpg._normalize_player(
+            "alice@example.org",
+            {"name": "Alice", "created_at": 100, "x": 1, "y": 2},
+        )
+    }
+    result = idlerpg._export_public_state(
+        {"rooms": {room_jid: room}},
+        {room_jid: True},
+    )
+
+    assert result["ok"] is True
+    root_manifest = _assert_generation_hashes(tmp_path)
+    room_dir = tmp_path / idlerpg._room_slug(room_jid)
+    room_manifest = _assert_generation_hashes(room_dir)
+    assert "index.json" in root_manifest["files"]
+    assert "room.json" in room_manifest["files"]
+    assert "profiles/Alice.json" in room_manifest["files"]
+
+
+def test_delta_export_rewrites_corrupted_unchanged_file_before_commit(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", False)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1234)
+
+    room_jid = "room@conf"
+    room = idlerpg._blank_room()
+    data = {"rooms": {room_jid: room}}
+    first = idlerpg._export_public_state(data, {room_jid: True})
+    assert first["ok"] is True
+
+    room_dir = tmp_path / idlerpg._room_slug(room_jid)
+    players_path = room_dir / "players.json"
+    expected = players_path.read_bytes()
+    players_path.write_text('{"corrupted": true}', encoding="utf-8")
+
+    second = idlerpg._export_public_state(data, {room_jid: True})
+
+    assert second["ok"] is True
+    assert players_path.read_bytes() == expected
+    assert second["files_changed"] >= 1
+    _assert_generation_hashes(room_dir)
+
+
+def test_generation_id_changes_only_when_export_content_changes(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", False)
+    now = [1000]
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now[0])
+
+    room_jid = "room@conf"
+    room = idlerpg._blank_room()
+    data = {"rooms": {room_jid: room}}
+    idlerpg._export_public_state(data, {room_jid: True})
+    room_dir = tmp_path / idlerpg._room_slug(room_jid)
+    first = _assert_generation_hashes(room_dir)["generation_id"]
+
+    now[0] = 2000
+    idlerpg._export_public_state(data, {room_jid: True})
+    second = _assert_generation_hashes(room_dir)["generation_id"]
+    assert second == first
+
+    room["players"]["alice@example.org"] = idlerpg._normalize_player(
+        "alice@example.org",
+        {"name": "Alice", "created_at": 100, "x": 1, "y": 2},
+    )
+    idlerpg._export_public_state(data, {room_jid: True})
+    third = _assert_generation_hashes(room_dir)["generation_id"]
+    assert third != second

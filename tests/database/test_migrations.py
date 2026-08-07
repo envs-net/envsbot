@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -13,12 +14,17 @@ async def test_room_invites_migration_creates_table_and_index():
         async def execute(self, sql):
             statements.append(" ".join(sql.split()))
 
+    @asynccontextmanager
+    async def transaction(*, label="transaction"):
+        assert label == "migration_room_invites"
+        yield Conn()
+
     migration = next(
         item for item in available_migrations()
         if item.version == "0003_room_invites"
     )
 
-    await migration.run(SimpleNamespace(conn=Conn()))
+    await migration.run(SimpleNamespace(transaction=transaction))
 
     joined = "\n".join(statements)
     assert "CREATE TABLE IF NOT EXISTS room_invites" in joined

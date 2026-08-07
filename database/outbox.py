@@ -37,45 +37,45 @@ class OutboxStore:
         self.db = db
 
     async def init(self, *, commit: bool = True) -> None:
-        await self.db.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS outbox_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                destination TEXT NOT NULL,
-                body TEXT NOT NULL,
-                message_type TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'message',
-                dedupe_key TEXT UNIQUE,
-                origin_id TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempts INTEGER NOT NULL DEFAULT 0,
-                max_attempts INTEGER NOT NULL DEFAULT 12,
-                created_at INTEGER NOT NULL,
-                available_at INTEGER NOT NULL,
-                locked_at INTEGER,
-                last_error TEXT,
-                dead_at INTEGER
+        del commit
+        async with self.db.transaction(label="outbox_init") as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS outbox_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    destination TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'message',
+                    dedupe_key TEXT UNIQUE,
+                    origin_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL DEFAULT 12,
+                    created_at INTEGER NOT NULL,
+                    available_at INTEGER NOT NULL,
+                    locked_at INTEGER,
+                    last_error TEXT,
+                    dead_at INTEGER
+                )
+                """
             )
-            """
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_outbox_due "
-            "ON outbox_messages(status, available_at, id)"
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_outbox_category "
-            "ON outbox_messages(category, status)"
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_outbox_destination "
-            "ON outbox_messages(destination, status, available_at, id)"
-        )
-        await self.db.conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_origin_id "
-            "ON outbox_messages(origin_id)"
-        )
-        if commit:
-            await self.db.conn.commit()
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_outbox_due "
+                "ON outbox_messages(status, available_at, id)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_outbox_category "
+                "ON outbox_messages(category, status)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_outbox_destination "
+                "ON outbox_messages(destination, status, available_at, id)"
+            )
+            await conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_origin_id "
+                "ON outbox_messages(origin_id)"
+            )
 
     @staticmethod
     def _payload_bytes(destination: str, body: str, message_type: str, category: str) -> int:

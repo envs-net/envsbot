@@ -263,6 +263,7 @@ class TaskSupervisor:
             "circuit_state": "closed",
             "next_restart_at": None,
             "kind": kind,
+            "expected_exit": False,
         }
         self._tasks[task] = meta
         self._by_plugin.setdefault(plugin, set()).add(task)
@@ -362,6 +363,9 @@ class TaskSupervisor:
             except asyncio.CancelledError:
                 raise
             except ExpectedTaskExit:
+                task = asyncio.current_task()
+                if task is not None:
+                    self._tasks.get(task, {})["expected_exit"] = True
                 return None
             except Exception as exc:
                 run_seconds = asyncio.get_running_loop().time() - started
@@ -441,6 +445,8 @@ class TaskSupervisor:
                 meta["name"],
                 exc_info=exc,
             )
+        elif meta.get("kind") == "service" and meta.get("expected_exit"):
+            self._forget_task(task)
         elif meta.get("kind") != "service":
             self._prune_completed_one_shot_history()
 

@@ -491,3 +491,46 @@ def test_idlerpg_site_uses_singular_day_label(tmp_path: Path) -> None:
 
     assert "1 day, 01:00:00" in html
     assert "1 days, 01:00:00" not in html
+
+
+def _write_generation_manifest(room_dir: Path) -> dict[str, object]:
+    files = {}
+    for path in sorted(room_dir.glob("*.json")):
+        if path.name == "generation.json":
+            continue
+        files[path.name] = __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+    generation_id = __import__("hashlib").sha256(
+        json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    payload = {
+        "format": "envsbot-generation-v1",
+        "generation_id": generation_id,
+        "generated_at": int(time.time()),
+        "files": files,
+    }
+    (room_dir / "generation.json").write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+def test_idlerpg_site_never_mixes_files_outside_committed_generation(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    slug = "alpha_at_conference.example.org"
+    room_dir = data_dir / slug
+    _write_generation_manifest(room_dir)
+
+    healthy = _render(data_dir, view="players", room=slug)
+    assert "Alice" in healthy
+    assert "Bob" in healthy
+
+    players_path = room_dir / "players.json"
+    payload = json.loads(players_path.read_text(encoding="utf-8"))
+    payload["players"] = [_player("Mallory", rank=1, online=True, level=99)]
+    players_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    raced = _render(data_dir, view="players", room=slug)
+    assert "Mallory" not in raced
+    assert "Alice" not in raced
+
+    _write_generation_manifest(room_dir)
+    committed = _render(data_dir, view="players", room=slug)
+    assert "Mallory" in committed

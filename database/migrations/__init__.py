@@ -58,64 +58,67 @@ async def _outbox_dead_timestamp(db) -> None:
     """Track when a message entered the dead-letter state for retention."""
     columns = {
         str(row["name"])
-        for row in await (
-            await db.conn.execute("PRAGMA table_info(outbox_messages)")
-        ).fetchall()
+        for row in await db.fetch_all("PRAGMA table_info(outbox_messages)")
     }
     if "dead_at" not in columns:
-        await db.conn.execute("ALTER TABLE outbox_messages ADD COLUMN dead_at INTEGER")
+        await db.write(
+            "ALTER TABLE outbox_messages ADD COLUMN dead_at INTEGER",
+            label="migration_outbox_dead_at",
+        )
 
 
 async def _room_invites(db) -> None:
     """Create the pending room invite table and indexes."""
-    await db.conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS room_invites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            room_jid TEXT NOT NULL,
-            inviter TEXT NOT NULL,
-            reason TEXT,
-            created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-            UNIQUE(room_jid, inviter)
+    async with db.transaction(label="migration_room_invites") as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS room_invites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_jid TEXT NOT NULL,
+                inviter TEXT NOT NULL,
+                reason TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                UNIQUE(room_jid, inviter)
+            )
+            """
         )
-        """
-    )
-    await db.conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at "
-        "ON room_invites(created_at)"
-    )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at "
+            "ON room_invites(created_at)"
+        )
 
 
 async def _outbox_origin_id(db) -> None:
     """Persist a stable XEP-0359 origin-id for every durable message."""
     columns = {
         str(row["name"])
-        for row in await (
-            await db.conn.execute("PRAGMA table_info(outbox_messages)")
-        ).fetchall()
+        for row in await db.fetch_all("PRAGMA table_info(outbox_messages)")
     }
     if "origin_id" not in columns:
-        await db.conn.execute("ALTER TABLE outbox_messages ADD COLUMN origin_id TEXT")
-
-    rows = await (
-        await db.conn.execute(
-            "SELECT id, created_at, dedupe_key FROM outbox_messages "
-            "WHERE origin_id IS NULL OR origin_id=''"
+        await db.write(
+            "ALTER TABLE outbox_messages ADD COLUMN origin_id TEXT",
+            label="migration_outbox_origin_column",
         )
-    ).fetchall()
+
+    rows = await db.fetch_all(
+        "SELECT id, created_at, dedupe_key FROM outbox_messages "
+        "WHERE origin_id IS NULL OR origin_id=''"
+    )
     for row in rows:
         stable = uuid.uuid5(
             uuid.NAMESPACE_URL,
             "envsbot-outbox:"
             f"{int(row['id'])}:{int(row['created_at'])}:{str(row['dedupe_key'] or '')}",
         ).hex
-        await db.conn.execute(
+        await db.write(
             "UPDATE outbox_messages SET origin_id=? WHERE id=?",
             (stable, int(row["id"])),
+            label="migration_outbox_origin_backfill",
         )
-    await db.conn.execute(
+    await db.write(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_origin_id "
-        "ON outbox_messages(origin_id)"
+        "ON outbox_messages(origin_id)",
+        label="migration_outbox_origin_index",
     )
 
 

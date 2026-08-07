@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 import pytest
 
@@ -276,3 +277,24 @@ async def test_cache_age_limit_ignores_stale_loaded_rows(monkeypatch):
     await cache.start(store)
     assert [entry["body"] for entry in cache.get_messages("room")] == ["new"]
     await cache.close()
+
+
+@pytest.mark.asyncio
+async def test_message_cache_writer_is_tracked_as_core_service():
+    from utils.task_supervisor import TaskSupervisor
+
+    supervisor = TaskSupervisor()
+    cache = message_cache.MessageCache(max_messages=5, task_supervisor=supervisor)
+    await cache.start(FakeStore())
+
+    infos = supervisor.snapshot(include_done=False)
+    writer = next(info for info in infos if info.name == "message-cache-writer")
+    assert writer.plugin == "_core"
+    assert writer.kind == "service"
+
+    await cache.close()
+    await asyncio.sleep(0)
+    assert all(
+        info.name != "message-cache-writer"
+        for info in supervisor.snapshot(include_done=True)
+    )

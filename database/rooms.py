@@ -1,19 +1,23 @@
-import asyncio
+"""Room persistence backed by the central :class:`DatabaseManager` API."""
+
+from __future__ import annotations
+
 import json
+from typing import Any
 
 
 class Rooms:
-    """
-    Rooms table manager.
-    """
+    """Manage joined-room metadata without touching the raw SQLite connection."""
 
-    def __init__(self, conn, transaction_lock=None):
-        self.conn = conn
-        self._transaction_lock = transaction_lock or asyncio.Lock()
+    def __init__(self, db: Any):
+        self.db = db
 
-    async def init(self, *, commit: bool = True):
-
-        await self.conn.execute(
+    async def init(self, *, commit: bool = True) -> None:
+        # ``commit`` is retained for migration-call compatibility. ``write`` is
+        # nested-savepoint safe, so calling it inside a migration does not
+        # commit the migration's outer savepoint.
+        del commit
+        await self.db.write(
             """
             CREATE TABLE IF NOT EXISTS rooms (
                 room_jid TEXT PRIMARY KEY,
@@ -21,152 +25,105 @@ class Rooms:
                 autojoin INTEGER DEFAULT 0,
                 status TEXT DEFAULT '{}'
             )
-            """
+            """,
+            label="rooms_init",
         )
 
-        if commit:
-            await self.conn.commit()
+    async def add(self, room_jid: str, nick: str, autojoin: bool = False) -> None:
+        await self.db.write(
+            "INSERT OR REPLACE INTO rooms (room_jid, nick, autojoin, status) "
+            "VALUES (?, ?, ?, ?)",
+            (room_jid, nick, int(autojoin), json.dumps({})),
+            label="rooms_add",
+        )
 
-    async def add(self, room_jid, nick, autojoin=False):
+    async def delete(self, room_jid: str) -> None:
+        await self.db.write(
+            "DELETE FROM rooms WHERE room_jid = ?",
+            (room_jid,),
+            label="rooms_delete",
+        )
 
-        status = json.dumps({})
-
-        async with self._transaction_lock:
-            await self.conn.execute(
-                "INSERT OR REPLACE INTO rooms (room_jid, nick, autojoin, status)"
-                " VALUES (?, ?, ?, ?)",
-                (room_jid, nick, int(autojoin), status)
-            )
-            await self.conn.commit()
-
-    async def delete(self, room_jid):
-
-        async with self._transaction_lock:
-            await self.conn.execute(
-                "DELETE FROM rooms WHERE room_jid = ?",
-                (room_jid,)
-            )
-            await self.conn.commit()
-
-    async def update(self, room_jid, **fields):
-        # Only allow updates to these columns
+    async def update(self, room_jid: str, **fields: Any) -> None:
         allowed_fields = {"nick", "autojoin", "status"}
-        safe_fields = {k: v for k, v in fields.items() if k in allowed_fields}
+        safe_fields = {key: value for key, value in fields.items() if key in allowed_fields}
         if not safe_fields:
             return
-
-        keys = ", ".join(f"{k}=?" for k in safe_fields)
-        values = list(safe_fields.values())
-
-        async with self._transaction_lock:
-            await self.conn.execute(
-                f"UPDATE rooms SET {keys} WHERE room_jid=?",
-                (*values, room_jid)
-            )
-            await self.conn.commit()
+        keys = ", ".join(f"{key}=?" for key in safe_fields)
+        values = [*safe_fields.values(), room_jid]
+        await self.db.write(
+            f"UPDATE rooms SET {keys} WHERE room_jid=?",
+            tuple(values),
+            label="rooms_update",
+        )
 
     async def list(self):
-
-        cursor = await self.conn.execute(
+        return await self.db.fetch_all(
             "SELECT room_jid, nick, autojoin, status FROM rooms"
         )
 
-        return await cursor.fetchall()
-
-    async def get(self, room_jid):
-
-        cursor = await self.conn.execute(
-            "SELECT room_jid, nick, autojoin, status FROM rooms WHERE"
-            " room_jid=?",
-            (room_jid,)
+    async def get(self, room_jid: str):
+        return await self.db.fetch_one(
+            "SELECT room_jid, nick, autojoin, status FROM rooms WHERE room_jid=?",
+            (room_jid,),
         )
 
-        return await cursor.fetchone()
-
-    # ----------------
-    # Helper functions
-    # ----------------
-    def _get_nested(self, data, path):
-
-        keys = path.split(".")
-        current = data
-
-        for k in keys:
-            if not isinstance(current, dict) or k not in current:
+    @staticmethod
+    def _get_nested(data: dict[str, Any], path: str):
+        current: Any = data
+        for key in path.split("."):
+            if not isinstance(current, dict) or key not in current:
                 return None
-            current = current[k]
-
+            current = current[key]
         return current
 
-    def _set_nested(self, data, path, value):
-
+    @staticmethod
+    def _set_nested(data: dict[str, Any], path: str, value: Any) -> None:
         keys = path.split(".")
         current = data
-
-        for k in keys[:-1]:
-            if k not in current or not isinstance(current[k], dict):
-                current[k] = {}
-            current = current[k]
-
+        for key in keys[:-1]:
+            nested = current.get(key)
+            if not isinstance(nested, dict):
+                nested = {}
+                current[key] = nested
+            current = nested
         current[keys[-1]] = value
 
-    async def status_get(self, room_jid, path=None):
-
+    async def status_get(self, room_jid: str, path: str | None = None):
         row = await self.get(room_jid)
-
         if not row:
             return None
+        data = json.loads(row[3] or "{}")
+        return data if path is None else self._get_nested(data, path)
 
-        status = row[3] or "{}"
-        data = json.loads(status)
-
-        if path is None:
-            return data
-
-        return self._get_nested(data, path)
-
-    async def status_set(self, room_jid, path, value):
-
+    async def status_set(self, room_jid: str, path: str, value: Any) -> None:
         row = await self.get(room_jid)
-
         if not row:
             return
-
-        status = row[3] or "{}"
-        data = json.loads(status)
-
+        data = json.loads(row[3] or "{}")
         self._set_nested(data, path, value)
+        await self.db.write(
+            "UPDATE rooms SET status=? WHERE room_jid=?",
+            (json.dumps(data), room_jid),
+            label="rooms_status_set",
+        )
 
-        async with self._transaction_lock:
-            await self.conn.execute(
-                "UPDATE rooms SET status=? WHERE room_jid=?",
-                (json.dumps(data), room_jid)
-            )
-            await self.conn.commit()
-
-    async def status_delete(self, room_jid, path):
-
+    async def status_delete(self, room_jid: str, path: str) -> None:
         row = await self.get(room_jid)
-
         if not row:
             return
-
-        status = row[3] or "{}"
-        data = json.loads(status)
-
+        data = json.loads(row[3] or "{}")
         keys = path.split(".")
-        current = data
-
-        for k in keys[:-1]:
-            if k not in current:
+        current: Any = data
+        for key in keys[:-1]:
+            if not isinstance(current, dict) or key not in current:
                 return
-            current = current[k]
-
+            current = current[key]
+        if not isinstance(current, dict):
+            return
         current.pop(keys[-1], None)
-
-        async with self._transaction_lock:
-            await self.conn.execute(
-                "UPDATE rooms SET status=? WHERE room_jid=?",
-                (json.dumps(data), room_jid)
-            )
-            await self.conn.commit()
+        await self.db.write(
+            "UPDATE rooms SET status=? WHERE room_jid=?",
+            (json.dumps(data), room_jid),
+            label="rooms_status_delete",
+        )

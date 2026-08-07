@@ -186,36 +186,196 @@ async def _set_data(
     await _refresh_public_export(bot, data, force=force_export)
 
 
+_SeasonRevision = tuple[int, tuple[int, int]]
+_SeasonEventsByRoom = dict[str, list[dict[str, Any]] | None]
+
+
+async def _prepare_public_export_season_events(
+    bot,
+    rooms: dict[str, Any],
+    enabled_rooms: dict[str, bool],
+    *,
+    force: bool,
+) -> tuple[
+    _SeasonEventsByRoom | None,
+    dict[str, int] | None,
+    dict[str, bool] | None,
+    dict[str, _SeasonRevision],
+]:
+    """Resolve full/incremental active-season history for one public export."""
+    pending: dict[str, _SeasonRevision] = {}
+    normalized = _normalized_store(bot)
+    if not _dep_config.EXPORT_FULL_SEASON_EVENTS or normalized is None:
+        return None, None, None, pending
+
+    loader = getattr(normalized, "load_season_events", None)
+    revision_getter = getattr(normalized, "season_event_revision", None)
+    if not callable(loader) or not callable(revision_getter):
+        return None, None, None, pending
+
+    events_by_room: _SeasonEventsByRoom = {}
+    counts_by_room: dict[str, int] = {}
+    append_by_room: dict[str, bool] = {}
+    for room_jid, enabled in enabled_rooms.items():
+        if not enabled:
+            continue
+        room = rooms.get(room_jid)
+        if not isinstance(room, dict):
+            continue
+        season = room.get("season")
+        started_at = (
+            int(season.get("started_at", 0) or 0)
+            if isinstance(season, dict)
+            else 0
+        )
+        revision = tuple(await revision_getter(str(room_jid), started_at))
+        revision_key = (started_at, revision)
+        key = str(room_jid)
+        previous = _PUBLIC_EXPORT_SEASON_REVISIONS.get(key)
+        pending[key] = revision_key
+        counts_by_room[key] = int(revision[0])
+
+        can_append = (
+            not force
+            and previous is not None
+            and previous[0] == started_at
+            and int(revision[0]) >= int(previous[1][0])
+            and int(revision[1]) >= int(previous[1][1])
+        )
+        if previous == revision_key and not force:
+            # No database read at all for an unchanged season stream.
+            events_by_room[key] = None
+            append_by_room[key] = False
+        elif can_append and previous is not None:
+            # Fetch only rows inserted after the last successfully exported
+            # rowid. The chunk writer appends idempotently.
+            events_by_room[key] = await loader(
+                key,
+                started_at,
+                after_rowid=int(previous[1][1]),
+            )
+            append_by_room[key] = True
+        else:
+            # First export, forced export, season rollover or a non-monotonic
+            # revision rebuilds from SQLite once.
+            events_by_room[key] = await loader(key, started_at, after_rowid=0)
+            append_by_room[key] = False
+
+    return events_by_room, counts_by_room, append_by_room, pending
+
+
+async def _run_public_export_worker(
+    snapshot: dict[str, Any],
+    enabled_rooms: dict[str, bool],
+    season_events_by_room: _SeasonEventsByRoom | None,
+    season_event_counts_by_room: dict[str, int] | None,
+    season_events_append_by_room: dict[str, bool] | None,
+) -> dict[str, Any]:
+    """Run public JSON serialization/filesystem work outside the event loop."""
+    try:
+        if season_events_by_room is None:
+            result = await asyncio.to_thread(
+                _dep_export._export_public_state,
+                snapshot,
+                dict(enabled_rooms),
+            )
+        else:
+            result = await asyncio.to_thread(
+                _dep_export._export_public_state,
+                snapshot,
+                dict(enabled_rooms),
+                season_events_by_room,
+                season_event_counts_by_room,
+                season_events_append_by_room,
+            )
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return result if isinstance(result, dict) else {"ok": True}
+
+
+def _record_public_export_result(
+    result: dict[str, Any],
+    *,
+    elapsed: float,
+    interval: int,
+    enabled_rooms: dict[str, bool],
+    pending_season_revisions: dict[str, _SeasonRevision],
+) -> bool:
+    """Update diagnostics/cursors/schedule after one worker result."""
+    finished_at = _dep_formatting._now()
+    duration_ms = max(0, int(elapsed * 1000))
+    observe("idlerpg_export", elapsed)
+    ok = bool(result.get("ok", True))
+    _PUBLIC_EXPORT_RUNTIME.update({
+        "running": False,
+        "last_finished_at": finished_at,
+        "last_duration_ms": duration_ms,
+        "last_error": str(result.get("error") or "")[:300],
+        "rooms": max(0, int(result.get("rooms", 0) or 0)),
+        "players": max(0, int(result.get("players", 0) or 0)),
+        "events": max(0, int(result.get("events", 0) or 0)),
+        "files": max(0, int(result.get("files", 0) or 0)),
+        "bytes": max(0, int(result.get("bytes", 0) or 0)),
+        "files_changed": max(0, int(result.get("files_changed", 0) or 0)),
+        "files_skipped": max(0, int(result.get("files_skipped", 0) or 0)),
+        "files_deleted": max(0, int(result.get("files_deleted", 0) or 0)),
+    })
+    counter = "successes" if ok else "failures"
+    _PUBLIC_EXPORT_RUNTIME[counter] = int(
+        _PUBLIC_EXPORT_RUNTIME.get(counter, 0) or 0
+    ) + 1
+    if ok:
+        _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = 0
+        if pending_season_revisions:
+            _PUBLIC_EXPORT_SEASON_REVISIONS.update(pending_season_revisions)
+            for room_jid in tuple(_PUBLIC_EXPORT_SEASON_REVISIONS):
+                if room_jid not in enabled_rooms or not enabled_rooms.get(room_jid):
+                    _PUBLIC_EXPORT_SEASON_REVISIONS.pop(room_jid, None)
+        elif not _dep_config.EXPORT_FULL_SEASON_EVENTS:
+            _PUBLIC_EXPORT_SEASON_REVISIONS.clear()
+        _PUBLIC_EXPORT_SCHEDULE["next_at"] = (
+            finished_at + interval if interval > 0 else finished_at
+        )
+        return True
+
+    _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = int(
+        _PUBLIC_EXPORT_RUNTIME.get("consecutive_failures", 0) or 0
+    ) + 1
+    # A worker failure may have happened after atomically publishing only part
+    # of a delta. Forget cursors so the next attempt performs a full chunk
+    # reconciliation instead of assuming the partial export is complete.
+    for room_jid in pending_season_revisions:
+        _PUBLIC_EXPORT_SEASON_REVISIONS.pop(room_jid, None)
+    _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
+    _dep_config.log.warning(
+        "[IDLERPG] Public export failed: %s",
+        _PUBLIC_EXPORT_RUNTIME["last_error"] or "unknown error",
+    )
+    return False
+
+
 async def _refresh_public_export(
     bot,
     data: dict[str, Any] | None = None,
     *,
     force: bool = True,
 ) -> bool:
-    """Refresh public JSON without blocking the XMPP event loop.
-
-    A deep snapshot is created before yielding, then all JSON serialization and
-    filesystem work runs in a worker thread.  One lock serializes exports and
-    automatic callers re-check the interval after waiting so concurrent state
-    writes are coalesced into a single export.
-    """
+    """Refresh public JSON from a stable state snapshot off the XMPP event loop."""
     if not _dep_config.EXPORT_ENABLED:
         return False
 
     interval = max(0, int(_dep_config.EXPORT_INTERVAL_SECONDS))
-    lock = _public_export_lock()
-    async with lock:
+    async with _public_export_lock():
         now = _dep_formatting._now()
-        next_export_at = _PUBLIC_EXPORT_SCHEDULE["next_at"]
-        if not force and interval > 0 and now < next_export_at:
+        if not force and interval > 0 and now < _PUBLIC_EXPORT_SCHEDULE["next_at"]:
             return False
 
         if data is None:
             data = await _get_data(bot)
-        rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
-        room_jids = rooms.keys() if isinstance(rooms, dict) else ()
+        rooms_value = data.get("rooms", {}) if isinstance(data, dict) else {}
+        rooms = rooms_value if isinstance(rooms_value, dict) else {}
         try:
-            enabled_rooms = await _enabled_rooms(bot, room_jids)
+            enabled_rooms = await _enabled_rooms(bot, rooms.keys())
         except Exception:
             _dep_config.log.debug(
                 "[IDLERPG] Could not resolve enabled rooms for public export",
@@ -223,68 +383,21 @@ async def _refresh_public_export(
             )
             return False
 
-        season_events_by_room: dict[str, list[dict[str, Any]] | None] | None = None
-        season_event_counts_by_room: dict[str, int] | None = None
-        season_events_append_by_room: dict[str, bool] | None = None
-        pending_season_revisions: dict[str, tuple[int, tuple[int, int]]] = {}
-        normalized = _normalized_store(bot)
-        if _dep_config.EXPORT_FULL_SEASON_EVENTS and normalized is not None:
-            loader = getattr(normalized, "load_season_events", None)
-            revision_getter = getattr(normalized, "season_event_revision", None)
-            if callable(loader) and callable(revision_getter):
-                season_events_by_room = {}
-                season_event_counts_by_room = {}
-                season_events_append_by_room = {}
-                for room_jid, enabled in enabled_rooms.items():
-                    if not enabled:
-                        continue
-                    room = rooms.get(room_jid) if isinstance(rooms, dict) else None
-                    if not isinstance(room, dict):
-                        continue
-                    season = room.get("season")
-                    started_at = (
-                        int(season.get("started_at", 0) or 0)
-                        if isinstance(season, dict)
-                        else 0
-                    )
-                    revision = tuple(await revision_getter(str(room_jid), started_at))
-                    revision_key = (started_at, revision)
-                    key = str(room_jid)
-                    previous = _PUBLIC_EXPORT_SEASON_REVISIONS.get(key)
-                    pending_season_revisions[key] = revision_key
-                    season_event_counts_by_room[key] = int(revision[0])
+        (
+            season_events_by_room,
+            season_event_counts_by_room,
+            season_events_append_by_room,
+            pending_season_revisions,
+        ) = await _prepare_public_export_season_events(
+            bot,
+            rooms,
+            enabled_rooms,
+            force=force,
+        )
 
-                    can_append = (
-                        not force
-                        and previous is not None
-                        and previous[0] == started_at
-                        and int(revision[0]) >= int(previous[1][0])
-                        and int(revision[1]) >= int(previous[1][1])
-                    )
-                    if previous == revision_key and not force:
-                        # No database read at all for an unchanged season stream.
-                        season_events_by_room[key] = None
-                        season_events_append_by_room[key] = False
-                    elif can_append and previous is not None:
-                        # Fetch only rows inserted after the last successfully
-                        # exported rowid. The chunk writer appends idempotently.
-                        season_events_by_room[key] = await loader(
-                            key,
-                            started_at,
-                            after_rowid=int(previous[1][1]),
-                        )
-                        season_events_append_by_room[key] = True
-                    else:
-                        # First export, forced export, season rollover or a
-                        # non-monotonic revision rebuilds from SQLite once.
-                        season_events_by_room[key] = await loader(
-                            key, started_at, after_rowid=0
-                        )
-                        season_events_append_by_room[key] = False
-
-        # deepcopy must happen before yielding to the worker so the worker never
-        # observes game-state mutations from later commands or ticks. Full season
-        # history is intentionally fetched separately and never copied into state.
+        # Snapshot before yielding to the worker: the thread must never observe
+        # game-state mutations from later commands/ticks. Full season history is
+        # fetched separately and therefore never copied into the mutable state.
         snapshot = copy.deepcopy(data)
         started_at = _dep_formatting._now()
         started_perf = time.perf_counter()
@@ -293,82 +406,20 @@ async def _refresh_public_export(
             "last_started_at": started_at,
             "last_error": "",
         })
-        try:
-            if season_events_by_room is None:
-                result = await asyncio.to_thread(
-                    _dep_export._export_public_state,
-                    snapshot,
-                    dict(enabled_rooms),
-                )
-            else:
-                result = await asyncio.to_thread(
-                    _dep_export._export_public_state,
-                    snapshot,
-                    dict(enabled_rooms),
-                    season_events_by_room,
-                    season_event_counts_by_room,
-                    season_events_append_by_room,
-                )
-        except Exception as exc:
-            result = {
-                "ok": False,
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-
-        finished_at = _dep_formatting._now()
-        elapsed = time.perf_counter() - started_perf
-        duration_ms = max(0, int(elapsed * 1000))
-        observe("idlerpg_export", elapsed)
-        result = result if isinstance(result, dict) else {"ok": True}
-        ok = bool(result.get("ok", True))
-        _PUBLIC_EXPORT_RUNTIME.update({
-            "running": False,
-            "last_finished_at": finished_at,
-            "last_duration_ms": duration_ms,
-            "last_error": str(result.get("error") or "")[:300],
-            "rooms": max(0, int(result.get("rooms", 0) or 0)),
-            "players": max(0, int(result.get("players", 0) or 0)),
-            "events": max(0, int(result.get("events", 0) or 0)),
-            "files": max(0, int(result.get("files", 0) or 0)),
-            "bytes": max(0, int(result.get("bytes", 0) or 0)),
-            "files_changed": max(0, int(result.get("files_changed", 0) or 0)),
-            "files_skipped": max(0, int(result.get("files_skipped", 0) or 0)),
-            "files_deleted": max(0, int(result.get("files_deleted", 0) or 0)),
-        })
-        counter = "successes" if ok else "failures"
-        _PUBLIC_EXPORT_RUNTIME[counter] = int(
-            _PUBLIC_EXPORT_RUNTIME.get(counter, 0) or 0
-        ) + 1
-        if ok:
-            _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = 0
-            if pending_season_revisions:
-                _PUBLIC_EXPORT_SEASON_REVISIONS.update(pending_season_revisions)
-                for room_jid in tuple(_PUBLIC_EXPORT_SEASON_REVISIONS):
-                    if room_jid not in enabled_rooms or not enabled_rooms.get(room_jid):
-                        _PUBLIC_EXPORT_SEASON_REVISIONS.pop(room_jid, None)
-            elif not _dep_config.EXPORT_FULL_SEASON_EVENTS:
-                _PUBLIC_EXPORT_SEASON_REVISIONS.clear()
-            _PUBLIC_EXPORT_SCHEDULE["next_at"] = (
-                finished_at + interval if interval > 0 else finished_at
-            )
-            return True
-
-        _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = int(
-            _PUBLIC_EXPORT_RUNTIME.get("consecutive_failures", 0) or 0
-        ) + 1
-        # A worker failure may have happened after atomically publishing
-        # only part of a delta. Forget the cursor so the next attempt performs
-        # one full chunk reconciliation instead of assuming the partial export
-        # is a complete prefix.
-        for room_jid in pending_season_revisions:
-            _PUBLIC_EXPORT_SEASON_REVISIONS.pop(room_jid, None)
-        # Failed automatic exports may retry immediately on the next state write.
-        _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
-        _dep_config.log.warning(
-            "[IDLERPG] Public export failed: %s",
-            _PUBLIC_EXPORT_RUNTIME["last_error"] or "unknown error",
+        result = await _run_public_export_worker(
+            snapshot,
+            enabled_rooms,
+            season_events_by_room,
+            season_event_counts_by_room,
+            season_events_append_by_room,
         )
-        return False
+        return _record_public_export_result(
+            result,
+            elapsed=time.perf_counter() - started_perf,
+            interval=interval,
+            enabled_rooms=enabled_rooms,
+            pending_season_revisions=pending_season_revisions,
+        )
 
 
 async def _flush_idlerpg_store(bot) -> None:

@@ -6,6 +6,7 @@ import aiosqlite
 import pytest
 
 from database.audit import AuditLog
+from tests.database.helpers import SqliteDbAdapter
 
 
 @pytest.mark.asyncio
@@ -13,7 +14,7 @@ async def test_audit_log_init_append_and_list_filters(tmp_path):
     db_path = tmp_path / "audit.sqlite"
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
-        audit = AuditLog(conn)
+        audit = AuditLog(SqliteDbAdapter(conn))
         await audit.init()
 
         await audit.append(
@@ -49,7 +50,7 @@ async def test_audit_log_list_filters_by_target_and_event(tmp_path):
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
     try:
-        audit = AuditLog(conn)
+        audit = AuditLog(SqliteDbAdapter(conn))
         await audit.init()
         await audit.append("room_added", actor="admin@example.org", target="room@example.org")
         await audit.append("plugin_loaded", actor="admin@example.org", target="rss")
@@ -70,7 +71,7 @@ async def test_audit_export_jsonl_and_prune(tmp_path):
     db_path = tmp_path / "audit-export.sqlite"
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
-        audit = AuditLog(conn)
+        audit = AuditLog(SqliteDbAdapter(conn))
         await audit.init()
         await audit.append("old", actor="admin@example.org", details={"x": 1})
         await conn.execute(
@@ -94,7 +95,7 @@ async def test_audit_summary_since_counts_recent_activity(tmp_path):
     db_path = tmp_path / "audit-summary.sqlite"
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
-        audit = AuditLog(conn)
+        audit = AuditLog(SqliteDbAdapter(conn))
         await audit.init()
 
         await audit.append("old_event", actor="old@example.org", target="old")

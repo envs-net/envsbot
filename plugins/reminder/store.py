@@ -32,39 +32,37 @@ async def _get_room_reminder_state(bot, room_jid: str) -> bool:
 async def _init_reminder_db(bot):
     """Create the reminders table and indexes if they do not exist.
 
-    Keeping this inside the plugin makes reminder.py self-contained: the core
-    database manager only has to provide execute()/fetch_all().
+    Keeping this inside the plugin makes reminder.py self-contained while all
+    writes still pass through DatabaseManager's nested-safe transaction API.
     """
     if runtime.REMINDER_DB_READY:
         return
 
-    await bot.db.execute("""
-        CREATE TABLE IF NOT EXISTS reminders (
-            id INTEGER PRIMARY KEY,
-            user_jid TEXT NOT NULL,
-            room_jid TEXT,
-            message TEXT NOT NULL,
-            scheduled_at TIMESTAMP NOT NULL,
-            remind_at TIMESTAMP NOT NULL,
-            is_active INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    await bot.db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_reminders_user_jid
-        ON reminders(user_jid)
-    """)
-
-    await bot.db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_reminders_remind_at
-        ON reminders(remind_at)
-    """)
-
-    await bot.db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_reminders_is_active
-        ON reminders(is_active)
-    """)
+    async with bot.db.transaction(label="reminder_init") as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY,
+                user_jid TEXT NOT NULL,
+                room_jid TEXT,
+                message TEXT NOT NULL,
+                scheduled_at TIMESTAMP NOT NULL,
+                remind_at TIMESTAMP NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_user_jid
+            ON reminders(user_jid)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_remind_at
+            ON reminders(remind_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reminders_is_active
+            ON reminders(is_active)
+        """)
 
     runtime.REMINDER_DB_READY = True
     log.info("[REMINDER] ✅ Initialized reminders table")
@@ -79,7 +77,7 @@ async def _create_reminder(
     """Insert a reminder and return its ID."""
     await _init_reminder_db(bot)
 
-    cursor = await bot.db.execute(
+    cursor = await bot.db.write(
         """
         INSERT INTO reminders
         (user_jid, room_jid, message, scheduled_at, remind_at, is_active)
@@ -99,7 +97,7 @@ async def _delete_reminder(bot, reminder_id: int):
     """Delete one reminder by ID."""
     await _init_reminder_db(bot)
 
-    await bot.db.execute(
+    await bot.db.write(
         "DELETE FROM reminders WHERE id = ?",
         (reminder_id,),
     )
@@ -107,15 +105,12 @@ async def _get_reminder(bot, reminder_id: int) -> dict | None:
     """Return one reminder by ID, or None if it does not exist."""
     await _init_reminder_db(bot)
 
-    rows = await bot.db.fetch_all(
+    row = await bot.db.fetch_one(
         "SELECT * FROM reminders WHERE id = ?",
         (reminder_id,),
     )
 
-    if not rows:
-        return None
-
-    return dict(rows[0])
+    return dict(row) if row is not None else None
 async def _get_pending_reminders(bot, user_jid: str) -> list[dict]:
     """Return pending reminders for one user ordered by due date."""
     await _init_reminder_db(bot)

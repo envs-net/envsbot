@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from importlib import import_module
 from pathlib import Path
 
@@ -311,6 +312,25 @@ def _string_membership_sets(path: Path, variable_name: str) -> list[set[str]]:
     return values
 
 
+
+def _dict_string_keys_for_named_value(path: Path, value_name: str) -> set[str]:
+    """Return literal dict keys that map directly to one named handler."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values, strict=True):
+            if not (
+                isinstance(key, ast.Constant)
+                and isinstance(key.value, str)
+                and isinstance(value, ast.Name)
+                and value.id == value_name
+            ):
+                continue
+            keys.add(key.value)
+    return keys
+
 def test_add_capable_resource_commands_keep_standard_removal_aliases():
     removal_words = {"delete", "del", "remove", "rm"}
 
@@ -345,8 +365,15 @@ def test_add_capable_resource_commands_keep_standard_removal_aliases():
                     )
     assert add_subcommand_comparisons == {
         ("plugins/pin.py", "subcmd"),
-        ("plugins/rss/commands.py", "sub"),
     }
+
+    rss_commands = ROOT / "plugins" / "rss" / "commands.py"
+    assert _dict_string_keys_for_named_value(
+        rss_commands, "_rss_handle_add"
+    ) == {"add"}
+    assert _dict_string_keys_for_named_value(
+        rss_commands, "_rss_handle_delete"
+    ) == removal_words
 
     room_commands = _decorated_command_aliases(
         ROOT / "core_plugins" / "rooms" / "commands.py"
@@ -358,9 +385,6 @@ def test_add_capable_resource_commands_keep_standard_removal_aliases():
         "rooms rm",
     } <= ({"rooms delete"} | room_commands["rooms delete"])
 
-    assert removal_words in _string_membership_sets(
-        ROOT / "plugins" / "rss" / "commands.py", "sub"
-    )
     assert removal_words in _string_membership_sets(
         ROOT / "plugins" / "pin.py", "subcmd"
     )
@@ -430,3 +454,38 @@ def test_profile_acronym_and_restart_file_io_stays_off_event_loop():
                     )
 
     assert offenders == []
+
+
+def test_persistence_code_uses_database_manager_api_not_shared_connection():
+    """Keep the shared SQLite connection private to DatabaseManager itself."""
+    offenders: list[str] = []
+    manager_path = ROOT / "database" / "manager.py"
+    for path in _production_python_files():
+        if path == manager_path:
+            continue
+        source = path.read_text(encoding="utf-8")
+        forbidden = (
+            r"\b(?:self\.|bot\.)?db\.conn\b",
+            r"\b(?:self\.|bot\.)db\.execute\(",
+            r"\bself\.conn\.(?:execute|executemany|commit|rollback)\(",
+        )
+        if any(re.search(pattern, source) for pattern in forbidden):
+            offenders.append(str(path.relative_to(ROOT)))
+
+    assert offenders == []
+
+
+def _function_line_span(relative_path: str, function_name: str) -> int:
+    path = ROOT / relative_path
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            return int(node.end_lineno or node.lineno) - int(node.lineno) + 1
+    raise AssertionError(f"missing function {relative_path}:{function_name}")
+
+
+def test_refactored_hot_paths_stay_split_into_small_orchestrators():
+    """Prevent the main persistence/command/export routers from growing back."""
+    assert _function_line_span("plugins/rss/commands.py", "rss_command") <= 90
+    assert _function_line_span("database/idlerpg.py", "save_state") <= 100
+    assert _function_line_span("plugins/idlerpg/state.py", "_refresh_public_export") <= 100

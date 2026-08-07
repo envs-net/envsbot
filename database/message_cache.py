@@ -14,34 +14,32 @@ class MessageCacheStore:
 
     async def init(self, *, commit: bool = True) -> None:
         """Create the persistent message-cache table and lookup indexes."""
-        await self.db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS message_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cache_key TEXT NOT NULL UNIQUE,
-                conversation TEXT NOT NULL,
-                stanza_id TEXT,
-                sender_nick TEXT,
-                sender_jid TEXT,
-                body TEXT NOT NULL,
-                message_type TEXT NOT NULL,
-                received_at INTEGER NOT NULL
+        del commit
+        async with self.db.transaction(label="message_cache_init") as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cache_key TEXT NOT NULL UNIQUE,
+                    conversation TEXT NOT NULL,
+                    stanza_id TEXT,
+                    sender_nick TEXT,
+                    sender_jid TEXT,
+                    body TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    received_at INTEGER NOT NULL
+                )
+                """
             )
-            """,
-            auto_commit=commit,
-        )
-        await self.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_message_cache_conversation_id "
-            "ON message_cache(conversation, id)",
-            auto_commit=commit,
-        )
-        await self.db.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS "
-            "idx_message_cache_reply_lookup "
-            "ON message_cache(conversation, stanza_id) "
-            "WHERE stanza_id IS NOT NULL",
-            auto_commit=commit,
-        )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_message_cache_conversation_id "
+                "ON message_cache(conversation, id)"
+            )
+            await conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_message_cache_reply_lookup "
+                "ON message_cache(conversation, stanza_id) "
+                "WHERE stanza_id IS NOT NULL"
+            )
 
     async def prune_all(
         self,

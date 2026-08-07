@@ -40,6 +40,53 @@ function idlerpg_load_json($path, $default = []) {
     return is_array($decoded) ? $decoded : $default;
 }
 
+
+function idlerpg_generation_manifest($data_dir) {
+    $path = rtrim($data_dir, '/') . '/generation.json';
+    $manifest = idlerpg_load_json($path, []);
+    if (($manifest['format'] ?? '') !== 'envsbot-generation-v1') {
+        return null;
+    }
+    if (!is_string($manifest['generation_id'] ?? null) || !is_array($manifest['files'] ?? null)) {
+        return null;
+    }
+    return $manifest;
+}
+
+function idlerpg_snapshot_json($data_dir, $manifest, $filename, $default, &$ok) {
+    if (!$ok || !is_array($manifest)) {
+        return $default;
+    }
+    $expected = $manifest['files'][$filename] ?? null;
+    if (!is_string($expected) || !preg_match('/^[a-f0-9]{64}$/D', $expected)) {
+        $ok = false;
+        return $default;
+    }
+    $path = rtrim($data_dir, '/') . '/' . ltrim($filename, '/');
+    if (!is_readable($path)) {
+        $ok = false;
+        return $default;
+    }
+    $raw = file_get_contents($path);
+    if ($raw === false || !hash_equals($expected, hash('sha256', $raw))) {
+        $ok = false;
+        return $default;
+    }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        $ok = false;
+        return $default;
+    }
+    return $decoded;
+}
+
+function idlerpg_snapshot_optional_json($data_dir, $manifest, $filename, $default, &$ok) {
+    if (!isset($manifest['files'][$filename])) {
+        return $default;
+    }
+    return idlerpg_snapshot_json($data_dir, $manifest, $filename, $default, $ok);
+}
+
 function idlerpg_ttl($seconds) {
     $seconds = max(0, (int) $seconds);
     $days = intdiv($seconds, 86400);
@@ -444,7 +491,7 @@ function idlerpg_data_file($filename, $data_dir = null) {
     return rtrim($data_dir, '/') . '/' . ltrim($filename, '/');
 }
 
-function idlerpg_season_event_list($payload, $data_dir) {
+function idlerpg_season_event_list($payload, $data_dir, $snapshot = null, &$snapshot_ok = null) {
     if (!is_array($payload)) {
         return null;
     }
@@ -468,7 +515,16 @@ function idlerpg_season_event_list($payload, $data_dir) {
         if (!preg_match('#^(?:[A-Za-z0-9_.-]+/)?season-events/[0-9]{6}\.json$#D', $filename)) {
             return null;
         }
-        $chunk = idlerpg_load_json(idlerpg_data_file($filename, $data_dir), []);
+        if (is_array($snapshot)) {
+            $local_ok = $snapshot_ok !== false;
+            $chunk = idlerpg_snapshot_json($data_dir, $snapshot, $filename, [], $local_ok);
+            $snapshot_ok = $local_ok;
+            if (!$local_ok) {
+                return null;
+            }
+        } else {
+            $chunk = idlerpg_load_json(idlerpg_data_file($filename, $data_dir), []);
+        }
         $chunk_events = $chunk['events'] ?? null;
         if (!is_array($chunk_events)) {
             return null;
@@ -481,6 +537,109 @@ function idlerpg_season_event_list($payload, $data_dir) {
     }
     $expected = max(0, (int) ($payload['events_total'] ?? count($events)));
     return count($events) === $expected ? $events : null;
+}
+
+
+function idlerpg_load_export_snapshot($data_dir, $attempts = 5) {
+    $defaults = [
+        'room.json' => [],
+        'leaderboard.json' => ['players' => []],
+        'players.json' => ['players' => []],
+        'map.json' => ['players' => [], 'width' => 500, 'height' => 500],
+        'events.json' => ['events' => []],
+        'season_events.json' => [],
+        'hall_of_fame.json' => ['seasons' => []],
+        'achievements.json' => ['achievements' => []],
+    ];
+    $first_manifest = idlerpg_generation_manifest($data_dir);
+    if ($first_manifest === null) {
+        $payloads = [];
+        foreach ($defaults as $filename => $default) {
+            $payloads[$filename] = idlerpg_load_json(
+                idlerpg_data_file($filename, $data_dir),
+                $default
+            );
+        }
+        $legacy_ok = true;
+        return [
+            'payloads' => $payloads,
+            'season_events' => idlerpg_season_event_list(
+                $payloads['season_events.json'],
+                $data_dir,
+                null,
+                $legacy_ok
+            ),
+            'generation_id' => null,
+            'consistent' => true,
+        ];
+    }
+
+    for ($attempt = 0; $attempt < max(1, (int) $attempts); $attempt++) {
+        $manifest = idlerpg_generation_manifest($data_dir);
+        if ($manifest === null) {
+            usleep(20000);
+            continue;
+        }
+        $ok = true;
+        $payloads = [];
+        foreach ($defaults as $filename => $default) {
+            if ($filename === 'season_events.json') {
+                $payloads[$filename] = idlerpg_snapshot_optional_json(
+                    $data_dir,
+                    $manifest,
+                    $filename,
+                    $default,
+                    $ok
+                );
+            } else {
+                $payloads[$filename] = idlerpg_snapshot_json(
+                    $data_dir,
+                    $manifest,
+                    $filename,
+                    $default,
+                    $ok
+                );
+            }
+            if (!$ok) {
+                break;
+            }
+        }
+        $season_events = null;
+        if ($ok) {
+            $season_events = idlerpg_season_event_list(
+                $payloads['season_events.json'],
+                $data_dir,
+                $manifest,
+                $ok
+            );
+        }
+        $after = idlerpg_generation_manifest($data_dir);
+        if (
+            $ok
+            && is_array($after)
+            && hash_equals(
+                (string) $manifest['generation_id'],
+                (string) ($after['generation_id'] ?? '')
+            )
+        ) {
+            return [
+                'payloads' => $payloads,
+                'season_events' => $season_events,
+                'generation_id' => $manifest['generation_id'],
+                'consistent' => true,
+            ];
+        }
+        usleep(20000);
+    }
+
+    // Never mix files from different committed generations. A transient export
+    // race yields an empty view and resolves on the next request instead.
+    return [
+        'payloads' => $defaults,
+        'season_events' => null,
+        'generation_id' => null,
+        'consistent' => false,
+    ];
 }
 
 function idlerpg_sort_players($players) {
@@ -788,14 +947,16 @@ function idlerpg_percent($part, $total) {
 $available_rooms = idlerpg_available_rooms();
 $selected_room_slug = idlerpg_room_slug($available_rooms);
 $data_dir = idlerpg_data_dir($selected_room_slug, $available_rooms);
-$room_payload = idlerpg_load_json(idlerpg_data_file('room.json', $data_dir), []);
-$leaderboard_payload = idlerpg_load_json(idlerpg_data_file('leaderboard.json', $data_dir), ['players' => []]);
-$players_payload = idlerpg_load_json(idlerpg_data_file('players.json', $data_dir), ['players' => []]);
-$map_payload = idlerpg_load_json(idlerpg_data_file('map.json', $data_dir), ['players' => [], 'width' => 500, 'height' => 500]);
-$events_payload = idlerpg_load_json(idlerpg_data_file('events.json', $data_dir), ['events' => []]);
-$season_events_payload = idlerpg_load_json(idlerpg_data_file('season_events.json', $data_dir), []);
-$hof_payload = idlerpg_load_json(idlerpg_data_file('hall_of_fame.json', $data_dir), ['seasons' => []]);
-$achievements_payload = idlerpg_load_json(idlerpg_data_file('achievements.json', $data_dir), ['achievements' => []]);
+$export_snapshot = idlerpg_load_export_snapshot($data_dir);
+$snapshot_payloads = $export_snapshot['payloads'];
+$room_payload = $snapshot_payloads['room.json'];
+$leaderboard_payload = $snapshot_payloads['leaderboard.json'];
+$players_payload = $snapshot_payloads['players.json'];
+$map_payload = $snapshot_payloads['map.json'];
+$events_payload = $snapshot_payloads['events.json'];
+$season_events_payload = $snapshot_payloads['season_events.json'];
+$hof_payload = $snapshot_payloads['hall_of_fame.json'];
+$achievements_payload = $snapshot_payloads['achievements.json'];
 
 $leaderboard = is_array($leaderboard_payload['players'] ?? null)
     ? $leaderboard_payload['players']
@@ -813,7 +974,7 @@ $map_players = is_array($map_payload['players'] ?? null)
 if (count($map_players) === 0 && count($players) > 0) {
     $map_players = $players;
 }
-$season_event_list = idlerpg_season_event_list($season_events_payload, $data_dir);
+$season_event_list = $export_snapshot['season_events'];
 $has_season_event_export = is_array($season_event_list);
 $events = $has_season_event_export
     ? $season_event_list

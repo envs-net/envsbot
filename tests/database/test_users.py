@@ -1,9 +1,11 @@
-from database.users import PluginRuntimeStore
 import asyncio
 import json
-import sqlite3
 import logging
+from contextlib import asynccontextmanager
+
 import pytest
+
+from database.users import PluginRuntimeStore
 
 pytestmark = pytest.mark.asyncio
 # (pytest-asyncio required)
@@ -56,6 +58,12 @@ class DummyDB:
         # For UPDATE/INSERT operations, just record and pretend to accept.
         return DummyCursor(None)
 
+    async def fetch_one(self, query, params=()):
+        return await (await self.execute(query, params)).fetchone()
+
+    async def fetch_all(self, query, params=()):
+        return await (await self.execute(query, params)).fetchall()
+
 
 class DummyUM:
     def __init__(self):
@@ -63,6 +71,13 @@ class DummyUM:
         self._runtime_cache = {}
         self._runtime_meta = {}
         self._dirty_runtime = set()
+        self._runtime_update_lock = asyncio.Lock()
+
+    def _touch_runtime_cache(self, jid, **_kwargs):
+        return None
+
+    def _mark_runtime_dirty(self, jid):
+        self._dirty_runtime.add(jid)
 
 # --------------------------
 # Fixtures
@@ -298,6 +313,29 @@ class RichDummyDB:
 
         return RichCursor()
 
+    async def fetch_one(self, query, params=()):
+        return await (await self.execute(query, params)).fetchone()
+
+    async def fetch_all(self, query, params=()):
+        return await (await self.execute(query, params)).fetchall()
+
+    @asynccontextmanager
+    async def transaction(self, *, label="transaction"):
+        savepoint = f"envsbot_{label}"
+        self.calls.append((f"SAVEPOINT {savepoint}", ()))
+        try:
+            yield self
+        except BaseException:
+            self.calls.append((f"ROLLBACK TO {savepoint}", ()))
+            self.calls.append((f"RELEASE {savepoint}", ()))
+            raise
+        else:
+            self.calls.append((f"RELEASE {savepoint}", ()))
+
+    async def write(self, query, params=(), *, label="write"):
+        async with self.transaction(label=label):
+            return await self.execute(query, params)
+
 
 class MutatingRuntimeWriteDB(RichDummyDB):
     def __init__(self):
@@ -405,8 +443,8 @@ async def test_user_manager_value_helpers_and_flush_all_success():
     await um.flush_all()
 
     queries = _queries(db)
-    assert "SAVEPOINT flush_checkpoint" in queries
-    assert "RELEASE flush_checkpoint" in queries
+    assert "SAVEPOINT envsbot_users_flush_all" in queries
+    assert "RELEASE envsbot_users_flush_all" in queries
     assert not um._dirty_users
     assert not um._dirty_runtime
     assert GLOBAL_JID in um._runtime_cache
@@ -426,8 +464,8 @@ async def test_user_manager_flush_all_rolls_back_and_keeps_dirty_flags():
         await um.flush_all()
 
     queries = _queries(db)
-    assert "ROLLBACK TO flush_checkpoint" in queries
-    assert "RELEASE flush_checkpoint" in queries
+    assert "ROLLBACK TO envsbot_users_flush_all" in queries
+    assert "RELEASE envsbot_users_flush_all" in queries
     assert um._dirty_users == {"bad@jid"}
 
 
@@ -551,24 +589,93 @@ async def test_runtime_store_update_global_uses_default_and_serializes():
     }
 
 
-@pytest.mark.asyncio
-async def test_flush_all_treats_missing_release_savepoint_as_committed():
-    class MissingReleaseSavepointDB(RichDummyDB):
-        async def execute(self, query, params=()):
-            normalized = " ".join(query.split())
-            if normalized == "RELEASE flush_checkpoint":
-                self.calls.append((normalized, params))
-                raise sqlite3.OperationalError("no such savepoint: flush_checkpoint")
-            return await super().execute(query, params)
+async def test_user_cache_prune_evicts_clean_lru_but_keeps_dirty(monkeypatch):
+    from database import users as users_module
 
-    db = MissingReleaseSavepointDB()
+    db = RichDummyDB()
     um = UserManager(db)
-    await um.create("release@jid", "Release")
+    monkeypatch.setitem(users_module.config, "user_cache_max_entries", 2)
+    monkeypatch.setitem(users_module.config, "user_runtime_cache_max_entries", 2)
+    monkeypatch.setitem(users_module.config, "user_cache_ttl_seconds", 0)
 
-    await um.flush_all()
+    um._users_cache = {
+        "old@jid": {"jid": "old@jid"},
+        "dirty@jid": {"jid": "dirty@jid"},
+        "new@jid": {"jid": "new@jid"},
+    }
+    um._users_cache_access = {
+        "old@jid": 1.0,
+        "dirty@jid": 2.0,
+        "new@jid": 3.0,
+    }
+    um._dirty_users.add("dirty@jid")
 
-    queries = _queries(db)
-    assert "SAVEPOINT flush_checkpoint" in queries
-    assert "RELEASE flush_checkpoint" in queries
-    assert not um._dirty_users
-    assert not um._dirty_runtime
+    state = um.prune_caches()
+
+    assert set(um._users_cache) == {"dirty@jid", "new@jid"}
+    assert state["users"] == 2
+    assert state["evicted_users"] == 1
+    assert "dirty@jid" in um._dirty_users
+
+
+async def test_runtime_cache_prune_keeps_global_and_dirty_entries(monkeypatch):
+    from database import users as users_module
+
+    db = RichDummyDB()
+    um = UserManager(db)
+    monkeypatch.setitem(users_module.config, "user_cache_max_entries", 5)
+    monkeypatch.setitem(users_module.config, "user_runtime_cache_max_entries", 2)
+    monkeypatch.setitem(users_module.config, "user_cache_ttl_seconds", 0)
+
+    um._runtime_cache = {
+        GLOBAL_JID: {"plugins": {}},
+        "old@jid": {"plugins": {}},
+        "dirty@jid": {"plugins": {}},
+    }
+    um._runtime_cache_access = {
+        GLOBAL_JID: 0.0,
+        "old@jid": 1.0,
+        "dirty@jid": 2.0,
+    }
+    um._runtime_meta = {
+        GLOBAL_JID: "global",
+        "old@jid": "old",
+        "dirty@jid": "dirty",
+    }
+    um._dirty_runtime.add("dirty@jid")
+
+    state = um.prune_caches()
+
+    assert set(um._runtime_cache) == {GLOBAL_JID, "dirty@jid"}
+    assert "old@jid" not in um._runtime_meta
+    assert state["runtime"] == 2
+    assert state["evicted_runtime"] == 1
+
+
+async def test_cache_ttl_evicts_only_clean_expired_entries(monkeypatch):
+    from database import users as users_module
+
+    db = RichDummyDB()
+    um = UserManager(db)
+    monkeypatch.setitem(users_module.config, "user_cache_max_entries", 10)
+    monkeypatch.setitem(users_module.config, "user_runtime_cache_max_entries", 10)
+    monkeypatch.setitem(users_module.config, "user_cache_ttl_seconds", 100)
+
+    um._users_cache = {
+        "expired@jid": {"jid": "expired@jid"},
+        "fresh@jid": {"jid": "fresh@jid"},
+        "dirty@jid": {"jid": "dirty@jid"},
+    }
+    um._users_cache_access = {
+        "expired@jid": 1.0,
+        "fresh@jid": 950.0,
+        "dirty@jid": 1.0,
+    }
+    um._dirty_users.add("dirty@jid")
+    um._last_cache_prune = 0.0
+
+    um._maybe_prune_caches(now=1_000.0, force=True)
+
+    assert "expired@jid" not in um._users_cache
+    assert "fresh@jid" in um._users_cache
+    assert "dirty@jid" in um._users_cache

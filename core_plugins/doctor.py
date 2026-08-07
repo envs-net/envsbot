@@ -429,7 +429,7 @@ def _task_lines(bot: Any, *, full: bool) -> list[str]:
     return lines
 
 
-def _backup_lines() -> list[str]:
+def _backup_lines(bot: Any | None = None) -> list[str]:
     directory = backup_dir()
     exists = directory.exists()
     writable_target = directory if exists else directory.parent
@@ -542,6 +542,23 @@ def _performance_lines(bot: Any, *, full: bool) -> list[str]:
         if detail:
             lines.append(_line(True, label, detail))
 
+    users = getattr(getattr(bot, "db", None), "users", None)
+    cache_state = getattr(users, "cache_state", None)
+    if callable(cache_state):
+        try:
+            state = cache_state()
+            lines.append(
+                _line(
+                    True,
+                    "User caches",
+                    f"users={state.get('users', 0)}/{state.get('user_limit', 0)}, "
+                    f"runtime={state.get('runtime', 0)}/{state.get('runtime_limit', 0)}, "
+                    f"dirty={state.get('dirty_users', 0)}+{state.get('dirty_runtime', 0)}, "
+                    f"evicted={state.get('evicted_users', 0)}+{state.get('evicted_runtime', 0)}",
+                )
+            )
+        except Exception as exc:
+            lines.append(_line(False, "User caches", str(exc)))
     return lines or [_line(None, "Performance", "no runtime samples collected yet")]
 
 
@@ -887,7 +904,7 @@ async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
     if section == "tasks":
         return _task_lines(bot, full=full)
     if section == "backups":
-        return _backup_lines()
+        return _backup_lines(bot)
     if section == "performance":
         return _performance_lines(bot, full=full)
     if section == "network":

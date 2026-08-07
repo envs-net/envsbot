@@ -111,22 +111,22 @@ async def test_reminders_list_and_delete(dummy_bot, dummy_msg):
         dummy_msg, "❌ Reminder ID must be a number.")
 
     # Reminder not found
-    dummy_bot.db.fetch_all = AsyncMock(return_value=[])
+    dummy_bot.db.fetch_one = AsyncMock(return_value=None)
     await reminder.delete_reminder(dummy_bot, "a@b", "TestNick",
                                    ["13"], dummy_msg, False)
     dummy_bot.reply.assert_any_call(dummy_msg, "❌ Reminder not found.")
 
     # Reminder found, but not owned
-    dummy_bot.db.fetch_all = AsyncMock(
-        return_value=[{"id": 4, "user_jid": "other@user"}])
+    dummy_bot.db.fetch_one = AsyncMock(
+        return_value={"id": 4, "user_jid": "other@user"})
     await reminder.delete_reminder(dummy_bot, "a@b", "TestNick",
                                    ["4"], dummy_msg, False)
     dummy_bot.reply.assert_any_call(
         dummy_msg, "❌ You can only delete your own reminders.")
 
     # Reminder delete OK
-    dummy_bot.db.fetch_all = AsyncMock(
-        return_value=[{"id": 5, "user_jid": "a@b"}])
+    dummy_bot.db.fetch_one = AsyncMock(
+        return_value={"id": 5, "user_jid": "a@b"})
     await reminder.delete_reminder(dummy_bot, "a@b", "TestNick",
                                    ["5"], dummy_msg, False)
     dummy_bot.reply.assert_any_call(dummy_msg, "✅ Reminder 5 deleted.")

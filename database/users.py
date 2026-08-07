@@ -1,11 +1,11 @@
 import asyncio
 import json
 import logging
-import sqlite3
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 
-from .locking import AsyncRLock
+from utils.config import config
 
 GLOBAL_JID = "__GLOBAL__"
 
@@ -59,11 +59,10 @@ class PluginRuntimeStore:
         Load full runtime JSON for a user from the database.
         Ensures the returned structure always contains a "plugins" dict.
         """
-        cursor = await self.um.db.execute(
+        row = await self.um.db.fetch_one(
             "SELECT data, last_updated FROM users_runtime WHERE jid = ?",
             (jid,),
         )
-        row = await cursor.fetchone()
 
         if not row:
             self.um._runtime_meta[jid] = None
@@ -151,6 +150,7 @@ class PluginRuntimeStore:
         """
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
+        self.um._touch_runtime_cache(jid)
 
         data = self.um._runtime_cache[jid]
 
@@ -176,6 +176,7 @@ class PluginRuntimeStore:
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
+        self.um._touch_runtime_cache(jid)
 
         data = self.um._runtime_cache[jid]
 
@@ -197,6 +198,7 @@ class PluginRuntimeStore:
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
+        self.um._touch_runtime_cache(jid)
 
         data = self.um._runtime_cache[jid]
 
@@ -215,6 +217,7 @@ class PluginRuntimeStore:
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
+        self.um._touch_runtime_cache(jid)
 
         data = self.um._runtime_cache[jid]
 
@@ -241,14 +244,18 @@ class UserManager:
     - Parse JSON (handled by SQLite JSON1)
     """
 
-    def __init__(self, db, transaction_lock=None):
+    def __init__(self, db):
         self.db = db
-        self._transaction_lock = transaction_lock or AsyncRLock()
         self._nick_index = {}
         self._nick_index_lock = asyncio.Lock()
 
-        self._users_cache = {}
-        self._runtime_cache = {}
+        self._users_cache: dict[str, dict] = {}
+        self._runtime_cache: dict[str, dict] = {}
+        self._users_cache_access: dict[str, float] = {}
+        self._runtime_cache_access: dict[str, float] = {}
+        self._last_cache_prune = 0.0
+        self._cache_evictions_users = 0
+        self._cache_evictions_runtime = 0
 
         self._runtime_meta = {}
         self._runtime_update_lock = asyncio.Lock()
@@ -283,6 +290,121 @@ class UserManager:
                 dirty.discard(jid)
                 versions.pop(jid, None)
 
+    @staticmethod
+    def _cache_limit(key: str, default: int) -> int:
+        try:
+            return max(1, int(config.get(key, default) or default))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _cache_ttl_seconds() -> float:
+        try:
+            return max(0.0, float(config.get("user_cache_ttl_seconds", 86400) or 0))
+        except (TypeError, ValueError):
+            return 86400.0
+
+    @staticmethod
+    def _cache_prune_interval_seconds() -> float:
+        try:
+            return max(1.0, float(config.get("user_cache_prune_interval_seconds", 300) or 300))
+        except (TypeError, ValueError):
+            return 300.0
+
+    def _touch_user_cache(self, jid: str, *, now: float | None = None) -> None:
+        self._users_cache_access[str(jid)] = time.monotonic() if now is None else float(now)
+        self._maybe_prune_caches(now=now)
+
+    def _touch_runtime_cache(self, jid: str, *, now: float | None = None) -> None:
+        self._runtime_cache_access[str(jid)] = time.monotonic() if now is None else float(now)
+        self._maybe_prune_caches(now=now)
+
+    def _maybe_prune_caches(self, *, now: float | None = None, force: bool = False) -> None:
+        current = time.monotonic() if now is None else float(now)
+        if not force and current - self._last_cache_prune < self._cache_prune_interval_seconds():
+            return
+        self._last_cache_prune = current
+        self._cache_evictions_users += self._prune_one_cache(
+            cache=self._users_cache,
+            access=self._users_cache_access,
+            dirty=self._dirty_users,
+            maximum=self._cache_limit("user_cache_max_entries", 5000),
+            ttl=self._cache_ttl_seconds(),
+            now=current,
+            pinned=set(),
+        )
+        runtime_evicted = self._prune_one_cache(
+            cache=self._runtime_cache,
+            access=self._runtime_cache_access,
+            dirty=self._dirty_runtime,
+            maximum=self._cache_limit("user_runtime_cache_max_entries", 5000),
+            ttl=self._cache_ttl_seconds(),
+            now=current,
+            pinned={GLOBAL_JID},
+        )
+        self._cache_evictions_runtime += runtime_evicted
+        for jid in tuple(self._runtime_meta):
+            if jid not in self._runtime_cache:
+                self._runtime_meta.pop(jid, None)
+
+    @staticmethod
+    def _prune_one_cache(
+        *,
+        cache: dict[str, dict],
+        access: dict[str, float],
+        dirty: set[str],
+        maximum: int,
+        ttl: float,
+        now: float,
+        pinned: set[str],
+    ) -> int:
+        """Evict only clean LRU/expired entries; dirty state is never dropped."""
+        removed = 0
+        if ttl > 0:
+            expired = sorted(
+                jid
+                for jid, touched in access.items()
+                if jid in cache
+                and jid not in dirty
+                and jid not in pinned
+                and now - touched >= ttl
+            )
+            for jid in expired:
+                cache.pop(jid, None)
+                access.pop(jid, None)
+                removed += 1
+
+        excess = max(0, len(cache) - maximum)
+        if excess:
+            candidates = sorted(
+                (touched, jid)
+                for jid, touched in access.items()
+                if jid in cache and jid not in dirty and jid not in pinned
+            )
+            for _touched, jid in candidates[:excess]:
+                cache.pop(jid, None)
+                access.pop(jid, None)
+                removed += 1
+        return removed
+
+    def prune_caches(self) -> dict[str, int]:
+        """Force one cache-prune pass and return current diagnostics."""
+        self._maybe_prune_caches(force=True)
+        return self.cache_state()
+
+    def cache_state(self) -> dict[str, int]:
+        """Return bounded-cache diagnostics without exposing user identifiers."""
+        return {
+            "users": len(self._users_cache),
+            "runtime": len(self._runtime_cache),
+            "dirty_users": len(self._dirty_users),
+            "dirty_runtime": len(self._dirty_runtime),
+            "user_limit": self._cache_limit("user_cache_max_entries", 5000),
+            "runtime_limit": self._cache_limit("user_runtime_cache_max_entries", 5000),
+            "evicted_users": self._cache_evictions_users,
+            "evicted_runtime": self._cache_evictions_runtime,
+        }
+
     # ------------------------------------------------------------------
     # Initialization
     # ------------------------------------------------------------------
@@ -291,45 +413,39 @@ class UserManager:
         if await self.get(GLOBAL_JID) is None:
             await self.create(GLOBAL_JID, "__global__")
 
-    async def init(self, *, commit: bool = True):
-        async with self._transaction_lock:
-            await self.db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                jid TEXT PRIMARY KEY,
-                nickname TEXT,
-                role INTEGER DEFAULT 80,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                registered INTEGER DEFAULT FALSE
+    async def init(self, *, commit: bool = True) -> None:
+        """Create user tables through the central nested-safe DB API."""
+        del commit
+        async with self.db.transaction(label="users_init") as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    jid TEXT PRIMARY KEY,
+                    nickname TEXT,
+                    role INTEGER DEFAULT 80,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    registered INTEGER DEFAULT FALSE
+                )
+                """
             )
-            """)
-
-            await self.db.execute("""
-            CREATE TABLE IF NOT EXISTS users_runtime (
-                jid TEXT PRIMARY KEY,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                data TEXT DEFAULT '{}' NOT NULL,
-                FOREIGN KEY (jid)
-                    REFERENCES users(jid)
-                    ON DELETE CASCADE
-                    ON UPDATE CASCADE
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users_runtime (
+                    jid TEXT PRIMARY KEY,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    data TEXT DEFAULT '{}' NOT NULL,
+                    FOREIGN KEY (jid)
+                        REFERENCES users(jid)
+                        ON DELETE CASCADE
+                        ON UPDATE CASCADE
+                )
+                """
             )
-            """)
 
-            if commit:
-                commit_fn = getattr(self.db, "commit", None)
-                if commit_fn is not None:
-                    await commit_fn()
-
-        # Ensure GLOBAL_JID exists in the write-behind cache.
         await self.ensure_global_exists()
-
-        # Load persisted _nick_index
-        store = self.plugin("users")
-        index = await store.get_global("_nick_index")
-
+        index = await self.plugin("users").get_global("_nick_index")
         if isinstance(index, dict):
-            # Convert all lists to sets for consistency
             self._nick_index = {
                 nick: set(jids) if isinstance(jids, list) else jids
                 for nick, jids in index.items()
@@ -351,22 +467,24 @@ class UserManager:
                 "registered": True,
             }
             self._mark_user_dirty(jid)
+            self._touch_user_cache(jid)
 
     async def get(self, jid):
         if jid in self._users_cache:
+            self._touch_user_cache(jid)
             return self._users_cache[jid]
 
-        cursor = await self.db.execute(
+        row = await self.db.fetch_one(
             "SELECT * FROM users WHERE jid=?",
-            (jid,)
+            (jid,),
         )
-        row = await cursor.fetchone()
 
         if not row:
             return None
 
         user = dict(row)
         self._users_cache[jid] = user
+        self._touch_user_cache(jid)
         return user
 
     async def set(self, jid, key, value):
@@ -379,10 +497,12 @@ class UserManager:
 
     async def list(self):
         """Return all users as dictionaries, including cached updates."""
-        cursor = await self.db.execute(
-            "SELECT * FROM users ORDER BY role ASC, jid ASC"
-        )
-        rows = [dict(row) for row in await cursor.fetchall()]
+        rows = [
+            dict(row)
+            for row in await self.db.fetch_all(
+                "SELECT * FROM users ORDER BY role ASC, jid ASC"
+            )
+        ]
         seen = {row["jid"] for row in rows}
 
         for jid, user in self._users_cache.items():
@@ -401,24 +521,17 @@ class UserManager:
         await self.set(jid, "last_seen", now)
 
     async def delete(self, jid):
-        # 1. Delete atomically from the shared SQLite connection.
-        async with self._transaction_lock:
-            await self.db.execute(
-                "DELETE FROM users WHERE jid = ?",
-                (jid,)
-            )
-
-            await self.db.execute(
-                "DELETE FROM users_runtime WHERE jid = ?",
-                (jid,)
-            )
-            commit_fn = getattr(self.db, "commit", None)
-            if commit_fn is not None:
-                await commit_fn()
+        # 1. Delete atomically through the shared DatabaseManager boundary.
+        async with self.db.transaction(label="users_delete") as conn:
+            await conn.execute("DELETE FROM users WHERE jid = ?", (jid,))
+            await conn.execute("DELETE FROM users_runtime WHERE jid = ?", (jid,))
 
         # 2. Remove from caches
         self._users_cache.pop(jid, None)
         self._runtime_cache.pop(jid, None)
+        self._users_cache_access.pop(jid, None)
+        self._runtime_cache_access.pop(jid, None)
+        self._runtime_meta.pop(jid, None)
 
         # 3. Clean dirty flags
         self._dirty_users.discard(jid)
@@ -473,18 +586,16 @@ class UserManager:
     # FLUSH LOGIC
     # ------------------------------------------------------------------
 
-    async def flush_users(self, jids=None):
-        for jid in list(self._dirty_users if jids is None else jids):
+    async def _flush_users_to(self, conn, jids: Iterable[str]) -> None:
+        for jid in list(jids):
             user = self._users_cache.get(jid)
             if user is None:
                 continue
-
-            await self.db.execute(
+            await conn.execute(
                 """
                 INSERT INTO users (jid, nickname, role, last_seen, registered)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(jid)
-                DO UPDATE SET
+                ON CONFLICT(jid) DO UPDATE SET
                     nickname=excluded.nickname,
                     role=excluded.role,
                     last_seen=excluded.last_seen,
@@ -499,98 +610,58 @@ class UserManager:
                 ),
             )
 
-    async def _write_runtime(self, jid: str, data: dict):
-        """
-        Persist full runtime JSON blob for a user.
+    async def flush_users(self, jids: Iterable[str] | None = None) -> None:
+        """Persist selected cached users atomically."""
+        selected = list(self._dirty_users if jids is None else jids)
+        if not selected:
+            return
+        async with self.db.transaction(label="users_flush_users") as conn:
+            await self._flush_users_to(conn, selected)
 
-        Uses UPSERT semantics to either insert or update the row.
-        """
+    async def _write_runtime_to(self, conn, jid: str, data: dict) -> None:
         timestamp = self._runtime_meta.get(jid)
-        await self.db.execute(
+        await conn.execute(
             """
             INSERT INTO users_runtime (jid, last_updated, data)
             VALUES (?, ?, ?)
-            ON CONFLICT(jid)
-            DO UPDATE SET
+            ON CONFLICT(jid) DO UPDATE SET
                 last_updated = excluded.last_updated,
                 data = excluded.data
             """,
             (jid, timestamp, json.dumps(data)),
         )
 
-    @staticmethod
-    def _is_missing_savepoint_error(exc: Exception) -> bool:
-        return (
-            isinstance(exc, sqlite3.OperationalError)
-            and "no such savepoint" in str(exc).lower()
-        )
+    async def _write_runtime(self, jid: str, data: dict) -> None:
+        """Persist one runtime JSON blob atomically."""
+        async with self.db.transaction(label="users_runtime_write") as conn:
+            await self._write_runtime_to(conn, jid, data)
 
-    async def _release_flush_savepoint(self) -> None:
-        try:
-            await self.db.execute("RELEASE flush_checkpoint")
-        except Exception as exc:
-            if self._is_missing_savepoint_error(exc):
-                log.debug(
-                    "[DB] flush checkpoint already released by another "
-                    "commit; treating flush as committed"
-                )
-                return
-            raise
-
-    async def flush_all(self):
-        """
-        Flush cached data atomically in a single transaction.
-
-        Dirty sets may be changed by plugin tasks while a flush is already in
-        progress.  Work on snapshots and only clear entries whose dirty version
-        did not change during the flush.  This avoids both ``RuntimeError: Set
-        changed size during iteration`` and accidental loss of writes created
-        concurrently with the flush.
-        """
-        async with self._flush_lock, self._transaction_lock:
-            # Persist nick index
+    async def flush_all(self) -> None:
+        """Flush dirty user/runtime cache state in one nested-safe transaction."""
+        async with self._flush_lock:
             index = getattr(self, "_nick_index", None)
             if index is not None:
-                store = self.plugin("users")
-                # Convert sets to lists for JSON serialization
                 serializable_index = {
                     nick: list(jids) if isinstance(jids, set) else jids
                     for nick, jids in index.items()
                 }
-                await store.set_global("_nick_index", serializable_index)
+                await self.plugin("users").set_global("_nick_index", serializable_index)
 
             if not (self._dirty_users or self._dirty_runtime):
+                self._maybe_prune_caches(force=True)
                 return
 
             dirty_users = self._dirty_snapshot(
-                self._dirty_users,
-                self._dirty_users_versions,
+                self._dirty_users, self._dirty_users_versions
             )
             dirty_runtime = self._dirty_snapshot(
-                self._dirty_runtime,
-                self._dirty_runtime_versions,
+                self._dirty_runtime, self._dirty_runtime_versions
             )
 
-            # Start transaction using SAVEPOINT (thread-safe alternative)
-            try:
-                await self.db.execute("SAVEPOINT flush_checkpoint")
-
-                # ------------------------------------------------------
-                # 1. USERS
-                # ------------------------------------------------------
+            async with self.db.transaction(label="users_flush_all") as conn:
                 if dirty_users:
-                    await self.flush_users(dirty_users.keys())
-
-                # ------------------------------------------------------
-                # 2. RUNTIME
-                # ------------------------------------------------------
+                    await self._flush_users_to(conn, dirty_users.keys())
                 for jid, version in dirty_runtime.items():
-                    # If a user was deleted while this flush was in progress,
-                    # delete() removes both the dirty flag and the cached blob.
-                    # Do not recreate an empty users_runtime row from an old
-                    # snapshot in that case.  If the same jid was modified
-                    # again, the dirty version changes and we persist the
-                    # current cache while leaving it dirty for the next flush.
                     is_still_dirty = jid in self._dirty_runtime
                     is_same_version = self._dirty_runtime_versions.get(jid) == version
                     data = self._runtime_cache.get(jid)
@@ -599,40 +670,16 @@ class UserManager:
                     if data is None:
                         data = {"plugins": {}}
                     if is_still_dirty or is_same_version:
-                        await self._write_runtime(jid, data)
+                        await self._write_runtime_to(conn, jid, data)
 
-                # Commit transaction.  If another task committed on the same
-                # SQLite connection while this savepoint was open, SQLite may
-                # have already released it; that still means the flush writes
-                # reached the database, so we treat that specific case as ok.
-                await self._release_flush_savepoint()
-                log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
-
-            except Exception:
-                try:
-                    await self.db.execute("ROLLBACK TO flush_checkpoint")
-                    await self.db.execute("RELEASE flush_checkpoint")
-                except Exception as rollback_exc:
-                    log.debug(
-                        "[DB] Rollback after flush failure also failed: %s",
-                        rollback_exc,
-                    )
-                log.exception("[DB] FLUSH ALL FAILED!")
-                raise
-
-            # ----------------------------------------------------------
-            # CLEAR ONLY DIRTY FLAGS THAT WERE SUCCESSFULLY FLUSHED
-            # ----------------------------------------------------------
             self._clear_flushed_dirty(
-                self._dirty_users,
-                self._dirty_users_versions,
-                dirty_users,
+                self._dirty_users, self._dirty_users_versions, dirty_users
             )
             self._clear_flushed_dirty(
-                self._dirty_runtime,
-                self._dirty_runtime_versions,
-                dirty_runtime,
+                self._dirty_runtime, self._dirty_runtime_versions, dirty_runtime
             )
+            self._maybe_prune_caches(force=True)
+            log.debug("[DB] ✅ UserManager.flush_all() SUCCESSFUL!")
 
     # ------------------------------------------------------------------
     # Plugin API

@@ -1,6 +1,7 @@
 import pytest
 import asyncio
 import datetime
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytz
 import re
@@ -35,7 +36,16 @@ def dummy_bot():
     bot.plugin = {}
     bot.db = MagicMock()
     bot.db.execute = AsyncMock(return_value=MagicMock(lastrowid=1))
+    bot.db.write = AsyncMock(return_value=MagicMock(lastrowid=1))
+    bot.db.fetch_one = AsyncMock(return_value=None)
     bot.db.fetch_all = AsyncMock(return_value=[])
+
+    @asynccontextmanager
+    async def transaction(*, label="test"):
+        del label
+        yield bot.db
+
+    bot.db.transaction = transaction
     # plugin("reminder") returns bot.db
     bot.db.users.plugin = MagicMock(return_value=bot.db)
     bot.db.users.get = AsyncMock(return_value={})

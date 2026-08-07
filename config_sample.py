@@ -305,6 +305,34 @@ MESSAGE_CACHE_SIZE = 100
 MESSAGE_CACHE_MAX_AGE_DAYS = 30
 
 
+# ================= USER TRACKING =================
+
+# Maximum number of clean user rows kept in the read-through cache. Dirty entries are
+# never evicted.
+# Startup-only: restart envsbot after changing this value.
+USER_CACHE_MAX_ENTRIES = 5000
+
+# Maximum number of clean per-user runtime JSON blobs kept in memory. Dirty entries
+# and the global plugin runtime blob are never evicted.
+# Startup-only: restart envsbot after changing this value.
+USER_RUNTIME_CACHE_MAX_ENTRIES = 5000
+
+# Evict clean user/runtime cache entries that have not been accessed for this many
+# seconds. 0 disables TTL eviction.
+# Startup-only: restart envsbot after changing this value.
+USER_CACHE_TTL_SECONDS = 86400
+
+# Minimum interval between automatic cache-prune passes.
+# Startup-only: restart envsbot after changing this value.
+USER_CACHE_PRUNE_INTERVAL_SECONDS = 300
+
+# Users.
+USERS = {
+    # Maximum remembered nicknames per room for one tracked user.
+    'max_room_nicks': 5,
+}
+
+
 # ================= COMMAND RATE LIMITS =================
 
 # Protect the bot from command spam. Limits are in-memory and reset on restart.
@@ -565,15 +593,6 @@ DUCKS = {
     'count_commands': False,
     # Persist duck state after this many relevant state updates.
     'state_save_every': 1,
-}
-
-
-# ================= USER TRACKING =================
-
-# Users.
-USERS = {
-    # Maximum remembered nicknames per room for one tracked user.
-    'max_room_nicks': 5,
 }
 
 

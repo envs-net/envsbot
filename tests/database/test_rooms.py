@@ -2,13 +2,14 @@ import pytest
 import aiosqlite
 
 from database.rooms import Rooms
+from tests.database.helpers import SqliteDbAdapter
 
 
 @pytest.mark.asyncio
 async def test_rooms_init_add_get(tmp_path):
     db_path = tmp_path / "r.db"
     async with aiosqlite.connect(db_path) as sqlite:
-        rooms = Rooms(sqlite)
+        rooms = Rooms(SqliteDbAdapter(sqlite))
         await rooms.init()
         await rooms.add("room@conference", "my-bot", autojoin=True)
         row = await rooms.get("room@conference")
@@ -22,7 +23,7 @@ async def test_rooms_init_add_get(tmp_path):
 async def test_rooms_update_and_delete(tmp_path):
     db_path = tmp_path / "r2.db"
     async with aiosqlite.connect(db_path) as sqlite:
-        rooms = Rooms(sqlite)
+        rooms = Rooms(SqliteDbAdapter(sqlite))
         await rooms.init()
         await rooms.add("r2@c", "bot")
         await rooms.update("r2@c", nick="changed", autojoin=0)
@@ -39,7 +40,7 @@ async def test_rooms_update_and_delete(tmp_path):
 async def test_rooms_status_set_get_delete(tmp_path):
     db_path = tmp_path / "r3.db"
     async with aiosqlite.connect(db_path) as sqlite:
-        rooms = Rooms(sqlite)
+        rooms = Rooms(SqliteDbAdapter(sqlite))
         await rooms.init()
         await rooms.add("room@conf", "nick")
         await rooms.status_set("room@conf", "greeting", "hello")
@@ -61,7 +62,7 @@ async def test_rooms_status_set_get_delete(tmp_path):
 async def test_rooms_list(tmp_path):
     db_path = tmp_path / "room-list.db"
     async with aiosqlite.connect(db_path) as sqlite:
-        rooms = Rooms(sqlite)
+        rooms = Rooms(SqliteDbAdapter(sqlite))
         await rooms.init()
         await rooms.add("r1@x", "n1")
         await rooms.add("r2@x", "n2")

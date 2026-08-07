@@ -13,27 +13,27 @@ class CommandUsageStore:
         self.db = db
 
     async def init(self, *, commit: bool = True) -> None:
-        await self.db.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS command_usage (
-                command_name TEXT NOT NULL,
-                context TEXT NOT NULL,
-                day TEXT NOT NULL,
-                success_count INTEGER NOT NULL DEFAULT 0,
-                failure_count INTEGER NOT NULL DEFAULT 0,
-                total_duration_ms INTEGER NOT NULL DEFAULT 0,
-                max_duration_ms INTEGER NOT NULL DEFAULT 0,
-                last_used_at INTEGER NOT NULL,
-                PRIMARY KEY (command_name, context, day)
+        del commit
+        async with self.db.transaction(label="command_usage_init") as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS command_usage (
+                    command_name TEXT NOT NULL,
+                    context TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    total_duration_ms INTEGER NOT NULL DEFAULT 0,
+                    max_duration_ms INTEGER NOT NULL DEFAULT 0,
+                    last_used_at INTEGER NOT NULL,
+                    PRIMARY KEY (command_name, context, day)
+                )
+                """
             )
-            """
-        )
-        await self.db.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_command_usage_last_used "
-            "ON command_usage(last_used_at)"
-        )
-        if commit:
-            await self.db.conn.commit()
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_usage_last_used "
+                "ON command_usage(last_used_at)"
+            )
 
     async def record(
         self,

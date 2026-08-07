@@ -646,8 +646,9 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
             limiter_kwargs.update(kwargs)
 
     class FakeDB:
-        def __init__(self, path):
+        def __init__(self, path, *, task_supervisor=None):
             self.path = path
+            self.task_supervisor = task_supervisor
 
     class FakePluginManager:
         def __init__(self, owner):
@@ -692,6 +693,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert bot.connection_start_time is None
     assert bot._startup_backup_done is False
     assert bot.db.path == "envsbot.sqlite3"
+    assert bot.db.task_supervisor is bot.tasks
     assert bot.presence.owner is bot
     assert bot.bot_plugins.owner is bot
     assert limiter_kwargs == {
