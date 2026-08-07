@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Coroutine, Protocol, cast
 
 log = logging.getLogger(__name__)
 
@@ -163,17 +163,19 @@ def create_plugin_task(
         manager = getattr(bot, "bot_plugins", None)
         creator = getattr(manager, "create_task", None)
         if _is_plugin_task_creator(creator):
-            return creator(plugin, coro, name=name)
+            task_creator = cast(Callable[..., asyncio.Task[Any]], creator)
+            return task_creator(plugin, coro, name=name)
+        task_coro = cast(Coroutine[Any, Any, Any], coro)
         if _asyncio_create_task_supports_name():
             try:
-                return asyncio.create_task(coro, name=name)
+                return asyncio.create_task(task_coro, name=name)
             except TypeError as exc:
                 if "name" not in str(exc):
                     raise
                 # Some tests monkeypatch asyncio.create_task with a reduced callable.
                 # Fall back to the pre-name signature while production keeps using names.
-                return asyncio.create_task(coro)
-        return asyncio.create_task(coro)
+                return asyncio.create_task(task_coro)
+        return asyncio.create_task(task_coro)
     except BaseException:
         _close_unscheduled_awaitable(coro)
         raise
@@ -232,16 +234,18 @@ class TaskSupervisor:
     ) -> asyncio.Task[Any]:
         """Create and track a task for a plugin."""
         task_name = name or f"{plugin}-task"
+        task_coro = cast(Coroutine[Any, Any, Any], coro)
+        task: asyncio.Task[Any]
         if _asyncio_create_task_supports_name():
             try:
-                task = asyncio.create_task(coro, name=task_name)
+                task = asyncio.create_task(task_coro, name=task_name)
             except TypeError as exc:
                 if "name" not in str(exc):
                     raise
                 # Some tests monkeypatch asyncio.create_task with a reduced callable.
-                task = asyncio.create_task(coro)
+                task = asyncio.create_task(task_coro)
         else:
-            task = asyncio.create_task(coro)
+            task = asyncio.create_task(task_coro)
         meta = {
             "plugin": plugin,
             "name": task_name,
@@ -362,7 +366,7 @@ class TaskSupervisor:
                     consecutive = 0
                 consecutive += 1
                 task = asyncio.current_task()
-                meta = self._tasks.get(task, {})
+                meta = self._tasks.get(task, {}) if task is not None else {}
                 meta["restart_count"] = int(meta.get("restart_count") or 0) + 1
                 meta["last_error"] = f"{type(exc).__name__}: {exc}"
                 if consecutive > restart_limit:
@@ -397,7 +401,7 @@ class TaskSupervisor:
                 continue
             else:
                 task = asyncio.current_task()
-                meta = self._tasks.get(task, {})
+                meta = self._tasks.get(task, {}) if task is not None else {}
                 meta["circuit_state"] = "closed"
                 meta["next_restart_at"] = None
                 meta["last_error"] = None

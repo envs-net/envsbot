@@ -24,6 +24,13 @@ def _is_config_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _expected_type_name(expected_type: type | tuple[type, ...]) -> str:
+    """Return a readable name for one or more accepted config types."""
+    if isinstance(expected_type, tuple):
+        return " or ".join(item.__name__ for item in expected_type)
+    return expected_type.__name__
+
+
 def _matches_expected_type(value: object, expected_type: object) -> bool:
     expected_types = (
         expected_type if isinstance(expected_type, tuple) else (expected_type,)
@@ -203,7 +210,7 @@ def check_required_keys(cfg):
             _validate_string(cfg[key], key, errors)
         elif not isinstance(cfg[key], expected_type):
             errors.append(
-                f"{key}: expected {expected_type.__name__}, "
+                f"{key}: expected {_expected_type_name(expected_type)}, "
                 f"got {type(cfg[key]).__name__}"
             )
     return errors
