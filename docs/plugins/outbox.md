@@ -22,7 +22,7 @@ Inspect pending and failed durable message deliveries.
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,outbox <status|dead|retry>`
+Usage: `,outbox <status|dead|retry|delete>`
 
 #### Subcommands
 
@@ -36,7 +36,13 @@ Usage: `,outbox <status|dead|retry>`
   - Examples:
     - `,outbox dead` — List permanently failed deliveries.
 
-- `retry [category]`
-  - Description: Retry dead letters.
+- `retry [id|category|all]`
+  - Description: Retry one or more dead letters.
   - Examples:
+    - `,outbox retry 42` — Retry dead letter #42.
     - `,outbox retry rss` — Retry failed RSS deliveries.
+
+- `delete <id|dead>`
+  - Description: Delete one queued message or purge dead letters.
+  - Examples:
+    - `,outbox delete 42` — Delete queued message #42.

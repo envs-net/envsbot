@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 
+from utils.config.spec import CONFIG_DISPLAY_SECTIONS, CONFIG_FIELDS
+
 
 def test_config_sample_imports_and_exposes_safe_defaults():
     sample = importlib.import_module("config_sample")
@@ -60,3 +62,32 @@ def test_config_sample_imports_and_exposes_safe_defaults():
         "xkcd": False,
         "xmpp": True,
     }
+
+
+def test_config_sample_matches_declarative_schema_exactly():
+    sample = importlib.import_module("config_sample")
+    schema_python_keys = {field.python_key for field in CONFIG_FIELDS.values()}
+    sample_keys = {
+        name
+        for name in vars(sample)
+        if name.isupper() and not name.startswith("_")
+    }
+
+    assert sample_keys == schema_python_keys
+
+
+def test_config_display_sections_cover_declarative_schema_exactly_once():
+    displayed = [key for _title, keys in CONFIG_DISPLAY_SECTIONS for key in keys]
+    schema_python_keys = {field.python_key for field in CONFIG_FIELDS.values()}
+
+    assert len(displayed) == len(set(displayed))
+    assert set(displayed) == schema_python_keys
+
+
+def test_new_operational_defaults_are_declared():
+    fields = CONFIG_FIELDS
+    assert fields["http_max_redirects"].python_key == "HTTP_MAX_REDIRECTS"
+    assert fields["http_max_read_bytes"].python_key == "HTTP_MAX_READ_BYTES"
+    assert fields["task_stale_after_seconds"].python_key == "TASK_STALE_AFTER_SECONDS"
+    assert fields["outbox_max_pending"].minimum_exclusive is True
+    assert fields["admin_report_mode"].choices == ("daily", "problems_only")

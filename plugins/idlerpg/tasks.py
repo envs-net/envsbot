@@ -4,7 +4,11 @@ from __future__ import annotations
 import asyncio
 import random
 from functools import partial
-from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
+from utils.task_supervisor import (
+    create_plugin_task,
+    create_resilient_plugin_task,
+    sleep_with_heartbeat,
+)
 from .handlers import on_message, on_muc_presence
 from .state import _checkpoint_room_clock, _flush_idlerpg_store
 
@@ -155,13 +159,20 @@ async def _sync_tasks_to_enabled_rooms(bot) -> None:
 async def _game_loop(bot, room_jid: str) -> None:
     while True:
         try:
-            await asyncio.sleep(max(1, _dep_config.TICK_SECONDS))
+            supervisor = getattr(bot, "tasks", None)
+            if supervisor is not None:
+                supervisor.heartbeat(_dep_constants.PLUGIN_NAME, room_jid)
+            await sleep_with_heartbeat(
+                bot, _dep_constants.PLUGIN_NAME, room_jid, max(1, _dep_config.TICK_SECONDS)
+            )
             await _tick_room(bot, room_jid, announce=True)
         except asyncio.CancelledError:
             raise
         except Exception:
             _dep_config.log.exception("[IDLERPG] Game loop failed for %s", room_jid)
-            await asyncio.sleep(max(5, _dep_config.TICK_SECONDS))
+            await sleep_with_heartbeat(
+                bot, _dep_constants.PLUGIN_NAME, room_jid, max(5, _dep_config.TICK_SECONDS)
+            )
 
 
 async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:

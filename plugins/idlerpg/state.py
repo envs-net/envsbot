@@ -96,6 +96,7 @@ _PUBLIC_EXPORT_RUNTIME: dict[str, Any] = {
     "last_duration_ms": 0,
     "successes": 0,
     "failures": 0,
+    "consecutive_failures": 0,
     "last_error": "",
     "rooms": 0,
     "players": 0,
@@ -125,6 +126,7 @@ def _reset_public_export_schedule() -> None:
         "last_duration_ms": 0,
         "successes": 0,
         "failures": 0,
+        "consecutive_failures": 0,
         "last_error": "",
         "rooms": 0,
         "players": 0,
@@ -234,11 +236,15 @@ async def _refresh_public_export(
             _PUBLIC_EXPORT_RUNTIME.get(counter, 0) or 0
         ) + 1
         if ok:
+            _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = 0
             _PUBLIC_EXPORT_SCHEDULE["next_at"] = (
                 finished_at + interval if interval > 0 else finished_at
             )
             return True
 
+        _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = int(
+            _PUBLIC_EXPORT_RUNTIME.get("consecutive_failures", 0) or 0
+        ) + 1
         # Failed automatic exports may retry immediately on the next state write.
         _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
         _dep_config.log.warning(

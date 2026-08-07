@@ -9,6 +9,9 @@ import logging
 import time
 from typing import Any
 
+from database.outbox import OutboxCapacityError
+from utils.task_supervisor import ExpectedTaskExit
+
 from bot.room_state import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
@@ -77,6 +80,7 @@ class PersistentOutbox:
         self.delivered = 0
         self.failed_attempts = 0
         self.dead_letters = 0
+        self.capacity_rejections = 0
 
     @property
     def enabled(self) -> bool:
@@ -94,10 +98,11 @@ class PersistentOutbox:
             return
         supervisor = getattr(self.bot, "tasks", None)
         if supervisor is not None:
-            self.task = supervisor.create(
+            self.task = supervisor.create_resilient(
                 "_runtime",
-                self._run(),
+                self._supervised_run,
                 name="persistent-outbox",
+                service=True,
             )
         else:
             self.task = asyncio.create_task(
@@ -137,19 +142,37 @@ class PersistentOutbox:
             return None
         config = getattr(self.bot, "config", {}) or {}
         key = dedupe_key or message_dedupe_key(category, destination, body)
-        message_id = await self.store.enqueue(
-            destination=destination,
-            body=body,
-            message_type=message_type,
-            category=category,
-            dedupe_key=key,
-            max_attempts=(
-                int(max_attempts)
-                if max_attempts is not None
-                else int(config.get("outbox_max_attempts", 12) or 12)
-            ),
-            available_at=available_at,
-        )
+        try:
+            message_id = await self.store.enqueue(
+                destination=destination,
+                body=body,
+                message_type=message_type,
+                category=category,
+                dedupe_key=key,
+                max_attempts=(
+                    int(max_attempts)
+                    if max_attempts is not None
+                    else int(config.get("outbox_max_attempts", 12) or 12)
+                ),
+                available_at=available_at,
+                max_pending=int(config.get("outbox_max_pending", 10000) or 10000),
+                max_bytes=int(config.get("outbox_max_bytes", 50 * 1024 * 1024) or 50 * 1024 * 1024),
+                max_per_destination=int(
+                    config.get("outbox_max_per_destination", 1000) or 1000
+                ),
+                max_per_category=int(
+                    config.get("outbox_max_per_category", 5000) or 5000
+                ),
+            )
+        except OutboxCapacityError as exc:
+            self.capacity_rejections += 1
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            log.error("[OUTBOX] Queue capacity rejected message: %s", exc)
+            alerts = getattr(self.bot, "alerts", None)
+            report = getattr(alerts, "report_outbox_capacity", None)
+            if callable(report):
+                await report(str(exc))
+            return None
         self.wakeup.set()
         return message_id
 
@@ -227,6 +250,10 @@ class PersistentOutbox:
                     queued.category,
                     queued.destination,
                 )
+                alerts = getattr(self.bot, "alerts", None)
+                report = getattr(alerts, "report_outbox_dead", None)
+                if callable(report):
+                    await report(queued.id, queued.category)
             return
 
         await store.mark_sent(queued.id)
@@ -246,11 +273,21 @@ class PersistentOutbox:
             await self._send_one(message)
         return len(queued)
 
+    async def _supervised_run(self) -> None:
+        """Run until graceful shutdown, which is an expected service exit."""
+        await self._run()
+        if self.stop_event.is_set():
+            raise ExpectedTaskExit("persistent outbox stop requested")
+
     async def _run(self) -> None:
         config = getattr(self.bot, "config", {}) or {}
         poll_seconds = max(1.0, float(config.get("outbox_poll_seconds", 5) or 5))
         try:
             while not self.stop_event.is_set():
+                supervisor = getattr(self.bot, "tasks", None)
+                heartbeat = getattr(supervisor, "heartbeat", None)
+                if callable(heartbeat):
+                    heartbeat("_runtime", "persistent-outbox")
                 processed = 0
                 try:
                     processed = await self.run_once()
@@ -282,11 +319,21 @@ class PersistentOutbox:
             else {"pending": 0, "inflight": 0, "dead": 0, "total": 0}
         )
         oldest_age = await self.store.oldest_pending_age() if self.store is not None else 0
+        usage = await self.store.queue_usage() if self.store is not None else {
+            "queued": 0,
+            "bytes": 0,
+            "largest_destination": "",
+            "largest_destination_count": 0,
+            "largest_category": "",
+            "largest_category_count": 0,
+        }
         return {
             **counts,
+            **usage,
             "oldest_pending_age_seconds": oldest_age,
             "delivered_since_start": self.delivered,
             "failed_attempts_since_start": self.failed_attempts,
+            "capacity_rejections_since_start": self.capacity_rejections,
             "last_delivery_at": self.last_delivery_at,
             "last_error": self.last_error,
             "worker_running": bool(self.task and not self.task.done()),

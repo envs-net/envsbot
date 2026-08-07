@@ -47,6 +47,7 @@ from utils.rate_limiter import TokenBucketRateLimiter
 from utils.task_supervisor import TaskSupervisor
 from utils.outbox import PersistentOutbox
 from utils.runtime_watchdog import RuntimeWatchdog
+from utils.admin_alerts import AdminAlertManager
 from utils.version import __version__
 
 # === set up logging ===
@@ -139,6 +140,7 @@ class Bot(
         )
         self.outbox = PersistentOutbox(self)
         self.watchdog = RuntimeWatchdog(self)
+        self.alerts = AdminAlertManager(self)
         self.room_state = room_state
         self._startup_backup_done = False
         self._shutdown_lock = asyncio.Lock()
@@ -262,15 +264,80 @@ def copy_initial_chat_slang(source="init_chat_slang.csv", target="chat_slang.csv
 
 
 def cli(argv: list[str] | None = None) -> int:
-    """Console-script entrypoint for running envsbot.
-
-    Returning an integer keeps the function easy to test and lets both the
-    setuptools console-script wrapper and the direct ``__main__`` path apply
-    the exit code consistently.
-    """
+    """Console-script entrypoint for runtime and local administration commands."""
+    import argparse
     import sys
 
     arguments = list(sys.argv[1:] if argv is None else argv)
+
+    if arguments[:1] == ["db"]:
+        from utils.database_cli import (
+            database_backup,
+            database_check,
+            database_migrate,
+            database_status,
+        )
+
+        parser = argparse.ArgumentParser(prog="envsbot db")
+        subparsers = parser.add_subparsers(dest="command", required=True)
+        subparsers.add_parser("status", help="Show applied/pending schema migrations")
+        migrate_parser = subparsers.add_parser("migrate", help="Apply pending migrations")
+        migrate_parser.add_argument("--dry-run", action="store_true", help="Only list migrations")
+        subparsers.add_parser("check", help="Run integrity, FK and schema checks")
+        backup_parser = subparsers.add_parser("backup", help="Create a SQLite snapshot")
+        backup_parser.add_argument("destination", nargs="?", help="Optional snapshot path")
+        options = parser.parse_args(arguments[1:])
+
+        async def run_db_command():
+            if options.command == "status":
+                return await database_status(config)
+            if options.command == "migrate":
+                return await database_migrate(config, dry_run=options.dry_run)
+            if options.command == "check":
+                return await database_check(config)
+            return await database_backup(config, destination=options.destination)
+
+        try:
+            code, output = asyncio.run(run_db_command())
+        except Exception as exc:
+            print(f"Database command failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        print(output)
+        return int(code)
+
+    if arguments[:1] == ["systemd"]:
+        from utils.systemd_deploy import check_systemd_installation, render_systemd_unit
+
+        parser = argparse.ArgumentParser(prog="envsbot systemd")
+        parser.add_argument("command", choices=("check", "render"))
+        parser.add_argument("--user", default="envsbot", help="systemd service user")
+        parser.add_argument("--group", default="envsbot", help="systemd service group")
+        parser.add_argument(
+            "--environment-file",
+            default="/etc/default/envsbot",
+            help="optional EnvironmentFile path",
+        )
+        options = parser.parse_args(arguments[1:])
+        if options.command == "render":
+            print(
+                render_systemd_unit(
+                    config,
+                    user=options.user,
+                    group=options.group,
+                    environment_file=options.environment_file,
+                ),
+                end="",
+            )
+            return 0
+        code, output = check_systemd_installation(
+            config,
+            user=options.user,
+            group=options.group,
+            environment_file=options.environment_file,
+        )
+        print(output)
+        return int(code)
+
     copy_initial_chat_slang()
     try:
         runner = preflight_check if "--check" in arguments else main

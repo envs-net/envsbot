@@ -284,6 +284,7 @@ class PluginManager:
         *,
         name=None,
         max_restarts=None,
+        service=True,
     ):
         """Create a supervised task with restart backoff and circuit breaking."""
         supervisor = getattr(self.bot, "tasks", None)
@@ -294,6 +295,7 @@ class PluginManager:
             factory,
             name=name,
             max_restarts=max_restarts,
+            service=service,
         )
 
     async def _cancel_plugin_tasks(self, plugin_name):

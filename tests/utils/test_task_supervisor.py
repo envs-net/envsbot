@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from utils import task_supervisor as ts
-from utils.task_supervisor import TaskSupervisor, create_plugin_task
+from utils.task_supervisor import ExpectedTaskExit, TaskSupervisor, create_plugin_task
 
 
 def test_asyncio_create_task_supports_name_branches(monkeypatch):
@@ -485,6 +485,7 @@ async def test_resilient_task_restarts_then_recovers():
         max_restarts=3,
         initial_backoff=0,
         max_backoff=0,
+        service=False,
     )
     assert await task == "ok"
     info = next(item for item in supervisor.snapshot() if item.name == "resilient")
@@ -492,6 +493,65 @@ async def test_resilient_task_restarts_then_recovers():
     assert info.restart_count == 2
     assert info.circuit_state == "closed"
     assert info.last_error is None
+
+
+
+
+@pytest.mark.asyncio
+async def test_service_task_treats_normal_return_as_failure_and_opens_circuit():
+    supervisor = TaskSupervisor()
+    calls = 0
+
+    async def worker():
+        nonlocal calls
+        calls += 1
+        return "unexpected"
+
+    task = supervisor.create_resilient(
+        "example",
+        worker,
+        name="service-return",
+        max_restarts=1,
+        initial_backoff=0,
+        max_backoff=0,
+        service=True,
+    )
+    result = await asyncio.gather(task, return_exceptions=True)
+
+    assert calls == 2
+    assert isinstance(result[0], RuntimeError)
+    assert "service task exited unexpectedly" in str(result[0])
+    info = next(item for item in supervisor.snapshot() if item.name == "service-return")
+    assert info.kind == "service"
+    assert info.circuit_state == "open"
+
+
+@pytest.mark.asyncio
+async def test_service_task_expected_exit_does_not_restart():
+    supervisor = TaskSupervisor()
+    calls = 0
+
+    async def worker():
+        nonlocal calls
+        calls += 1
+        raise ExpectedTaskExit("feed removed")
+
+    task = supervisor.create_resilient(
+        "example",
+        worker,
+        name="expected-exit",
+        max_restarts=3,
+        initial_backoff=0,
+        max_backoff=0,
+        service=True,
+    )
+
+    assert await task is None
+    assert calls == 1
+    info = next(item for item in supervisor.snapshot() if item.name == "expected-exit")
+    assert info.kind == "service"
+    assert info.restart_count == 0
+    assert info.circuit_state == "closed"
 
 
 @pytest.mark.asyncio
@@ -531,3 +591,23 @@ async def test_clear_plugin_failures_resets_open_circuit_diagnostics():
     assert supervisor.clear_plugin_failures("demo") == 1
     assert supervisor.summary()[1] == 0
     assert supervisor.snapshot(include_done=True) == []
+@pytest.mark.asyncio
+async def test_sleep_with_heartbeat_refreshes_during_long_wait(monkeypatch):
+    calls = []
+    sleeps = []
+
+    class Supervisor:
+        def heartbeat(self, plugin, name):
+            calls.append((plugin, name))
+            return True
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(ts.asyncio, "sleep", fake_sleep)
+    bot = SimpleNamespace(tasks=Supervisor())
+
+    await ts.sleep_with_heartbeat(bot, "reports", "daily", 5, interval=2)
+
+    assert sleeps == [2.0, 2.0, 1.0]
+    assert calls == [("reports", "daily")] * 3

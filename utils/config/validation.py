@@ -7,6 +7,7 @@ from zoneinfo import available_timezones
 import slixmpp
 
 from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
+from .spec import CONFIG_FIELDS
 from .errors import ConfigError
 
 
@@ -68,75 +69,7 @@ def _validate_jid(value, key, errors):
 
 
 def _validate_numeric_ranges(cfg, errors):
-    positive_integer_keys = {
-        "backup_keep",
-        "command_usage_retention_days",
-        "database_maintenance_interval_seconds",
-        "outbox_batch_size",
-        "outbox_inflight_timeout_seconds",
-        "outbox_max_attempts",
-        "outbox_retry_initial_seconds",
-        "outbox_retry_max_seconds",
-        "task_restart_max_attempts",
-        "birthday_cache_ttl_seconds",
-        "birthday_check_interval_seconds",
-        "birthday_initial_scan_delay_seconds",
-        "karma_delay_seconds",
-        "message_cache_size",
-        "pin_page_size",
-        "poll_max_history_per_room",
-        "poll_max_option_len",
-        "poll_max_options",
-        "poll_max_question_len",
-        "reminder_max_age_days",
-        "rss_global_query_interval",
-        "rss_broken_error_threshold",
-        "rss_list_page_size",
-        "rss_max_backoff_time",
-        "rss_max_entries_per_poll",
-        "rss_max_read_bytes",
-        "rss_template_max_length",
-        "rss_max_redirects",
-        "rss_retry_initial_delay",
-        "sed_max_input_length",
-        "sed_max_output_length",
-        "sed_max_pattern_length",
-        "sed_max_replacement_length",
-        "tell_delivery_delay_seconds",
-        "urlcheck_max_read_bytes",
-        "urlcheck_max_redirects",
-        "urlcheck_wait_seconds",
-        "xkcd_check_interval",
-        "xkcd_index_start_delay_seconds",
-    }
-    positive_number_keys = {
-        "http_timeout_seconds",
-        "outbox_poll_seconds",
-        "task_restart_initial_seconds",
-        "task_restart_max_seconds",
-        "task_restart_reset_seconds",
-        "watchdog_interval_seconds",
-        "watchdog_lag_failure_seconds",
-        "watchdog_lag_warning_seconds",
-        "rss_fetch_timeout_seconds",
-        "rss_retry_backoff_multiplier",
-        "sed_regex_timeout",
-        "stop_cmd_timeout_seconds",
-        "updatecheck_timeout_seconds",
-        "urlcheck_fetch_timeout_seconds",
-        "vcard_fetch_timeout_seconds",
-        "xmpp_query_timeout_seconds",
-        "xkcd_http_timeout",
-        "xkcd_index_request_delay_seconds",
-    }
-    zero_or_greater_integer_keys = {
-        "max_new_feed_entries",
-        "message_cache_max_age_days",
-        "rss_trusted_max_feeds",
-    }
-    zero_or_greater_number_keys = {
-        "rss_startup_stagger_seconds",
-    }
+    """Validate declarative min/max/choice constraints plus pagination syntax."""
     default_pagination = cfg.get("default_pagination")
     if default_pagination is not None:
         if str(default_pagination).strip().lower() != "all":
@@ -144,51 +77,44 @@ def _validate_numeric_ranges(cfg, errors):
                 errors.append("default_pagination: expected 'all' or positive integer")
             else:
                 try:
-                    parsed_default_pagination = int(str(default_pagination).strip())
+                    parsed = int(str(default_pagination).strip())
                 except (TypeError, ValueError):
-                    parsed_default_pagination = 0
-                if parsed_default_pagination <= 0:
+                    parsed = 0
+                if parsed <= 0:
                     errors.append("default_pagination: expected 'all' or positive integer")
-    range_integer_keys = {"port": (1, 65535)}
-    min_integer_keys = {"version_check_interval": 60}
-    range_number_keys = {"rss_similarity_threshold": (0, 1)}
 
-    for key in positive_integer_keys:
+    for key, field in CONFIG_FIELDS.items():
         value = cfg.get(key)
-        if _is_config_int(value) and value <= 0:
-            errors.append(f"{key}: must be greater than 0")
-
-    for key in positive_number_keys:
-        value = cfg.get(key)
-        if _is_config_number(value) and value <= 0:
-            errors.append(f"{key}: must be greater than 0")
-
-    for key in zero_or_greater_integer_keys:
-        value = cfg.get(key)
-        if _is_config_int(value) and value < 0:
-            errors.append(f"{key}: must be 0 or greater")
-
-    for key in zero_or_greater_number_keys:
-        value = cfg.get(key)
-        if _is_config_number(value) and value < 0:
-            errors.append(f"{key}: must be 0 or greater")
-
-    for key, (minimum, maximum) in range_integer_keys.items():
-        value = cfg.get(key)
-        if _is_config_int(value) and not (minimum <= value <= maximum):
-            errors.append(f"{key}: must be between {minimum} and {maximum}")
-
-    for key, minimum in min_integer_keys.items():
-        value = cfg.get(key)
-        if _is_config_int(value) and value < minimum:
-            errors.append(f"{key}: must be at least {minimum}")
-
-    for key, (minimum, maximum) in range_number_keys.items():
-        value = cfg.get(key)
-        if _is_config_number(value) and not (minimum < value <= maximum):
-            errors.append(
-                f"{key}: must be greater than {minimum} and at most {maximum}"
-            )
+        if value is None or isinstance(value, bool):
+            continue
+        if field.choices and isinstance(value, str) and value not in field.choices:
+            errors.append(f"{key}: expected one of {', '.join(field.choices)}")
+            continue
+        if not isinstance(value, (int, float)):
+            continue
+        if field.minimum is not None and field.maximum is not None:
+            if field.minimum_exclusive:
+                invalid = value <= field.minimum or value > field.maximum
+                if invalid:
+                    errors.append(
+                        f"{key}: must be greater than {field.minimum} and at most {field.maximum}"
+                    )
+            elif value < field.minimum or value > field.maximum:
+                errors.append(
+                    f"{key}: must be between {field.minimum} and {field.maximum}"
+                )
+            continue
+        if field.minimum is not None:
+            invalid = value <= field.minimum if field.minimum_exclusive else value < field.minimum
+            if invalid:
+                if field.minimum_exclusive:
+                    errors.append(f"{key}: must be greater than {field.minimum}")
+                elif field.minimum == 0:
+                    errors.append(f"{key}: must be 0 or greater")
+                else:
+                    errors.append(f"{key}: must be at least {field.minimum}")
+        if field.maximum is not None and value > field.maximum:
+            errors.append(f"{key}: must be at most {field.maximum}")
 
 
 def _validate_timezone(cfg, errors):
@@ -298,12 +224,7 @@ def check_optional_keys(cfg):
                 value,
                 key,
                 errors,
-                allow_empty=key in {
-                    "version_check_notify_jid",
-                    "room_invite_notify_jid",
-                    "admin_report_jid",
-                    "admin_report_timezone",
-                },
+                allow_empty=bool(CONFIG_FIELDS.get(key) and CONFIG_FIELDS[key].allow_empty),
             )
             continue
 

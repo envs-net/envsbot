@@ -109,6 +109,8 @@ async def build_daily_admin_report(bot: Any) -> str:
     plugin_failures = len(getattr(getattr(bot, "bot_plugins", None), "failed_plugins", {}) or {})
     watchdog = getattr(bot, "watchdog", None)
     watchdog_state = watchdog.runtime_state() if watchdog is not None else {}
+    alerts = getattr(bot, "alerts", None)
+    alert_state = alerts.runtime_state() if alerts is not None else {}
 
     lines = [
         "🩺 EnvsBot daily health",
@@ -116,6 +118,7 @@ async def build_daily_admin_report(bot: Any) -> str:
         f"• rooms: {joined}/{configured or joined} joined",
         f"• plugins: {plugin_failures} load failure(s)",
         f"• tasks: {running} running, {failed} failed, {circuits} open circuit(s)",
+        f"• immediate alerts: {int(alert_state.get('active', 0))} active",
         (
             "• outbox: "
             f"{int(outbox_state.get('pending', 0))} pending, "

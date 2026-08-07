@@ -41,16 +41,24 @@ async def _check_database(config: Mapping[str, Any]) -> tuple[bool, str]:
     path = config.get("db", "bot.db")
     db = DatabaseManager(str(path))
     try:
-        await db.connect()
+        await db.connect(
+            run_migrations=False,
+            start_background=False,
+            enforce_schema_compatibility=False,
+        )
         integrity = await db.integrity_check()
         ok = bool(integrity) and str(integrity[0]).lower() == "ok"
         migration_status = await db.migration_status()
         pending = migration_status.get("pending", [])
+        unknown = migration_status.get("unknown", [])
         await db.verify_read_write()
-        suffix = ""
+        suffix_parts = []
         if pending:
-            suffix = f", pending_migrations={','.join(pending)}"
+            suffix_parts.append(f"pending_migrations={','.join(pending)}")
+        if unknown:
+            suffix_parts.append(f"unknown_migrations={','.join(unknown)}")
             ok = False
+        suffix = f", {', '.join(suffix_parts)}" if suffix_parts else ""
         return ok, f"database: integrity={','.join(map(str, integrity or [])) or 'unknown'}{suffix}"
     except Exception as exc:
         return False, f"database: {type(exc).__name__}: {redact_text(exc)}"

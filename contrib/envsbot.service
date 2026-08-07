@@ -11,6 +11,7 @@ User=envsbot
 Group=envsbot
 WorkingDirectory=/srv/envsbot
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/default/envsbot
 ExecStart=/srv/envsbot/.venv/bin/envsbot
 Restart=on-failure
 RestartSec=5
@@ -20,8 +21,9 @@ TimeoutStopSec=45
 # makes only its generated public directories/files web-readable.
 UMask=0077
 
-# Runtime and filesystem hardening. Adjust ReadWritePaths when using a different
-# database, data, backup or log location.
+# Runtime and filesystem hardening. This checked-in unit is an /srv/envsbot
+# example. Prefer `envsbot systemd render` on the target host so WorkingDirectory,
+# ExecStart and ReadWritePaths match the actual installation.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

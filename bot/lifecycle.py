@@ -187,6 +187,9 @@ class LifecycleMixin:
         watchdog_start = getattr(getattr(self, "watchdog", None), "start", None)
         if callable(watchdog_start):
             await watchdog_start()
+        alerts_start = getattr(getattr(self, "alerts", None), "start", None)
+        if callable(alerts_start):
+            await alerts_start()
 
         self.presence.broadcast()
         self.roster.auto_subscribe = True
@@ -233,6 +236,19 @@ class LifecycleMixin:
         """Best-effort ordered shutdown of tasks, cache and database."""
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self.accepting_commands = False
+
+        alerts_status = "skipped"
+        try:
+            alerts = getattr(self, "alerts", None)
+            stop_alerts = getattr(alerts, "stop", None)
+            if callable(stop_alerts):
+                await stop_alerts()
+                alerts_status = "ok"
+        except Exception:
+            alerts_status = "failed"
+            log.exception("[LIFECYCLE] event=shutdown phase=alerts status=failed")
+        else:
+            log.info("[LIFECYCLE] event=shutdown phase=alerts %s", kv(status=alerts_status))
 
         watchdog_status = "skipped"
         try:
@@ -366,6 +382,7 @@ class LifecycleMixin:
             and plugin_status in healthy_statuses
             and task_status in healthy_statuses
             and cache_status in healthy_statuses
+            and alerts_status in healthy_statuses
             and watchdog_status in healthy_statuses
             and outbox_status in healthy_statuses
             else "partial"
@@ -378,6 +395,7 @@ class LifecycleMixin:
                 plugins=plugin_status,
                 tasks=task_status,
                 message_cache=cache_status,
+                alerts=alerts_status,
                 watchdog=watchdog_status,
                 outbox=outbox_status,
                 db=db_status,

@@ -14,7 +14,7 @@ class MessageCacheStore:
         self.db = db
         self._transaction_lock = getattr(db, "transaction_lock", asyncio.Lock())
 
-    async def init(self) -> None:
+    async def init(self, *, commit: bool = True) -> None:
         """Create the persistent message-cache table and lookup indexes."""
         await self.db.execute(
             """
@@ -29,17 +29,20 @@ class MessageCacheStore:
                 message_type TEXT NOT NULL,
                 received_at INTEGER NOT NULL
             )
-            """
+            """,
+            auto_commit=commit,
         )
         await self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_message_cache_conversation_id "
-            "ON message_cache(conversation, id)"
+            "ON message_cache(conversation, id)",
+            auto_commit=commit,
         )
         await self.db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS "
             "idx_message_cache_reply_lookup "
             "ON message_cache(conversation, stanza_id) "
-            "WHERE stanza_id IS NOT NULL"
+            "WHERE stanza_id IS NOT NULL",
+            auto_commit=commit,
         )
 
     async def prune_all(

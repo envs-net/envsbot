@@ -5,6 +5,8 @@ import asyncio
 from typing import Callable
 from datetime import datetime, timezone
 
+from .locking import AsyncRLock
+
 GLOBAL_JID = "__GLOBAL__"
 
 log = logging.getLogger(__name__)
@@ -241,7 +243,7 @@ class UserManager:
 
     def __init__(self, db, transaction_lock=None):
         self.db = db
-        self._transaction_lock = transaction_lock or asyncio.Lock()
+        self._transaction_lock = transaction_lock or AsyncRLock()
         self._nick_index = {}
         self._nick_index_lock = asyncio.Lock()
 
@@ -289,31 +291,37 @@ class UserManager:
         if await self.get(GLOBAL_JID) is None:
             await self.create(GLOBAL_JID, "__global__")
 
-    async def init(self):
-        await self.db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            jid TEXT PRIMARY KEY,
-            nickname TEXT,
-            role INTEGER DEFAULT 80,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            registered INTEGER DEFAULT FALSE
-        )
-        """)
+    async def init(self, *, commit: bool = True):
+        async with self._transaction_lock:
+            await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                jid TEXT PRIMARY KEY,
+                nickname TEXT,
+                role INTEGER DEFAULT 80,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                registered INTEGER DEFAULT FALSE
+            )
+            """)
 
-        await self.db.execute("""
-        CREATE TABLE IF NOT EXISTS users_runtime (
-            jid TEXT PRIMARY KEY,
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            data TEXT DEFAULT '{}' NOT NULL,
-            FOREIGN KEY (jid)
-                REFERENCES users(jid)
-                ON DELETE CASCADE
-                ON UPDATE CASCADE
-        )
-        """)
+            await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS users_runtime (
+                jid TEXT PRIMARY KEY,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                data TEXT DEFAULT '{}' NOT NULL,
+                FOREIGN KEY (jid)
+                    REFERENCES users(jid)
+                    ON DELETE CASCADE
+                    ON UPDATE CASCADE
+            )
+            """)
 
-        # Ensure GLOBAL_JID exists
+            if commit:
+                commit_fn = getattr(self.db, "commit", None)
+                if commit_fn is not None:
+                    await commit_fn()
+
+        # Ensure GLOBAL_JID exists in the write-behind cache.
         await self.ensure_global_exists()
 
         # Load persisted _nick_index
@@ -393,16 +401,20 @@ class UserManager:
         await self.set(jid, "last_seen", now)
 
     async def delete(self, jid):
-        # 1. Delete from database
-        await self.db.execute(
-            "DELETE FROM users WHERE jid = ?",
-            (jid,)
-        )
+        # 1. Delete atomically from the shared SQLite connection.
+        async with self._transaction_lock:
+            await self.db.execute(
+                "DELETE FROM users WHERE jid = ?",
+                (jid,)
+            )
 
-        await self.db.execute(
-            "DELETE FROM users_runtime WHERE jid = ?",
-            (jid,)
-        )
+            await self.db.execute(
+                "DELETE FROM users_runtime WHERE jid = ?",
+                (jid,)
+            )
+            commit_fn = getattr(self.db, "commit", None)
+            if commit_fn is not None:
+                await commit_fn()
 
         # 2. Remove from caches
         self._users_cache.pop(jid, None)
@@ -484,7 +496,7 @@ class UserManager:
                     user.get("role", 80),
                     user.get("last_seen"),
                     user.get("registered", 0),
-                )
+                ),
             )
 
     async def _write_runtime(self, jid: str, data: dict):

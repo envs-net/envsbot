@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 
@@ -6,11 +7,11 @@ class Rooms:
     Rooms table manager.
     """
 
-    def __init__(self, conn):
-
+    def __init__(self, conn, transaction_lock=None):
         self.conn = conn
+        self._transaction_lock = transaction_lock or asyncio.Lock()
 
-    async def init(self):
+    async def init(self, *, commit: bool = True):
 
         await self.conn.execute(
             """
@@ -23,28 +24,29 @@ class Rooms:
             """
         )
 
-        await self.conn.commit()
+        if commit:
+            await self.conn.commit()
 
     async def add(self, room_jid, nick, autojoin=False):
 
         status = json.dumps({})
 
-        await self.conn.execute(
-            "INSERT OR REPLACE INTO rooms (room_jid, nick, autojoin, status)"
-            " VALUES (?, ?, ?, ?)",
-            (room_jid, nick, int(autojoin), status)
-        )
-
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                "INSERT OR REPLACE INTO rooms (room_jid, nick, autojoin, status)"
+                " VALUES (?, ?, ?, ?)",
+                (room_jid, nick, int(autojoin), status)
+            )
+            await self.conn.commit()
 
     async def delete(self, room_jid):
 
-        await self.conn.execute(
-            "DELETE FROM rooms WHERE room_jid = ?",
-            (room_jid,)
-        )
-
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                "DELETE FROM rooms WHERE room_jid = ?",
+                (room_jid,)
+            )
+            await self.conn.commit()
 
     async def update(self, room_jid, **fields):
         # Only allow updates to these columns
@@ -56,12 +58,12 @@ class Rooms:
         keys = ", ".join(f"{k}=?" for k in safe_fields)
         values = list(safe_fields.values())
 
-        await self.conn.execute(
-            f"UPDATE rooms SET {keys} WHERE room_jid=?",
-            (*values, room_jid)
-        )
-
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                f"UPDATE rooms SET {keys} WHERE room_jid=?",
+                (*values, room_jid)
+            )
+            await self.conn.commit()
 
     async def list(self):
 
@@ -135,12 +137,12 @@ class Rooms:
 
         self._set_nested(data, path, value)
 
-        await self.conn.execute(
-            "UPDATE rooms SET status=? WHERE room_jid=?",
-            (json.dumps(data), room_jid)
-        )
-
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                "UPDATE rooms SET status=? WHERE room_jid=?",
+                (json.dumps(data), room_jid)
+            )
+            await self.conn.commit()
 
     async def status_delete(self, room_jid, path):
 
@@ -162,9 +164,9 @@ class Rooms:
 
         current.pop(keys[-1], None)
 
-        await self.conn.execute(
-            "UPDATE rooms SET status=? WHERE room_jid=?",
-            (json.dumps(data), room_jid)
-        )
-
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                "UPDATE rooms SET status=? WHERE room_jid=?",
+                (json.dumps(data), room_jid)
+            )
+            await self.conn.commit()

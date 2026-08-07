@@ -84,6 +84,8 @@ DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
 # Periodic low-impact SQLite maintenance. The worker runs PRAGMA optimize,
 # checkpoints WAL when enabled and prunes old aggregate command statistics.
 DATABASE_MAINTENANCE_INTERVAL_SECONDS = 21600
+# Create a consistent SQLite snapshot before applying pending schema migrations.
+DATABASE_BACKUP_BEFORE_MIGRATE = True
 COMMAND_USAGE_RETENTION_DAYS = 365
 
 # Persistent outbound delivery queue. Failed RSS, reminder and admin-report
@@ -95,6 +97,14 @@ OUTBOX_MAX_ATTEMPTS = 12
 OUTBOX_RETRY_INITIAL_SECONDS = 30
 OUTBOX_RETRY_MAX_SECONDS = 1800
 OUTBOX_INFLIGHT_TIMEOUT_SECONDS = 300
+# Hard growth limits for long outages or broken destinations.
+OUTBOX_MAX_PENDING = 10000
+OUTBOX_MAX_BYTES = 50 * 1024 * 1024
+OUTBOX_MAX_PER_DESTINATION = 1000
+OUTBOX_MAX_PER_CATEGORY = 5000
+# Dead letters older than this are pruned by database maintenance. 0 disables
+# age-based pruning.
+OUTBOX_DEAD_RETENTION_DAYS = 30
 
 # Event-loop monitor and native systemd watchdog integration. With the bundled
 # service unit, a process that is alive but no longer responsive is restarted.
@@ -109,6 +119,8 @@ TASK_RESTART_MAX_ATTEMPTS = 5
 TASK_RESTART_INITIAL_SECONDS = 5.0
 TASK_RESTART_MAX_SECONDS = 300.0
 TASK_RESTART_RESET_SECONDS = 900.0
+# Heartbeats older than this are reported by `,tasks stale`.
+TASK_STALE_AFTER_SECONDS = 3600.0
 
 # Number of recent messages retained per room or private conversation. The
 # cache is shared by all plugins, stored in SQLite and restored on restart.
@@ -143,10 +155,26 @@ BACKUP_RETENTION_DAYS = 0
 BACKUP_ON_START = True
 
 
+# ================= IMMEDIATE ADMIN ALERTS =================
+
+# Send deduplicated state-change warnings to the same destination used by the
+# admin report. Ongoing incidents are repeated only after the cooldown.
+ADMIN_ALERTS_ENABLED = True
+ADMIN_ALERT_INTERVAL_SECONDS = 60
+ADMIN_ALERT_COOLDOWN_SECONDS = 3600
+ADMIN_ALERT_OUTBOX_OLDEST_SECONDS = 1800
+ADMIN_ALERT_ROOM_MISSING_SECONDS = 1800
+ADMIN_ALERT_BACKUP_MAX_AGE_HOURS = 36
+ADMIN_ALERT_IDLERPG_EXPORT_FAILURES = 3
+
+
 # ================= DAILY ADMIN REPORT =================
 
 # Optional compact XMPP-only health report. No HTTP metrics endpoint is opened.
 ADMIN_REPORT_ENABLED = False
+# "daily" always sends; "problems_only" skips a scheduled report when the
+# immediate alert manager currently has no active incident.
+ADMIN_REPORT_MODE = "daily"
 # Empty uses VERSION_CHECK_NOTIFY_JID, ROOM_INVITE_NOTIFY_JID or OWNER.
 ADMIN_REPORT_JID = ""
 ADMIN_REPORT_TIME = "08:00"
@@ -182,6 +210,8 @@ COMMAND_RATE_LIMIT_BYPASS_ROLE = "moderator"
 # value is set below. Keep the User-Agent versionless so it does not have to be
 # updated for every release.
 HTTP_TIMEOUT_SECONDS = 8
+HTTP_MAX_REDIRECTS = 5
+HTTP_MAX_READ_BYTES = 1024 * 1024
 HTTP_USER_AGENT = "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
 
 # Safety guard for user-supplied URLs fetched by RSS and URL title checks.

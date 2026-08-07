@@ -83,10 +83,11 @@ class RuntimeWatchdog:
         self.stop_event = asyncio.Event()
         supervisor = getattr(self.bot, "tasks", None)
         if supervisor is not None:
-            self.task = supervisor.create(
+            self.task = supervisor.create_resilient(
                 "_runtime",
-                self._run(),
+                self._run,
                 name="runtime-watchdog",
+                service=True,
             )
         else:
             self.task = asyncio.create_task(self._run(), name="runtime-watchdog")
@@ -145,6 +146,15 @@ class RuntimeWatchdog:
                         lag,
                         warning_threshold,
                     )
+                    alerts = getattr(self.bot, "alerts", None)
+                    report = getattr(alerts, "report_event_loop_lag", None)
+                    if callable(report):
+                        await report(lag, warning_threshold)
+
+                supervisor = getattr(self.bot, "tasks", None)
+                heartbeat = getattr(supervisor, "heartbeat", None)
+                if callable(heartbeat):
+                    heartbeat("_runtime", "runtime-watchdog")
 
                 if lag >= failure_threshold:
                     self.state.heartbeat_suppressed += 1

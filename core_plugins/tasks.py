@@ -75,7 +75,8 @@ def _compact_task_line(task: TaskInfo) -> str:
     if task.next_restart_at:
         circuit += f" | restart_at={task.next_restart_at}"
     extra = f" | error={task.last_error}" if task.last_error else ""
-    return f"• {task.plugin}/{task.name} — {status_icon(task.status)} {task.status}{heartbeat}{circuit}{extra}"
+    kind = f" | kind={task.kind}"
+    return f"• {task.plugin}/{task.name} — {status_icon(task.status)} {task.status}{kind}{heartbeat}{circuit}{extra}"
 
 
 def _full_task_lines(task: TaskInfo) -> list[str]:
@@ -83,6 +84,7 @@ def _full_task_lines(task: TaskInfo) -> list[str]:
     lines = [
         f"• {task.plugin}/{task.name}",
         f"  status = {task.status}",
+        f"  kind = {task.kind}",
         f"  created_at = {task.created_at}",
         f"  done_at = {task.done_at or '-'}",
         f"  cancelled = {task.cancelled}",

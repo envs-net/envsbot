@@ -49,3 +49,24 @@ async def test_systemd_watchdog_forces_worker_when_unit_requires_it(monkeypatch)
         assert notifications[0].startswith("READY=1")
     finally:
         await runtime.stop()
+
+@pytest.mark.asyncio
+async def test_watchdog_uses_resilient_service_supervision(monkeypatch):
+    from unittest.mock import MagicMock
+
+    monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+    monkeypatch.delenv("WATCHDOG_USEC", raising=False)
+    monkeypatch.setattr(watchdog, "sd_notify", lambda _payload: False)
+    supervisor = SimpleNamespace(create_resilient=MagicMock(return_value=MagicMock()))
+    runtime = watchdog.RuntimeWatchdog(
+        SimpleNamespace(config={"watchdog_enabled": True}, tasks=supervisor)
+    )
+
+    await runtime.start()
+
+    supervisor.create_resilient.assert_called_once_with(
+        "_runtime",
+        runtime._run,
+        name="runtime-watchdog",
+        service=True,
+    )

@@ -9,21 +9,12 @@ from typing import Any
 
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.redaction import redact_named
-from utils.config.spec import operational_startup_only_keys
+from utils.config.spec import startup_only_keys
 
 log = logging.getLogger(__name__)
 
-STARTUP_ONLY_KEYS = {
-    "jid",
-    "password",
-    "resource",
-    "host",
-    "port",
-    "direct_tls",
-    "db",
-    "message_cache_size",
-    "message_cache_max_age_days",
-} | operational_startup_only_keys()
+STARTUP_ONLY_KEYS = startup_only_keys()
+
 
 _RATE_LIMIT_KEYS = {
     "command_rate_limit_capacity",

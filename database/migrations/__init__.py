@@ -24,33 +24,45 @@ class Migration:
 
 async def _initial_runtime_tables(db) -> None:
     """Create core runtime tables owned by the users and rooms managers."""
-    await db.users.init()
-    await db.rooms.init()
+    await db.users.init(commit=False)
+    await db.rooms.init(commit=False)
 
 
 async def _audit_log(db) -> None:
     """Create the audit log table."""
-    await db.audit.init()
+    await db.audit.init(commit=False)
 
 
 async def _message_cache(db) -> None:
     """Create the persistent shared recent-message cache."""
-    await db.message_cache.init()
+    await db.message_cache.init(commit=False)
 
 
 async def _idlerpg_state(db) -> None:
     """Create normalized IdleRPG state tables and indexes."""
-    await db.idlerpg.init()
+    await db.idlerpg.init(commit=False)
 
 
 async def _outbox(db) -> None:
     """Create persistent outbound message queue."""
-    await db.outbox.init()
+    await db.outbox.init(commit=False)
 
 
 async def _command_usage(db) -> None:
     """Create privacy-preserving command usage aggregates."""
-    await db.command_usage.init()
+    await db.command_usage.init(commit=False)
+
+
+async def _outbox_dead_timestamp(db) -> None:
+    """Track when a message entered the dead-letter state for retention."""
+    columns = {
+        str(row["name"])
+        for row in await (
+            await db.conn.execute("PRAGMA table_info(outbox_messages)")
+        ).fetchall()
+    }
+    if "dead_at" not in columns:
+        await db.conn.execute("ALTER TABLE outbox_messages ADD COLUMN dead_at INTEGER")
 
 
 async def _room_invites(db) -> None:
@@ -108,6 +120,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0007_command_usage",
         "Create aggregate command usage statistics",
         _command_usage,
+    ),
+    Migration(
+        "0008_outbox_dead_timestamp",
+        "Track when outbound messages enter dead-letter state",
+        _outbox_dead_timestamp,
     ),
 )
 

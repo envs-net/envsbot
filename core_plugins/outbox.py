@@ -17,7 +17,7 @@ PLUGIN_META = {
     "outbox",
     role=Role.ADMIN,
     short="Inspect pending and failed durable message deliveries.",
-    usage="{prefix}outbox <status|dead|retry>",
+    usage="{prefix}outbox <status|dead|retry|delete>",
     subcommands=[
         help_subcommand(
             "status",
@@ -33,9 +33,18 @@ PLUGIN_META = {
         ),
         help_subcommand(
             "retry",
-            "retry [category]",
-            "Retry dead letters.",
-            examples=[help_example("{prefix}outbox retry rss", "Retry failed RSS deliveries.")],
+            "retry [id|category|all]",
+            "Retry one or more dead letters.",
+            examples=[
+                help_example("{prefix}outbox retry 42", "Retry dead letter #42."),
+                help_example("{prefix}outbox retry rss", "Retry failed RSS deliveries."),
+            ],
+        ),
+        help_subcommand(
+            "delete",
+            "delete <id|dead>",
+            "Delete one queued message or purge dead letters.",
+            examples=[help_example("{prefix}outbox delete 42", "Delete queued message #42.")],
         ),
     ],
     examples=[
@@ -55,17 +64,26 @@ async def outbox_command(bot, sender, nick, args, msg, is_room):
     subcommand = str(args[0]).lower() if args else "status"
     if subcommand == "status":
         state = await runtime.runtime_state()
+        usage = state.get("queue_usage", {})
+        max_bytes = int((getattr(bot, "config", {}) or {}).get("outbox_max_bytes", 50 * 1024 * 1024) or 1)
+        max_pending = int((getattr(bot, "config", {}) or {}).get("outbox_max_pending", 10000) or 1)
         bot.reply(
             msg,
             [
                 "📮 Persistent outbox",
                 f"• worker: {'running' if state['worker_running'] else 'stopped'}",
-                f"• pending: {state['pending']}",
+                f"• pending: {state['pending']} / {max_pending}",
                 f"• inflight: {state['inflight']}",
                 f"• dead: {state['dead']}",
+                f"• queued bytes: {int(usage.get('bytes', 0))} / {max_bytes}",
+                f"• largest destination: {usage.get('largest_destination') or '-'} "
+                f"({usage.get('largest_destination_count', 0)} queued)",
+                f"• largest category: {usage.get('largest_category') or '-'} "
+                f"({usage.get('largest_category_count', 0)} queued)",
                 f"• oldest pending: {state['oldest_pending_age_seconds']}s",
                 f"• delivered since start: {state['delivered_since_start']}",
                 f"• failed attempts since start: {state['failed_attempts_since_start']}",
+                f"• capacity rejections since start: {state.get('capacity_rejections_since_start', 0)}",
                 f"• last error: {state['last_error'] or '-'}",
             ],
         )
@@ -83,12 +101,27 @@ async def outbox_command(bot, sender, nick, args, msg, is_room):
         bot.reply(msg, lines)
         return
     if subcommand == "retry":
-        category = str(args[1]).strip() if len(args) > 1 else None
-        count = await store.retry_dead(category=category)
+        selector = str(args[1]).strip() if len(args) > 1 else "all"
+        if selector.isdigit():
+            count = await store.retry_dead(message_id=int(selector))
+        else:
+            category = None if selector.lower() == "all" else selector
+            count = await store.retry_dead(category=category)
         runtime.wakeup.set()
         bot.reply_ok(msg, f"Queued {count} dead-letter message(s) for retry.")
         return
-    bot.reply_usage(msg, f"{bot.prefix}outbox <status|dead|retry> [category]")
+    if subcommand == "delete":
+        selector = str(args[1]).strip() if len(args) > 1 else ""
+        if selector.isdigit():
+            count = await store.delete(int(selector))
+        elif selector.lower() == "dead":
+            count = await store.delete_dead()
+        else:
+            bot.reply_usage(msg, f"{bot.prefix}outbox delete <id|dead>")
+            return
+        bot.reply_ok(msg, f"Deleted {count} outbox message(s).")
+        return
+    bot.reply_usage(msg, f"{bot.prefix}outbox <status|dead|retry|delete>")
 
 
 async def get_runtime_state(bot, room_jid=None):

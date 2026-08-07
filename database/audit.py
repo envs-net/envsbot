@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -9,10 +10,11 @@ from typing import Any
 class AuditLog:
     """Persist and read admin/security-relevant bot events."""
 
-    def __init__(self, conn):
+    def __init__(self, conn, transaction_lock=None):
         self.conn = conn
+        self._transaction_lock = transaction_lock or asyncio.Lock()
 
-    async def init(self):
+    async def init(self, *, commit: bool = True):
         """Create the audit_log table if it does not exist."""
         await self.conn.execute(
             """
@@ -26,7 +28,8 @@ class AuditLog:
             )
             """
         )
-        await self.conn.commit()
+        if commit:
+            await self.conn.commit()
 
     async def append(
         self,
@@ -37,14 +40,15 @@ class AuditLog:
         details: dict[str, Any] | None = None,
     ) -> None:
         """Append one audit event."""
-        await self.conn.execute(
-            """
-            INSERT INTO audit_log (event, actor, target, details)
-            VALUES (?, ?, ?, ?)
-            """,
-            (event, actor, target, json.dumps(details or {}, sort_keys=True)),
-        )
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                """
+                INSERT INTO audit_log (event, actor, target, details)
+                VALUES (?, ?, ?, ?)
+                """,
+                (event, actor, target, json.dumps(details or {}, sort_keys=True)),
+            )
+            await self.conn.commit()
 
     def _filter_sql(
         self,
@@ -251,9 +255,10 @@ class AuditLog:
         count = int(row["count"] if hasattr(row, "keys") else row[0])
         if dry_run or count == 0:
             return count
-        await self.conn.execute(
-            "DELETE FROM audit_log WHERE created_at < datetime('now', ?)",
-            (f"-{days} days",),
-        )
-        await self.conn.commit()
+        async with self._transaction_lock:
+            await self.conn.execute(
+                "DELETE FROM audit_log WHERE created_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            await self.conn.commit()
         return count

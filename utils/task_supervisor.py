@@ -13,6 +13,10 @@ from typing import Any, Awaitable, Callable, Protocol
 log = logging.getLogger(__name__)
 
 
+class ExpectedTaskExit(Exception):
+    """Signal an intentional service-task exit outside process shutdown."""
+
+
 class BotLike(Protocol):
     """Minimal bot shape required for plugin task creation."""
 
@@ -21,6 +25,33 @@ class BotLike(Protocol):
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+async def sleep_with_heartbeat(
+    bot: Any,
+    plugin: str,
+    name: str,
+    delay: float,
+    *,
+    interval: float = 300.0,
+) -> None:
+    """Sleep while keeping a supervised service task heartbeat fresh.
+
+    Long, intentional waits (for example a daily report schedule or RSS
+    backoff) must not look like a hung worker to `tasks stale`.  The remaining
+    delay is decremented explicitly so tests can replace ``asyncio.sleep``
+    without requiring a real monotonic clock advance.
+    """
+    remaining = max(0.0, float(delay))
+    heartbeat_interval = max(1.0, float(interval))
+    while remaining > 0:
+        supervisor = getattr(bot, "tasks", None)
+        heartbeat = getattr(supervisor, "heartbeat", None)
+        if callable(heartbeat):
+            heartbeat(plugin, name)
+        step = min(remaining, heartbeat_interval)
+        await asyncio.sleep(step)
+        remaining -= step
 
 
 @dataclass(frozen=True)
@@ -38,6 +69,7 @@ class TaskInfo:
     restart_count: int = 0
     circuit_state: str = "closed"
     next_restart_at: str | None = None
+    kind: str = "one-shot"
 
 
 def _is_test_mock(candidate: object) -> bool:
@@ -155,6 +187,7 @@ def create_resilient_plugin_task(
     name: str | None = None,
     max_restarts: int | None = None,
     fallback_creator: Callable[..., asyncio.Task[Any]] | None = None,
+    service: bool = True,
 ) -> asyncio.Task[Any]:
     """Create a restartable supervised task when the runtime supports it."""
     manager = getattr(bot, "bot_plugins", None)
@@ -165,6 +198,7 @@ def create_resilient_plugin_task(
             factory,
             name=name,
             max_restarts=max_restarts,
+            service=service,
         )
     supervisor = getattr(bot, "tasks", None)
     resilient = getattr(supervisor, "create_resilient", None)
@@ -174,6 +208,7 @@ def create_resilient_plugin_task(
             factory,
             name=name,
             max_restarts=max_restarts,
+            service=service,
         )
     creator = fallback_creator or create_plugin_task
     return creator(bot, plugin, factory(), name=name)
@@ -193,6 +228,7 @@ class TaskSupervisor:
         coro: Awaitable[Any],
         *,
         name: str | None = None,
+        kind: str = "one-shot",
     ) -> asyncio.Task[Any]:
         """Create and track a task for a plugin."""
         task_name = name or f"{plugin}-task"
@@ -219,6 +255,7 @@ class TaskSupervisor:
             "restart_count": 0,
             "circuit_state": "closed",
             "next_restart_at": None,
+            "kind": kind,
         }
         self._tasks[task] = meta
         self._by_plugin.setdefault(plugin, set()).add(task)
@@ -235,6 +272,7 @@ class TaskSupervisor:
         initial_backoff: float | None = None,
         max_backoff: float | None = None,
         reset_after: float | None = None,
+        service: bool = True,
     ) -> asyncio.Task[Any]:
         """Create a worker protected by restart backoff and a circuit breaker."""
         config = getattr(self.bot, "config", {}) if self.bot is not None else {}
@@ -266,14 +304,22 @@ class TaskSupervisor:
                 initial_backoff=initial,
                 max_backoff=maximum,
                 reset_after=reset,
+                service=service,
             ),
             name=task_name,
+            kind="service" if service else "one-shot",
         )
 
     async def _notify_circuit_open(self, plugin: str, name: str, error: str) -> None:
         if self.bot is None:
             return
         try:
+            alerts = getattr(self.bot, "alerts", None)
+            report = getattr(alerts, "report_task_circuit", None)
+            if callable(report):
+                await report(plugin, name, error)
+                return
+
             from utils.admin_notify import notify_admin
 
             await notify_admin(
@@ -296,6 +342,7 @@ class TaskSupervisor:
         initial_backoff: float,
         max_backoff: float,
         reset_after: float,
+        service: bool,
     ) -> Any:
         await asyncio.sleep(0)
         consecutive = 0
@@ -303,8 +350,12 @@ class TaskSupervisor:
             started = asyncio.get_running_loop().time()
             try:
                 result = await factory()
+                if service:
+                    raise RuntimeError("service task exited unexpectedly")
             except asyncio.CancelledError:
                 raise
+            except ExpectedTaskExit:
+                return None
             except Exception as exc:
                 run_seconds = asyncio.get_running_loop().time() - started
                 if reset_after and run_seconds >= reset_after:
@@ -592,6 +643,7 @@ class TaskSupervisor:
                     restart_count=int(meta.get("restart_count") or 0),
                     circuit_state=str(meta.get("circuit_state") or "closed"),
                     next_restart_at=meta.get("next_restart_at"),
+                    kind=str(meta.get("kind") or "one-shot"),
                 )
             )
         return sorted(items, key=lambda item: (item.plugin, item.name))

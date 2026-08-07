@@ -124,3 +124,24 @@ async def test_idlerpg_state_store_removes_rooms_with_cascade(tmp_db_path):
         }
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_idlerpg_save_state_is_safe_inside_existing_sqlite_transaction(tmp_db_path):
+    """Regression for `cannot start a transaction within a transaction`."""
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect()
+    try:
+        await db.conn.execute("BEGIN")
+        assert db.conn.in_transaction is True
+
+        await db.idlerpg.save_state(_state())
+
+        # The store uses a nested savepoint and must leave the caller's outer
+        # transaction intact instead of issuing another BEGIN.
+        assert db.conn.in_transaction is True
+        await db.conn.commit()
+        loaded = await db.idlerpg.load_state()
+        assert loaded["rooms"]["room@conf"]["players"]["alice@example.org"]["name"] == "Alice"
+    finally:
+        await db.close()

@@ -31,7 +31,11 @@ from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
 from utils.formatting import page_size_for, parse_page_args
 
-from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
+from utils.task_supervisor import (
+    create_plugin_task,
+    create_resilient_plugin_task,
+    sleep_with_heartbeat,
+)
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -524,7 +528,10 @@ async def xkcd_check_loop(bot):
 
         while True:
             try:
-                await asyncio.sleep(CHECK_INTERVAL)
+                supervisor = getattr(bot, "tasks", None)
+                if supervisor is not None:
+                    supervisor.heartbeat("xkcd", "xkcd-check")
+                await sleep_with_heartbeat(bot, "xkcd", "xkcd-check", CHECK_INTERVAL)
 
                 latest = await get_latest_xkcd()
                 if not latest:
@@ -891,6 +898,7 @@ async def on_load(bot):
         name="xkcd-index",
         max_restarts=3,
         fallback_creator=create_plugin_task,
+        service=False,
     )
     CHECK_TASK = create_resilient_plugin_task(
         bot,

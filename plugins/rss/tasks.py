@@ -5,7 +5,12 @@ from __future__ import annotations
 import asyncio
 from urllib.parse import urlparse
 
-from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
+from utils.task_supervisor import (
+    ExpectedTaskExit,
+    create_plugin_task,
+    create_resilient_plugin_task,
+    sleep_with_heartbeat,
+)
 
 from .config import (
     DEFAULT_POLL_INTERVAL,
@@ -28,7 +33,6 @@ from .store import (
     _record_feed_check,
     _retry_delay,
     _set_feed_field,
-    _sleep_for_retry,
     _update_feed_link,
     _update_feed,
     get_feeds,
@@ -50,16 +54,21 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
             url,
             initial_delay,
         )
-        await asyncio.sleep(initial_delay)
+        await sleep_with_heartbeat(
+            bot, "rss", f"rss-check-{url}", initial_delay
+        )
 
     while True:
+        supervisor = getattr(bot, "tasks", None)
+        if supervisor is not None:
+            supervisor.heartbeat("rss", f"rss-check-{url}")
         _, feed = await _load_feed(store, url)
 
         if feed is None:
-            break
+            raise ExpectedTaskExit(f"RSS feed removed: {url}")
 
         if _feed_is_globally_paused(feed):
-            await asyncio.sleep(period)
+            await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", period)
             continue
 
         feed_title = feed["title"]
@@ -71,7 +80,10 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
 
         now = _now()
 
-        if await _sleep_for_retry(period, next_retry, now):
+        if next_retry > now:
+            await sleep_with_heartbeat(
+                bot, "rss", f"rss-check-{url}", next_retry - now
+            )
             continue
 
         try:
@@ -84,7 +96,7 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
 
         await _handle_feed_recovery(bot, store, url, error_count)
 
-        if await _handle_empty_feed(url, period, parsed):
+        if await _handle_empty_feed(bot, url, period, parsed):
             continue
 
         feed_link = await _maybe_update_feed_link(
@@ -92,7 +104,7 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
         )
 
         if await _initialize_missing_last_id(bot, store, url, last_id, parsed):
-            await asyncio.sleep(period)
+            await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", period)
             continue
 
         new_entries = _collect_new_entries(parsed, last_id)
@@ -106,7 +118,7 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
             await _handle_post_error(bot, store, url, period, now, exc)
             continue
 
-        await asyncio.sleep(period)
+        await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", period)
 async def ensure_task(bot, store, url, period, *, initial_delay=0.0):
     """Ensure a check task is running for the given feed."""
     if url in CHECK_TASKS and not CHECK_TASKS[url].done():
@@ -195,7 +207,7 @@ async def _handle_post_error(bot, store, url, period, now, exc):
         ) or changed
 
     await _update_feed(bot, store, url, mutator)
-    await asyncio.sleep(retry_delay)
+    await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", retry_delay)
 
 
 async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
@@ -227,11 +239,11 @@ async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
         error_count,
         next_retry,
     )
-    await asyncio.sleep(retry_delay)
-async def _handle_empty_feed(url, period, parsed):
+    await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", retry_delay)
+async def _handle_empty_feed(bot, url, period, parsed):
     if not parsed.entries:
         log.debug("Feed %s has no entries", url)
-        await asyncio.sleep(period)
+        await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", period)
         return True
     return False
 async def _handle_feed_recovery(bot, store, url, error_count):

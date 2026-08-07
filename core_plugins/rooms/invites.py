@@ -163,28 +163,42 @@ def extract_room_invite(msg) -> dict[str, str] | None:
     return _room_invite_from_muc_plugin(msg) or _room_invite_from_direct_plugin(msg)
 
 
+def _db_write_lock(bot):
+    db = getattr(bot, "db", None)
+    return getattr(db, "transaction_lock", _NullAsyncLock())
+
+
+class _NullAsyncLock:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
 async def setup_room_invites_db(bot) -> None:
     """Create the persistent pending room invite table when needed."""
     conn = getattr(getattr(bot, "db", None), "conn", None)
     if conn is None:
         return
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS room_invites (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            room_jid TEXT NOT NULL,
-            inviter TEXT NOT NULL,
-            reason TEXT,
-            created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-            UNIQUE(room_jid, inviter)
+    async with _db_write_lock(bot):
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS room_invites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_jid TEXT NOT NULL,
+                inviter TEXT NOT NULL,
+                reason TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                UNIQUE(room_jid, inviter)
+            )
+            """
         )
-        """
-    )
-    await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at "
-        "ON room_invites(created_at)"
-    )
-    await conn.commit()
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at "
+            "ON room_invites(created_at)"
+        )
+        await conn.commit()
 
 
 async def load_pending_room_invites(bot) -> dict[int, dict]:
@@ -232,8 +246,9 @@ async def load_pending_room_invites(bot) -> dict[int, dict]:
 
     if expired_ids:
         placeholders = ",".join("?" for _ in expired_ids)
-        await conn.execute(f"DELETE FROM room_invites WHERE id IN ({placeholders})", expired_ids)
-        await conn.commit()
+        async with _db_write_lock(bot):
+            await conn.execute(f"DELETE FROM room_invites WHERE id IN ({placeholders})", expired_ids)
+            await conn.commit()
         log.info("Expired %d pending room invite(s)", len(expired_ids))
 
     return bot.pending_room_invites
@@ -275,15 +290,16 @@ async def _store_pending_room_invite(bot, room_jid: str, inviter: str, reason: s
         return invite
 
     try:
-        cur = await conn.execute(
-            """
-            INSERT INTO room_invites (room_jid, inviter, reason, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (room_jid, inviter, reason or "", created_at),
-        )
-        await conn.commit()
-        invite_id = int(cur.lastrowid)
+        async with _db_write_lock(bot):
+            cur = await conn.execute(
+                """
+                INSERT INTO room_invites (room_jid, inviter, reason, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (room_jid, inviter, reason or "", created_at),
+            )
+            await conn.commit()
+            invite_id = int(cur.lastrowid)
     except Exception:
         await load_pending_room_invites(bot)
         return bot.pending_room_invites.get(bot.pending_room_invite_index.get(key))
@@ -328,8 +344,9 @@ async def _delete_pending_room_invite(bot, invite_id: int) -> dict | None:
                     "reason": row[3] or "",
                     "created_at": int(row[4] or 0),
                 }
-        await conn.execute("DELETE FROM room_invites WHERE id = ?", (invite_id,))
-        await conn.commit()
+        async with _db_write_lock(bot):
+            await conn.execute("DELETE FROM room_invites WHERE id = ?", (invite_id,))
+            await conn.commit()
 
     if invite:
         index.pop((str(invite["room_jid"]), str(invite["inviter"])), None)
@@ -360,10 +377,11 @@ async def cleanup_all_room_invites(bot) -> int:
     count = len(getattr(bot, "pending_room_invites", {}) or {})
     conn = getattr(getattr(bot, "db", None), "conn", None)
     if conn is not None:
-        cur = await conn.execute("DELETE FROM room_invites")
-        await conn.commit()
-        if cur.rowcount is not None and cur.rowcount >= 0:
-            count = cur.rowcount
+        async with _db_write_lock(bot):
+            cur = await conn.execute("DELETE FROM room_invites")
+            await conn.commit()
+            if cur.rowcount is not None and cur.rowcount >= 0:
+                count = cur.rowcount
     bot.pending_room_invites = {}
     bot.pending_room_invite_index = {}
     return count

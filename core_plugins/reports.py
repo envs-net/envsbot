@@ -10,7 +10,7 @@ from utils.admin_notify import admin_notify_target, notify_admin
 from utils.admin_reports import build_daily_admin_report
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
-from utils.task_supervisor import create_resilient_plugin_task
+from utils.task_supervisor import create_resilient_plugin_task, sleep_with_heartbeat
 
 PLUGIN_META = {
     "name": "reports",
@@ -66,9 +66,17 @@ async def send_report(bot, *, manual: bool = False) -> bool:
 
 async def _report_loop(bot) -> None:
     while True:
+        supervisor = getattr(bot, "tasks", None)
+        if supervisor is not None:
+            supervisor.heartbeat("reports", "daily-admin-report")
         target = _next_report_at(bot)
         delay = max(1.0, (target - datetime.now(target.tzinfo)).total_seconds())
-        await asyncio.sleep(delay)
+        await sleep_with_heartbeat(bot, "reports", "daily-admin-report", delay)
+        config = getattr(bot, "config", {}) or {}
+        mode = str(config.get("admin_report_mode", "daily") or "daily").strip().lower()
+        alerts = getattr(bot, "alerts", None)
+        if mode == "problems_only" and alerts is not None and alerts.active_count() == 0:
+            continue
         await send_report(bot)
 
 
@@ -145,6 +153,7 @@ async def report_command(bot, sender, nick, args, msg, is_room):
         [
             "🩺 Daily admin report",
             f"• enabled: {enabled}",
+            f"• mode: {str(config.get('admin_report_mode', 'daily') or 'daily')}",
             f"• destination: {admin_notify_target(bot) or '-'}",
             f"• next run: {next_at}",
             f"• worker: {'running' if _REPORT_TASK and not _REPORT_TASK.done() else 'stopped'}",
@@ -157,6 +166,7 @@ async def get_runtime_state(bot, room_jid=None):
     config = getattr(bot, "config", {}) or {}
     return {
         "enabled": bool(config.get("admin_report_enabled", False)),
+        "mode": str(config.get("admin_report_mode", "daily") or "daily"),
         "destination_configured": bool(admin_notify_target(bot)),
         "worker_running": bool(_REPORT_TASK and not _REPORT_TASK.done()),
         "next_run": _next_report_at(bot).isoformat(timespec="minutes"),

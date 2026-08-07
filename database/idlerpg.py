@@ -94,7 +94,7 @@ class IdleRPGStateStore:
         self._event_ids: dict[str, set[str]] = {}
         self._recent_event_ids: dict[str, set[str]] = {}
 
-    async def init(self) -> None:
+    async def init(self, *, commit: bool = True) -> None:
         """Create normalized state tables and lookup indexes."""
         await self.db.conn.execute(
             """
@@ -168,6 +168,8 @@ class IdleRPGStateStore:
             "CREATE INDEX IF NOT EXISTS idx_idlerpg_events_room_season "
             "ON idlerpg_events(room_jid, season_started_at, ts)"
         )
+        if commit:
+            await self.db.conn.commit()
 
     async def _load_state_locked(self) -> dict[str, Any]:
         room_rows = await (
@@ -360,8 +362,9 @@ class IdleRPGStateStore:
                 room: set(ids) for room, ids in self._recent_event_ids.items()
             }
 
+            savepoint = "idlerpg_save_state"
+            await self.db.conn.execute(f"SAVEPOINT {savepoint}")
             try:
-                await self.db.conn.execute("BEGIN IMMEDIATE")
                 stale_rooms = set(self._room_hashes) - current_room_jids
                 for room_jid in sorted(stale_rooms):
                     await self.db.conn.execute(
@@ -566,9 +569,10 @@ class IdleRPGStateStore:
                     new_event_ids[room_jid] = keep_ids
                     new_recent_ids[room_jid] = set(recent_ids)
 
-                await self.db.conn.commit()
+                await self.db.conn.execute(f"RELEASE {savepoint}")
             except Exception:
-                await self.db.conn.rollback()
+                await self.db.conn.execute(f"ROLLBACK TO {savepoint}")
+                await self.db.conn.execute(f"RELEASE {savepoint}")
                 raise
 
             self._room_hashes = new_room_hashes

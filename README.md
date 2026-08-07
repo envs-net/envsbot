@@ -62,8 +62,7 @@ echo "Using EnvsBot release $LATEST_TAG"
 
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -e .
+pip install -c constraints/python313.txt -e .
 
 cp config_sample.py config.py
 $EDITOR config.py
@@ -95,8 +94,12 @@ git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
 source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -e .
+pip install -c constraints/python313.txt -e .
+envsbot db status
+envsbot db migrate --dry-run
+envsbot db backup
+envsbot db migrate
+envsbot db check
 envsbot --check
 exit
 
@@ -350,16 +353,21 @@ ReadWritePaths=/srv/envsbot
 WantedBy=multi-user.target
 ```
 
-Install and start:
+Install and start. The repository unit remains a documented `/srv/envsbot`
+example; `envsbot systemd render` is safer for installations with custom paths:
 
 ```bash
-sudo install -m 0644 envsbot.service /etc/systemd/system/envsbot.service
+envsbot systemd check
+envsbot systemd render | sudo tee /etc/systemd/system/envsbot.service >/dev/null
+sudo systemd-analyze verify /etc/systemd/system/envsbot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now envsbot.service
 journalctl -u envsbot.service -f
 ```
 
-Adjust paths, user and group for your installation.
+The rendered service uses the active executable/configuration and includes
+`EnvironmentFile=-/etc/default/envsbot` for optional local environment
+overrides.
 
 ---
 
@@ -411,11 +419,13 @@ Install development dependencies and run the test suite:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
 pytest
 ```
+
+Use `constraints/python312.txt` instead when the environment runs Python 3.12.
+Dependency snapshots are updated intentionally with
+`scripts/update-constraints.sh`; see [`constraints/README.md`](constraints/README.md).
 
 Run without coverage when you only want a quick local check:
 

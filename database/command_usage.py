@@ -12,7 +12,7 @@ class CommandUsageStore:
     def __init__(self, db):
         self.db = db
 
-    async def init(self) -> None:
+    async def init(self, *, commit: bool = True) -> None:
         await self.db.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS command_usage (
@@ -32,6 +32,8 @@ class CommandUsageStore:
             "CREATE INDEX IF NOT EXISTS idx_command_usage_last_used "
             "ON command_usage(last_used_at)"
         )
+        if commit:
+            await self.db.conn.commit()
 
     async def record(
         self,
@@ -47,31 +49,32 @@ class CommandUsageStore:
         success_count = 1 if success else 0
         failure_count = 0 if success else 1
         duration = max(0, int(duration_ms))
-        await self.db.conn.execute(
-            """
-            INSERT INTO command_usage (
-                command_name, context, day, success_count, failure_count,
-                total_duration_ms, max_duration_ms, last_used_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(command_name, context, day) DO UPDATE SET
-                success_count=command_usage.success_count + excluded.success_count,
-                failure_count=command_usage.failure_count + excluded.failure_count,
-                total_duration_ms=command_usage.total_duration_ms + excluded.total_duration_ms,
-                max_duration_ms=MAX(command_usage.max_duration_ms, excluded.max_duration_ms),
-                last_used_at=MAX(command_usage.last_used_at, excluded.last_used_at)
-            """,
-            (
-                str(command_name),
-                str(context),
-                day,
-                success_count,
-                failure_count,
-                duration,
-                duration,
-                ts,
-            ),
-        )
-        await self.db.conn.commit()
+        async with self.db.transaction_lock:
+            await self.db.conn.execute(
+                """
+                INSERT INTO command_usage (
+                    command_name, context, day, success_count, failure_count,
+                    total_duration_ms, max_duration_ms, last_used_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(command_name, context, day) DO UPDATE SET
+                    success_count=command_usage.success_count + excluded.success_count,
+                    failure_count=command_usage.failure_count + excluded.failure_count,
+                    total_duration_ms=command_usage.total_duration_ms + excluded.total_duration_ms,
+                    max_duration_ms=MAX(command_usage.max_duration_ms, excluded.max_duration_ms),
+                    last_used_at=MAX(command_usage.last_used_at, excluded.last_used_at)
+                """,
+                (
+                    str(command_name),
+                    str(context),
+                    day,
+                    success_count,
+                    failure_count,
+                    duration,
+                    duration,
+                    ts,
+                ),
+            )
+            await self.db.conn.commit()
 
     async def summary(self, *, days: int = 30, limit: int = 30) -> list[dict[str, Any]]:
         cutoff = int(time.time()) - max(1, int(days)) * 86400
@@ -119,9 +122,10 @@ class CommandUsageStore:
             "%Y-%m-%d",
             time.gmtime(time.time() - int(retention_days) * 86400),
         )
-        cursor = await self.db.conn.execute(
-            "DELETE FROM command_usage WHERE day < ?",
-            (cutoff_day,),
-        )
-        await self.db.conn.commit()
-        return max(0, int(cursor.rowcount or 0))
+        async with self.db.transaction_lock:
+            cursor = await self.db.conn.execute(
+                "DELETE FROM command_usage WHERE day < ?",
+                (cutoff_day,),
+            )
+            await self.db.conn.commit()
+            return max(0, int(cursor.rowcount or 0))

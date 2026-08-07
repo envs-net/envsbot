@@ -47,7 +47,11 @@ from core_plugins._core import (
 # --------------------------------------------------------------------------
 from plugins.vcard import get_user_vcard as get_profile
 
-from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
+from utils.task_supervisor import (
+    create_plugin_task,
+    create_resilient_plugin_task,
+    sleep_with_heartbeat,
+)
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -564,16 +568,23 @@ async def _birthday_check_loop(
     last_full_check_date: str | None = None
 
     try:
-        await asyncio.sleep(INITIAL_SCAN_DELAY_SECONDS)
+        await sleep_with_heartbeat(
+            bot, "birthday_notify", "birthday-check-loop", INITIAL_SCAN_DELAY_SECONDS
+        )
 
         while True:
+            supervisor = getattr(bot, "tasks", None)
+            if supervisor is not None:
+                supervisor.heartbeat("birthday_notify", "birthday-check-loop")
             today_str = _today().isoformat()
 
             if last_full_check_date != today_str:
                 await _check_and_announce_birthdays(bot)
                 last_full_check_date = today_str
 
-            await asyncio.sleep(check_interval)
+            await sleep_with_heartbeat(
+                bot, "birthday_notify", "birthday-check-loop", check_interval
+            )
 
     except asyncio.CancelledError:
         log.debug("[BIRTHDAY] ✅ Birthday check loop stopped")

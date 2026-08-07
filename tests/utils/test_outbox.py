@@ -58,3 +58,29 @@ async def test_outbox_sends_and_deletes_claimed_message():
     runtime.store.mark_sent.assert_awaited_once_with(2)
     runtime.store.mark_failed.assert_not_awaited()
     assert runtime.delivered == 1
+
+@pytest.mark.asyncio
+async def test_outbox_uses_resilient_service_supervision():
+    supervisor = SimpleNamespace(create_resilient=MagicMock(return_value=MagicMock()))
+    bot = SimpleNamespace(config={}, tasks=supervisor)
+    runtime = PersistentOutbox(bot)
+    store = SimpleNamespace(recover_inflight=AsyncMock())
+
+    await runtime.start(store)
+
+    supervisor.create_resilient.assert_called_once_with(
+        "_runtime",
+        runtime._supervised_run,
+        name="persistent-outbox",
+        service=True,
+    )
+
+@pytest.mark.asyncio
+async def test_outbox_graceful_stop_is_expected_service_exit():
+    from utils.task_supervisor import ExpectedTaskExit
+
+    runtime = PersistentOutbox(SimpleNamespace(config={}))
+    runtime.stop_event.set()
+
+    with pytest.raises(ExpectedTaskExit):
+        await runtime._supervised_run()

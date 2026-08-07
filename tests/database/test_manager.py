@@ -41,6 +41,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
         "0005_idlerpg_state",
         "0006_outbox",
         "0007_command_usage",
+        "0008_outbox_dead_timestamp",
     }
     await db.close()
 
@@ -122,13 +123,8 @@ async def test_database_manager_list_migrations():
 
 
 @pytest.mark.asyncio
-async def test_applied_versions_and_run_migrations_skip_existing(monkeypatch):
+async def test_applied_versions_and_run_migrations_skip_existing(tmp_path, monkeypatch):
     manager_mod = sys.modules[DatabaseManager.__module__]
-
-    db = DatabaseManager(":memory:")
-    db.list_migrations = AsyncMock(return_value=[{"version": "0001"}])
-    assert await db.applied_migration_versions() == {"0001"}
-
     calls = []
 
     class Migration:
@@ -137,31 +133,77 @@ async def test_applied_versions_and_run_migrations_skip_existing(monkeypatch):
             self.description = f"description {version}"
 
         async def run(self, db_arg):
-            assert db_arg is db
             calls.append(("run", self.version))
+            await db_arg.conn.execute(
+                f"CREATE TABLE migrated_{self.version} (value INTEGER)"
+            )
 
-    db.applied_migration_versions = AsyncMock(return_value={"0001"})
-    async def mark_applied(version):
-        calls.append(("mark", version))
-
-    db.mark_migration_applied = AsyncMock(side_effect=mark_applied)
     def fake_available_migrations():
         return (Migration("0001"), Migration("0002"), Migration("0003"))
 
-    monkeypatch.setattr(
-        manager_mod,
-        "available_migrations",
-        fake_available_migrations,
-    )
+    monkeypatch.setattr(manager_mod, "available_migrations", fake_available_migrations)
+    db = DatabaseManager(str(tmp_path / "migrations.db"), flush_interval=999)
+    await db.connect(run_migrations=False, start_background=False)
+    try:
+        await db.mark_migration_applied("0001")
+        assert await db.applied_migration_versions() == {"0001"}
 
-    await db.run_migrations()
+        applied = await db.run_migrations(backup_before=False)
 
-    assert calls == [
-        ("run", "0002"),
-        ("mark", "0002"),
-        ("run", "0003"),
-        ("mark", "0003"),
-    ]
+        assert applied == ["0002", "0003"]
+        assert calls == [("run", "0002"), ("run", "0003")]
+        assert await db.applied_migration_versions() == {"0001", "0002", "0003"}
+        history = await db.migration_history(limit=10)
+        assert [row["version"] for row in history] == ["0003", "0002"]
+        assert all(row["status"] == "applied" for row in history)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_migration_rolls_back_savepoint_and_records_failure(tmp_path, monkeypatch):
+    manager_mod = sys.modules[DatabaseManager.__module__]
+
+    class BrokenMigration:
+        version = "9000_broken"
+        description = "create then fail"
+
+        async def run(self, db_arg):
+            await db_arg.conn.execute("CREATE TABLE must_rollback (value INTEGER)")
+            raise RuntimeError("migration exploded")
+
+    monkeypatch.setattr(manager_mod, "available_migrations", lambda: (BrokenMigration(),))
+    db = DatabaseManager(str(tmp_path / "broken-migration.db"), flush_interval=999)
+    await db.connect(run_migrations=False, start_background=False)
+    try:
+        with pytest.raises(RuntimeError, match="migration exploded"):
+            await db.run_migrations(backup_before=False)
+
+        assert await db.fetch_one(
+            "SELECT name FROM sqlite_master WHERE name='must_rollback'"
+        ) is None
+        assert "9000_broken" not in await db.applied_migration_versions()
+        history = await db.migration_history(limit=1)
+        assert history[0]["version"] == "9000_broken"
+        assert history[0]["status"] == "failed"
+        assert "migration exploded" in str(history[0]["error"])
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_refuses_unknown_newer_migration(tmp_path):
+    from database.manager import DatabaseSchemaTooNewError
+
+    db = DatabaseManager(str(tmp_path / "newer-schema.db"), flush_interval=999)
+    await db.connect(run_migrations=False, start_background=False)
+    try:
+        await db.mark_migration_applied("9999_future_schema")
+        with pytest.raises(DatabaseSchemaTooNewError, match="newer than this envsbot build"):
+            await db.assert_schema_compatible()
+    finally:
+        await db.close()
+
 
 @pytest.mark.asyncio
 async def test_database_manager_integrity_check_and_optimize(tmp_db_path):
@@ -216,11 +258,14 @@ async def test_database_migration_status_and_read_write_check(tmp_path, monkeypa
 
     db = DatabaseManager(str(tmp_path / "bot.db"), flush_interval=999)
     db.applied_migration_versions = AsyncMock(return_value={"0001"})
+    db.migration_history = AsyncMock(return_value=[])
     assert await db.pending_migration_versions() == ["0002"]
     assert await db.migration_status() == {
         "known": ["0001", "0002"],
         "applied": ["0001"],
         "pending": ["0002"],
+        "unknown": [],
+        "last_run": None,
     }
 
     from database.migrations import available_migrations as real_available_migrations

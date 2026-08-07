@@ -222,12 +222,18 @@ possible. The queue resumes after reconnects and process restarts.
 ```text
 ,outbox status
 ,outbox dead
-,outbox retry
+,outbox retry 42
 ,outbox retry rss
+,outbox retry all
+,outbox delete 42
+,outbox delete dead
 ```
 
-`dead` deliberately omits message bodies. `doctor database` reports pending and
-dead counts, the oldest pending age and whether the worker is running.
+`dead` deliberately omits message bodies. `status` also reports configured count
+and byte limits plus the largest destination/category backlog. `doctor database`
+reports pending and dead counts, the oldest pending age and whether the worker is
+running. Dead letters are retained for `OUTBOX_DEAD_RETENTION_DAYS` and pruned
+automatically; setting the retention to `0` disables age-based dead-letter cleanup.
 
 ## Task circuits and systemd watchdog
 
@@ -260,21 +266,33 @@ or never used without retaining caller identities or command arguments:
 Counters are retained for `COMMAND_USAGE_RETENTION_DAYS` and pruned by automatic
 database maintenance.
 
-## Optional daily admin report
+## Immediate admin alerts and optional daily report
 
-The daily report is disabled by default and is delivered only over XMPP. It
-summarizes uptime, room joins, plugin/task failures, open circuits, outbox state,
-event-loop lag, database maintenance, latest backup verification and aggregate
-24-hour command counts.
+Immediate alerts are enabled by default and delivered only over XMPP to the same
+administrative destination used by runtime notifications. They cover state
+changes such as an opened task circuit, outbox pressure/dead letters, a prolonged
+missing room, stale or invalid backups, repeated database/IdleRPG export failures
+and excessive event-loop lag. Alerts are stateful and deduplicated: the first
+problem is marked red, optional cooldown reminders yellow and recovery green.
+
+The daily report is disabled by default. It summarizes uptime, room joins,
+plugin/task failures, open circuits, outbox state, event-loop lag, database
+maintenance, latest backup verification and aggregate 24-hour command counts.
 
 ```python
 ADMIN_REPORT_ENABLED = True
 ADMIN_REPORT_JID = "admin@example.org"
 ADMIN_REPORT_TIME = "08:00"
 ADMIN_REPORT_TIMEZONE = "Europe/Berlin"
+ADMIN_REPORT_MODE = "daily"  # or "problems_only"
+
+ADMIN_ALERTS_ENABLED = True
+ADMIN_ALERT_INTERVAL_SECONDS = 60
+ADMIN_ALERT_COOLDOWN_SECONDS = 3600
 ```
 
-Use `,report status` to inspect the schedule and `,report now` for a manual
+`ADMIN_REPORT_MODE = "problems_only"` suppresses the scheduled report when no
+active immediate alert exists. Use `,report status` to inspect the schedule and `,report now` for a manual
 report. `ADMIN_REPORT_BACKUP_SMOKE_TEST = True` additionally extracts and opens
 the latest backup in a temporary directory; it does not modify production
 files. No external metrics service or network listener is created.

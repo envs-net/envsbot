@@ -158,14 +158,14 @@ async def test_check_database_success_pending_and_failure(monkeypatch, tmp_path)
             self.closed = False
             instances.append(self)
 
-        async def connect(self):
+        async def connect(self, **_kwargs):
             self.connected = True
 
         async def integrity_check(self):
             return ["ok"]
 
         async def migration_status(self):
-            return {"pending": []}
+            return {"pending": [], "unknown": []}
 
         async def verify_read_write(self):
             self.verified = True
@@ -181,15 +181,24 @@ async def test_check_database_success_pending_and_failure(monkeypatch, tmp_path)
 
     class PendingDB(FakeDB):
         async def migration_status(self):
-            return {"pending": ["0002", "0003"]}
+            return {"pending": ["0002", "0003"], "unknown": []}
 
     monkeypatch.setattr(preflight, "DatabaseManager", PendingDB)
     ok, message = await preflight._check_database({"db": tmp_path / "bot.db"})
-    assert ok is False
+    assert ok is True
     assert "pending_migrations=0002,0003" in message
 
+    class NewerDB(FakeDB):
+        async def migration_status(self):
+            return {"pending": [], "unknown": ["9999_future"]}
+
+    monkeypatch.setattr(preflight, "DatabaseManager", NewerDB)
+    ok, message = await preflight._check_database({"db": tmp_path / "bot.db"})
+    assert ok is False
+    assert "unknown_migrations=9999_future" in message
+
     class BrokenDB(FakeDB):
-        async def connect(self):
+        async def connect(self, **_kwargs):
             raise RuntimeError("password=secret")
 
     monkeypatch.setattr(preflight, "DatabaseManager", BrokenDB)
@@ -230,7 +239,7 @@ async def test_collect_preflight_checks_and_run_preflight(monkeypatch, capsys):
 @pytest.mark.asyncio
 async def test_check_database_keeps_bare_key_names_in_error_text(monkeypatch, tmp_path):
     class BareSecretDB:
-        async def connect(self):
+        async def connect(self, **_kwargs):
             raise RuntimeError("secret")
 
         async def close(self):
