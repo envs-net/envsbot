@@ -210,4 +210,3 @@ def check_systemd_installation(
         )
     )
     return (0 if all(ok for ok, _ in checks) else 1), "\n".join(lines)
-

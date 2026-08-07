@@ -44,9 +44,16 @@ Managed archives are written to `BACKUP_DIR`, which defaults to `data/backups`.
 When `BACKUP_ON_START = True`, envsbot creates one startup backup per process
 start; this also covers service restarts. Each archive contains `bot.db`,
 `config.py`, `vcard.py`, `chat_slang.csv` and a `manifest.json` when those
-files exist. Restore is owner-only and creates a
-safety backup before overwriting files. Restart envsbot after restoring
-`config.py` or `vcard.py` changes.
+files exist. Restore is owner-only. Before changing live files, envsbot fully
+verifies the selected archive, stages the runtime files and creates a
+checksum-verified safety backup. The online restore replaces only `bot.db` and
+the active config;
+`vcard.py` and `chat_slang.csv` remain available in the archive for an
+offline/manual restore while the service is stopped. This keeps restore
+compatible with hardened deployments whose application checkout is read-only.
+If a live replacement or database reconnect fails, envsbot attempts to roll
+the runtime files back from the safety backup. Restart envsbot after restoring
+the config.
 
 Backup archives contain secrets such as the bot password and optional API keys.
 Keep them private and include them in your normal server backup policy.

@@ -113,8 +113,15 @@ Before a release, verify backup creation and listing:
 Test restore only on a disposable instance:
 
 ```text
+,backup restore-plan last
 ,restore last confirm
 ```
+
+The restore command verifies and stages the selected archive before changing
+live files, creates a checksum-verified safety backup and automatically attempts rollback on a
+failed live restore. Only the database and active config are restored online;
+`vcard.py` and `chat_slang.csv` are retained in the archive for manual/offline
+recovery because a hardened application checkout is read-only.
 
 ## GitHub / mirror checks
 

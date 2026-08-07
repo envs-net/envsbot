@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 BACKUP_PREFIX = "envsbot-backup"
 MIGRATION_BACKUP_PREFIX = "envsbot-db-pre-migration"
 MANIFEST_NAME = "manifest.json"
-RESTORE_ENTRIES = ("bot.db", "config.py", "vcard.py", "chat_slang.csv")
+SOURCE_TREE_BACKUP_ENTRIES = ("vcard.py", "chat_slang.csv")
 
 
 class BackupError(Exception):
@@ -576,6 +576,37 @@ def _target_paths() -> dict[str, Path]:
     }
 
 
+def _config_restore_member(members: set[str]) -> str | None:
+    """Return the config archive member matching the active config format."""
+    config_path = get_runtime_config_path()
+    suffix = config_path.suffix.lower()
+    if suffix == ".py":
+        candidates = ("config.py",)
+    elif suffix == ".json":
+        candidates = (config_path.name, "config.json")
+    else:
+        candidates = (config_path.name,)
+    return next((name for name in dict.fromkeys(candidates) if name in members), None)
+
+
+def _restore_specs(members: set[str]) -> tuple[list[tuple[str, Path]], list[str]]:
+    """Return live restore targets and source-tree entries kept for offline restore."""
+    targets = _target_paths()
+    online: list[tuple[str, Path]] = []
+    if "bot.db" in members:
+        online.append(("bot.db", targets["bot.db"]))
+
+    config_member = _config_restore_member(members)
+    if config_member is not None:
+        online.append((config_member, targets["config.py"]))
+
+    manual = [entry for entry in SOURCE_TREE_BACKUP_ENTRIES if entry in members]
+    for config_entry in ("config.py", "config.json"):
+        if config_entry in members and config_entry != config_member:
+            manual.append(config_entry)
+    return online, manual
+
+
 def _safe_members(archive: zipfile.ZipFile) -> set[str]:
     names = set()
     for info in archive.infolist():
@@ -605,6 +636,76 @@ def _restore_entry(archive: zipfile.ZipFile, entry: str, target: Path) -> None:
         raise
 
 
+def _stage_archive_entries(
+    archive_path: Path,
+    specs: list[tuple[str, Path]],
+    stage_dir: Path,
+) -> dict[str, Path]:
+    """Extract all live restore inputs before any target is changed."""
+    staged: dict[str, Path] = {}
+    with zipfile.ZipFile(archive_path) as archive:
+        members = _safe_members(archive)
+        for index, (entry, _target) in enumerate(specs):
+            if entry not in members:
+                raise BackupError(f"Backup archive is missing restore entry: {entry}")
+            target = stage_dir / f"{index:02d}-{Path(entry).name}"
+            with archive.open(entry) as source, target.open("wb") as handle:
+                shutil.copyfileobj(source, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(target, PRIVATE_FILE_MODE)
+            staged[entry] = target
+    return staged
+
+
+def _replace_from_stage(source: Path, target: Path) -> None:
+    """Atomically replace one live target from a staged restore file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            os.chmod(tmp_path, PRIVATE_FILE_MODE)
+            with source.open("rb") as handle:
+                shutil.copyfileobj(handle, tmp)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, target)
+        ensure_private_file(target)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _apply_staged_entries(
+    staged: dict[str, Path],
+    specs: list[tuple[str, Path]],
+) -> list[str]:
+    """Publish all staged live restore entries in target order."""
+    restored: list[str] = []
+    for entry, target in specs:
+        _replace_from_stage(staged[entry], target)
+        restored.append(entry)
+    return restored
+
+
+def _rollback_staged_entries(
+    staged_by_target: dict[Path, Path],
+    specs: list[tuple[str, Path]],
+    original_exists: dict[Path, bool],
+) -> None:
+    """Restore pre-restore target contents after a failed live restore."""
+    for _entry, target in specs:
+        if original_exists.get(target, False):
+            source = staged_by_target.get(target)
+            if source is None:
+                raise BackupError(f"Safety backup is missing rollback target: {target}")
+            _replace_from_stage(source, target)
+        else:
+            target.unlink(missing_ok=True)
+
+
 async def _close_database(bot: Any) -> bool:
     db = getattr(bot, "db", None)
     close = getattr(db, "close", None)
@@ -621,57 +722,141 @@ async def _connect_database(bot: Any) -> None:
         await _maybe_await(connect())
 
 
-def _restore_archive_entries(archive_path: Path, targets: dict[str, Path]) -> list[str]:
-    """Extract managed restore entries in a worker thread."""
-    restored: list[str] = []
+async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
+    """Safely restore runtime files and reconnect the database when possible.
+
+    Source-tree files remain in the archive for offline/manual recovery.  A live
+    restore only replaces the database and active config because hardened
+    deployments deliberately keep the application checkout read-only.
+    """
+    archive_path = archive_path.resolve()
+    smoke = await asyncio.to_thread(smoke_test_backup, archive_path)
+    if not bool(smoke.get("ok")):
+        errors = ", ".join(str(item) for item in smoke.get("errors", []))
+        raise BackupError(
+            f"Backup is not safe to restore: {errors or 'verification failed'}"
+        )
+
+    manifest = await asyncio.to_thread(_read_manifest, archive_path)
     with zipfile.ZipFile(archive_path) as archive:
         members = _safe_members(archive)
-        for entry in RESTORE_ENTRIES:
-            if entry not in members:
-                continue
-            _restore_entry(archive, entry, targets[entry])
-            restored.append(entry)
-    return restored
+    restore_specs, manual_entries = _restore_specs(members)
+    if not restore_specs:
+        raise BackupError("Backup contains no runtime files that can be restored online.")
 
-
-async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
-    """Restore managed backup entries and reconnect the database when possible."""
-    archive_path = archive_path.resolve()
-    manifest = await asyncio.to_thread(_read_manifest, archive_path)
-    # Do not prune while the selected archive is still needed for restore.
-    safety_backup = await create_backup(
-        bot,
-        reason="restore-safety",
-        prune=False,
-        verify=False,
-    )
-
-    restored: list[str] = []
-    closed_db = False
-    try:
-        closed_db = await _close_database(bot)
-        targets = _target_paths()
-        restored = await asyncio.to_thread(
-            _restore_archive_entries,
+    with tempfile.TemporaryDirectory(prefix="envsbot-restore-stage-") as stage_name:
+        stage_root = Path(stage_name)
+        restore_stage = stage_root / "restore"
+        rollback_stage = stage_root / "rollback"
+        restore_stage.mkdir()
+        rollback_stage.mkdir()
+        staged_restore = await asyncio.to_thread(
+            _stage_archive_entries,
             archive_path,
-            targets,
+            restore_specs,
+            restore_stage,
         )
-        if closed_db:
-            await _connect_database(bot)
-            closed_db = False
+        original_exists = {target: target.exists() for _entry, target in restore_specs}
+
+        # Do not prune while the selected archive or safety archive is needed.
+        safety_backup = await create_backup(
+            bot,
+            reason="restore-safety",
+            prune=False,
+            verify=False,
+        )
+        safety_verify = await asyncio.to_thread(verify_backup, safety_backup)
+        if not bool(safety_verify.get("ok")):
+            errors = ", ".join(str(item) for item in safety_verify.get("errors", []))
+            raise BackupError(
+                "Safety backup verification failed before restore: "
+                f"{errors or 'unknown error'}"
+            )
+
+        with zipfile.ZipFile(safety_backup) as archive:
+            safety_members = _safe_members(archive)
+        safety_specs = _restore_specs(safety_members)[0]
+        safety_by_target = {target: entry for entry, target in safety_specs}
+        rollback_specs: list[tuple[str, Path]] = []
+        for _entry, target in restore_specs:
+            if not original_exists[target]:
+                continue
+            safety_entry = safety_by_target.get(target)
+            if safety_entry is None:
+                raise BackupError(
+                    f"Safety backup cannot roll back restore target: {target}"
+                )
+            rollback_specs.append((safety_entry, target))
+        staged_rollback = await asyncio.to_thread(
+            _stage_archive_entries,
+            safety_backup,
+            rollback_specs,
+            rollback_stage,
+        )
+        rollback_by_target = {
+            target: staged_rollback[safety_entry]
+            for safety_entry, target in rollback_specs
+        }
+
+        restored: list[str] = []
+        try:
+            closed_db = await _close_database(bot)
+        except Exception as close_error:
+            with suppress(Exception):
+                await _connect_database(bot)
+            raise BackupError(
+                f"Could not close database before restore: {close_error}"
+            ) from close_error
+
+        try:
+            restored = await asyncio.to_thread(
+                _apply_staged_entries,
+                staged_restore,
+                restore_specs,
+            )
+            if closed_db:
+                await _connect_database(bot)
+        except Exception as restore_error:
+            rollback_error: Exception | None = None
+            try:
+                # A failed reconnect may leave a partially-open DB connection.
+                # Close it best-effort before restoring the original DB bytes.
+                with suppress(Exception):
+                    await _close_database(bot)
+                await asyncio.to_thread(
+                    _rollback_staged_entries,
+                    rollback_by_target,
+                    restore_specs,
+                    original_exists,
+                )
+                await _connect_database(bot)
+            except Exception as exc:
+                rollback_error = exc
+
+            if rollback_error is not None:
+                raise BackupError(
+                    "Restore failed and automatic rollback also failed; "
+                    f"safety backup {safety_backup.name} was preserved. "
+                    f"Restore error: {restore_error}; rollback error: {rollback_error}"
+                ) from restore_error
+            raise BackupError(
+                "Restore failed; original runtime files were rolled back from "
+                f"{safety_backup.name}: {restore_error}"
+            ) from restore_error
+
+    try:
         await asyncio.to_thread(prune_old_backups)
     except Exception:
-        if closed_db:
-            try:
-                await _connect_database(bot)
-            except Exception:
-                log.debug("[BACKUP] Failed to reconnect database after restore error", exc_info=True)
-        raise
+        log.exception(
+            "[BACKUP] restore status=ok prune_status=failed archive=%s",
+            archive_path.name,
+        )
 
     return {
         "archive": archive_path.name,
         "manifest": manifest,
         "restored": restored,
+        "manual_restore": manual_entries,
         "safety_backup": safety_backup.name,
     }
 
@@ -772,13 +957,14 @@ def restore_plan(archive_path: Path) -> dict[str, Any]:
     """Return what restore_backup() would restore without writing files."""
     archive_path = archive_path.resolve()
     manifest = _read_manifest(archive_path)
-    targets = _target_paths()
     with zipfile.ZipFile(archive_path) as archive:
         members = _safe_members(archive)
-        entries = [entry for entry in RESTORE_ENTRIES if entry in members]
+    specs, manual_entries = _restore_specs(members)
+    entries = [entry for entry, _target in specs]
     return {
         "archive": archive_path.name,
         "manifest": manifest,
         "entries": entries,
-        "targets": {entry: str(targets[entry]) for entry in entries},
+        "targets": {entry: str(target) for entry, target in specs},
+        "manual_restore": manual_entries,
     }

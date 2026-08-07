@@ -191,6 +191,7 @@ def test_problem_lines_empty_messages():
 
 @pytest.mark.asyncio
 async def test_doctor_release_section_reports_release_readiness(bot, monkeypatch):
+    bot.version = "1.5.0"
     monkeypatch.setattr(
         doctor,
         "check_for_updates_once",
@@ -213,6 +214,34 @@ async def test_doctor_release_section_reports_release_readiness(bot, monkeypatch
     assert any("Command docs: ok" in line for line in lines)
     assert any("Migrations: ok" in line for line in lines)
     assert any("Plugin metadata: ok" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_latest_release_line_marks_local_unreleased_build_ahead(bot, monkeypatch):
+    bot.version = "1.8.0"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(False, "1.7.3", None)),
+    )
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "⚠️ Latest release: v1.7.3 (local build ahead / unreleased)"
+
+
+@pytest.mark.asyncio
+async def test_latest_release_line_marks_remote_update_available(bot, monkeypatch):
+    bot.version = "1.7.3"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(True, "1.8.0", None)),
+    )
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "🔴 Latest release: v1.8.0 (update available)"
 
 
 @pytest.mark.asyncio

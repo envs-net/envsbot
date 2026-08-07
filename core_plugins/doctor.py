@@ -35,8 +35,8 @@ from utils.file_security import (
 )
 from utils.formatting import format_page, parse_page_args
 from utils.performance import snapshot as performance_snapshot
-from utils.updatecheck import check_for_updates_once
-from utils.version import display_version
+from utils.updatecheck import check_for_updates_once, parse_version_tuple
+from utils.version import display_version, normalized_version
 
 PLUGIN_META = {
     "name": "doctor",
@@ -597,8 +597,25 @@ async def _latest_release_line(bot: Any) -> str:
         return _line(None, "Latest release", f"check failed: {error}")
     if not remote_version:
         return _line(None, "Latest release", "unknown")
-    status = "update available" if update_available else "current"
-    return _line(not update_available, "Latest release", f"{display_version(remote_version)} ({status})")
+
+    raw_local = getattr(bot, "version", None)
+    local_version = normalized_version(
+        raw_local if isinstance(raw_local, str) and raw_local.strip() else None
+    )
+    remote_parts = parse_version_tuple(remote_version)
+    local_parts = parse_version_tuple(local_version)
+    if update_available or remote_parts > local_parts:
+        return _line(
+            False,
+            "Latest release",
+            f"{display_version(remote_version)} (update available)",
+        )
+    if local_parts > remote_parts:
+        return _warning_line(
+            "Latest release",
+            f"{display_version(remote_version)} (local build ahead / unreleased)",
+        )
+    return _line(True, "Latest release", f"{display_version(remote_version)} (current)")
 
 
 def _command_docs_line() -> str:

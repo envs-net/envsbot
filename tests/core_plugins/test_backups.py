@@ -65,6 +65,7 @@ async def test_restore_runs_with_confirmation(bot, msg, monkeypatch):
     restore = AsyncMock(return_value={
         "archive": "backup.zip",
         "restored": ["bot.db", "config.py"],
+        "manual_restore": ["vcard.py", "chat_slang.csv"],
         "safety_backup": "safety.zip",
     })
     audit = AsyncMock()
@@ -78,7 +79,9 @@ async def test_restore_runs_with_confirmation(bot, msg, monkeypatch):
     restore.assert_awaited_once_with(bot, Path("backup.zip"))
     audit.assert_awaited_once()
     bot.reply_ok.assert_called_once()
-    assert "Backup restored" in bot.reply_ok.call_args.args[1]
+    reply = bot.reply_ok.call_args.args[1]
+    assert "Backup restored" in reply
+    assert "Offline/manual only: vcard.py, chat_slang.csv" in reply
 
 
 def test_backup_formatting_helpers():
@@ -255,6 +258,7 @@ async def test_backup_restore_supports_dry_run(bot, msg, monkeypatch):
         "manifest": {"created_at": "2026-06-24T12:00:00Z"},
         "entries": ["bot.db"],
         "targets": {"bot.db": "/srv/envsbot/bot.db"},
+        "manual_restore": ["vcard.py", "chat_slang.csv"],
     }))
 
     await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last", "dry-run"], msg, False)
@@ -262,3 +266,5 @@ async def test_backup_restore_supports_dry_run(bot, msg, monkeypatch):
     lines = bot.reply.call_args.args[1]
     assert lines[0] == "📦 Backup restore dry-run"
     assert "• bot.db -> /srv/envsbot/bot.db" in lines
+    assert "Kept in archive for offline/manual restore:" in lines
+    assert "• vcard.py" in lines

@@ -324,6 +324,10 @@ def _format_restore_plan_lines(plan: dict) -> list[str]:
             lines.append(f"• {entry} -> {plan['targets'][entry]}")
     else:
         lines.append("• nothing")
+    manual_entries = list(plan.get("manual_restore") or [])
+    if manual_entries:
+        lines.append("Kept in archive for offline/manual restore:")
+        lines.extend(f"• {entry}" for entry in manual_entries)
     return lines
 
 
@@ -353,9 +357,11 @@ async def backup_restore(bot, sender, nick, args, msg, is_room):
         bot.reply_warn(
             msg,
             f"Usage: {bot.prefix}restore <archive|last> <dry-run|confirm>\n"
-            "Restore overwrites bot.db, config.py, vcard.py and chat_slang.csv "
-            "when those files are present in the archive. A safety backup is "
-            "created first.",
+            "Live restore overwrites bot.db and the active config when present. "
+            "vcard.py and chat_slang.csv stay in the archive for offline/manual "
+            "restore because the application checkout may be read-only. The "
+            "selected backup is fully verified and a safety backup is created "
+            "before any live file is replaced.",
         )
         return
 
@@ -375,14 +381,21 @@ async def backup_restore(bot, sender, nick, args, msg, is_room):
         "backup_restored",
         actor=sender,
         target=result["archive"],
-        details={"restored": result["restored"], "safety_backup": result["safety_backup"]},
+        details={
+            "restored": result["restored"],
+            "manual_restore": result.get("manual_restore", []),
+            "safety_backup": result["safety_backup"],
+        },
     )
     restored = ", ".join(result["restored"]) or "nothing"
+    manual_restore = ", ".join(result.get("manual_restore") or []) or "none"
     bot.reply_ok(
         msg,
         "Backup restored.\n"
         f"Archive: {result['archive']}\n"
-        f"Restored: {restored}\n"
+        f"Restored online: {restored}\n"
+        f"Offline/manual only: {manual_restore}\n"
         f"Safety backup: {result['safety_backup']}\n"
-        "Restart the bot after restoring config.py or vcard.py changes.",
+        "Restart the bot after restoring the config. Source-tree files should "
+        "only be restored while the service is stopped.",
     )

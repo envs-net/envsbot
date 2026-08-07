@@ -32,6 +32,18 @@ class FakeDB:
         self.connected = True
 
 
+class ReconnectOnceFailDB(FakeDB):
+    def __init__(self, path):
+        super().__init__(path)
+        self.connect_attempts = 0
+
+    async def connect(self):
+        self.connect_attempts += 1
+        if self.connect_attempts == 1:
+            raise RuntimeError("reconnect failed")
+        self.connected = True
+
+
 def _write_runtime_files(root):
     db_path = root / "bot.db"
     db_path.write_bytes(b"sqlite-data")
@@ -39,6 +51,27 @@ def _write_runtime_files(root):
     (root / "vcard.py").write_text('FN = "EnvsBot"\n', encoding="utf-8")
     (root / "chat_slang.csv").write_text("brb,be right back\n", encoding="utf-8")
     return db_path
+
+
+def _write_sqlite_value(path, value):
+    path.unlink(missing_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("CREATE TABLE restore_test (value TEXT NOT NULL)")
+        connection.execute("INSERT INTO restore_test VALUES (?)", (value,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _read_sqlite_value(path):
+    connection = sqlite3.connect(path)
+    try:
+        row = connection.execute("SELECT value FROM restore_test").fetchone()
+        assert row is not None
+        return str(row[0])
+    finally:
+        connection.close()
 
 
 @pytest.fixture
@@ -104,10 +137,11 @@ async def test_create_backup_offloads_archive_work_and_pruning(backup_env, monke
 
 @pytest.mark.asyncio
 async def test_restore_backup_restores_files_and_reconnects_database(backup_env):
+    _write_sqlite_value(backup_env.db_path, "backup")
     bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
     archive = await backups.create_backup(bot, reason="before change")
 
-    backup_env.db_path.write_bytes(b"changed-db")
+    _write_sqlite_value(backup_env.db_path, "current")
     (backup_env.root / "config.py").write_text("BROKEN = True\n", encoding="utf-8")
     (backup_env.root / "vcard.py").write_text("BROKEN = True\n", encoding="utf-8")
     (backup_env.root / "chat_slang.csv").write_text("changed\n", encoding="utf-8")
@@ -116,11 +150,13 @@ async def test_restore_backup_restores_files_and_reconnects_database(backup_env)
 
     assert bot.db.closed is True
     assert bot.db.connected is True
-    assert backup_env.db_path.read_bytes() == b"sqlite-data"
+    assert _read_sqlite_value(backup_env.db_path) == "backup"
     assert (backup_env.root / "config.py").read_text(encoding="utf-8") == 'JID = "bot@example.org"\n'
-    assert (backup_env.root / "vcard.py").read_text(encoding="utf-8") == 'FN = "EnvsBot"\n'
-    assert (backup_env.root / "chat_slang.csv").read_text(encoding="utf-8") == "brb,be right back\n"
+    assert (backup_env.root / "vcard.py").read_text(encoding="utf-8") == "BROKEN = True\n"
+    assert (backup_env.root / "chat_slang.csv").read_text(encoding="utf-8") == "changed\n"
     assert result["archive"] == archive.name
+    assert result["restored"] == ["bot.db", "config.py"]
+    assert result["manual_restore"] == ["vcard.py", "chat_slang.csv"]
     assert result["safety_backup"].endswith("restore-safety.zip")
 
 
@@ -195,15 +231,64 @@ def test_backup_resolve_details_prune_and_safe_members(backup_env, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_backup_restore_reconnects_after_restore_error(backup_env, monkeypatch):
+    _write_sqlite_value(backup_env.db_path, "backup")
     bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
     archive = await backups.create_backup(bot, reason="restore failure")
-    monkeypatch.setattr(backups, "_restore_entry", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("copy failed")))
+    _write_sqlite_value(backup_env.db_path, "current")
+    (backup_env.root / "config.py").write_text("CURRENT = True\n", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match="copy failed"):
+    replace = backups._replace_from_stage
+    calls = 0
+
+    def fail_second_replace(source, target):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("copy failed")
+        replace(source, target)
+
+    monkeypatch.setattr(backups, "_replace_from_stage", fail_second_replace)
+
+    with pytest.raises(backups.BackupError, match="rolled back"):
         await backups.restore_backup(bot, archive)
 
     assert bot.db.closed is True
     assert bot.db.connected is True
+    assert _read_sqlite_value(backup_env.db_path) == "current"
+    assert (backup_env.root / "config.py").read_text(encoding="utf-8") == "CURRENT = True\n"
+
+
+@pytest.mark.asyncio
+async def test_restore_rejects_invalid_database_before_live_changes(backup_env):
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(bot, reason="invalid target", verify=False)
+    current_config = (backup_env.root / "config.py").read_text(encoding="utf-8")
+
+    with pytest.raises(backups.BackupError, match="not safe to restore"):
+        await backups.restore_backup(bot, archive)
+
+    assert bot.db.closed is False
+    assert bot.db.connected is False
+    assert backup_env.db_path.read_bytes() == b"sqlite-data"
+    assert (backup_env.root / "config.py").read_text(encoding="utf-8") == current_config
+    assert len(list(backup_env.backup_dir.glob("*restore-safety.zip"))) == 0
+
+
+@pytest.mark.asyncio
+async def test_restore_rolls_back_when_database_reconnect_fails(backup_env):
+    _write_sqlite_value(backup_env.db_path, "backup")
+    bot = SimpleNamespace(db=ReconnectOnceFailDB(backup_env.db_path))
+    archive = await backups.create_backup(bot, reason="before reconnect failure")
+    _write_sqlite_value(backup_env.db_path, "current")
+    (backup_env.root / "config.py").write_text("CURRENT = True\n", encoding="utf-8")
+
+    with pytest.raises(backups.BackupError, match="rolled back"):
+        await backups.restore_backup(bot, archive)
+
+    assert bot.db.connect_attempts == 2
+    assert bot.db.connected is True
+    assert _read_sqlite_value(backup_env.db_path) == "current"
+    assert (backup_env.root / "config.py").read_text(encoding="utf-8") == "CURRENT = True\n"
 
 
 def test_plan_backup_prune_supports_dry_run_and_age(backup_env):
@@ -274,6 +359,23 @@ def test_verify_backup_and_restore_plan(backup_env):
     plan = backups.restore_plan(archive)
     assert plan["entries"] == ["bot.db"]
     assert plan["targets"]["bot.db"] == str(backup_env.db_path)
+
+
+def test_restore_plan_never_writes_legacy_json_into_python_config(backup_env):
+    backup_env.backup_dir.mkdir(parents=True, exist_ok=True)
+    archive = backup_env.backup_dir / "envsbot-backup-20260101-legacy-json.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("bot.db", b"sqlite-data")
+        zf.writestr("config.json", b'{"jid": "bot@example.org"}')
+        zf.writestr(
+            "manifest.json",
+            json.dumps({"app": "envsbot", "created_at": "2026-01-01T00:00:00Z", "files": []}),
+        )
+
+    plan = backups.restore_plan(archive)
+
+    assert plan["entries"] == ["bot.db"]
+    assert plan["manual_restore"] == ["config.json"]
 
 
 @pytest.mark.asyncio

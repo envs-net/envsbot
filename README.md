@@ -377,7 +377,7 @@ Commands:
 ,restore last confirm
 ```
 
-Restore is owner-only and creates a safety backup before overwriting files. Restart the bot after restoring `config.py` or `vcard.py` changes. Backup archives contain secrets and should be protected like `config.py`.
+Restore is owner-only. Before changing live files, envsbot fully verifies the selected archive, stages the runtime files and creates a checksum-verified safety backup. The online restore replaces only `bot.db` and the active config; `vcard.py` and `chat_slang.csv` remain in the archive for an offline/manual restore because hardened deployments keep the application checkout read-only. A failed live restore is rolled back from the safety backup when possible. Restart the bot after restoring the config. Backup archives contain secrets and should be protected like `config.py`.
 
 ## SQLite Maintenance
 
