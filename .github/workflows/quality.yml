@@ -11,7 +11,11 @@ jobs:
   test:
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        include:
+          - python-version: "3.12"
+            constraints: constraints/python312.txt
+          - python-version: "3.13"
+            constraints: constraints/python313.txt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +23,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: pip install -c constraints/python${{ matrix.python-version }}.txt -r requirements.txt -r requirements-dev.txt
+      - run: pip install -c ${{ matrix.constraints }} -r requirements.txt -r requirements-dev.txt
       - run: python -m pip check
       - run: ./scripts/quality.sh
       - run: python -m build
