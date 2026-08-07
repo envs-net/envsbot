@@ -3,7 +3,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 from .locking import AsyncRLock
 

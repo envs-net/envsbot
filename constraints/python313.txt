@@ -1,9 +1,9 @@
 # Fully resolved dependency snapshot for Python 3.13.
-# Reviewed from the green CI dependency resolution on 2026-08-07.
+# Security refresh: aiohttp 3.14.3 on 2026-08-07; verify via CI closure check.
 # Regenerate intentionally with scripts/update-constraints.sh 3.13.
 aiodns==4.0.4
 aiohappyeyeballs==2.7.1
-aiohttp==3.14.2
+aiohttp==3.14.3
 aiosignal==1.4.0
 aiosqlite==0.22.1
 ast-serialize==0.7.0

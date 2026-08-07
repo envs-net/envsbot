@@ -83,3 +83,15 @@ def test_github_actions_use_node24_generations():
 
     assert "actions/checkout@v7" in workflow
     assert "actions/setup-python@v7" in workflow
+
+
+def test_aiohttp_security_floor_and_locks():
+    """Known-vulnerable aiohttp releases must not re-enter supported installs."""
+    requirement = "aiohttp>=3.14.3,<4"
+    assert requirement in Path("requirements.txt").read_text(encoding="utf-8")
+
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert requirement in pyproject["project"]["dependencies"]
+
+    for path in (Path("constraints/python312.txt"), Path("constraints/python313.txt")):
+        assert "aiohttp==3.14.3" in path.read_text(encoding="utf-8").lower()
