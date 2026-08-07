@@ -1430,6 +1430,21 @@ def test_copy_initial_chat_slang_paths(tmp_path, monkeypatch):
     assert not error_target.exists()
 
 
+def test_copy_initial_chat_slang_uses_configured_runtime_dir(tmp_path, monkeypatch):
+    app_dir = tmp_path / "app"
+    runtime_dir = tmp_path / "runtime"
+    app_dir.mkdir()
+    runtime_dir.mkdir()
+    (app_dir / "init_chat_slang.csv").write_text("hello,world\n", encoding="utf-8")
+
+    monkeypatch.setattr(envsbot, "BASE_DIR", app_dir)
+    monkeypatch.setitem(envsbot.config, "runtime_data_dir", str(runtime_dir))
+
+    envsbot.copy_initial_chat_slang()
+
+    assert (runtime_dir / "chat_slang.csv").read_text(encoding="utf-8") == "hello,world\n"
+
+
 def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
     calls = []
 

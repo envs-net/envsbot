@@ -37,6 +37,11 @@ from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
 from utils.http_fetch import fetch_json, passthrough_validator
+from utils.runtime_paths import (
+    chat_slang_additions_file,
+    chat_slang_file,
+    chat_slang_removals_file,
+)
 from utils.tls_certificate import validate_dns_hostname
 from core_plugins._core import (
     handle_room_toggle_command,
@@ -370,15 +375,9 @@ async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
 # ----------------- Chat Slang Lookup -----------------
 
 # --- Configuration ---
-SLANG_CSV = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "chat_slang.csv"
-)
-SLANG_ADDITIONS_CSV = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "slang_additions.csv"
-)
-SLANG_REMOVALS_CSV = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "slang_removals.csv"
-)
+SLANG_CSV = str(chat_slang_file(config))
+SLANG_ADDITIONS_CSV = str(chat_slang_additions_file(config))
+SLANG_REMOVALS_CSV = str(chat_slang_removals_file(config))
 
 
 # --- CSV helpers ---

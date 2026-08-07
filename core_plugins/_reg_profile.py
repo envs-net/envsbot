@@ -33,6 +33,7 @@ import inspect
 
 from slixmpp.xmlstream import ET
 from utils.config import config
+from utils.runtime_paths import profile_state_file, vcard_file
 
 PLUGIN_META = {
     "name": "_reg_profile",
@@ -44,8 +45,8 @@ PLUGIN_META = {
 # Setup logging
 log = logging.getLogger(__name__)
 
-AVATAR_HASH_FILE = "avatar_hash.asc"
-VCARD_HASH_FILE = "vcard_hash.asc"
+AVATAR_HASH_FILE = str(profile_state_file(config, "avatar_hash.asc"))
+VCARD_HASH_FILE = str(profile_state_file(config, "vcard_hash.asc"))
 
 
 # -------------------------------------------------
@@ -188,12 +189,11 @@ def build_vcard(card, data):
 # -------------------------------------------------
 async def update_vcard(bot):
     """
-    Update the XMPP vCard if plugins/vcard.py XML string has changed.
+    Update the XMPP vCard if the configured runtime vcard.py has changed.
     Uses VCARD global from vcard.py (XML, as string).
     Skips update if hash matches.
     """
-    plugin_dir = os.path.dirname(os.path.abspath(__file__))
-    vcard_py_path = os.path.join(os.path.dirname(plugin_dir), "vcard.py")
+    vcard_py_path = str(vcard_file(config))
     try:
         VCARD = await asyncio.to_thread(_load_vcard_xml, vcard_py_path)
     except FileNotFoundError:

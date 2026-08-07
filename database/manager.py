@@ -159,7 +159,7 @@ class DatabaseManager:
         creator = getattr(supervisor, "create_resilient", None)
         if callable(creator):
             return creator(
-                "_core",
+                "_runtime",
                 factory,
                 name=name,
                 service=True,
@@ -170,7 +170,7 @@ class DatabaseManager:
     def _heartbeat(self, name: str) -> None:
         heartbeat = getattr(self.task_supervisor, "heartbeat", None)
         if callable(heartbeat):
-            heartbeat("_core", name)
+            heartbeat("_runtime", name)
 
     async def _supervised_flush_loop(self) -> None:
         await self._flush_loop()

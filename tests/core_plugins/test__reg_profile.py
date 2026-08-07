@@ -114,6 +114,7 @@ async def test_update_vcard_py_missing(monkeypatch):
 async def test_update_vcard_import_error(monkeypatch, tmp_path):
     vcard_py = tmp_path / "vcard.py"
     vcard_py.write_text("raise Exception('fail')")
+    monkeypatch.setattr(_reg_profile, "vcard_file", lambda _config: vcard_py)
 
     monkeypatch.setattr(_reg_profile.os.path, "exists", lambda p: True)
     monkeypatch.setattr(_reg_profile.os.path, "abspath",
@@ -152,6 +153,7 @@ async def test_update_vcard_import_error(monkeypatch, tmp_path):
 async def test_update_vcard_not_str(monkeypatch, tmp_path):
     vcard_py = tmp_path / "vcard.py"
     vcard_py.write_text("VCARD = 12345")
+    monkeypatch.setattr(_reg_profile, "vcard_file", lambda _config: vcard_py)
 
     monkeypatch.setattr(_reg_profile.os.path, "exists", lambda p: True)
     monkeypatch.setattr(_reg_profile.os.path, "abspath",
@@ -191,6 +193,7 @@ async def test_update_vcard_no_change(monkeypatch, tmp_path):
     vcard_py = tmp_path / "vcard.py"
     vcard_text = "bot"
     vcard_py.write_text(f"VCARD = '''{vcard_text}'''")
+    monkeypatch.setattr(_reg_profile, "vcard_file", lambda _config: vcard_py)
 
     # patch file system lookups
     monkeypatch.setattr(_reg_profile.os.path, "exists", lambda p: True)
@@ -235,6 +238,7 @@ async def test_update_vcard_success(monkeypatch, tmp_path):
     vcard_py = tmp_path / "vcard.py"
     vcard_text = "<vCard xmlns='vcard-temp'><FN>bot</FN></vCard>"
     vcard_py.write_text(f"VCARD = '''{vcard_text}'''")
+    monkeypatch.setattr(_reg_profile, "vcard_file", lambda _config: vcard_py)
 
     monkeypatch.setattr(_reg_profile.os.path, "exists", lambda p: True)
     monkeypatch.setattr(_reg_profile.os.path, "abspath",

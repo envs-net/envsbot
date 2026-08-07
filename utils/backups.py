@@ -28,13 +28,24 @@ from utils.file_security import (
     ensure_private_file,
 )
 from utils.version import __version__
+from utils.runtime_paths import (
+    chat_slang_additions_file,
+    chat_slang_file,
+    chat_slang_removals_file,
+    vcard_file,
+)
 
 log = logging.getLogger(__name__)
 
 BACKUP_PREFIX = "envsbot-backup"
 MIGRATION_BACKUP_PREFIX = "envsbot-db-pre-migration"
 MANIFEST_NAME = "manifest.json"
-SOURCE_TREE_BACKUP_ENTRIES = ("vcard.py", "chat_slang.csv")
+SUPPORT_FILE_ENTRIES = (
+    "vcard.py",
+    "chat_slang.csv",
+    "slang_additions.csv",
+    "slang_removals.csv",
+)
 
 
 class BackupError(Exception):
@@ -138,8 +149,10 @@ def _source_items(db_path: Path) -> list[tuple[str, Path]]:
     return [
         ("bot.db", db_path),
         (config_arcname, config_path),
-        ("vcard.py", BASE_DIR / "vcard.py"),
-        ("chat_slang.csv", BASE_DIR / "chat_slang.csv"),
+        ("vcard.py", vcard_file(config)),
+        ("chat_slang.csv", chat_slang_file(config)),
+        ("slang_additions.csv", chat_slang_additions_file(config)),
+        ("slang_removals.csv", chat_slang_removals_file(config)),
     ]
 
 
@@ -571,8 +584,10 @@ def _target_paths() -> dict[str, Path]:
         "bot.db": _resolve_path(config.get("db", "bot.db")),
         "config.py": config_path,
         "config.json": config_path,
-        "vcard.py": BASE_DIR / "vcard.py",
-        "chat_slang.csv": BASE_DIR / "chat_slang.csv",
+        "vcard.py": vcard_file(config),
+        "chat_slang.csv": chat_slang_file(config),
+        "slang_additions.csv": chat_slang_additions_file(config),
+        "slang_removals.csv": chat_slang_removals_file(config),
     }
 
 
@@ -591,7 +606,7 @@ def _config_restore_member(members: set[str]) -> str | None:
 
 
 def _restore_specs(members: set[str]) -> tuple[list[tuple[str, Path]], list[str]]:
-    """Return live restore targets and source-tree entries kept for offline restore."""
+    """Return live restore targets and entries kept for offline restore."""
     targets = _target_paths()
     online: list[tuple[str, Path]] = []
     if "bot.db" in members:
@@ -601,7 +616,17 @@ def _restore_specs(members: set[str]) -> tuple[list[tuple[str, Path]], list[str]
     if config_member is not None:
         online.append((config_member, targets["config.py"]))
 
-    manual = [entry for entry in SOURCE_TREE_BACKUP_ENTRIES if entry in members]
+    project_root = BASE_DIR.resolve()
+    manual: list[str] = []
+    for entry in SUPPORT_FILE_ENTRIES:
+        if entry not in members:
+            continue
+        target = targets[entry].resolve()
+        if target == project_root or project_root in target.parents:
+            manual.append(entry)
+        else:
+            online.append((entry, target))
+
     for config_entry in ("config.py", "config.json"):
         if config_entry in members and config_entry != config_member:
             manual.append(config_entry)
@@ -726,9 +751,10 @@ async def _connect_database(bot: Any) -> None:
 async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
     """Safely restore runtime files and reconnect the database when possible.
 
-    Source-tree files remain in the archive for offline/manual recovery.  A live
-    restore only replaces the database and active config because hardened
-    deployments deliberately keep the application checkout read-only.
+    Mutable support files are restored online when they live outside the
+    application checkout. Legacy source-tree copies remain in the archive for
+    offline/manual recovery so hardened deployments never require write access
+    to the read-only application tree.
     """
     archive_path = archive_path.resolve()
     smoke = await asyncio.to_thread(smoke_test_backup, archive_path)

@@ -439,7 +439,7 @@ async def test_database_write_helpers_commit_atomically(tmp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_database_background_workers_use_core_supervisor(tmp_db_path):
+async def test_database_background_workers_use_runtime_supervisor(tmp_db_path):
     from utils.task_supervisor import TaskSupervisor
 
     supervisor = TaskSupervisor()
@@ -452,9 +452,9 @@ async def test_database_background_workers_use_core_supervisor(tmp_db_path):
     try:
         infos = supervisor.snapshot(include_done=False)
         by_name = {info.name: info for info in infos}
-        assert by_name["database-flush"].plugin == "_core"
+        assert by_name["database-flush"].plugin == "_runtime"
         assert by_name["database-flush"].kind == "service"
-        assert by_name["database-maintenance"].plugin == "_core"
+        assert by_name["database-maintenance"].plugin == "_runtime"
         assert by_name["database-maintenance"].kind == "service"
     finally:
         await db.close()

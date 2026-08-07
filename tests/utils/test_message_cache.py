@@ -280,7 +280,7 @@ async def test_cache_age_limit_ignores_stale_loaded_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_message_cache_writer_is_tracked_as_core_service():
+async def test_message_cache_writer_is_tracked_as_runtime_service():
     from utils.task_supervisor import TaskSupervisor
 
     supervisor = TaskSupervisor()
@@ -289,7 +289,7 @@ async def test_message_cache_writer_is_tracked_as_core_service():
 
     infos = supervisor.snapshot(include_done=False)
     writer = next(info for info in infos if info.name == "message-cache-writer")
-    assert writer.plugin == "_core"
+    assert writer.plugin == "_runtime"
     assert writer.kind == "service"
 
     await cache.close()
@@ -298,3 +298,23 @@ async def test_message_cache_writer_is_tracked_as_core_service():
         info.name != "message-cache-writer"
         for info in supervisor.snapshot(include_done=True)
     )
+
+
+@pytest.mark.asyncio
+async def test_message_cache_close_tolerates_pre_cancelled_writer_and_drains_queue():
+    from utils.task_supervisor import TaskSupervisor
+
+    supervisor = TaskSupervisor()
+    store = FakeStore()
+    cache = message_cache.MessageCache(max_messages=5, task_supervisor=supervisor)
+    await cache.start(store)
+    await cache.add_entry({"conversation": "room", "body": "queued"})
+
+    assert cache._writer_task is not None
+    cache._writer_task.cancel()
+    await asyncio.gather(cache._writer_task, return_exceptions=True)
+
+    await cache.close()
+
+    assert [entry["body"] for entry in store.saved] == ["queued"]
+    assert cache._started is False

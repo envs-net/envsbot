@@ -225,7 +225,7 @@ class MessageCache:
         creator = getattr(self.task_supervisor, "create_resilient", None)
         if callable(creator):
             self._writer_task = creator(
-                "_core",
+                "_runtime",
                 self._supervised_writer_loop,
                 name="message-cache-writer",
                 service=True,
@@ -252,7 +252,30 @@ class MessageCache:
         await self._queue.put(_STOP)
         task = self._writer_task
         if task is not None:
-            await asyncio.gather(task)
+            results = await asyncio.gather(task, return_exceptions=True)
+            result = results[0] if results else None
+            if isinstance(result, BaseException) and not isinstance(
+                result, asyncio.CancelledError
+            ):
+                log.warning(
+                    "[MESSAGE_CACHE] writer stopped with %s during shutdown",
+                    type(result).__name__,
+                )
+
+        # A supervised writer may already have been cancelled by another
+        # shutdown path. Drain anything still queued synchronously so a
+        # CancelledError can never abort the rest of the process shutdown.
+        pending: list[object] = []
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._queue.task_done()
+            if item is not _STOP:
+                pending.append(item)
+        if pending:
+            await self._persist_with_retry(pending, queue_failed=False)
         if self._retry_backlog:
             await self._persist_with_retry([], queue_failed=False)
         self._writer_task = None
@@ -366,7 +389,7 @@ class MessageCache:
     def _writer_heartbeat(self) -> None:
         heartbeat = getattr(self.task_supervisor, "heartbeat", None)
         if callable(heartbeat):
-            heartbeat("_core", "message-cache-writer")
+            heartbeat("_runtime", "message-cache-writer")
 
     async def _writer_loop(self) -> None:
         while True:

@@ -38,6 +38,7 @@ ruff check --select I,UP,B \
   utils/plugin_manager.py \
   utils/performance.py \
   utils/rate_limiter.py \
+  utils/runtime_paths.py \
   utils/systemd_deploy.py \
   utils/outbox.py
 
@@ -65,6 +66,7 @@ mypy \
   utils/plugin_manager.py \
   utils/performance.py \
   utils/rate_limiter.py \
+  utils/runtime_paths.py \
   utils/backups.py \
   utils/outbox.py \
   utils/runtime_watchdog.py \

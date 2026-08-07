@@ -335,8 +335,10 @@ runtime-writable files from `/srv/envsbot`:
 The supplied [`contrib/envsbot.service`](contrib/envsbot.service) uses
 `ProtectSystem=strict` and only grants writes to `/etc/envsbot`,
 `/var/lib/envsbot` and `/var/log/envsbot`. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and configure
-`LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `BACKUP_DIR`,
-`RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below `/var/lib/envsbot`.
+`LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `RUNTIME_DATA_DIR`,
+`BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below
+`/var/lib/envsbot`. `RUNTIME_DATA_DIR` holds writable support files such as
+`vcard.py`, `chat_slang.csv` and profile hash markers.
 
 Use the deployment helper before installing or replacing the unit. Select the
 same external config path that the service should keep using:
@@ -368,6 +370,11 @@ Managed backups are ZIP archives stored below `data/backups` by default. When `B
 * `chat_slang.csv`
 * `manifest.json`
 
+For hardened installations, set `RUNTIME_DATA_DIR = "/var/lib/envsbot"`.
+`vcard.py`, `chat_slang.csv`, slang review queues and profile hash markers then
+stay writable without granting write access to the application checkout. If the
+setting is omitted, the historical application-root location is retained.
+
 Commands:
 
 ```text
@@ -377,7 +384,7 @@ Commands:
 ,restore last confirm
 ```
 
-Restore is owner-only. Before changing live files, envsbot fully verifies the selected archive, stages the runtime files and creates a checksum-verified safety backup. The online restore replaces only `bot.db` and the active config; `vcard.py` and `chat_slang.csv` remain in the archive for an offline/manual restore because hardened deployments keep the application checkout read-only. A failed live restore is rolled back from the safety backup when possible. Restart the bot after restoring the config. Backup archives contain secrets and should be protected like `config.py`.
+Restore is owner-only. Before changing live files, envsbot fully verifies the selected archive, stages the runtime files and creates a checksum-verified safety backup. `bot.db` and the active config are restored online. Configured `vcard.py` and `chat_slang.csv` files are also restored online when they live in `RUNTIME_DATA_DIR` outside the read-only application checkout; legacy copies inside the source tree remain available for offline/manual restore. A failed live restore is rolled back from the safety backup when possible. Restart the bot after restoring the config. Backup archives contain secrets and should be protected like `config.py`.
 
 ## SQLite Maintenance
 

@@ -50,7 +50,10 @@ Create the runtime configuration outside the application tree:
 sudo cp config_sample.py /etc/envsbot/config.py
 sudo chown envsbot:envsbot /etc/envsbot/config.py
 sudo chmod 0600 /etc/envsbot/config.py
-cp vcard_sample.py vcard.py
+sudo install -d -o envsbot -g envsbot -m 0700 /var/lib/envsbot
+sudo cp vcard_sample.py /var/lib/envsbot/vcard.py
+sudo chown envsbot:envsbot /var/lib/envsbot/vcard.py
+sudo chmod 0600 /var/lib/envsbot/vcard.py
 ```
 
 The supplied systemd unit sets `ENVSBOT_CONFIG=/etc/envsbot/config.py`. For a
@@ -71,14 +74,22 @@ example:
 ```python
 LOG_DIR = "/var/log/envsbot"
 DB_FILE = "/var/lib/envsbot/bot.db"
+RUNTIME_DATA_DIR = "/var/lib/envsbot"
 BACKUP_DIR = "/var/lib/envsbot/backups"
 RESTART_NOTIFICATION_FILE = "/var/lib/envsbot/restart_notification.json"
 # In the existing IDLERPG dictionary:
 # "export_path": "/var/lib/envsbot/idlerpg",
 ```
 
-Do not grant write access to `/srv/envsbot` merely to accommodate a database or
-config file there. `envsbot systemd check` treats that as a hardening failure.
+`RUNTIME_DATA_DIR` contains mutable support files (`vcard.py`, `chat_slang.csv`,
+slang review queues and profile hash markers). When it is unset, envsbot keeps the historical application-root
+location; setting it explicitly is required for a read-only hardened
+production checkout. The packaged `init_chat_slang.csv` is copied there automatically on
+first startup.
+
+Do not grant write access to `/srv/envsbot` merely to accommodate a database,
+configuration or runtime support file there. `envsbot systemd check` treats that
+as a hardening failure.
 Existing installations can keep their current data while planning the move, but
 should move these paths before installing the strict rendered unit.
 

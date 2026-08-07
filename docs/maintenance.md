@@ -46,11 +46,11 @@ start; this also covers service restarts. Each archive contains `bot.db`,
 `config.py`, `vcard.py`, `chat_slang.csv` and a `manifest.json` when those
 files exist. Restore is owner-only. Before changing live files, envsbot fully
 verifies the selected archive, stages the runtime files and creates a
-checksum-verified safety backup. The online restore replaces only `bot.db` and
-the active config;
-`vcard.py` and `chat_slang.csv` remain available in the archive for an
-offline/manual restore while the service is stopped. This keeps restore
-compatible with hardened deployments whose application checkout is read-only.
+checksum-verified safety backup. The online restore replaces `bot.db`, the active
+config and configured `vcard.py`/`chat_slang.csv` files when those support files
+live outside the application checkout (normally below `RUNTIME_DATA_DIR`).
+Legacy support files inside the read-only source tree remain available in the
+archive for offline/manual restore.
 If a live replacement or database reconnect fails, envsbot attempts to roll
 the runtime files back from the safety backup. Restart envsbot after restoring
 the config.

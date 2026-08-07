@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.config import get_runtime_config_path
+from utils.runtime_paths import runtime_data_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,6 +39,7 @@ def service_paths(config: Mapping[str, Any]) -> dict[str, Path]:
         "config": get_runtime_config_path().resolve(),
         "database": _resolve_runtime_path(config.get("db", "bot.db")),
         "log_directory": _resolve_runtime_path(config.get("log_dir", "logs")),
+        "runtime_data_directory": runtime_data_dir(config),
         "backup_directory": _resolve_runtime_path(config.get("backup_dir", "data/backups")),
         "idlerpg_export": _idlerpg_export_path(config),
         "restart_notification": _resolve_runtime_path(
@@ -62,6 +64,7 @@ def _unique_writable_paths(config: Mapping[str, Any]) -> list[Path]:
         paths["config"].parent,
         paths["database"].parent,
         paths["log_directory"],
+        paths["runtime_data_directory"],
         paths["backup_directory"],
         paths["idlerpg_export"],
         paths["restart_notification"].parent,
@@ -184,7 +187,12 @@ def check_systemd_installation(
             ),
             f"{label} parent: {parent}",
         ))
-    for label in ("backup_directory", "idlerpg_export", "log_directory"):
+    for label in (
+        "backup_directory",
+        "idlerpg_export",
+        "log_directory",
+        "runtime_data_directory",
+    ):
         path = paths[label]
         parent = path if path.is_dir() else path.parent
         checks.append((

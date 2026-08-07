@@ -358,9 +358,10 @@ async def backup_restore(bot, sender, nick, args, msg, is_room):
             msg,
             f"Usage: {bot.prefix}restore <archive|last> <dry-run|confirm>\n"
             "Live restore overwrites bot.db and the active config when present. "
-            "vcard.py and chat_slang.csv stay in the archive for offline/manual "
-            "restore because the application checkout may be read-only. The "
-            "selected backup is fully verified and a safety backup is created "
+            "Configured vcard/chat-slang support files are also restored online "
+            "when they live outside the read-only application checkout; legacy "
+            "source-tree copies stay in the archive for offline/manual restore. "
+            "The selected backup is fully verified and a safety backup is created "
             "before any live file is replaced.",
         )
         return

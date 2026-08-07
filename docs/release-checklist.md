@@ -118,10 +118,11 @@ Test restore only on a disposable instance:
 ```
 
 The restore command verifies and stages the selected archive before changing
-live files, creates a checksum-verified safety backup and automatically attempts rollback on a
-failed live restore. Only the database and active config are restored online;
-`vcard.py` and `chat_slang.csv` are retained in the archive for manual/offline
-recovery because a hardened application checkout is read-only.
+live files, creates a checksum-verified safety backup and automatically attempts
+rollback on a failed live restore. The database and active config are restored
+online. Configured `vcard.py` and `chat_slang.csv` files below
+`RUNTIME_DATA_DIR` are restored online too; legacy copies inside the read-only
+application checkout remain in the archive for manual/offline recovery.
 
 ## GitHub / mirror checks
 

@@ -31,6 +31,7 @@ from utils.file_security import PRIVATE_FILE_MODE
 from utils.config import config
 from utils.audit import audit_event
 from utils.task_supervisor import create_plugin_task
+from utils.runtime_paths import vcard_file
 from utils.updatecheck import check_for_updates_once, version_check_worker
 from utils.version import __version__, display_version
 
@@ -286,7 +287,7 @@ def _xmpp_status_lines(
     occupants = sum(_room_occupant_count(room_data)
                     for _room, room_data in room_snapshot)
     avatar_hash = getattr(bot, "avatar_hash", None)
-    vcard_path = Path(__file__).resolve().parent.parent / "vcard.py"
+    vcard_path = vcard_file(config)
 
     return [
         f"Rooms: {muc_label} · {direct_label}",

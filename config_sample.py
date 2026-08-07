@@ -74,6 +74,12 @@ TIMEZONE = 'Europe/Berlin'
 # Startup-only: restart envsbot after changing this value.
 DB_FILE = 'data/bot.db'
 
+# Directory for mutable support files such as vcard.py, chat_slang.csv and profile
+# hash markers. None keeps the historical application-root location for compatibility.
+# Hardened systemd installs should set /var/lib/envsbot.
+# Startup-only: restart envsbot after changing this value.
+RUNTIME_DATA_DIR = None
+
 # File used to remember who requested a bot restart across process restarts. Keep this
 # outside /tmp when systemd PrivateTmp=true is enabled.
 RESTART_NOTIFICATION_FILE = 'data/envsbot_restart_notification.json'

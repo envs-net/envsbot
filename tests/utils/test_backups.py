@@ -12,6 +12,7 @@ import pytest
 import utils.backups as backups
 import utils.config as config_mod
 import utils.config.loader as config_loader
+import utils.runtime_paths as runtime_paths
 
 
 class FakeDB:
@@ -81,6 +82,7 @@ def backup_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "BASE_DIR", tmp_path)
     monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
     monkeypatch.setattr(backups, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(runtime_paths, "BASE_DIR", tmp_path)
     monkeypatch.delenv("ENVSBOT_CONFIG", raising=False)
     monkeypatch.setitem(backups.config, "db", str(db_path))
     monkeypatch.setitem(backups.config, "backup_dir", str(backup_dir))
@@ -532,3 +534,37 @@ def test_verify_sqlite_snapshot_checks_integrity_and_foreign_keys(tmp_path):
     assert result["ok"] is True
     assert result["database_integrity"] == ["ok"]
     assert result["foreign_key_violations"] == 0
+
+
+@pytest.mark.asyncio
+async def test_restore_support_files_online_when_runtime_dir_is_outside_app_tree(
+    backup_env, tmp_path, monkeypatch
+):
+    project_root = tmp_path / "app"
+    project_root.mkdir()
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    monkeypatch.setattr(backups, "BASE_DIR", project_root)
+    (runtime_dir / "vcard.py").write_text('VCARD = "backup"\n', encoding="utf-8")
+    (runtime_dir / "chat_slang.csv").write_text("brb,backup\n", encoding="utf-8")
+    monkeypatch.setitem(backups.config, "runtime_data_dir", str(runtime_dir))
+
+    _write_sqlite_value(backup_env.db_path, "backup")
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(bot, reason="runtime support")
+
+    _write_sqlite_value(backup_env.db_path, "current")
+    (runtime_dir / "vcard.py").write_text('VCARD = "current"\n', encoding="utf-8")
+    (runtime_dir / "chat_slang.csv").write_text("brb,current\n", encoding="utf-8")
+
+    result = await backups.restore_backup(bot, archive)
+
+    assert (runtime_dir / "vcard.py").read_text(encoding="utf-8") == 'VCARD = "backup"\n'
+    assert (runtime_dir / "chat_slang.csv").read_text(encoding="utf-8") == "brb,backup\n"
+    assert result["restored"] == [
+        "bot.db",
+        "config.py",
+        "vcard.py",
+        "chat_slang.csv",
+    ]
+    assert result["manual_restore"] == []

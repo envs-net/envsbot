@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import signal
+from pathlib import Path
 
 import slixmpp
 
@@ -40,7 +41,9 @@ from utils.config import (
     setup_logging,
     validate_startup_config,
 )
+from utils.config.defaults import BASE_DIR
 from utils.message_cache import MessageCache
+from utils.runtime_paths import chat_slang_file
 from utils.plugin_manager import PluginManager
 from utils.presence_manager import PresenceManager
 from utils.rate_limiter import TokenBucketRateLimiter
@@ -253,18 +256,35 @@ async def main():
     return int(getattr(xmpp, "_requested_exit_code", 1))
 
 
-def copy_initial_chat_slang(source="init_chat_slang.csv", target="chat_slang.csv") -> None:
-    """Copy the default chat slang file into place on first startup."""
-    if os.path.exists(source) and not os.path.exists(target):
+def copy_initial_chat_slang(
+    source: str | os.PathLike[str] | None = None,
+    target: str | os.PathLike[str] | None = None,
+) -> None:
+    """Copy the packaged chat-slang defaults into the writable runtime area."""
+    source_path = Path(source) if source is not None else BASE_DIR / "init_chat_slang.csv"
+    target_path = Path(target) if target is not None else chat_slang_file(config)
+    if source_path.exists() and not target_path.exists():
         try:
-            shutil.copyfile(source, target)
-            log.info("[INIT] ✅ Copied %s to %s", source, target)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_path, target_path)
+            log.info("[INIT] ✅ Copied %s to %s", source_path, target_path)
         except Exception as e:
-            log.error("[INIT] 🔴 Failed to copy %s to %s: %s", source, target, e)
-    elif not os.path.exists(source):
-        log.warning("[INIT] 🔴 Source file %s not found. Skipping copy.", source)
+            log.error(
+                "[INIT] 🔴 Failed to copy %s to %s: %s",
+                source_path,
+                target_path,
+                e,
+            )
+    elif not source_path.exists():
+        log.warning(
+            "[INIT] 🔴 Source file %s not found. Skipping copy.",
+            source_path,
+        )
     else:
-        log.info("[INIT] ✅ Target file %s already exists. Skipping copy.", target)
+        log.info(
+            "[INIT] ✅ Target file %s already exists. Skipping copy.",
+            target_path,
+        )
 
 
 def cli(argv: list[str] | None = None) -> int:
