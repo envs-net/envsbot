@@ -213,6 +213,11 @@ async def test_check_database_success_pending_and_failure(monkeypatch, tmp_path)
 async def test_collect_preflight_checks_and_run_preflight(monkeypatch, capsys):
     monkeypatch.setattr(preflight, "validate_startup_config", lambda _config: None)
     monkeypatch.setattr(preflight, "_check_config_path", lambda: (True, "config path: ok"))
+    monkeypatch.setattr(
+        preflight,
+        "_check_sensitive_permissions",
+        lambda _config: (True, "permissions ok"),
+    )
     monkeypatch.setattr(preflight, "_check_config_sample", lambda _config: (True, "sample ok"))
     monkeypatch.setattr(preflight, "_check_imports", lambda: (True, "imports ok"))
     monkeypatch.setattr(preflight, "_check_plugin_imports_and_metadata", lambda: (True, "plugins ok"))
