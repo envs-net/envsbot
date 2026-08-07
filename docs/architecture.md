@@ -321,10 +321,21 @@ already owns the responsibility.
 Failed or temporarily deferred XMPP deliveries are owned by the central
 `PersistentOutbox`. The queue is stored in `outbox_messages`, uses atomic
 claiming, exponential retry backoff and a dead-letter state, and resumes after
-a process restart. Plugins should use `utils.outbox.durable_send()` or
+a process restart. Every durable row owns a stable XEP-0359 `origin-id` that is
+reused for retries to make replay detection possible across the final
+transport-accepted/mark-sent crash window. Plugins should use
+`utils.outbox.durable_send()` or
 `bot.reply(..., persist=True, category=...)` for messages whose delivery must
 survive a disconnect. Message bodies remain private in the SQLite database and
 are included in managed backups.
+
+Database writes that span more than one statement should use
+`DatabaseManager.transaction()`. It serializes the single SQLite connection
+through a task-reentrant lock and uses nested-safe SAVEPOINT boundaries.
+Single writes use `DatabaseManager.write()`/`write_many()` and reads use the
+locked `fetch_one()`/`fetch_all()` helpers. IdleRPG, the outbox, persistent
+message cache and command-usage stores use this shared transaction boundary so
+one coroutine cannot commit or roll back another coroutine's unit of work.
 
 Long-running workers use `TaskSupervisor.create_resilient()` through
 `create_resilient_plugin_task()`. Repeated failures move a worker through

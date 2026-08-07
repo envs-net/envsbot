@@ -51,6 +51,14 @@ safety backup before overwriting files. Restart envsbot after restoring
 Backup archives contain secrets such as the bot password and optional API keys.
 Keep them private and include them in your normal server backup policy.
 
+New managed ZIP backups are restore-smoke-tested by default
+(`BACKUP_SMOKE_TEST_ON_CREATE = True`) before they are accepted. Pre-migration
+SQLite snapshots are also verified with `integrity_check` and
+`foreign_key_check`, then retained independently using
+`DATABASE_MIGRATION_BACKUP_KEEP` and
+`DATABASE_MIGRATION_BACKUP_RETENTION_DAYS`. This prevents migration safety
+snapshots from accumulating forever while preserving recent rollback points.
+
 ## Automatic online maintenance
 
 The running bot performs lightweight online maintenance at

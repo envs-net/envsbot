@@ -52,15 +52,16 @@ async def test_clear_conversation_uses_exact_delete_and_normalizes_count(
     rowcount,
     expected,
 ):
-    execute = AsyncMock(return_value=SimpleNamespace(rowcount=rowcount))
-    store = MessageCacheStore(SimpleNamespace(execute=execute))
+    write = AsyncMock(return_value=SimpleNamespace(rowcount=rowcount))
+    store = MessageCacheStore(SimpleNamespace(write=write))
 
     class Conversation:
         def __str__(self):
             return "room@example.org/resource"
 
     assert await store.clear_conversation(Conversation()) == expected
-    execute.assert_awaited_once_with(
+    write.assert_awaited_once_with(
         "DELETE FROM message_cache WHERE conversation = ?",
         ("room@example.org/resource",),
+        label="message_cache_clear",
     )

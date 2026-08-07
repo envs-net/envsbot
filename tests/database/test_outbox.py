@@ -16,19 +16,34 @@ async def test_outbox_deduplicates_claims_and_marks_sent(tmp_db_path):
             category="rss",
             dedupe_key="rss:one",
         )
+        origin_before = (
+            await db.fetch_one(
+                "SELECT origin_id FROM outbox_messages WHERE id=?",
+                (first,),
+            )
+        )["origin_id"]
         second = await db.outbox.enqueue(
             destination="room@example.org",
             body="hello updated",
             message_type="groupchat",
             category="rss",
             dedupe_key="rss:one",
+            origin_id="must-not-replace-existing",
         )
         assert first == second
         assert (await db.outbox.counts())["pending"] == 1
+        origin_after = (
+            await db.fetch_one(
+                "SELECT origin_id FROM outbox_messages WHERE id=?",
+                (first,),
+            )
+        )["origin_id"]
+        assert origin_after == origin_before
 
         claimed = await db.outbox.claim_due(limit=10)
         assert len(claimed) == 1
         assert claimed[0].body == "hello updated"
+        assert claimed[0].origin_id == origin_before
         assert (await db.outbox.counts())["inflight"] == 1
 
         await db.outbox.mark_sent(claimed[0].id)
@@ -222,5 +237,30 @@ async def test_outbox_dead_letter_retention_prunes_old_rows(tmp_db_path):
         await db.execute("UPDATE outbox_messages SET dead_at=0 WHERE id=?", (message_id,))
         assert await db.outbox.prune_dead(retention_days=1) == 1
         assert (await db.outbox.counts())["dead"] == 0
+    finally:
+        await db.close()
+
+@pytest.mark.asyncio
+async def test_outbox_retry_keeps_stable_origin_id(tmp_db_path):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        message_id = await db.outbox.enqueue(
+            destination="user@example.org",
+            body="retry me",
+            origin_id="stable-origin",
+            max_attempts=2,
+        )
+        claimed = (await db.outbox.claim_due())[0]
+        assert claimed.origin_id == "stable-origin"
+        assert await db.outbox.mark_failed(
+            claimed, RuntimeError("temporary"), retry_delay_seconds=1
+        ) is False
+        await db.execute(
+            "UPDATE outbox_messages SET available_at=0 WHERE id=?",
+            (message_id,),
+        )
+        retried = (await db.outbox.claim_due())[0]
+        assert retried.origin_id == "stable-origin"
     finally:
         await db.close()

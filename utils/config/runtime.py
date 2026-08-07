@@ -224,6 +224,10 @@ def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
             item("export_full_season_events"),
             False,
         ),
+        "EXPORT_SEASON_EVENT_CHUNK_SIZE": max(
+            1,
+            _to_int(item("export_season_event_chunk_size") or 1000, 1000),
+        ),
         "EXPORT_ENABLED": _to_bool(item("export_enabled"), True),
         "EXPORT_INTERVAL_SECONDS": _to_int(
             item("export_interval_seconds")

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import uuid
 from collections import defaultdict, deque
@@ -19,8 +20,11 @@ from typing import Any, cast
 
 from utils.performance import observe
 
+log = logging.getLogger(__name__)
+
 _EVENT_ID_KEY = "_storage_id"
 _EVENT_SEASON_KEY = "_season_started_at"
+_EVENT_ROWID_KEY = "_storage_rowid"
 _ROOM_SEPARATE_KEYS = {
     "players",
     "events",
@@ -64,7 +68,7 @@ def _event_signature(event: Mapping[str, Any]) -> str:
     public = {
         str(key): value
         for key, value in event.items()
-        if str(key) not in {_EVENT_ID_KEY, _EVENT_SEASON_KEY}
+        if str(key) not in {_EVENT_ID_KEY, _EVENT_SEASON_KEY, _EVENT_ROWID_KEY}
     }
     return _digest(_json_dump(public))
 
@@ -175,11 +179,9 @@ class IdleRPGStateStore:
             await self.db.conn.commit()
 
     async def _load_state_locked(self) -> dict[str, Any]:
-        room_rows = await (
-            await self.db.conn.execute(
-                "SELECT room_jid, state_json FROM idlerpg_rooms ORDER BY room_jid"
-            )
-        ).fetchall()
+        room_rows = await self.db.fetch_all(
+            "SELECT room_jid, state_json FROM idlerpg_rooms ORDER BY room_jid"
+        )
         rooms: dict[str, dict[str, Any]] = {}
         room_hashes: dict[str, str] = {}
         for row in room_rows:
@@ -195,12 +197,10 @@ class IdleRPGStateStore:
             room_hashes[room_jid] = _digest(raw)
 
         player_hashes: dict[tuple[str, str], str] = {}
-        player_rows = await (
-            await self.db.conn.execute(
-                "SELECT room_jid, jid, data_json "
-                "FROM idlerpg_players ORDER BY room_jid, jid"
-            )
-        ).fetchall()
+        player_rows = await self.db.fetch_all(
+            "SELECT room_jid, jid, data_json "
+            "FROM idlerpg_players ORDER BY room_jid, jid"
+        )
         for row in player_rows:
             room_jid = str(row["room_jid"])
             if room_jid not in rooms:
@@ -213,13 +213,11 @@ class IdleRPGStateStore:
                 player_hashes[(room_jid, jid)] = _digest(raw)
 
         season_hashes: dict[tuple[str, str], str] = {}
-        season_rows = await (
-            await self.db.conn.execute(
-                "SELECT room_jid, season_id, active, position, data_json "
-                "FROM idlerpg_seasons "
-                "ORDER BY room_jid, active DESC, position ASC, started_at ASC"
-            )
-        ).fetchall()
+        season_rows = await self.db.fetch_all(
+            "SELECT room_jid, season_id, active, position, data_json "
+            "FROM idlerpg_seasons "
+            "ORDER BY room_jid, active DESC, position ASC, started_at ASC"
+        )
         for row in season_rows:
             room_jid = str(row["room_jid"])
             if room_jid not in rooms:
@@ -238,13 +236,11 @@ class IdleRPGStateStore:
                 rooms[room_jid]["hall_of_fame"].append(season)
 
         recent_ids: dict[str, set[str]] = defaultdict(set)
-        event_rows = await (
-            await self.db.conn.execute(
-                "SELECT room_jid, event_id, season_started_at, data_json "
-                "FROM idlerpg_events WHERE in_recent = 1 "
-                "ORDER BY room_jid, ts ASC, event_id ASC"
-            )
-        ).fetchall()
+        event_rows = await self.db.fetch_all(
+            "SELECT room_jid, event_id, season_started_at, data_json "
+            "FROM idlerpg_events WHERE in_recent = 1 "
+            "ORDER BY room_jid, ts ASC, event_id ASC"
+        )
         for row in event_rows:
             room_jid = str(row["room_jid"])
             room = rooms.get(room_jid)
@@ -329,22 +325,53 @@ class IdleRPGStateStore:
 
         return prepared, recent_ids
 
+    async def season_event_revision(
+        self,
+        room_jid: str,
+        season_started_at: int,
+    ) -> tuple[int, int]:
+        """Return ``(event_count, max_rowid)`` for an append-only season stream."""
+        row = await self.db.fetch_one(
+            """
+            SELECT COUNT(*) AS count,
+                   COALESCE(MAX(rowid), 0) AS max_rowid
+              FROM idlerpg_events
+             WHERE room_jid = ? AND season_started_at = ?
+            """,
+            (str(room_jid), max(0, int(season_started_at))),
+        )
+        if row is None:
+            return (0, 0)
+        return (
+            max(0, int(row["count"] or 0)),
+            max(0, int(row["max_rowid"] or 0)),
+        )
+
     async def load_season_events(
         self,
         room_jid: str,
         season_started_at: int,
+        *,
+        after_rowid: int = 0,
     ) -> list[dict[str, Any]]:
-        """Load one season's append-only event history on demand."""
+        """Load full or incremental season events in chronological order.
+
+        ``rowid`` is private storage metadata.  It never appears in public event
+        JSON but gives the exporter an efficient append cursor without loading
+        the complete active season after every new event.
+        """
         async with self._lock:
-            rows = await (
-                await self.db.conn.execute(
-                    "SELECT event_id, season_started_at, data_json "
-                    "FROM idlerpg_events "
-                    "WHERE room_jid = ? AND season_started_at = ? "
-                    "ORDER BY ts ASC, event_id ASC",
-                    (str(room_jid), max(0, int(season_started_at))),
-                )
-            ).fetchall()
+            rows = await self.db.fetch_all(
+                "SELECT rowid AS storage_rowid, event_id, season_started_at, data_json "
+                "FROM idlerpg_events "
+                "WHERE room_jid = ? AND season_started_at = ? AND rowid > ? "
+                "ORDER BY ts ASC, rowid ASC",
+                (
+                    str(room_jid),
+                    max(0, int(season_started_at)),
+                    max(0, int(after_rowid)),
+                ),
+            )
         result: list[dict[str, Any]] = []
         for row in rows:
             event = _json_load(str(row["data_json"]), {})
@@ -352,6 +379,7 @@ class IdleRPGStateStore:
                 continue
             event[_EVENT_ID_KEY] = str(row["event_id"])
             event[_EVENT_SEASON_KEY] = _integer(row["season_started_at"])
+            event[_EVENT_ROWID_KEY] = _integer(row["storage_rowid"])
             result.append(event)
         return result
 
@@ -363,7 +391,7 @@ class IdleRPGStateStore:
     ) -> None:
         """Persist state transactionally, optionally limited to selected rooms."""
         started_perf = time.perf_counter()
-        async with self._lock, self.db.transaction_lock:
+        async with self._lock:
             await self._ensure_cache_locked()
             rooms_value = data.get("rooms", {}) if isinstance(data, Mapping) else {}
             rooms = rooms_value if isinstance(rooms_value, Mapping) else {}
@@ -390,9 +418,7 @@ class IdleRPGStateStore:
                 room: set(ids) for room, ids in self._recent_event_ids.items()
             }
 
-            savepoint = "idlerpg_save_state"
-            await self.db.conn.execute(f"SAVEPOINT {savepoint}")
-            try:
+            async with self.db.transaction(label="idlerpg_save_state") as conn:
                 stale_rooms = (
                     set(self._room_hashes) - current_room_jids
                     if requested_room_jids is None
@@ -400,7 +426,7 @@ class IdleRPGStateStore:
                     - current_room_jids
                 )
                 for room_jid in sorted(stale_rooms):
-                    await self.db.conn.execute(
+                    await conn.execute(
                         "DELETE FROM idlerpg_rooms WHERE room_jid = ?",
                         (room_jid,),
                     )
@@ -432,7 +458,7 @@ class IdleRPGStateStore:
                     room_payload = _json_dump(room_state)
                     room_hash = _digest(room_payload)
                     if self._room_hashes.get(room_jid) != room_hash:
-                        await self.db.conn.execute(
+                        await conn.execute(
                             """
                             INSERT INTO idlerpg_rooms (
                                 room_jid, state_json, updated_at
@@ -456,7 +482,7 @@ class IdleRPGStateStore:
                         key for key in self._player_hashes if key[0] == room_jid
                     }
                     for key in sorted(old_player_keys - player_keys):
-                        await self.db.conn.execute(
+                        await conn.execute(
                             "DELETE FROM idlerpg_players "
                             "WHERE room_jid = ? AND jid = ?",
                             key,
@@ -472,7 +498,7 @@ class IdleRPGStateStore:
                         payload_hash = _digest(payload)
                         key = (room_jid, jid)
                         if self._player_hashes.get(key) != payload_hash:
-                            await self.db.conn.execute(
+                            await conn.execute(
                                 """
                                 INSERT INTO idlerpg_players (
                                     room_jid, jid, data_json, updated_at
@@ -514,7 +540,7 @@ class IdleRPGStateStore:
                         key for key in self._season_hashes if key[0] == room_jid
                     }
                     for key in sorted(old_season_keys - season_keys):
-                        await self.db.conn.execute(
+                        await conn.execute(
                             "DELETE FROM idlerpg_seasons "
                             "WHERE room_jid = ? AND season_id = ?",
                             key,
@@ -528,7 +554,7 @@ class IdleRPGStateStore:
                             f"{int(active)}:{position}:{payload_hash}"
                         )
                         if self._season_hashes.get(key) != composite_hash:
-                            await self.db.conn.execute(
+                            await conn.execute(
                                 """
                                 INSERT INTO idlerpg_seasons (
                                     room_jid, season_id, active, position,
@@ -561,9 +587,9 @@ class IdleRPGStateStore:
                         public_event = {
                             str(key): value
                             for key, value in event.items()
-                            if str(key) not in {_EVENT_ID_KEY, _EVENT_SEASON_KEY}
+                            if str(key) not in {_EVENT_ID_KEY, _EVENT_SEASON_KEY, _EVENT_ROWID_KEY}
                         }
-                        await self.db.conn.execute(
+                        await conn.execute(
                             """
                             INSERT OR IGNORE INTO idlerpg_events (
                                 room_jid, event_id, ts, season_started_at,
@@ -580,25 +606,19 @@ class IdleRPGStateStore:
                             ),
                         )
                     for event_id in sorted(old_recent_ids - recent_ids):
-                        await self.db.conn.execute(
+                        await conn.execute(
                             "UPDATE idlerpg_events SET in_recent = 0 "
                             "WHERE room_jid = ? AND event_id = ?",
                             (room_jid, event_id),
                         )
                     for event_id in sorted(recent_ids - old_recent_ids):
-                        await self.db.conn.execute(
+                        await conn.execute(
                             "UPDATE idlerpg_events SET in_recent = 1 "
                             "WHERE room_jid = ? AND event_id = ?",
                             (room_jid, event_id),
                         )
                     new_recent_ids[room_jid] = set(recent_ids)
                     raw_room.pop("_pending_events", None)
-
-                await self.db.conn.execute(f"RELEASE {savepoint}")
-            except Exception:
-                await self.db.conn.execute(f"ROLLBACK TO {savepoint}")
-                await self.db.conn.execute(f"RELEASE {savepoint}")
-                raise
 
             self._room_hashes = new_room_hashes
             self._player_hashes = new_player_hashes
@@ -607,11 +627,48 @@ class IdleRPGStateStore:
             self._cache_ready = True
         observe("idlerpg_save", time.perf_counter() - started_perf)
 
+    async def prune_events(self, *, retention_days: int) -> int:
+        """Prune old completed-season events while preserving live history.
+
+        Active-season rows are never removed, even when an endless/manual
+        season outlives the retention window.  Rows still referenced by the
+        bounded recent-event cache are preserved as well.
+        """
+        days = max(0, int(retention_days))
+        if days <= 0:
+            return 0
+        cutoff = int(time.time()) - days * 86400
+        async with self._lock:
+            async with self.db.transaction(label="idlerpg_event_retention") as conn:
+                cursor = await conn.execute(
+                    """
+                    DELETE FROM idlerpg_events
+                     WHERE ts < ?
+                       AND in_recent = 0
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM idlerpg_seasons AS seasons
+                            WHERE seasons.room_jid = idlerpg_events.room_jid
+                              AND seasons.active = 1
+                              AND seasons.started_at = idlerpg_events.season_started_at
+                       )
+                    """,
+                    (cutoff,),
+                )
+                removed = max(0, int(cursor.rowcount or 0))
+            if removed:
+                # Event IDs are append-only and the recent cache is retained,
+                # so no in-memory hash rebuild is required after pruning.
+                log.info("[IDLERPG] Pruned %d retained event row(s)", removed)
+            return removed
+
     async def clear(self) -> None:
         """Delete all normalized IdleRPG state."""
-        async with self._lock, self.db.transaction_lock:
-            await self.db.conn.execute("DELETE FROM idlerpg_rooms")
-            await self.db.conn.commit()
+        async with self._lock:
+            await self.db.write(
+                "DELETE FROM idlerpg_rooms",
+                label="idlerpg_clear",
+            )
             self._room_hashes.clear()
             self._player_hashes.clear()
             self._season_hashes.clear()
@@ -627,8 +684,6 @@ class IdleRPGStateStore:
             ("seasons", "idlerpg_seasons"),
             ("events", "idlerpg_events"),
         ):
-            row = await (
-                await self.db.conn.execute(f"SELECT COUNT(*) AS count FROM {table}")
-            ).fetchone()
+            row = await self.db.fetch_one(f"SELECT COUNT(*) AS count FROM {table}")
             result[key] = int(row["count"] if row else 0)
         return result

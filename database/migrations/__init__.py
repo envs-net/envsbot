@@ -7,6 +7,7 @@ changes explicit and ordered.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -85,6 +86,39 @@ async def _room_invites(db) -> None:
     )
 
 
+async def _outbox_origin_id(db) -> None:
+    """Persist a stable XEP-0359 origin-id for every durable message."""
+    columns = {
+        str(row["name"])
+        for row in await (
+            await db.conn.execute("PRAGMA table_info(outbox_messages)")
+        ).fetchall()
+    }
+    if "origin_id" not in columns:
+        await db.conn.execute("ALTER TABLE outbox_messages ADD COLUMN origin_id TEXT")
+
+    rows = await (
+        await db.conn.execute(
+            "SELECT id, created_at, dedupe_key FROM outbox_messages "
+            "WHERE origin_id IS NULL OR origin_id=''"
+        )
+    ).fetchall()
+    for row in rows:
+        stable = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "envsbot-outbox:"
+            f"{int(row['id'])}:{int(row['created_at'])}:{str(row['dedupe_key'] or '')}",
+        ).hex
+        await db.conn.execute(
+            "UPDATE outbox_messages SET origin_id=? WHERE id=?",
+            (stable, int(row["id"])),
+        )
+    await db.conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_origin_id "
+        "ON outbox_messages(origin_id)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "0001_initial_runtime_tables",
@@ -125,6 +159,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0008_outbox_dead_timestamp",
         "Track when outbound messages enter dead-letter state",
         _outbox_dead_timestamp,
+    ),
+    Migration(
+        "0009_outbox_origin_id",
+        "Persist stable XEP-0359 origin IDs for durable message retries",
+        _outbox_origin_id,
     ),
 )
 

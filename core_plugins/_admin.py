@@ -301,6 +301,19 @@ def _task_summary_line(bot) -> str:
     supervisor = getattr(bot, "tasks", None)
     if supervisor is None:
         return "Tasks: unavailable"
+    details = getattr(supervisor, "summary_by_kind", None)
+    if callable(details):
+        counts = details()
+        text = (
+            f"Tasks: {counts.get('services_running', 0)} services running, "
+            f"{counts.get('one_shots_running', 0)} one-shots running, "
+            f"{counts.get('one_shots_completed', 0)} one-shots completed, "
+            f"{counts.get('failed', 0)} failed"
+        )
+        service_finished = int(counts.get("services_finished", 0) or 0)
+        if service_finished:
+            text += f", {service_finished} services finished unexpectedly"
+        return text
     running, failed, finished = supervisor.summary()
     if failed:
         return f"Tasks: {running} running, {failed} failed, {finished} finished"

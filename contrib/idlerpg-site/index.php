@@ -444,6 +444,45 @@ function idlerpg_data_file($filename, $data_dir = null) {
     return rtrim($data_dir, '/') . '/' . ltrim($filename, '/');
 }
 
+function idlerpg_season_event_list($payload, $data_dir) {
+    if (!is_array($payload)) {
+        return null;
+    }
+    // Backward compatibility with pre-v1.8 monolithic exports.
+    if (array_key_exists('events', $payload) && is_array($payload['events'])) {
+        return $payload['events'];
+    }
+    if (($payload['format'] ?? '') !== 'chunked-v1' || !is_array($payload['chunks'] ?? null)) {
+        return null;
+    }
+
+    $events = [];
+    foreach ($payload['chunks'] as $chunk_meta) {
+        if (!is_array($chunk_meta)) {
+            return null;
+        }
+        $filename = (string) ($chunk_meta['file'] ?? '');
+        // Manifest paths are relative to the selected room directory. Root
+        // compatibility manifests may prefix the room slug, so allow exactly
+        // one safe slug component and never permit arbitrary path traversal.
+        if (!preg_match('#^(?:[A-Za-z0-9_.-]+/)?season-events/[0-9]{6}\.json$#D', $filename)) {
+            return null;
+        }
+        $chunk = idlerpg_load_json(idlerpg_data_file($filename, $data_dir), []);
+        $chunk_events = $chunk['events'] ?? null;
+        if (!is_array($chunk_events)) {
+            return null;
+        }
+        foreach ($chunk_events as $event) {
+            if (is_array($event)) {
+                $events[] = $event;
+            }
+        }
+    }
+    $expected = max(0, (int) ($payload['events_total'] ?? count($events)));
+    return count($events) === $expected ? $events : null;
+}
+
 function idlerpg_sort_players($players) {
     usort($players, function ($a, $b) {
         $level_cmp = idlerpg_player_level($b) <=> idlerpg_player_level($a);
@@ -774,10 +813,10 @@ $map_players = is_array($map_payload['players'] ?? null)
 if (count($map_players) === 0 && count($players) > 0) {
     $map_players = $players;
 }
-$has_season_event_export = array_key_exists('events', $season_events_payload)
-    && is_array($season_events_payload['events']);
+$season_event_list = idlerpg_season_event_list($season_events_payload, $data_dir);
+$has_season_event_export = is_array($season_event_list);
 $events = $has_season_event_export
-    ? $season_events_payload['events']
+    ? $season_event_list
     : (is_array($events_payload['events'] ?? null)
         ? $events_payload['events']
         : (is_array($room_payload['events'] ?? null) ? $room_payload['events'] : []));
@@ -1488,7 +1527,7 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     'Events & battles' => ['event_chance', 'item_chance', 'battle_event_weight', 'team_battle_event_weight', 'boss_event_weight', 'item_event_weight', 'item_damage_event_weight', 'item_steal_event_weight', 'alignment_event_weight', 'critical_strike_chance', 'critical_strike_chance_good', 'critical_strike_chance_evil', 'item_drop_chance', 'level_battle_chance_below_25', 'level_battle_chance_at_25'],
                     'Bosses' => ['boss_min_players', 'boss_max_players', 'boss_min_level', 'boss_reward_percent', 'boss_loss_percent', 'boss_power_min_factor', 'boss_power_max_factor'],
                     'Items & achievements' => ['unique_items_enabled', 'unique_item_min_level', 'unique_item_chance', 'level_reward_min_level', 'season_achievement_gates_enabled'],
-                    'Seasons & history' => ['season_enabled', 'season_duration_days', 'season_reset_on_rollover', 'season_hof_size', 'event_log_limit', 'event_retention_days', 'export_event_limit', 'export_full_season_events', 'export_interval_seconds', 'export_top_limit'],
+                    'Seasons & history' => ['season_enabled', 'season_duration_days', 'season_reset_on_rollover', 'season_hof_size', 'event_log_limit', 'event_retention_days', 'export_event_limit', 'export_full_season_events', 'export_season_event_chunk_size', 'export_interval_seconds', 'export_top_limit'],
                     'Announcements' => ['announce_login', 'announce_top_interval', 'announce_top_limit', 'update_room_topic', 'topic_update_interval', 'topic_custom_text'],
                 ];
                 $shown_rule_keys = [];

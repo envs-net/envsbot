@@ -13,6 +13,8 @@ from typing import Any, Protocol, cast
 
 log = logging.getLogger(__name__)
 
+_COMPLETED_ONE_SHOT_HISTORY_LIMIT = 50
+
 
 class ExpectedTaskExit(Exception):
     """Signal an intentional service-task exit outside process shutdown."""
@@ -439,6 +441,22 @@ class TaskSupervisor:
                 meta["name"],
                 exc_info=exc,
             )
+        elif meta.get("kind") != "service":
+            self._prune_completed_one_shot_history()
+
+    def _prune_completed_one_shot_history(self) -> None:
+        """Keep recent successful one-shots for UX without leaking task metadata."""
+        completed = [
+            task
+            for task, meta in self._tasks.items()
+            if task.done()
+            and not task.cancelled()
+            and meta.get("kind") != "service"
+            and meta.get("last_error") is None
+        ]
+        excess = len(completed) - _COMPLETED_ONE_SHOT_HISTORY_LIMIT
+        for task in completed[: max(0, excess)]:
+            self._forget_task(task)
 
     def _forget_task(self, task: asyncio.Task[Any]) -> None:
         """Remove a task from supervisor indexes."""
@@ -652,6 +670,34 @@ class TaskSupervisor:
                 )
             )
         return sorted(items, key=lambda item: (item.plugin, item.name))
+
+    def summary_by_kind(self) -> dict[str, int]:
+        """Return operator-friendly task counts split by lifecycle kind."""
+        counts = {
+            "services_running": 0,
+            "one_shots_running": 0,
+            "one_shots_completed": 0,
+            "services_finished": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
+        for info in self.snapshot(include_done=True):
+            if info.status == "failed":
+                counts["failed"] += 1
+            elif info.status == "cancelled":
+                counts["cancelled"] += 1
+            elif info.status == "running":
+                key = (
+                    "services_running"
+                    if info.kind == "service"
+                    else "one_shots_running"
+                )
+                counts[key] += 1
+            elif info.kind == "service":
+                counts["services_finished"] += 1
+            else:
+                counts["one_shots_completed"] += 1
+        return counts
 
     def summary(self) -> tuple[int, int, int]:
         """Return (running, failed, done_or_cancelled) counts."""

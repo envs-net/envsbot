@@ -32,6 +32,7 @@ from utils.version import __version__
 log = logging.getLogger(__name__)
 
 BACKUP_PREFIX = "envsbot-backup"
+MIGRATION_BACKUP_PREFIX = "envsbot-db-pre-migration"
 MANIFEST_NAME = "manifest.json"
 RESTORE_ENTRIES = ("bot.db", "config.py", "vcard.py", "chat_slang.csv")
 
@@ -92,6 +93,30 @@ def backup_retention_days() -> int:
         return max(0, int(config.get("backup_retention_days", 0) or 0))
     except Exception:
         return 0
+
+
+def migration_backup_keep() -> int:
+    """Return how many pre-migration SQLite snapshots to retain."""
+    try:
+        return max(1, int(config.get("database_migration_backup_keep", 5) or 5))
+    except Exception:
+        return 5
+
+
+def migration_backup_retention_days() -> int:
+    """Return age retention for pre-migration snapshots, or 0 when disabled."""
+    try:
+        return max(
+            0,
+            int(config.get("database_migration_backup_retention_days", 90) or 0),
+        )
+    except Exception:
+        return 90
+
+
+def backup_smoke_test_on_create() -> bool:
+    """Return whether every newly-created managed archive must restore cleanly."""
+    return bool(config.get("backup_smoke_test_on_create", True))
 
 
 def _sha256(path: Path) -> str:
@@ -216,7 +241,13 @@ def _build_backup_archive(
         raise
 
 
-async def create_backup(bot: Any, *, reason: str = "manual", prune: bool = True) -> Path:
+async def create_backup(
+    bot: Any,
+    *,
+    reason: str = "manual",
+    prune: bool = True,
+    verify: bool | None = None,
+) -> Path:
     """Create a managed ZIP backup and return its archive path."""
     directory = ensure_private_directory(backup_dir())
 
@@ -261,6 +292,16 @@ async def create_backup(bot: Any, *, reason: str = "manual", prune: bool = True)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
+
+    should_verify = backup_smoke_test_on_create() if verify is None else bool(verify)
+    if should_verify:
+        smoke = await asyncio.to_thread(smoke_test_backup, archive_path)
+        if not bool(smoke.get("ok")):
+            archive_path.unlink(missing_ok=True)
+            errors = ", ".join(str(item) for item in smoke.get("errors", []))
+            raise BackupError(
+                f"new backup failed restore smoke test: {errors or 'unknown error'}"
+            )
 
     if prune:
         try:
@@ -389,6 +430,104 @@ def prune_old_backups(
     return removed
 
 
+def list_migration_snapshots(*, directory: Path | None = None) -> list[Path]:
+    """List pre-migration SQLite snapshots newest first."""
+    directory = directory or backup_dir()
+    if not directory.exists():
+        return []
+    paths = [
+        path
+        for path in directory.glob(f"{MIGRATION_BACKUP_PREFIX}-*.sqlite3")
+        if path.is_file()
+    ]
+    return sorted(paths, key=lambda path: (path.stat().st_mtime, path.name), reverse=True)
+
+
+def plan_migration_snapshot_prune(
+    *,
+    directory: Path | None = None,
+    keep: int | None = None,
+    days: int | None = None,
+) -> list[Path]:
+    """Return pre-migration snapshots selected by count/age retention."""
+    snapshots = list_migration_snapshots(directory=directory)
+    keep = migration_backup_keep() if keep is None else max(1, int(keep))
+    days = (
+        migration_backup_retention_days()
+        if days is None
+        else max(0, int(days))
+    )
+    selected = set(snapshots[keep:])
+    if days > 0:
+        cutoff = _now().timestamp() - days * 86400
+        selected.update(
+            path for path in snapshots if path.stat().st_mtime < cutoff
+        )
+    return [path for path in snapshots if path in selected]
+
+
+def prune_migration_snapshots(
+    *,
+    directory: Path | None = None,
+    keep: int | None = None,
+    days: int | None = None,
+    dry_run: bool = False,
+) -> list[Path]:
+    """Prune verified pre-migration SQLite snapshots."""
+    planned = plan_migration_snapshot_prune(
+        directory=directory,
+        keep=keep,
+        days=days,
+    )
+    if dry_run:
+        return planned
+    removed: list[Path] = []
+    for path in planned:
+        try:
+            path.unlink()
+            removed.append(path)
+        except FileNotFoundError:
+            continue
+    return removed
+
+
+def verify_sqlite_snapshot(path: Path) -> dict[str, Any]:
+    """Open a standalone SQLite snapshot read-only and run integrity checks."""
+    path = path.resolve()
+    errors: list[str] = []
+    integrity: list[str] = []
+    foreign_keys: list[tuple[Any, ...]] = []
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            integrity = [
+                str(row[0])
+                for row in connection.execute("PRAGMA integrity_check;").fetchall()
+            ]
+            foreign_keys = [
+                tuple(row)
+                for row in connection.execute("PRAGMA foreign_key_check;").fetchall()
+            ]
+        finally:
+            connection.close()
+    except Exception as exc:
+        errors.append(f"database open/integrity check failed: {exc}")
+    if integrity != ["ok"]:
+        errors.append(
+            "database integrity check failed: "
+            + ", ".join(integrity or ["no result"])
+        )
+    if foreign_keys:
+        errors.append(f"foreign key check failed: {len(foreign_keys)} violation(s)")
+    return {
+        "name": path.name,
+        "ok": not errors,
+        "errors": errors,
+        "database_integrity": integrity,
+        "foreign_key_violations": len(foreign_keys),
+    }
+
+
 def resolve_backup(name: str) -> Path:
     """Resolve a user-provided backup name to a managed archive path."""
     value = (name or "").strip()
@@ -500,7 +639,12 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
     archive_path = archive_path.resolve()
     manifest = await asyncio.to_thread(_read_manifest, archive_path)
     # Do not prune while the selected archive is still needed for restore.
-    safety_backup = await create_backup(bot, reason="restore-safety", prune=False)
+    safety_backup = await create_backup(
+        bot,
+        reason="restore-safety",
+        prune=False,
+        verify=False,
+    )
 
     restored: list[str] = []
     closed_db = False
@@ -580,6 +724,7 @@ def smoke_test_backup(path: Path) -> dict[str, Any]:
     verify = verify_backup(path)
     errors = list(verify.get("errors", []))
     database_result: list[str] = []
+    foreign_key_violations: list[tuple[Any, ...]] = []
     with tempfile.TemporaryDirectory(prefix="envsbot-backup-smoke-") as tmpdir:
         target = Path(tmpdir) / "bot.db"
         with zipfile.ZipFile(path) as archive:
@@ -596,6 +741,10 @@ def smoke_test_backup(path: Path) -> dict[str, Any]:
                         str(row[0])
                         for row in connection.execute("PRAGMA integrity_check;").fetchall()
                     ]
+                    foreign_key_violations = [
+                        tuple(row)
+                        for row in connection.execute("PRAGMA foreign_key_check;").fetchall()
+                    ]
                 finally:
                     connection.close()
             except Exception as exc:
@@ -605,11 +754,17 @@ def smoke_test_backup(path: Path) -> dict[str, Any]:
                     "database integrity check failed: "
                     + ", ".join(database_result or ["no result"])
                 )
+            if foreign_key_violations:
+                errors.append(
+                    "database foreign key check failed: "
+                    f"{len(foreign_key_violations)} violation(s)"
+                )
     return {
         "name": path.name,
         "ok": not errors,
         "errors": errors,
         "database_integrity": database_result,
+        "foreign_key_violations": len(foreign_key_violations),
     }
 
 

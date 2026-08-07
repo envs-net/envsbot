@@ -1107,13 +1107,20 @@ def test_export_room_state_includes_public_rules_and_achievement_catalog(tmp_pat
     assert "jid" not in room_payload["players"][0]
 
     season_events_payload = json.loads((tmp_path / "room_at_conf" / "season_events.json").read_text())
+    assert season_events_payload["format"] == "chunked-v1"
     assert season_events_payload["season"] == {
         "id": "season-a",
         "started_at": 1000,
         "ends_at": 2000,
     }
     assert season_events_payload["events_total"] == 3
-    assert [event["text"] for event in season_events_payload["events"]] == [
+    exported_events = []
+    for chunk_meta in season_events_payload["chunks"]:
+        chunk = json.loads(
+            (tmp_path / "room_at_conf" / chunk_meta["file"]).read_text()
+        )
+        exported_events.extend(chunk["events"])
+    assert [event["text"] for event in exported_events] == [
         "first",
         "second",
         "third",

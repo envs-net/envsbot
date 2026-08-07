@@ -367,6 +367,9 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
             f"players={int(export.get('players', 0) or 0)}, "
             f"events={int(export.get('events', 0) or 0)}, "
             f"files={int(export.get('files', 0) or 0)}, "
+            f"changed={int(export.get('files_changed', 0) or 0)}, "
+            f"skipped={int(export.get('files_skipped', 0) or 0)}, "
+            f"deleted={int(export.get('files_deleted', 0) or 0)}, "
             f"bytes={int(export.get('bytes', 0) or 0)}"
         )
     return lines

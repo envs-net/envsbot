@@ -385,6 +385,49 @@ def test_idlerpg_site_uses_complete_current_season_event_export(tmp_path: Path) 
     assert "The quest started" in html
 
 
+def test_idlerpg_site_reads_chunked_current_season_event_export(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    room_dir = data_dir / "alpha_at_conference.example.org"
+    legacy = json.loads((room_dir / "season_events.json").read_text(encoding="utf-8"))
+    events = legacy["events"]
+    chunk_dir = room_dir / "season-events"
+    chunk_dir.mkdir()
+    chunks = []
+    for index, chunk_events in enumerate((events[:1], events[1:]), start=1):
+        filename = f"{index:06d}.json"
+        (chunk_dir / filename).write_text(
+            json.dumps({
+                "room": legacy["room"],
+                "season_started_at": legacy["season"]["started_at"],
+                "chunk": index,
+                "events": chunk_events,
+            }),
+            encoding="utf-8",
+        )
+        chunks.append({"file": f"season-events/{filename}", "events": len(chunk_events)})
+    (room_dir / "season_events.json").write_text(
+        json.dumps({
+            "format": "chunked-v1",
+            "room": legacy["room"],
+            "season": legacy["season"],
+            "events_total": len(events),
+            "chunk_size": 1,
+            "chunks": chunks,
+        }),
+        encoding="utf-8",
+    )
+
+    html = _render(
+        data_dir,
+        view="events",
+        room="alpha_at_conference.example.org",
+    )
+
+    assert "complete current-season export" in html
+    assert "Alice unlocked Founder" in html
+    assert "The quest started" in html
+
+
 def test_idlerpg_site_rejects_unknown_or_unsafe_room_slug(tmp_path: Path) -> None:
     data_dir = _export_tree(tmp_path)
     html = _render(data_dir, view="home", room="../../etc/passwd")

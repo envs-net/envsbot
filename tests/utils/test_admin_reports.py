@@ -50,3 +50,39 @@ async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
     assert "backup: backup.zip (ok)" in report
     assert "commands (24h): 7 use(s), 0 failed" in report
     assert "http://" not in report and "https://" not in report
+
+@pytest.mark.asyncio
+async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch):
+    monkeypatch.setattr(
+        "utils.admin_reports._backup_state",
+        AsyncMock(return_value=("backup.zip", "ok")),
+    )
+    tasks = SimpleNamespace(
+        summary_by_kind=lambda: {
+            "services_running": 24,
+            "one_shots_running": 0,
+            "one_shots_completed": 1,
+            "services_finished": 0,
+            "failed": 0,
+            "cancelled": 0,
+        },
+        snapshot=lambda include_done=True: [],
+    )
+    bot = SimpleNamespace(
+        connection_start_time=datetime.now(timezone.utc),
+        config={},
+        presence=SimpleNamespace(joined_rooms={}),
+        tasks=tasks,
+        outbox=None,
+        db=SimpleNamespace(rooms=None, maintenance_state={}, command_usage=None),
+        bot_plugins=SimpleNamespace(failed_plugins={}),
+        watchdog=None,
+        alerts=None,
+    )
+
+    report = await build_daily_admin_report(bot)
+
+    assert (
+        "tasks: 24 services running, 0 one-shots running, "
+        "1 one-shots completed, 0 failed, 0 open circuit(s)"
+    ) in report

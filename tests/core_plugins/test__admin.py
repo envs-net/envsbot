@@ -520,6 +520,33 @@ def test_command_plugin_and_task_status_helpers(monkeypatch):
     assert _admin._task_summary_line(
         types.SimpleNamespace(tasks=ok_supervisor)
     ) == "Tasks: 2 running, 3 finished"
+    modern_supervisor = types.SimpleNamespace(
+        summary_by_kind=lambda: {
+            "services_running": 2,
+            "one_shots_running": 1,
+            "one_shots_completed": 3,
+            "services_finished": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
+    )
+    assert _admin._task_summary_line(
+        types.SimpleNamespace(tasks=modern_supervisor)
+    ) == "Tasks: 2 services running, 1 one-shots running, 3 one-shots completed, 0 failed"
+
+    finished_supervisor = types.SimpleNamespace(
+        summary_by_kind=lambda: {
+            "services_running": 2,
+            "one_shots_running": 0,
+            "one_shots_completed": 1,
+            "services_finished": 1,
+            "failed": 0,
+            "cancelled": 0,
+        }
+    )
+    assert _admin._task_summary_line(
+        types.SimpleNamespace(tasks=finished_supervisor)
+    ).endswith("1 services finished unexpectedly")
 
     assert _admin._plugin_status_lines(types.SimpleNamespace(bot_plugins=None))[:2] == [
         "Loaded: 0/0", "Commands: 2 (+1 aliases)"

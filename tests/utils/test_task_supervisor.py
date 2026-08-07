@@ -611,3 +611,53 @@ async def test_sleep_with_heartbeat_refreshes_during_long_wait(monkeypatch):
 
     assert sleeps == [2.0, 2.0, 1.0]
     assert calls == [("reports", "daily")] * 3
+
+@pytest.mark.asyncio
+async def test_summary_by_kind_separates_service_and_one_shot_lifecycle():
+    supervisor = TaskSupervisor()
+
+    async def quick():
+        return "done"
+
+    async def service():
+        while True:
+            await asyncio.sleep(60)
+
+    one_shot = supervisor.create("example", quick(), name="one-shot")
+    service_task = supervisor.create(
+        "example", service(), name="service", kind="service"
+    )
+    assert await one_shot == "done"
+
+    counts = supervisor.summary_by_kind()
+    assert counts["services_running"] == 1
+    assert counts["one_shots_running"] == 0
+    assert counts["one_shots_completed"] == 1
+    assert counts["services_finished"] == 0
+    assert counts["failed"] == 0
+
+    service_task.cancel()
+    await asyncio.gather(service_task, return_exceptions=True)
+
+@pytest.mark.asyncio
+async def test_completed_one_shot_history_is_bounded(monkeypatch):
+    monkeypatch.setattr(ts, "_COMPLETED_ONE_SHOT_HISTORY_LIMIT", 2)
+    supervisor = TaskSupervisor()
+
+    async def quick(value):
+        return value
+
+    tasks = [
+        supervisor.create("example", quick(index), name=f"one-shot-{index}")
+        for index in range(4)
+    ]
+    assert await asyncio.gather(*tasks) == [0, 1, 2, 3]
+    await asyncio.sleep(0)
+
+    completed = [
+        info
+        for info in supervisor.snapshot(include_done=True)
+        if info.kind == "one-shot" and info.status == "done"
+    ]
+    assert [info.name for info in completed] == ["one-shot-2", "one-shot-3"]
+    assert supervisor.summary_by_kind()["one_shots_completed"] == 2

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
@@ -46,24 +44,33 @@ def _task_sort_key(task: TaskInfo) -> tuple[int, str, str]:
     return (_STATUS_ORDER.get(task.status, 99), task.plugin, task.name)
 
 
-def _status_counts(tasks: Iterable[TaskInfo]) -> dict[str, int]:
-    """Count task states for a concise summary line."""
-    counts = {"running": 0, "failed": 0, "cancelled": 0, "done": 0}
-    for task in tasks:
-        counts[task.status] = counts.get(task.status, 0) + 1
-    return counts
-
-
 def _summary_line(tasks: list[TaskInfo]) -> str:
-    """Return a readable task state summary."""
-    counts = _status_counts(tasks)
-    return (
-        "Summary: "
-        f"{status_icon('running')} {counts.get('running', 0)} running, "
-        f"{status_icon('failed')} {counts.get('failed', 0)} failed, "
-        f"{status_icon('cancelled')} {counts.get('cancelled', 0)} cancelled, "
-        f"{status_icon('done')} {counts.get('done', 0)} done"
+    """Return a lifecycle-aware task summary."""
+    services_running = sum(
+        1 for task in tasks if task.kind == "service" and task.status == "running"
     )
+    one_shots_running = sum(
+        1 for task in tasks if task.kind != "service" and task.status == "running"
+    )
+    one_shots_completed = sum(
+        1 for task in tasks if task.kind != "service" and task.status == "done"
+    )
+    failed = sum(1 for task in tasks if task.status == "failed")
+    cancelled = sum(1 for task in tasks if task.status == "cancelled")
+    service_finished = sum(
+        1 for task in tasks if task.kind == "service" and task.status == "done"
+    )
+    parts = [
+        f"{status_icon('running')} {services_running} services running",
+        f"{one_shots_running} one-shots running",
+        f"{status_icon('done')} {one_shots_completed} one-shots completed",
+        f"{status_icon('failed')} {failed} failed",
+    ]
+    if service_finished:
+        parts.append(f"⚠️ {service_finished} services finished")
+    if cancelled:
+        parts.append(f"{cancelled} cancelled")
+    return "Summary: " + " · ".join(parts)
 
 
 def _compact_task_line(task: TaskInfo) -> str:

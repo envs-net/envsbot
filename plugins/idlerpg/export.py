@@ -12,6 +12,7 @@ expose private player JIDs.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -140,6 +141,106 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
     # atomically published with web-readable permissions even under umask 0077.
     _ensure_public_access(tmp, _PUBLIC_FILE_ACCESS)
     tmp.replace(path)
+
+
+_DELTA_MANIFEST_NAME = ".envsbot-export-manifest"
+_DELTA_MANIFEST_VERSION = 1
+
+
+def _stable_export_digest(payload: Any) -> str:
+    """Hash public content while ignoring the volatile generation timestamp."""
+    stable = payload
+    if isinstance(payload, dict) and "generated_at" in payload:
+        stable = dict(payload)
+        stable.pop("generated_at", None)
+    encoded = json.dumps(
+        stable,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+class _DeltaExportWriter:
+    """Publish only public JSON files whose semantic content changed."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.previous = self._load_manifest()
+        self.current: dict[str, str] = {}
+        self.changed = 0
+        self.skipped = 0
+        self.deleted = 0
+
+    def _load_manifest(self) -> dict[str, str]:
+        path = self.root / _DELTA_MANIFEST_NAME
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
+        if not isinstance(payload, dict) or payload.get("version") != _DELTA_MANIFEST_VERSION:
+            return {}
+        files = payload.get("files")
+        if not isinstance(files, dict):
+            return {}
+        return {
+            str(name): str(digest)
+            for name, digest in files.items()
+            if isinstance(name, str) and isinstance(digest, str)
+        }
+
+    def _relative(self, path: Path) -> str:
+        return path.relative_to(self.root).as_posix()
+
+    def write(self, path: Path, payload: Any) -> bool:
+        relative = self._relative(path)
+        digest = _stable_export_digest(payload)
+        self.current[relative] = digest
+        if path.is_file() and self.previous.get(relative) == digest:
+            self.skipped += 1
+            return False
+        _atomic_write_json(path, payload)
+        self.changed += 1
+        return True
+
+    def preserve(self, path: Path) -> None:
+        """Carry an unchanged file forward in the manifest without reading it."""
+        relative = self._relative(path)
+        digest = self.previous.get(relative)
+        if digest and path.is_file():
+            self.current[relative] = digest
+            self.skipped += 1
+
+    def remove(self, path: Path) -> bool:
+        existed = path.exists() or path.is_symlink()
+        _remove_export_path_safely(path)
+        relative = self._relative(path)
+        prefix = relative.rstrip("/") + "/"
+        for name in tuple(self.current):
+            if name == relative or name.startswith(prefix):
+                self.current.pop(name, None)
+        if existed:
+            self.deleted += 1
+        return existed
+
+    def prune_json_directory(self, directory: Path, expected_names: set[str]) -> None:
+        if not directory.is_dir():
+            return
+        for path in directory.glob("*.json"):
+            if path.name not in expected_names:
+                self.remove(path)
+
+    def finish(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        files = dict(sorted(self.current.items()))
+        if files == dict(sorted(self.previous.items())):
+            return
+        manifest = {
+            "version": _DELTA_MANIFEST_VERSION,
+            "files": files,
+        }
+        _atomic_write_json(self.root / _DELTA_MANIFEST_NAME, manifest)
 
 
 _ROOT_COMPATIBILITY_EXPORTS = (
@@ -503,10 +604,261 @@ def _public_rules() -> dict[str, Any]:
         "event_retention_days": _dep_config.EVENT_RETENTION_DAYS,
         "export_event_limit": _dep_config.EXPORT_EVENT_LIMIT,
         "export_full_season_events": _dep_config.EXPORT_FULL_SEASON_EVENTS,
+        "export_season_event_chunk_size": _dep_config.EXPORT_SEASON_EVENT_CHUNK_SIZE,
         "export_interval_seconds": _dep_config.EXPORT_INTERVAL_SECONDS,
         "export_top_limit": _dep_config.EXPORT_TOP_LIMIT,
     }
 
+
+
+_SEASON_EVENT_FORMAT = "chunked-v1"
+_SEASON_EVENT_CHUNK_DIR = "season-events"
+
+
+def _season_event_rowid(event: dict[str, Any]) -> int:
+    try:
+        return max(0, int(event.get("_storage_rowid", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _season_event_public_record(event: dict[str, Any]) -> dict[str, Any]:
+    payload = _event_public_record(event)
+    rowid = _season_event_rowid(event)
+    if rowid > 0:
+        payload["seq"] = rowid
+    return payload
+
+
+def _season_event_chunk_name(index: int) -> str:
+    return f"{max(1, int(index)):06d}.json"
+
+
+def _season_event_chunk_path(room_dir: Path, index: int) -> Path:
+    return room_dir / _SEASON_EVENT_CHUNK_DIR / _season_event_chunk_name(index)
+
+
+def _read_json_dict(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _season_manifest_chunks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    chunks = payload.get("chunks")
+    if not isinstance(chunks, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            return []
+        filename = str(chunk.get("file") or "")
+        if not re.fullmatch(r"season-events/[0-9]{6}\.json", filename):
+            return []
+        result.append(dict(chunk))
+    return result
+
+
+def _season_manifest_for_root(
+    manifest: dict[str, Any],
+    *,
+    slug: str,
+    generated_at: int,
+) -> dict[str, Any]:
+    root_manifest = dict(manifest)
+    root_manifest["generated_at"] = generated_at
+    chunks = []
+    for chunk in _season_manifest_chunks(manifest):
+        item = dict(chunk)
+        item["file"] = f"{slug}/{item['file']}"
+        chunks.append(item)
+    root_manifest["chunks"] = chunks
+    return root_manifest
+
+
+def _prune_season_event_chunks(
+    room_dir: Path,
+    expected_names: set[str],
+    *,
+    writer: _DeltaExportWriter | None,
+) -> None:
+    directory = room_dir / _SEASON_EVENT_CHUNK_DIR
+    if writer is not None:
+        writer.prune_json_directory(directory, expected_names)
+        return
+    if not directory.is_dir():
+        return
+    for path in directory.glob("*.json"):
+        if path.name not in expected_names:
+            _remove_export_path_safely(path)
+    try:
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+    except OSError:
+        pass
+
+
+def _remove_season_event_export(
+    room_dir: Path,
+    *,
+    writer: _DeltaExportWriter | None,
+) -> None:
+    manifest_path = room_dir / "season_events.json"
+    chunk_dir = room_dir / _SEASON_EVENT_CHUNK_DIR
+    if writer is not None:
+        writer.remove(manifest_path)
+        writer.remove(chunk_dir)
+    else:
+        _remove_export_path_safely(manifest_path)
+        _remove_export_path_safely(chunk_dir)
+
+
+def _preserve_season_event_export(
+    room_dir: Path,
+    *,
+    writer: _DeltaExportWriter | None,
+) -> dict[str, Any]:
+    manifest_path = room_dir / "season_events.json"
+    manifest = _read_json_dict(manifest_path)
+    if (
+        manifest is None
+        or manifest.get("format") != _SEASON_EVENT_FORMAT
+        or not _season_manifest_chunks(manifest)
+        and int(manifest.get("events_total", 0) or 0) > 0
+    ):
+        raise ValueError("existing season event export is missing or incompatible")
+    if writer is not None:
+        writer.preserve(manifest_path)
+        for chunk in _season_manifest_chunks(manifest):
+            writer.preserve(room_dir / str(chunk["file"]))
+    return manifest
+
+
+def _write_season_event_export(
+    room_dir: Path,
+    *,
+    room_jid: str,
+    season: dict[str, Any],
+    generated_at: int,
+    events: list[dict[str, Any]],
+    events_total: int,
+    append: bool,
+    writer: _DeltaExportWriter | None,
+) -> dict[str, Any]:
+    """Write append-friendly full-season history and return its manifest."""
+    _write = writer.write if writer is not None else _atomic_write_json
+    chunk_size = max(1, int(_dep_config.EXPORT_SEASON_EVENT_CHUNK_SIZE))
+    season_payload = {
+        "id": str(season.get("id") or ""),
+        "started_at": int(season.get("started_at", 0) or 0),
+        "ends_at": int(season.get("ends_at", 0) or 0),
+    }
+    public_events = [_season_event_public_record(event) for event in events]
+    public_events.sort(
+        key=lambda event: (
+            int(event.get("ts", 0) or 0),
+            int(event.get("seq", 0) or 0),
+        )
+    )
+
+    existing_chunks: list[dict[str, Any]] = []
+    existing_total = 0
+    last_rowid = 0
+    if append:
+        manifest = _read_json_dict(room_dir / "season_events.json")
+        if manifest is None or manifest.get("format") != _SEASON_EVENT_FORMAT:
+            raise ValueError("append requested without a chunked season manifest")
+        existing_season = manifest.get("season")
+        if not isinstance(existing_season, dict) or int(existing_season.get("started_at", 0) or 0) != season_payload["started_at"]:
+            raise ValueError("season event append crosses a season boundary")
+        if int(manifest.get("chunk_size", 0) or 0) != chunk_size:
+            raise ValueError("season event chunk size changed; full rebuild required")
+        existing_chunks = _season_manifest_chunks(manifest)
+        existing_total = max(0, int(manifest.get("events_total", 0) or 0))
+        last_rowid = max(0, int(manifest.get("last_rowid", 0) or 0))
+        expected_previous_total = max(0, int(events_total) - len(public_events))
+        if existing_total != expected_previous_total:
+            raise ValueError("season event append base does not match exported history")
+        public_events = [event for event in public_events if int(event.get("seq", 0) or 0) > last_rowid]
+        if existing_total + len(public_events) != max(0, int(events_total)):
+            raise ValueError("season event delta is incomplete")
+        if writer is not None:
+            for chunk in existing_chunks:
+                writer.preserve(room_dir / str(chunk["file"]))
+
+    chunks: list[dict[str, Any]] = [dict(chunk) for chunk in existing_chunks]
+    pending = list(public_events)
+    if append and chunks and pending:
+        final_meta = chunks[-1]
+        final_path = room_dir / str(final_meta["file"])
+        final_payload = _read_json_dict(final_path)
+        final_events = final_payload.get("events") if isinstance(final_payload, dict) else None
+        if not isinstance(final_events, list):
+            raise ValueError("last season event chunk is unreadable")
+        if len(final_events) < chunk_size:
+            take = min(chunk_size - len(final_events), len(pending))
+            final_events = [event for event in final_events if isinstance(event, dict)] + pending[:take]
+            pending = pending[take:]
+            _write(final_path, {
+                "generated_at": generated_at,
+                "room": room_jid,
+                "season_started_at": season_payload["started_at"],
+                "chunk": len(chunks),
+                "events": final_events,
+            })
+            seqs = [int(event.get("seq", 0) or 0) for event in final_events if isinstance(event, dict)]
+            final_meta.update({
+                "events": len(final_events),
+                "first_rowid": min((seq for seq in seqs if seq > 0), default=0),
+                "last_rowid": max(seqs, default=0),
+            })
+
+    if not append:
+        chunks = []
+        pending = list(public_events)
+
+    while pending:
+        index = len(chunks) + 1
+        chunk_events = pending[:chunk_size]
+        pending = pending[chunk_size:]
+        path = _season_event_chunk_path(room_dir, index)
+        _write(path, {
+            "generated_at": generated_at,
+            "room": room_jid,
+            "season_started_at": season_payload["started_at"],
+            "chunk": index,
+            "events": chunk_events,
+        })
+        seqs = [int(event.get("seq", 0) or 0) for event in chunk_events]
+        chunks.append({
+            "file": f"{_SEASON_EVENT_CHUNK_DIR}/{path.name}",
+            "events": len(chunk_events),
+            "first_rowid": min((seq for seq in seqs if seq > 0), default=0),
+            "last_rowid": max(seqs, default=0),
+        })
+
+    if not append and max(0, int(events_total)) != len(public_events):
+        raise ValueError("full season event export does not match database revision")
+
+    expected_names = {Path(str(chunk["file"])).name for chunk in chunks}
+    _prune_season_event_chunks(room_dir, expected_names, writer=writer)
+    last_rowid = max(
+        [int(chunk.get("last_rowid", 0) or 0) for chunk in chunks] + [last_rowid]
+    )
+    manifest = {
+        "generated_at": generated_at,
+        "room": room_jid,
+        "format": _SEASON_EVENT_FORMAT,
+        "season": season_payload,
+        "events_total": max(0, int(events_total)),
+        "chunk_size": chunk_size,
+        "last_rowid": last_rowid,
+        "chunks": chunks,
+    }
+    _write(room_dir / "season_events.json", manifest)
+    return manifest
 
 def _export_room_state(
     root: Path,
@@ -514,9 +866,15 @@ def _export_room_state(
     room: dict[str, Any],
     generated_at: int,
     season_events: list[dict[str, Any]] | None = None,
+    *,
+    season_events_count: int | None = None,
+    preserve_season_events: bool = False,
+    append_season_events: bool = False,
+    writer: _DeltaExportWriter | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     slug = _dep_formatting._room_slug(room_jid)
     room_dir = root / slug
+    _write = writer.write if writer is not None else _atomic_write_json
     ranked = _dep_state._ranked_players(room)
     leaderboard = [
         _player_public_record(room_jid, jid, player, rank=rank)
@@ -548,17 +906,18 @@ def _export_room_state(
         }
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
     events = _room_events(room, limit=_dep_config.EXPORT_EVENT_LIMIT)
-    season_events = (
-        sorted(
-            [
-                _event_public_record(event)
-                for event in (season_events if season_events is not None else _ensure_season_events(room))
-                if isinstance(event, dict)
-            ],
-            key=lambda event: int(event.get("ts", 0) or 0),
-        )
-        if _dep_config.EXPORT_FULL_SEASON_EVENTS
+    season_events_source = (
+        season_events if season_events is not None else _ensure_season_events(room)
+    )
+    season_events_payload = (
+        [event for event in season_events_source if isinstance(event, dict)]
+        if _dep_config.EXPORT_FULL_SEASON_EVENTS and not preserve_season_events
         else []
+    )
+    season_events_total = (
+        max(0, int(season_events_count))
+        if season_events_count is not None
+        else len(season_events_payload)
     )
     hall_of_fame = room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else []
     room_payload = {
@@ -573,17 +932,17 @@ def _export_room_state(
         "players": all_profiles,
         "quest": active_quest,
         "events": events,
-        "season_events_total": len(season_events),
+        "season_events_total": season_events_total,
         "hall_of_fame": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:],
         "achievement_catalog": _dep_leveling._achievement_catalog(),
         "equipment_slots": list(_dep_constants.ITEMS),
         "artifact_catalog": _public_artifact_catalog(),
         "rules": _public_rules(),
     }
-    _atomic_write_json(room_dir / "room.json", room_payload)
-    _atomic_write_json(room_dir / "leaderboard.json", {"generated_at": generated_at, "room": room_jid, "players": leaderboard})
-    _atomic_write_json(room_dir / "players.json", {"generated_at": generated_at, "room": room_jid, "players": all_profiles})
-    _atomic_write_json(room_dir / "map.json", {
+    _write(room_dir / "room.json", room_payload)
+    _write(room_dir / "leaderboard.json", {"generated_at": generated_at, "room": room_jid, "players": leaderboard})
+    _write(room_dir / "players.json", {"generated_at": generated_at, "room": room_jid, "players": all_profiles})
+    _write(room_dir / "map.json", {
         "generated_at": generated_at,
         "room": room_jid,
         "width": _dep_config.MAP_X,
@@ -591,32 +950,44 @@ def _export_room_state(
         "players": all_profiles,
         "quest": active_quest,
     })
-    _atomic_write_json(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:]})
-    _atomic_write_json(room_dir / "events.json", {"generated_at": generated_at, "room": room_jid, "events": events})
-    if _dep_config.EXPORT_FULL_SEASON_EVENTS:
-        _atomic_write_json(room_dir / "season_events.json", {
-            "generated_at": generated_at,
-            "room": room_jid,
-            "season": {
-                "id": str(season.get("id") or ""),
-                "started_at": int(season.get("started_at", 0) or 0),
-                "ends_at": int(season.get("ends_at", 0) or 0),
-            },
-            "events_total": len(season_events),
-            "events": season_events,
-        })
+    _write(room_dir / "hall_of_fame.json", {"generated_at": generated_at, "room": room_jid, "seasons": hall_of_fame[-_dep_config.SEASON_HOF_SIZE:]})
+    _write(room_dir / "events.json", {"generated_at": generated_at, "room": room_jid, "events": events})
+    season_events_manifest: dict[str, Any] | None = None
+    if _dep_config.EXPORT_FULL_SEASON_EVENTS and preserve_season_events:
+        season_events_manifest = _preserve_season_event_export(
+            room_dir, writer=writer
+        )
+    elif _dep_config.EXPORT_FULL_SEASON_EVENTS:
+        season_events_manifest = _write_season_event_export(
+            room_dir,
+            room_jid=room_jid,
+            season=season,
+            generated_at=generated_at,
+            events=season_events_payload,
+            events_total=season_events_total,
+            append=append_season_events,
+            writer=writer,
+        )
     else:
-        _remove_export_path_safely(room_dir / "season_events.json")
-    _atomic_write_json(room_dir / "achievements.json", {"generated_at": generated_at, "room": room_jid, "achievements": _dep_leveling._achievement_catalog()})
-    _atomic_write_json(room_dir / "artifacts.json", {
+        _remove_season_event_export(room_dir, writer=writer)
+    _write(room_dir / "achievements.json", {"generated_at": generated_at, "room": room_jid, "achievements": _dep_leveling._achievement_catalog()})
+    _write(room_dir / "artifacts.json", {
         "generated_at": generated_at,
         "room": room_jid,
         "equipment_slots": room_payload["equipment_slots"],
         "artifacts": room_payload["artifact_catalog"],
     })
     profiles_dir = room_dir / "profiles"
+    profile_names: set[str] = set()
     for profile in all_profiles:
-        _atomic_write_json(profiles_dir / f"{_dep_formatting._slug(profile['name'])}.json", profile)
+        filename = f"{_dep_formatting._slug(profile['name'])}.json"
+        profile_names.add(filename)
+        _write(profiles_dir / filename, profile)
+    if writer is not None:
+        writer.prune_json_directory(profiles_dir, profile_names)
+    if season_events_manifest is not None:
+        room_payload["_season_events_manifest"] = season_events_manifest
+
     summary = {
         "room": room_jid,
         "slug": slug,
@@ -634,7 +1005,9 @@ def _export_room_state(
 def _export_public_state(
     data: dict[str, Any],
     enabled_rooms: dict[str, bool] | None = None,
-    season_events_by_room: dict[str, list[dict[str, Any]]] | None = None,
+    season_events_by_room: dict[str, list[dict[str, Any]] | None] | None = None,
+    season_event_counts_by_room: dict[str, int] | None = None,
+    season_events_append_by_room: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     """Write a complete public export and return compact diagnostics.
 
@@ -645,6 +1018,7 @@ def _export_public_state(
         return {"ok": True, "rooms": 0, "players": 0, "events": 0, "files": 0, "bytes": 0}
     try:
         root = _export_root()
+        writer = _DeltaExportWriter(root)
         generated_at = _dep_formatting._now()
         rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
         if not isinstance(rooms, dict):
@@ -664,20 +1038,43 @@ def _export_public_state(
         summaries: list[dict[str, Any]] = []
         current_slugs: set[str] = set()
         default_room_payload = None
-        default_room_season_events: list[dict[str, Any]] = []
+        default_room_season_manifest: dict[str, Any] | None = None
         exported_events = 0
         exported_players = 0
         for room_jid, room in sorted(rooms.items()):
             room_jid = str(room_jid)
             if room_jid not in enabled or not isinstance(room, dict):
                 continue
+            has_season_entry = (
+                isinstance(season_events_by_room, dict)
+                and room_jid in season_events_by_room
+            )
             room_season_events = (
                 season_events_by_room.get(room_jid)
-                if isinstance(season_events_by_room, dict)
+                if has_season_entry
                 else None
             )
+            preserve_season_events = has_season_entry and room_season_events is None
+            room_season_count = (
+                season_event_counts_by_room.get(room_jid)
+                if isinstance(season_event_counts_by_room, dict)
+                else None
+            )
+            append_season_events = bool(
+                season_events_append_by_room.get(room_jid, False)
+                if isinstance(season_events_append_by_room, dict)
+                else False
+            )
             summary, room_payload = _export_room_state(
-                root, room_jid, room, generated_at, room_season_events
+                root,
+                room_jid,
+                room,
+                generated_at,
+                room_season_events,
+                season_events_count=room_season_count,
+                preserve_season_events=preserve_season_events,
+                append_season_events=append_season_events,
+                writer=writer,
             )
             summaries.append(summary)
             current_slugs.add(str(summary["slug"]))
@@ -687,21 +1084,9 @@ def _export_public_state(
                 exported_events += int(room_payload.get("season_events_total", 0) or 0)
             if default_room_payload is None:
                 default_room_payload = room_payload
-                if _dep_config.EXPORT_FULL_SEASON_EVENTS:
-                    default_room_season_events = (
-                        sorted(
-                            [
-                                _event_public_record(event)
-                                for event in (
-                                    room_season_events
-                                    if room_season_events is not None
-                                    else _ensure_season_events(room)
-                                )
-                                if isinstance(event, dict)
-                            ],
-                            key=lambda event: int(event.get("ts", 0) or 0),
-                        )
-                    )
+                manifest = room_payload.get("_season_events_manifest")
+                if isinstance(manifest, dict):
+                    default_room_season_manifest = manifest
 
         stale_slugs = previous_slugs - current_slugs
         stale_slugs.update(
@@ -709,19 +1094,19 @@ def _export_public_state(
             for room_jid, slug in known_slugs.items()
             if room_jid not in enabled
         )
-        _atomic_write_json(root / "index.json", {"generated_at": generated_at, "rooms": summaries})
+        writer.write(root / "index.json", {"generated_at": generated_at, "rooms": summaries})
         for slug in sorted(stale_slugs):
             safe_slug = _safe_export_slug(slug)
             if safe_slug:
-                _remove_export_path_safely(root / safe_slug)
+                writer.remove(root / safe_slug)
 
         if default_room_payload:
-            _atomic_write_json(root / "leaderboard.json", {
+            writer.write(root / "leaderboard.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "players": default_room_payload["leaderboard"],
             })
-            _atomic_write_json(root / "map.json", {
+            writer.write(root / "map.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "width": _dep_config.MAP_X,
@@ -729,52 +1114,49 @@ def _export_public_state(
                 "players": default_room_payload["players"],
                 "quest": default_room_payload["quest"],
             })
-            _atomic_write_json(root / "players.json", {
+            writer.write(root / "players.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "players": default_room_payload["players"],
             })
-            _atomic_write_json(root / "hall_of_fame.json", {
+            writer.write(root / "hall_of_fame.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "seasons": default_room_payload["hall_of_fame"],
             })
-            _atomic_write_json(root / "events.json", {
+            writer.write(root / "events.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "events": default_room_payload.get("events", []),
             })
-            if _dep_config.EXPORT_FULL_SEASON_EVENTS:
-                season = default_room_payload.get("season", {})
-                if not isinstance(season, dict):
-                    season = {}
-                _atomic_write_json(root / "season_events.json", {
-                    "generated_at": generated_at,
-                    "room": default_room_payload["room"],
-                    "season": {
-                        "id": str(season.get("id") or ""),
-                        "started_at": int(season.get("started_at", 0) or 0),
-                        "ends_at": int(season.get("ends_at", 0) or 0),
-                    },
-                    "events_total": len(default_room_season_events),
-                    "events": default_room_season_events,
-                })
-            else:
-                _remove_export_path_safely(root / "season_events.json")
-            _atomic_write_json(root / "achievements.json", {
+            if _dep_config.EXPORT_FULL_SEASON_EVENTS and default_room_season_manifest is not None:
+                writer.write(
+                    root / "season_events.json",
+                    _season_manifest_for_root(
+                        default_room_season_manifest,
+                        slug=_dep_formatting._room_slug(str(default_room_payload["room"])),
+                        generated_at=generated_at,
+                    ),
+                )
+            elif not _dep_config.EXPORT_FULL_SEASON_EVENTS:
+                writer.remove(root / "season_events.json")
+                writer.remove(root / _SEASON_EVENT_CHUNK_DIR)
+            writer.write(root / "achievements.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "achievements": default_room_payload.get("achievement_catalog", _dep_leveling._achievement_catalog()),
             })
-            _atomic_write_json(root / "artifacts.json", {
+            writer.write(root / "artifacts.json", {
                 "generated_at": generated_at,
                 "room": default_room_payload["room"],
                 "equipment_slots": default_room_payload["equipment_slots"],
                 "artifacts": default_room_payload["artifact_catalog"],
             })
         else:
-            _remove_root_compatibility_exports(root)
+            for filename in _ROOT_COMPATIBILITY_EXPORTS:
+                writer.remove(root / filename)
 
+        writer.finish()
         tree = _export_tree_stats(root)
         return {
             "ok": True,
@@ -782,6 +1164,9 @@ def _export_public_state(
             "rooms": len(summaries),
             "players": exported_players,
             "events": exported_events,
+            "files_changed": writer.changed,
+            "files_skipped": writer.skipped,
+            "files_deleted": writer.deleted,
             **tree,
         }
     except Exception as exc:

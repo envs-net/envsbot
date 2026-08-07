@@ -25,6 +25,8 @@ public/idlerpg/data/<room-slug>/players.json
 public/idlerpg/data/<room-slug>/map.json
 public/idlerpg/data/<room-slug>/events.json
 public/idlerpg/data/<room-slug>/season_events.json
+public/idlerpg/data/<room-slug>/season-events/000001.json
+public/idlerpg/data/<room-slug>/season-events/000002.json
 public/idlerpg/data/<room-slug>/hall_of_fame.json
 public/idlerpg/data/<room-slug>/achievements.json
 public/idlerpg/data/<room-slug>/artifacts.json
@@ -37,9 +39,12 @@ and complete fallback state; the
 specialized JSON files keep individual views usable if one optional file is
 missing. `events.json` remains a compact recent-event feed, while
 `season_events.json` is optional and is written only when
-`export_full_season_events` is enabled in the bot configuration. When present,
-it contains every event recorded during the active season; otherwise the site
-uses the limited `events.json` feed.
+`export_full_season_events` is enabled. Since EnvsBot v1.8 it is a compact
+`chunked-v1` manifest; the complete active-season history lives in immutable or
+append-only `season-events/NNNNNN.json` chunks. The example site loads those
+chunks transparently and remains compatible with the older monolithic
+`season_events.json` format. If no full-season export exists it falls back to
+the limited `events.json` feed.
 
 Example plugin config:
 
@@ -48,6 +53,7 @@ IDLERPG = {
     "export_enabled": True,
     "export_interval_seconds": 300,
     "export_full_season_events": False,
+    "export_season_event_chunk_size": 1000,
     "export_path": "/path/to/public/idlerpg/data",
     "export_public_base_url": "https://example.org/idlerpg/data",
     "website_public_base_url": "https://example.org/idlerpg",

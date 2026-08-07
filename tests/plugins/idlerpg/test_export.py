@@ -42,6 +42,7 @@ def test_public_rules_include_new_options():
     assert rules["boss_loss_percent"] == idlerpg.BOSS_LOSS_PERCENT
     assert rules["export_interval_seconds"] == idlerpg.EXPORT_INTERVAL_SECONDS
     assert rules["export_full_season_events"] == idlerpg.EXPORT_FULL_SEASON_EVENTS
+    assert rules["export_season_event_chunk_size"] == idlerpg.EXPORT_SEASON_EVENT_CHUNK_SIZE
     assert rules["quest_max_per_day"] == idlerpg.QUEST_MAX_PER_DAY
     assert rules["quest_grid_min_points"] == idlerpg.QUEST_GRID_MIN_POINTS
     assert rules["quest_grid_max_points"] == idlerpg.QUEST_GRID_MAX_POINTS
@@ -207,6 +208,9 @@ def test_full_season_event_export_can_be_disabled_and_removes_stale_files(
     room_dir = tmp_path / "room_at_conf"
     room_dir.mkdir()
     (room_dir / "season_events.json").write_text("{}", encoding="utf-8")
+    chunk_dir = room_dir / "season-events"
+    chunk_dir.mkdir()
+    (chunk_dir / "000001.json").write_text("{}", encoding="utf-8")
     (tmp_path / "season_events.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
@@ -217,6 +221,7 @@ def test_full_season_event_export_can_be_disabled_and_removes_stale_files(
 
     assert (room_dir / "events.json").exists()
     assert not (room_dir / "season_events.json").exists()
+    assert not (room_dir / "season-events").exists()
     assert not (tmp_path / "season_events.json").exists()
 
     index = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
@@ -543,3 +548,199 @@ async def test_concurrent_automatic_exports_are_coalesced(monkeypatch):
 
     assert sorted([first, second]) == [False, True]
     assert len(calls) == 1
+
+
+def test_public_export_skips_semantically_unchanged_json(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", False)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1234)
+
+    calls = []
+    real_write = idlerpg_export._atomic_write_json
+
+    def tracked_write(path, payload):
+        calls.append(path)
+        return real_write(path, payload)
+
+    monkeypatch.setattr(idlerpg_export, "_atomic_write_json", tracked_write)
+    data = {"rooms": {"room@conf": idlerpg._blank_room()}}
+
+    first = idlerpg._export_public_state(data, {"room@conf": True})
+    assert first["ok"] is True
+    assert first["files_changed"] > 0
+    assert calls
+
+    calls.clear()
+    second = idlerpg._export_public_state(data, {"room@conf": True})
+    assert second["ok"] is True
+    assert second["files_changed"] == 0
+    assert second["files_skipped"] > 0
+    assert second["files_deleted"] == 0
+    assert calls == []
+
+
+def test_public_export_prunes_stale_profile_as_delta(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", False)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1234)
+
+    room = idlerpg._blank_room()
+    room["players"] = {
+        "alice@example.org": idlerpg._normalize_player(
+            "alice@example.org",
+            {"name": "Alice", "created_at": 100, "x": 1, "y": 2},
+        )
+    }
+    data = {"rooms": {"room@conf": room}}
+    first = idlerpg._export_public_state(data, {"room@conf": True})
+    assert first["ok"] is True
+    profile = tmp_path / idlerpg._room_slug("room@conf") / "profiles" / "Alice.json"
+    assert profile.exists()
+
+    room["players"] = {}
+    second = idlerpg._export_public_state(data, {"room@conf": True})
+    assert second["ok"] is True
+    assert second["files_deleted"] >= 1
+    assert not profile.exists()
+
+
+@pytest.mark.asyncio
+async def test_automatic_full_season_export_reuses_unchanged_sqlite_revision(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import state as idlerpg_state
+
+    room_jid = "room@conf"
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "season-a", "started_at": 100, "ends_at": 0}
+    data = {"rooms": {room_jid: room}}
+    loads = []
+    exports = []
+    revision = [2, 22]
+
+    class Normalized:
+        async def load_state(self):
+            return data
+
+        async def save_state(self, _data, *, room_jids=None):
+            return None
+
+        async def season_event_revision(self, requested_room, started_at):
+            assert requested_room == room_jid
+            assert started_at == 100
+            return tuple(revision)
+
+        async def load_season_events(self, requested_room, started_at, *, after_rowid=0):
+            loads.append((requested_room, started_at, after_rowid))
+            if after_rowid > 0:
+                return [
+                    {
+                        "ts": 130,
+                        "kind": "game",
+                        "text": "three",
+                        "_storage_rowid": 23,
+                    }
+                ]
+            return [
+                {"ts": 110, "kind": "game", "text": "one", "_storage_rowid": 21},
+                {"ts": 120, "kind": "game", "text": "two", "_storage_rowid": 22},
+            ]
+
+    async def enabled_rooms(_bot, room_jids=()):
+        return {str(room): True for room in room_jids}
+
+    def export_state(_data, _enabled, events, counts, append):
+        exports.append((events, counts, append))
+        return {"ok": True}
+
+    bot = DummyBot()
+    bot.db.idlerpg = Normalized()
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(idlerpg_state, "_enabled_rooms", enabled_rooms)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", export_state)
+    idlerpg_state._reset_public_export_schedule()
+
+    assert await idlerpg_state._refresh_public_export(bot, data, force=False) is True
+    assert loads == [(room_jid, 100, 0)]
+    assert exports[0][0][room_jid][1]["text"] == "two"
+    assert exports[0][1] == {room_jid: 2}
+    assert exports[0][2] == {room_jid: False}
+
+    assert await idlerpg_state._refresh_public_export(bot, data, force=False) is True
+    assert loads == [(room_jid, 100, 0)]
+    assert exports[1][0] == {room_jid: None}
+    assert exports[1][1] == {room_jid: 2}
+    assert exports[1][2] == {room_jid: False}
+
+    revision[:] = [3, 23]
+    assert await idlerpg_state._refresh_public_export(bot, data, force=False) is True
+    assert loads[-1] == (room_jid, 100, 22)
+    assert exports[2][0][room_jid][0]["text"] == "three"
+    assert exports[2][1] == {room_jid: 3}
+    assert exports[2][2] == {room_jid: True}
+
+
+def test_chunked_season_export_appends_without_rewriting_old_chunks(tmp_path, monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+
+    room_jid = "room@conf"
+    room = idlerpg._blank_room()
+    room["season"] = {"id": "season-a", "started_at": 100, "ends_at": 0}
+    monkeypatch.setattr(idlerpg_config, "EXPORT_PATH", str(tmp_path))
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_SEASON_EVENT_CHUNK_SIZE", 2)
+
+    full = [
+        {"ts": 101, "kind": "game", "text": "one", "_storage_rowid": 11},
+        {"ts": 102, "kind": "game", "text": "two", "_storage_rowid": 12},
+        {"ts": 103, "kind": "game", "text": "three", "_storage_rowid": 13},
+    ]
+    first = idlerpg._export_public_state(
+        {"rooms": {room_jid: room}},
+        {room_jid: True},
+        {room_jid: full},
+        {room_jid: 3},
+        {room_jid: False},
+    )
+    assert first["ok"] is True
+    room_dir = tmp_path / "room_at_conf"
+    chunk1 = room_dir / "season-events" / "000001.json"
+    chunk2 = room_dir / "season-events" / "000002.json"
+    before_chunk1 = chunk1.read_bytes()
+    before_chunk2 = chunk2.read_bytes()
+
+    delta = [
+        {"ts": 104, "kind": "game", "text": "four", "_storage_rowid": 14},
+        {"ts": 105, "kind": "game", "text": "five", "_storage_rowid": 15},
+    ]
+    second = idlerpg._export_public_state(
+        {"rooms": {room_jid: room}},
+        {room_jid: True},
+        {room_jid: delta},
+        {room_jid: 5},
+        {room_jid: True},
+    )
+    assert second["ok"] is True
+    assert chunk1.read_bytes() == before_chunk1
+    assert chunk2.read_bytes() != before_chunk2
+    chunk3 = room_dir / "season-events" / "000003.json"
+    assert chunk3.exists()
+
+    manifest = json.loads((room_dir / "season_events.json").read_text(encoding="utf-8"))
+    assert manifest["format"] == "chunked-v1"
+    assert manifest["events_total"] == 5
+    assert manifest["last_rowid"] == 15
+    assert [chunk["events"] for chunk in manifest["chunks"]] == [2, 2, 1]
+    assert second["files_skipped"] > 0

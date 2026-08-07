@@ -2,7 +2,9 @@ import asyncio
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,15 +14,15 @@ from utils.config import config
 from utils.file_security import ensure_private_file
 from utils.logging_helpers import kv
 
-from .users import UserManager
-from .rooms import Rooms
 from .audit import AuditLog
-from .message_cache import MessageCacheStore
-from .idlerpg import IdleRPGStateStore
-from .outbox import OutboxStore
 from .command_usage import CommandUsageStore
-from .migrations import available_migrations
+from .idlerpg import IdleRPGStateStore
 from .locking import AsyncRLock
+from .message_cache import MessageCacheStore
+from .migrations import available_migrations
+from .outbox import OutboxStore
+from .rooms import Rooms
+from .users import UserManager
 
 # logger for this module
 log = logging.getLogger(__name__)
@@ -50,21 +52,21 @@ class DatabaseManager:
     def __init__(self, path: str, flush_interval: int = 60):
 
         self.path = path
-        self.conn = None
+        self.conn: aiosqlite.Connection | None = None
 
-        self.users = None
-        self.rooms = None
-        self.audit = None
-        self.message_cache = None
-        self.idlerpg = None
-        self.outbox = None
-        self.command_usage = None
+        self.users: UserManager | None = None
+        self.rooms: Rooms | None = None
+        self.audit: AuditLog | None = None
+        self.message_cache: MessageCacheStore | None = None
+        self.idlerpg: IdleRPGStateStore | None = None
+        self.outbox: OutboxStore | None = None
+        self.command_usage: CommandUsageStore | None = None
 
         self.flush_interval = flush_interval
 
-        self._flush_task = None
-        self._maintenance_task = None
-        self.maintenance_state = {
+        self._flush_task: asyncio.Task[Any] | None = None
+        self._maintenance_task: asyncio.Task[Any] | None = None
+        self.maintenance_state: dict[str, Any] = {
             "runs": 0,
             "failures": 0,
             "consecutive_failures": 0,
@@ -77,6 +79,65 @@ class DatabaseManager:
         self._stop_event = asyncio.Event()
         self._close_lock = asyncio.Lock()
         self.transaction_lock = AsyncRLock()
+        self._savepoint_counter = 0
+
+    def _connection(self) -> aiosqlite.Connection:
+        """Return the live connection or fail with a clear lifecycle error."""
+        conn = self.conn
+        if conn is None:
+            raise RuntimeError("database is not connected")
+        return conn
+
+    @asynccontextmanager
+    async def transaction(
+        self,
+        *,
+        label: str = "transaction",
+    ) -> AsyncIterator[aiosqlite.Connection]:
+        """Serialize one nested-safe SQLite write transaction.
+
+        SAVEPOINT is deliberately used even for top-level writes.  SQLite
+        allows SAVEPOINT inside an existing transaction, so callers remain
+        safe if a legacy path already opened a transaction on the shared
+        connection.  The task-reentrant lock prevents other coroutines from
+        observing or committing this unit of work.
+        """
+        conn = self._connection()
+        safe_label = re.sub(r"[^A-Za-z0-9_]", "_", str(label or "transaction"))
+        async with self.transaction_lock:
+            self._savepoint_counter += 1
+            savepoint = f"envsbot_{safe_label}_{self._savepoint_counter}"
+            await conn.execute(f"SAVEPOINT {savepoint}")
+            try:
+                yield conn
+            except BaseException:
+                await conn.execute(f"ROLLBACK TO {savepoint}")
+                await conn.execute(f"RELEASE {savepoint}")
+                raise
+            else:
+                await conn.execute(f"RELEASE {savepoint}")
+
+    async def write(
+        self,
+        query: str,
+        params: Sequence[Any] = (),
+        *,
+        label: str = "write",
+    ) -> aiosqlite.Cursor:
+        """Execute one atomic write through the shared transaction boundary."""
+        async with self.transaction(label=label) as conn:
+            return await conn.execute(query, tuple(params))
+
+    async def write_many(
+        self,
+        query: str,
+        rows: Sequence[Sequence[Any]],
+        *,
+        label: str = "write_many",
+    ) -> aiosqlite.Cursor:
+        """Execute an atomic executemany operation."""
+        async with self.transaction(label=label) as conn:
+            return await conn.executemany(query, [tuple(row) for row in rows])
 
     async def connect(
         self,
@@ -84,7 +145,7 @@ class DatabaseManager:
         run_migrations: bool = True,
         start_background: bool = True,
         enforce_schema_compatibility: bool = True,
-    ):
+    ) -> None:
         """Open the database connection and optionally migrate/start workers."""
         if self.conn is not None:
             return
@@ -92,33 +153,34 @@ class DatabaseManager:
         self._stop_event = asyncio.Event()
         self._running = False
         try:
-            self.conn = await aiosqlite.connect(self.path)
-            self.conn.row_factory = aiosqlite.Row
+            conn = await aiosqlite.connect(self.path)
+            self.conn = conn
+            conn.row_factory = aiosqlite.Row
             self._secure_database_files()
 
             # SQLite runtime pragmas. Keep these near connect() so every process
             # consistently applies them before table managers start using the DB.
-            await self.conn.execute("PRAGMA foreign_keys = ON;")
+            await conn.execute("PRAGMA foreign_keys = ON;")
             try:
                 busy_timeout = max(0, int(config.get("database_busy_timeout_ms", 5000) or 0))
             except Exception:
                 busy_timeout = 5000
-            await self.conn.execute(f"PRAGMA busy_timeout = {busy_timeout};")
+            await conn.execute(f"PRAGMA busy_timeout = {busy_timeout};")
             if config.get("database_wal_enabled", False):
-                await self.conn.execute("PRAGMA journal_mode = WAL;")
+                await conn.execute("PRAGMA journal_mode = WAL;")
                 self._secure_database_files()
 
-            cursor = await self.conn.execute("PRAGMA foreign_keys;")
+            cursor = await conn.execute("PRAGMA foreign_keys;")
             row = await cursor.fetchone()
-            if row["foreign_keys"] != 1:
+            if row is None or int(row["foreign_keys"]) != 1:
                 raise RuntimeError("Failed to enable foreign keys")
 
             self.users = UserManager(
-                self.conn,
+                conn,
                 transaction_lock=self.transaction_lock,
             )
-            self.rooms = Rooms(self.conn, transaction_lock=self.transaction_lock)
-            self.audit = AuditLog(self.conn, transaction_lock=self.transaction_lock)
+            self.rooms = Rooms(conn, transaction_lock=self.transaction_lock)
+            self.audit = AuditLog(conn, transaction_lock=self.transaction_lock)
             self.message_cache = MessageCacheStore(self)
             self.idlerpg = IdleRPGStateStore(self)
             self.outbox = OutboxStore(self)
@@ -168,42 +230,46 @@ class DatabaseManager:
             ensure_private_file(path)
 
     async def _init_schema_migrations(self) -> None:
-        """Create and upgrade migration bookkeeping outside application migrations."""
-        await self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                duration_ms INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'applied',
-                error TEXT
+        """Create/upgrade migration bookkeeping through the shared DB API."""
+        async with self.transaction(label="schema_migrations_init") as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'applied',
+                    error TEXT
+                )
+                """
             )
-            """
-        )
-        columns = {
-            str(row["name"])
-            for row in await (await self.conn.execute("PRAGMA table_info(schema_migrations)")).fetchall()
-        }
-        for name, ddl in (
-            ("duration_ms", "INTEGER NOT NULL DEFAULT 0"),
-            ("status", "TEXT NOT NULL DEFAULT 'applied'"),
-            ("error", "TEXT"),
-        ):
-            if name not in columns:
-                await self.conn.execute(f"ALTER TABLE schema_migrations ADD COLUMN {name} {ddl}")
-        await self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migration_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                version TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                duration_ms INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT
+            columns = {
+                str(row["name"])
+                for row in await (
+                    await conn.execute("PRAGMA table_info(schema_migrations)")
+                ).fetchall()
+            }
+            for name, ddl in (
+                ("duration_ms", "INTEGER NOT NULL DEFAULT 0"),
+                ("status", "TEXT NOT NULL DEFAULT 'applied'"),
+                ("error", "TEXT"),
+            ):
+                if name not in columns:
+                    await conn.execute(
+                        f"ALTER TABLE schema_migrations ADD COLUMN {name} {ddl}"
+                    )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migration_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    duration_ms INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT
+                )
+                """
             )
-            """
-        )
-        await self.conn.commit()
 
     async def mark_migration_applied(
         self,
@@ -212,17 +278,18 @@ class DatabaseManager:
         duration_ms: int = 0,
         commit: bool = True,
     ) -> None:
-        await self.conn.execute(
-            """
+        query = """
             INSERT INTO schema_migrations (version, duration_ms, status, error)
             VALUES (?, ?, 'applied', NULL)
             ON CONFLICT(version) DO UPDATE SET
                 duration_ms=excluded.duration_ms, status='applied', error=NULL
-            """,
-            (version, max(0, int(duration_ms))),
-        )
+            """
+        params = (version, max(0, int(duration_ms)))
         if commit:
-            await self.conn.commit()
+            await self.write(query, params, label="migration_mark_applied")
+        else:
+            # Used only while run_migrations() already owns transaction().
+            await self._connection().execute(query, params)
 
     async def _record_migration_history(
         self,
@@ -233,31 +300,28 @@ class DatabaseManager:
         status: str,
         error: str | None = None,
     ) -> None:
-        await self.conn.execute(
+        await self.write(
             """
             INSERT INTO schema_migration_history (
                 version, started_at, duration_ms, status, error
             ) VALUES (?, ?, ?, ?, ?)
             """,
             (version, started_at, max(0, int(duration_ms)), status, error),
+            label="migration_history",
         )
-        await self.conn.commit()
 
-    async def list_migrations(self):
-        cursor = await self.conn.execute(
+    async def list_migrations(self) -> list[aiosqlite.Row]:
+        return await self.fetch_all(
             "SELECT version, applied_at, duration_ms, status, error "
             "FROM schema_migrations ORDER BY version"
         )
-        return await cursor.fetchall()
 
     async def migration_history(self, *, limit: int = 20) -> list[dict[str, Any]]:
-        rows = await (
-            await self.conn.execute(
-                "SELECT version, started_at, duration_ms, status, error "
-                "FROM schema_migration_history ORDER BY id DESC LIMIT ?",
-                (max(1, min(200, int(limit))),),
-            )
-        ).fetchall()
+        rows = await self.fetch_all(
+            "SELECT version, started_at, duration_ms, status, error "
+            "FROM schema_migration_history ORDER BY id DESC LIMIT ?",
+            (max(1, min(200, int(limit))),),
+        )
         return [dict(row) for row in rows]
 
     async def applied_migration_versions(self) -> set[str]:
@@ -301,20 +365,22 @@ class DatabaseManager:
 
     async def verify_read_write(self) -> None:
         await self.fetch_one("SELECT 1")
-        async with self.transaction_lock:
-            await self.conn.execute("SAVEPOINT envsbot_preflight_rw")
-            try:
-                await self.conn.execute(
+        class _RollbackProbe(RuntimeError):
+            pass
+
+        try:
+            async with self.transaction(label="preflight_rw") as conn:
+                await conn.execute(
                     "CREATE TEMP TABLE IF NOT EXISTS envsbot_preflight_check (value INTEGER)"
                 )
-                await self.conn.execute(
+                await conn.execute(
                     "INSERT INTO envsbot_preflight_check (value) VALUES (1)"
                 )
-            finally:
-                await self.conn.execute("ROLLBACK TO envsbot_preflight_rw")
-                await self.conn.execute("RELEASE envsbot_preflight_rw")
+                raise _RollbackProbe
+        except _RollbackProbe:
+            pass
 
-    def _migration_backup_path(self) -> Path | None:
+    def _database_backup_path(self, *, pre_migration: bool = False) -> Path | None:
         raw = str(self.path or "")
         if raw in {"", ":memory:"} or raw.startswith("file:"):
             return None
@@ -322,16 +388,20 @@ class DatabaseManager:
 
         directory = backup_dir()
         directory.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-        return directory / f"envsbot-db-pre-migration-{stamp}.sqlite3"
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+        prefix = "envsbot-db-pre-migration" if pre_migration else "envsbot-db-backup"
+        return directory / f"{prefix}-{stamp}.sqlite3"
 
     async def backup_database(
         self,
         *,
         destination: Path | None = None,
+        pre_migration: bool = False,
     ) -> Path | None:
-        """Create a consistent SQLite snapshot without stopping the bot."""
-        target = destination or self._migration_backup_path()
+        """Create and verify a consistent SQLite snapshot without stopping."""
+        target = destination or self._database_backup_path(
+            pre_migration=pre_migration
+        )
         if target is None:
             return None
         target = Path(target).expanduser()
@@ -339,11 +409,32 @@ class DatabaseManager:
         async with self.transaction_lock:
             target_conn = await aiosqlite.connect(str(target))
             try:
-                await self.conn.backup(target_conn)
+                await self._connection().backup(target_conn)
                 await target_conn.commit()
             finally:
                 await target_conn.close()
         ensure_private_file(target)
+        from utils.backups import (
+            prune_migration_snapshots,
+            verify_sqlite_snapshot,
+        )
+
+        verification = await asyncio.to_thread(verify_sqlite_snapshot, target)
+        if not bool(verification.get("ok")):
+            target.unlink(missing_ok=True)
+            errors = ", ".join(
+                str(item) for item in verification.get("errors", [])
+            )
+            snapshot_kind = "pre-migration" if pre_migration else "database"
+            raise RuntimeError(
+                f"{snapshot_kind} snapshot failed verification: "
+                + (errors or "unknown error")
+            )
+        if pre_migration:
+            await asyncio.to_thread(
+                prune_migration_snapshots,
+                directory=target.parent,
+            )
         return target
 
     async def run_migrations(
@@ -367,43 +458,38 @@ class DatabaseManager:
             else bool(backup_before)
         )
         if should_backup:
-            backup = await self.backup_database()
+            backup = await self.backup_database(pre_migration=True)
             if backup is not None:
                 log.info("[DB] Pre-migration snapshot created: %s", backup)
 
         completed: list[str] = []
         async with self.transaction_lock:
             for migration in pending:
-                started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                started_at = datetime.now(UTC).isoformat(timespec="seconds")
                 started = time.monotonic()
                 savepoint = "migration_" + re.sub(r"[^a-zA-Z0-9_]", "_", migration.version)
                 log.info(
                     "[DB] event=migration status=applying %s",
                     kv(version=migration.version, description=migration.description),
                 )
-                await self.conn.execute(f"SAVEPOINT {savepoint}")
                 try:
-                    await migration.run(self)
-                    duration_ms = int((time.monotonic() - started) * 1000)
-                    await self.mark_migration_applied(
-                        migration.version,
-                        duration_ms=duration_ms,
-                        commit=False,
-                    )
-                    await self.conn.execute(f"RELEASE {savepoint}")
+                    async with self.transaction(label=savepoint):
+                        await migration.run(self)
+                        duration_ms = int((time.monotonic() - started) * 1000)
+                        await self.mark_migration_applied(
+                            migration.version,
+                            duration_ms=duration_ms,
+                            commit=False,
+                        )
                 except Exception as exc:
                     duration_ms = int((time.monotonic() - started) * 1000)
-                    try:
-                        await self.conn.execute(f"ROLLBACK TO {savepoint}")
-                        await self.conn.execute(f"RELEASE {savepoint}")
-                    finally:
-                        await self._record_migration_history(
-                            migration.version,
-                            started_at=started_at,
-                            duration_ms=duration_ms,
-                            status="failed",
-                            error=f"{type(exc).__name__}: {exc}"[:1000],
-                        )
+                    await self._record_migration_history(
+                        migration.version,
+                        started_at=started_at,
+                        duration_ms=duration_ms,
+                        status="failed",
+                        error=f"{type(exc).__name__}: {exc}"[:1000],
+                    )
                     log.exception(
                         "[DB] event=migration status=failed %s",
                         kv(version=migration.version, duration_ms=duration_ms),
@@ -424,7 +510,7 @@ class DatabaseManager:
                     )
         return completed
 
-    async def _flush_loop(self):
+    async def _flush_loop(self) -> None:
         """Background loop that flushes data periodically with retry logic."""
         try:
             while not self._stop_event.is_set():
@@ -447,20 +533,32 @@ class DatabaseManager:
         started = time.monotonic()
         checkpoint = None
         try:
+            # WAL checkpointing must not run inside a SQLite transaction. Hold
+            # the shared lock so no other task can open a write SAVEPOINT while
+            # optimize/checkpoint run, then let retention stores use the normal
+            # transaction API for their DELETE operations.
             async with self.transaction_lock:
-                await self.conn.execute("PRAGMA optimize;")
+                conn = self._connection()
+                await conn.execute("PRAGMA optimize;")
                 if config.get("database_wal_enabled", False):
-                    cursor = await self.conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
+                    cursor = await conn.execute("PRAGMA wal_checkpoint(PASSIVE);")
                     row = await cursor.fetchone()
                     checkpoint = tuple(row) if row is not None else None
-                retention_days = int(config.get("command_usage_retention_days", 365) or 0)
-                if self.command_usage is not None:
-                    await self.command_usage.prune(retention_days=retention_days)
-                if self.outbox is not None:
-                    await self.outbox.prune_dead(
-                        retention_days=int(config.get("outbox_dead_retention_days", 30) or 0)
-                    )
-                await self.conn.commit()
+            retention_days = int(config.get("command_usage_retention_days", 365) or 0)
+            if self.command_usage is not None:
+                await self.command_usage.prune(retention_days=retention_days)
+            if self.outbox is not None:
+                await self.outbox.prune_dead(
+                    retention_days=int(config.get("outbox_dead_retention_days", 30) or 0)
+                )
+            if self.idlerpg is not None:
+                idlerpg_config = config.get("idlerpg", {})
+                retention_days = (
+                    int(idlerpg_config.get("event_retention_days", 90) or 0)
+                    if isinstance(idlerpg_config, dict)
+                    else 90
+                )
+                await self.idlerpg.prune_events(retention_days=retention_days)
         except Exception as exc:
             self.maintenance_state["failures"] += 1
             self.maintenance_state["consecutive_failures"] += 1
@@ -513,9 +611,12 @@ class DatabaseManager:
             max_retries: Maximum number of retry attempts
             backoff: Initial backoff in seconds (exponential growth)
         """
+        users = self.users
+        if users is None:
+            return True
         for attempt in range(max_retries):
             try:
-                await self.users.flush_all()
+                await users.flush_all()
                 return True
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -537,15 +638,14 @@ class DatabaseManager:
                     return False
         return False
 
-    async def flush(self):
+    async def flush(self) -> None:
         """Manually flush cached data, raising when persistence fails."""
         if self.users:
             await self._flush_with_retry(raise_on_failure=True)
 
     async def integrity_check(self) -> list[str]:
         """Run SQLite PRAGMA integrity_check and return result rows."""
-        cursor = await self.conn.execute("PRAGMA integrity_check;")
-        rows = await cursor.fetchall()
+        rows = await self.fetch_all("PRAGMA integrity_check;")
         result: list[str] = []
         for row in rows:
             try:
@@ -556,17 +656,15 @@ class DatabaseManager:
 
     async def foreign_key_check(self) -> list[dict[str, Any]]:
         """Return SQLite foreign-key violations."""
-        cursor = await self.conn.execute("PRAGMA foreign_key_check;")
-        rows = await cursor.fetchall()
+        rows = await self.fetch_all("PRAGMA foreign_key_check;")
         return [dict(row) for row in rows]
 
     async def optimize(self) -> None:
-        """Run SQLite PRAGMA optimize for opportunistic maintenance."""
+        """Run SQLite PRAGMA optimize without opening an application transaction."""
         async with self.transaction_lock:
-            await self.conn.execute("PRAGMA optimize;")
-            await self.conn.commit()
+            await self._connection().execute("PRAGMA optimize;")
 
-    async def close(self):
+    async def close(self) -> None:
         """Stop background tasks, flush caches, and close idempotently."""
         async with self._close_lock:
             self._stop_event.set()
@@ -608,43 +706,56 @@ class DatabaseManager:
     async def execute(
         self,
         query: str,
-        params: tuple | None = None,
+        params: tuple[Any, ...] | None = None,
         auto_commit: bool = True,
-    ):
-        """Execute SQL while serializing writes on the shared connection."""
-        if params is None:
-            params = ()
+    ) -> aiosqlite.Cursor:
+        """Compatibility SQL helper backed by the hardened DB API.
+
+        New code should prefer :meth:`write`, :meth:`fetch_one`,
+        :meth:`fetch_all` or :meth:`transaction`.
+        """
+        values = () if params is None else params
         is_write = bool(_WRITE_PREFIX_RE.match(str(query)))
+        if is_write and auto_commit:
+            return await self.write(query, values, label="compat_execute")
+        conn = self._connection()
         if is_write:
+            # ``auto_commit=False`` is retained only for callers that are
+            # already inside ``transaction()``/migration savepoints.
             async with self.transaction_lock:
-                cursor = await self.conn.execute(query, params)
-                if auto_commit:
-                    await self.conn.commit()
-                return cursor
-        return await self.conn.execute(query, params)
+                return await conn.execute(query, values)
+        async with self.transaction_lock:
+            return await conn.execute(query, values)
 
-    async def fetch_one(self, query: str, params: tuple | None = None):
-        """
-        Execute a query and return a single row.
-        """
-        if params is None:
-            params = ()
+    async def fetch_one(
+        self,
+        query: str,
+        params: tuple[Any, ...] | None = None,
+    ) -> aiosqlite.Row | None:
+        """Execute a read without crossing another task's write transaction."""
+        values = () if params is None else params
+        async with self.transaction_lock:
+            conn = self._connection()
+            cursor = (
+                await conn.execute(query, values)
+                if values
+                else await conn.execute(query)
+            )
+            return await cursor.fetchone()
 
-        async with self.conn.execute(query, params) as cursor:
-            row = await cursor.fetchone()
-
-        if not row:
-            return None
-        return row
-
-    async def fetch_all(self, query: str, params: tuple | None = None):
-        """
-        Execute a query and return all rows.
-        """
-        if params is None:
-            params = ()
-
-        async with self.conn.execute(query, params) as cursor:
+    async def fetch_all(
+        self,
+        query: str,
+        params: tuple[Any, ...] | None = None,
+    ) -> list[aiosqlite.Row]:
+        """Execute a read and return all rows under the shared DB lock."""
+        values = () if params is None else params
+        async with self.transaction_lock:
+            conn = self._connection()
+            cursor = (
+                await conn.execute(query, values)
+                if values
+                else await conn.execute(query)
+            )
             rows = await cursor.fetchall()
-
-        return rows
+        return list(rows)

@@ -119,8 +119,12 @@ _PUBLIC_EXPORT_RUNTIME: dict[str, Any] = {
     "events": 0,
     "files": 0,
     "bytes": 0,
+    "files_changed": 0,
+    "files_skipped": 0,
+    "files_deleted": 0,
 }
 _PUBLIC_EXPORT_LOCKS: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+_PUBLIC_EXPORT_SEASON_REVISIONS: dict[str, tuple[int, tuple[int, int]]] = {}
 
 
 def _public_export_lock() -> asyncio.Lock:
@@ -149,8 +153,12 @@ def _reset_public_export_schedule() -> None:
         "events": 0,
         "files": 0,
         "bytes": 0,
+        "files_changed": 0,
+        "files_skipped": 0,
+        "files_deleted": 0,
     })
     _PUBLIC_EXPORT_LOCKS.clear()
+    _PUBLIC_EXPORT_SEASON_REVISIONS.clear()
 
 
 def _public_export_runtime() -> dict[str, Any]:
@@ -215,12 +223,18 @@ async def _refresh_public_export(
             )
             return False
 
-        season_events_by_room: dict[str, list[dict[str, Any]]] | None = None
+        season_events_by_room: dict[str, list[dict[str, Any]] | None] | None = None
+        season_event_counts_by_room: dict[str, int] | None = None
+        season_events_append_by_room: dict[str, bool] | None = None
+        pending_season_revisions: dict[str, tuple[int, tuple[int, int]]] = {}
         normalized = _normalized_store(bot)
         if _dep_config.EXPORT_FULL_SEASON_EVENTS and normalized is not None:
             loader = getattr(normalized, "load_season_events", None)
-            if callable(loader):
+            revision_getter = getattr(normalized, "season_event_revision", None)
+            if callable(loader) and callable(revision_getter):
                 season_events_by_room = {}
+                season_event_counts_by_room = {}
+                season_events_append_by_room = {}
                 for room_jid, enabled in enabled_rooms.items():
                     if not enabled:
                         continue
@@ -233,9 +247,40 @@ async def _refresh_public_export(
                         if isinstance(season, dict)
                         else 0
                     )
-                    season_events_by_room[str(room_jid)] = await loader(
-                        str(room_jid), started_at
+                    revision = tuple(await revision_getter(str(room_jid), started_at))
+                    revision_key = (started_at, revision)
+                    key = str(room_jid)
+                    previous = _PUBLIC_EXPORT_SEASON_REVISIONS.get(key)
+                    pending_season_revisions[key] = revision_key
+                    season_event_counts_by_room[key] = int(revision[0])
+
+                    can_append = (
+                        not force
+                        and previous is not None
+                        and previous[0] == started_at
+                        and int(revision[0]) >= int(previous[1][0])
+                        and int(revision[1]) >= int(previous[1][1])
                     )
+                    if previous == revision_key and not force:
+                        # No database read at all for an unchanged season stream.
+                        season_events_by_room[key] = None
+                        season_events_append_by_room[key] = False
+                    elif can_append:
+                        # Fetch only rows inserted after the last successfully
+                        # exported rowid. The chunk writer appends idempotently.
+                        season_events_by_room[key] = await loader(
+                            key,
+                            started_at,
+                            after_rowid=int(previous[1][1]),
+                        )
+                        season_events_append_by_room[key] = True
+                    else:
+                        # First export, forced export, season rollover or a
+                        # non-monotonic revision rebuilds from SQLite once.
+                        season_events_by_room[key] = await loader(
+                            key, started_at, after_rowid=0
+                        )
+                        season_events_append_by_room[key] = False
 
         # deepcopy must happen before yielding to the worker so the worker never
         # observes game-state mutations from later commands or ticks. Full season
@@ -261,6 +306,8 @@ async def _refresh_public_export(
                     snapshot,
                     dict(enabled_rooms),
                     season_events_by_room,
+                    season_event_counts_by_room,
+                    season_events_append_by_room,
                 )
         except Exception as exc:
             result = {
@@ -284,6 +331,9 @@ async def _refresh_public_export(
             "events": max(0, int(result.get("events", 0) or 0)),
             "files": max(0, int(result.get("files", 0) or 0)),
             "bytes": max(0, int(result.get("bytes", 0) or 0)),
+            "files_changed": max(0, int(result.get("files_changed", 0) or 0)),
+            "files_skipped": max(0, int(result.get("files_skipped", 0) or 0)),
+            "files_deleted": max(0, int(result.get("files_deleted", 0) or 0)),
         })
         counter = "successes" if ok else "failures"
         _PUBLIC_EXPORT_RUNTIME[counter] = int(
@@ -291,6 +341,13 @@ async def _refresh_public_export(
         ) + 1
         if ok:
             _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = 0
+            if pending_season_revisions:
+                _PUBLIC_EXPORT_SEASON_REVISIONS.update(pending_season_revisions)
+                for room_jid in tuple(_PUBLIC_EXPORT_SEASON_REVISIONS):
+                    if room_jid not in enabled_rooms or not enabled_rooms.get(room_jid):
+                        _PUBLIC_EXPORT_SEASON_REVISIONS.pop(room_jid, None)
+            elif not _dep_config.EXPORT_FULL_SEASON_EVENTS:
+                _PUBLIC_EXPORT_SEASON_REVISIONS.clear()
             _PUBLIC_EXPORT_SCHEDULE["next_at"] = (
                 finished_at + interval if interval > 0 else finished_at
             )
@@ -299,6 +356,12 @@ async def _refresh_public_export(
         _PUBLIC_EXPORT_RUNTIME["consecutive_failures"] = int(
             _PUBLIC_EXPORT_RUNTIME.get("consecutive_failures", 0) or 0
         ) + 1
+        # A worker failure may have happened after atomically publishing
+        # only part of a delta. Forget the cursor so the next attempt performs
+        # one full chunk reconciliation instead of assuming the partial export
+        # is a complete prefix.
+        for room_jid in pending_season_revisions:
+            _PUBLIC_EXPORT_SEASON_REVISIONS.pop(room_jid, None)
         # Failed automatic exports may retry immediately on the next state write.
         _PUBLIC_EXPORT_SCHEDULE["next_at"] = 0
         _dep_config.log.warning(

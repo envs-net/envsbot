@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -12,7 +11,6 @@ class MessageCacheStore:
 
     def __init__(self, db):
         self.db = db
-        self._transaction_lock = getattr(db, "transaction_lock", asyncio.Lock())
 
     async def init(self, *, commit: bool = True) -> None:
         """Create the persistent message-cache table and lookup indexes."""
@@ -52,16 +50,16 @@ class MessageCacheStore:
         min_received_at: int | None = None,
     ) -> int:
         """Apply the current age and per-conversation retention limits."""
-        async with self._transaction_lock:
-            removed = 0
+        removed = 0
+        limit = max(1, int(limit_per_conversation))
+        async with self.db.transaction(label="message_cache_prune") as conn:
             if min_received_at is not None:
-                cursor = await self.db.execute(
+                cursor = await conn.execute(
                     "DELETE FROM message_cache WHERE received_at < ?",
                     (int(min_received_at),),
                 )
                 removed += max(0, int(cursor.rowcount or 0))
-            limit = max(1, int(limit_per_conversation))
-            cursor = await self.db.execute(
+            cursor = await conn.execute(
                 """
                 DELETE FROM message_cache
                 WHERE id IN (
@@ -79,7 +77,8 @@ class MessageCacheStore:
                 """,
                 (limit,),
             )
-            return removed + max(0, int(cursor.rowcount or 0))
+            removed += max(0, int(cursor.rowcount or 0))
+        return removed
 
     async def load_recent(
         self,
@@ -90,7 +89,7 @@ class MessageCacheStore:
         """Load the retained rows in stable conversation/message order."""
         limit = max(1, int(limit_per_conversation))
         cutoff = 0 if min_received_at is None else int(min_received_at)
-        cursor = await self.db.execute(
+        rows = await self.db.fetch_all(
             """
             SELECT id, cache_key, conversation, stanza_id, sender_nick,
                    sender_jid, body, message_type, received_at
@@ -109,7 +108,7 @@ class MessageCacheStore:
             """,
             (cutoff, limit),
         )
-        return [dict(row) for row in await cursor.fetchall()]
+        return [dict(row) for row in rows]
 
     async def save_batch(
         self,
@@ -137,54 +136,47 @@ class MessageCacheStore:
 
         limit = max(1, int(limit_per_conversation))
         conversations = sorted({row[1] for row in rows})
-        async with self._transaction_lock:
-            try:
-                if min_received_at is not None:
-                    await self.db.conn.execute(
-                        "DELETE FROM message_cache WHERE received_at < ?",
-                        (int(min_received_at),),
-                    )
-                await self.db.conn.executemany(
-                    """
-                    INSERT OR IGNORE INTO message_cache (
-                        cache_key, conversation, stanza_id, sender_nick,
-                        sender_jid, body, message_type, received_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
+        async with self.db.transaction(label="message_cache_save_batch") as conn:
+            if min_received_at is not None:
+                await conn.execute(
+                    "DELETE FROM message_cache WHERE received_at < ?",
+                    (int(min_received_at),),
                 )
-                for conversation in conversations:
-                    await self.db.execute(
-                        """
-                        DELETE FROM message_cache
-                        WHERE conversation = ?
-                          AND id NOT IN (
-                              SELECT id
-                              FROM message_cache
-                              WHERE conversation = ?
-                              ORDER BY id DESC
-                              LIMIT ?
-                          )
-                        """,
-                        (conversation, conversation, limit),
-                        auto_commit=False,
-                    )
-                await self.db.conn.commit()
-            except Exception:
-                await self.db.conn.rollback()
-                raise
+            await conn.executemany(
+                """
+                INSERT OR IGNORE INTO message_cache (
+                    cache_key, conversation, stanza_id, sender_nick,
+                    sender_jid, body, message_type, received_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            for conversation in conversations:
+                await conn.execute(
+                    """
+                    DELETE FROM message_cache
+                    WHERE conversation = ?
+                      AND id NOT IN (
+                          SELECT id
+                          FROM message_cache
+                          WHERE conversation = ?
+                          ORDER BY id DESC
+                          LIMIT ?
+                      )
+                    """,
+                    (conversation, conversation, limit),
+                )
 
     async def clear_conversation(self, conversation: str) -> int:
         """Delete all persisted rows for one conversation."""
-        async with self._transaction_lock:
-            cursor = await self.db.execute(
-                "DELETE FROM message_cache WHERE conversation = ?",
-                (str(conversation),),
-            )
-            return max(0, int(cursor.rowcount or 0))
+        cursor = await self.db.write(
+            "DELETE FROM message_cache WHERE conversation = ?",
+            (str(conversation),),
+            label="message_cache_clear",
+        )
+        return max(0, int(cursor.rowcount or 0))
 
     async def count(self) -> int:
         """Return the number of retained persistent rows."""
-        cursor = await self.db.execute("SELECT COUNT(*) AS count FROM message_cache")
-        row = await cursor.fetchone()
+        row = await self.db.fetch_one("SELECT COUNT(*) AS count FROM message_cache")
         return int(row["count"] if row else 0)

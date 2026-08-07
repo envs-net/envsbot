@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +22,7 @@ class OutboxMessage:
     message_type: str
     category: str
     dedupe_key: str | None
+    origin_id: str
     attempts: int
     max_attempts: int
     created_at: int
@@ -44,6 +46,7 @@ class OutboxStore:
                 message_type TEXT NOT NULL,
                 category TEXT NOT NULL DEFAULT 'message',
                 dedupe_key TEXT UNIQUE,
+                origin_id TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
                 attempts INTEGER NOT NULL DEFAULT 0,
                 max_attempts INTEGER NOT NULL DEFAULT 12,
@@ -67,6 +70,10 @@ class OutboxStore:
             "CREATE INDEX IF NOT EXISTS idx_outbox_destination "
             "ON outbox_messages(destination, status, available_at, id)"
         )
+        await self.db.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_origin_id "
+            "ON outbox_messages(origin_id)"
+        )
         if commit:
             await self.db.conn.commit()
 
@@ -84,22 +91,20 @@ class OutboxStore:
         if exclude_id is not None:
             where += " AND id != ?"
             params.append(int(exclude_id))
-        row = await (
-            await self.db.conn.execute(
-                f"""
-                SELECT COUNT(*) AS pending,
-                       COALESCE(SUM(
-                           LENGTH(CAST(destination AS BLOB)) +
-                           LENGTH(CAST(body AS BLOB)) +
-                           LENGTH(CAST(message_type AS BLOB)) +
-                           LENGTH(CAST(category AS BLOB))
-                       ), 0) AS bytes
-                  FROM outbox_messages
-                 WHERE {where}
-                """,
-                tuple(params),
-            )
-        ).fetchone()
+        row = await self.db.fetch_one(
+            f"""
+            SELECT COUNT(*) AS pending,
+                   COALESCE(SUM(
+                       LENGTH(CAST(destination AS BLOB)) +
+                       LENGTH(CAST(body AS BLOB)) +
+                       LENGTH(CAST(message_type AS BLOB)) +
+                       LENGTH(CAST(category AS BLOB))
+                   ), 0) AS bytes
+              FROM outbox_messages
+             WHERE {where}
+            """,
+            tuple(params),
+        )
         return {
             "pending": int(row["pending"] if row else 0),
             "bytes": int(row["bytes"] if row else 0),
@@ -122,13 +127,13 @@ class OutboxStore:
         if exclude_id is not None:
             sql += " AND id != ?"
             params.append(int(exclude_id))
-        row = await (await self.db.conn.execute(sql, tuple(params))).fetchone()
+        row = await self.db.fetch_one(sql, tuple(params))
         return int(row["count"] if row else 0)
 
     async def recover_inflight(self, *, older_than_seconds: int = 300) -> int:
         cutoff = int(time.time()) - max(0, int(older_than_seconds))
-        async with self.db.transaction_lock:
-            cursor = await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            cursor = await conn.execute(
                 """
                 UPDATE outbox_messages
                    SET status='pending', locked_at=NULL
@@ -137,7 +142,6 @@ class OutboxStore:
                 """,
                 (cutoff,),
             )
-            await self.db.conn.commit()
             return max(0, int(cursor.rowcount or 0))
 
     async def enqueue(
@@ -148,6 +152,7 @@ class OutboxStore:
         message_type: str = "chat",
         category: str = "message",
         dedupe_key: str | None = None,
+        origin_id: str | None = None,
         available_at: int | None = None,
         max_attempts: int = 12,
         max_pending: int = 10000,
@@ -158,6 +163,7 @@ class OutboxStore:
         now = int(time.time())
         available = now if available_at is None else int(available_at)
         key = str(dedupe_key).strip() if dedupe_key else None
+        stable_origin_id = str(origin_id or "").strip() or uuid.uuid4().hex
         destination = str(destination)
         body = str(body)
         message_type = str(message_type or "chat")
@@ -168,11 +174,11 @@ class OutboxStore:
         max_per_category = max(1, int(max_per_category))
         payload_bytes = self._payload_bytes(destination, body, message_type, category)
 
-        async with self.db.transaction_lock:
+        async with self.db.transaction(label="outbox") as conn:
             existing = None
             if key:
                 existing = await (
-                    await self.db.conn.execute(
+                    await conn.execute(
                         "SELECT id FROM outbox_messages WHERE dedupe_key=?",
                         (key,),
                     )
@@ -208,16 +214,17 @@ class OutboxStore:
                 message_type,
                 category,
                 key,
+                stable_origin_id,
                 max(1, int(max_attempts)),
                 now,
                 available,
             )
-            cursor = await self.db.conn.execute(
+            cursor = await conn.execute(
                 """
                 INSERT INTO outbox_messages (
                     destination, body, message_type, category, dedupe_key,
-                    max_attempts, created_at, available_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    origin_id, max_attempts, created_at, available_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dedupe_key) DO UPDATE SET
                     destination=excluded.destination,
                     body=excluded.body,
@@ -250,15 +257,14 @@ class OutboxStore:
                 params,
             )
             row = await cursor.fetchone()
-            await self.db.conn.commit()
             return int(row["id"])
 
     async def claim_due(self, *, limit: int = 20) -> list[OutboxMessage]:
         """Claim due rows fairly across destinations for the delivery worker."""
         now = int(time.time())
         limit = max(1, min(200, int(limit)))
-        async with self.db.transaction_lock:
-            cursor = await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            cursor = await conn.execute(
                 """
                 WITH ranked AS (
                     SELECT id, available_at,
@@ -279,13 +285,12 @@ class OutboxStore:
                  WHERE id IN (SELECT id FROM selected)
                    AND status='pending'
                 RETURNING id, destination, body, message_type, category,
-                          dedupe_key, attempts, max_attempts, created_at,
+                          dedupe_key, origin_id, attempts, max_attempts, created_at,
                           available_at, last_error
                 """,
                 (now, limit, now),
             )
             rows = await cursor.fetchall()
-            await self.db.conn.commit()
         rows = sorted(rows, key=lambda row: (int(row["available_at"]), int(row["id"])))
         return [
             OutboxMessage(
@@ -295,6 +300,7 @@ class OutboxStore:
                 message_type=str(row["message_type"]),
                 category=str(row["category"]),
                 dedupe_key=row["dedupe_key"],
+                origin_id=str(row["origin_id"]),
                 attempts=int(row["attempts"]),
                 max_attempts=int(row["max_attempts"]),
                 created_at=int(row["created_at"]),
@@ -311,8 +317,8 @@ class OutboxStore:
         retry_delay_seconds: int,
         reason: str | None = None,
     ) -> None:
-        async with self.db.transaction_lock:
-            await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            await conn.execute(
                 """
                 UPDATE outbox_messages
                    SET status='pending', available_at=?, locked_at=NULL,
@@ -325,14 +331,12 @@ class OutboxStore:
                     int(message_id),
                 ),
             )
-            await self.db.conn.commit()
 
     async def mark_sent(self, message_id: int) -> None:
-        async with self.db.transaction_lock:
-            await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            await conn.execute(
                 "DELETE FROM outbox_messages WHERE id=?", (int(message_id),)
             )
-            await self.db.conn.commit()
 
     async def mark_failed(
         self,
@@ -343,8 +347,8 @@ class OutboxStore:
     ) -> bool:
         attempts = int(message.attempts) + 1
         dead = attempts >= int(message.max_attempts)
-        async with self.db.transaction_lock:
-            await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            await conn.execute(
                 """
                 UPDATE outbox_messages
                    SET status=?, attempts=?, available_at=?, locked_at=NULL,
@@ -360,7 +364,6 @@ class OutboxStore:
                     int(message.id),
                 ),
             )
-            await self.db.conn.commit()
         return dead
 
     async def retry_dead(
@@ -377,8 +380,8 @@ class OutboxStore:
         if message_id is not None:
             clauses.append("id=?")
             params.append(int(message_id))
-        async with self.db.transaction_lock:
-            cursor = await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            cursor = await conn.execute(
                 f"""
                 UPDATE outbox_messages
                    SET status='pending', attempts=0, available_at=?,
@@ -387,23 +390,20 @@ class OutboxStore:
                 """,
                 tuple(params),
             )
-            await self.db.conn.commit()
             return max(0, int(cursor.rowcount or 0))
 
     async def delete(self, message_id: int) -> int:
-        async with self.db.transaction_lock:
-            cursor = await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            cursor = await conn.execute(
                 "DELETE FROM outbox_messages WHERE id=?", (int(message_id),)
             )
-            await self.db.conn.commit()
             return max(0, int(cursor.rowcount or 0))
 
     async def delete_dead(self) -> int:
-        async with self.db.transaction_lock:
-            cursor = await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            cursor = await conn.execute(
                 "DELETE FROM outbox_messages WHERE status='dead'"
             )
-            await self.db.conn.commit()
             return max(0, int(cursor.rowcount or 0))
 
     async def prune_dead(self, *, retention_days: int) -> int:
@@ -411,13 +411,12 @@ class OutboxStore:
         if days <= 0:
             return 0
         cutoff = int(time.time()) - days * 86400
-        async with self.db.transaction_lock:
-            cursor = await self.db.conn.execute(
+        async with self.db.transaction(label="outbox") as conn:
+            cursor = await conn.execute(
                 "DELETE FROM outbox_messages "
                 "WHERE status='dead' AND COALESCE(dead_at, created_at) < ?",
                 (cutoff,),
             )
-            await self.db.conn.commit()
             return max(0, int(cursor.rowcount or 0))
 
     async def counts(self) -> dict[str, int]:

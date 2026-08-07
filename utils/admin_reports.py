@@ -71,9 +71,28 @@ async def build_daily_admin_report(bot: Any) -> str:
     joined, configured = await _room_counts(bot)
     tasks = getattr(bot, "tasks", None)
     running = failed = finished = 0
+    task_label = "0 services running, 0 one-shots completed, 0 failed"
     circuits = 0
     if tasks is not None:
-        running, failed, finished = tasks.summary()
+        details = getattr(tasks, "summary_by_kind", None)
+        if callable(details):
+            counts = details()
+            running = int(counts.get("services_running", 0)) + int(
+                counts.get("one_shots_running", 0)
+            )
+            failed = int(counts.get("failed", 0))
+            finished = int(counts.get("one_shots_completed", 0))
+            task_label = (
+                f"{int(counts.get('services_running', 0))} services running, "
+                f"{int(counts.get('one_shots_running', 0))} one-shots running, "
+                f"{finished} one-shots completed, {failed} failed"
+            )
+            service_finished = int(counts.get("services_finished", 0))
+            if service_finished:
+                task_label += f", {service_finished} services finished unexpectedly"
+        else:
+            running, failed, finished = tasks.summary()
+            task_label = f"{running} running, {failed} failed, {finished} finished"
         circuits = sum(
             1
             for info in tasks.snapshot(include_done=True)
@@ -117,7 +136,7 @@ async def build_daily_admin_report(bot: Any) -> str:
         f"• uptime: {uptime}",
         f"• rooms: {joined}/{configured or joined} joined",
         f"• plugins: {plugin_failures} load failure(s)",
-        f"• tasks: {running} running, {failed} failed, {circuits} open circuit(s)",
+        f"• tasks: {task_label}, {circuits} open circuit(s)",
         f"• immediate alerts: {int(alert_state.get('active', 0))} active",
         (
             "• outbox: "

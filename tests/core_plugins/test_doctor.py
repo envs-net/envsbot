@@ -490,3 +490,41 @@ def test_performance_section_formats_runtime_metrics(bot):
 def test_parse_doctor_sections_supports_performance_alias():
     assert doctor._parse_doctor_sections(["performance"])[1] == ("performance",)
     assert doctor._parse_doctor_sections(["perf"])[1] == ("performance",)
+
+def test_task_summary_text_distinguishes_one_shots_from_services():
+    supervisor = SimpleNamespace(
+        summary_by_kind=lambda: {
+            "services_running": 24,
+            "one_shots_running": 0,
+            "one_shots_completed": 1,
+            "services_finished": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
+    )
+
+    healthy, text = doctor._task_summary_text(supervisor)
+
+    assert healthy is True
+    assert text == (
+        "24 services running · 0 one-shots running · "
+        "1 one-shots completed · 0 failed"
+    )
+
+
+def test_task_summary_text_flags_service_that_finished_unexpectedly():
+    supervisor = SimpleNamespace(
+        summary_by_kind=lambda: {
+            "services_running": 23,
+            "one_shots_running": 0,
+            "one_shots_completed": 1,
+            "services_finished": 1,
+            "failed": 0,
+            "cancelled": 0,
+        }
+    )
+
+    healthy, text = doctor._task_summary_text(supervisor)
+
+    assert healthy is False
+    assert "1 services finished unexpectedly" in text

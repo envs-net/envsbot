@@ -246,3 +246,71 @@ async def test_idlerpg_partial_save_does_not_remove_other_rooms(tmp_db_path):
         assert loaded["rooms"]["room@conf"]["last_tick"] == 999
     finally:
         await db.close()
+
+@pytest.mark.asyncio
+async def test_idlerpg_event_retention_prunes_only_old_completed_history(tmp_db_path):
+    """Retention must never trim the active season or bounded recent cache."""
+    import time
+
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect()
+    try:
+        now = int(time.time())
+        active_started = now - 200 * 86400
+        completed_started = now - 300 * 86400
+        state = _state()
+        room = state["rooms"]["room@conf"]
+        room["season"] = {
+            "id": "season-active",
+            "started_at": active_started,
+            "ends_at": 0,
+        }
+        room["hall_of_fame"] = [
+            {
+                "id": "season-completed",
+                "started_at": completed_started,
+                "ended_at": now - 210 * 86400,
+                "winner": "Old",
+            }
+        ]
+        room.pop("season_events", None)
+        room.pop("season_events_started_at", None)
+        active_event = {
+            "ts": now - 150 * 86400,
+            "kind": "game",
+            "text": "active old event",
+            "_season_started_at": active_started,
+        }
+        recent_completed_event = {
+            "ts": now - 160 * 86400,
+            "kind": "game",
+            "text": "recent cache keeps me",
+            "_season_started_at": completed_started,
+        }
+        stale_completed_event = {
+            "ts": now - 200 * 86400,
+            "kind": "game",
+            "text": "stale completed event",
+            "_season_started_at": completed_started,
+        }
+        room["events"] = [active_event, recent_completed_event]
+        room["_pending_events"] = [
+            copy.deepcopy(active_event),
+            copy.deepcopy(recent_completed_event),
+            copy.deepcopy(stale_completed_event),
+        ]
+        await db.idlerpg.save_state(state, room_jids={"room@conf"})
+
+        assert await db.idlerpg.prune_events(retention_days=90) == 1
+        active_history = await db.idlerpg.load_season_events(
+            "room@conf", active_started
+        )
+        completed_history = await db.idlerpg.load_season_events(
+            "room@conf", completed_started
+        )
+        assert [event["text"] for event in active_history] == ["active old event"]
+        assert [event["text"] for event in completed_history] == [
+            "recent cache keeps me"
+        ]
+    finally:
+        await db.close()

@@ -159,6 +159,35 @@ TASK_RESTART_RESET_SECONDS = 900.0
 TASK_STALE_AFTER_SECONDS = 3600.0
 
 
+# ================= BACKUPS =================
+
+# Keep this many verified pre-migration SQLite snapshots.
+DATABASE_MIGRATION_BACKUP_KEEP = 5
+
+# Also prune pre-migration SQLite snapshots older than this many days. 0 disables age-
+# based pruning.
+DATABASE_MIGRATION_BACKUP_RETENTION_DAYS = 90
+
+# Managed ZIP backups are written here. The default is ignored by git. Archives
+# include bot.db, config.py, vcard.py and chat_slang.csv when present.
+BACKUP_DIR = 'data/backups'
+
+# Keep this many managed backup archives after creating a new one.
+BACKUP_KEEP = 15
+
+# Also prune managed backup archives older than this many days. Set to 0 to disable
+# age-based pruning.
+BACKUP_RETENTION_DAYS = 0
+
+# Create a managed backup once during each bot process start. This also covers service
+# restarts, because a restart starts a fresh bot process.
+BACKUP_ON_START = True
+
+# Restore each newly created backup into a temporary directory and run SQLite
+# integrity_check before accepting it.
+BACKUP_SMOKE_TEST_ON_CREATE = True
+
+
 # ================= PERSISTENT OUTBOX =================
 
 # Persistent outbound delivery queue. Failed RSS, reminder and admin-report messages
@@ -274,24 +303,6 @@ MESSAGE_CACHE_SIZE = 100
 # Remove cached messages older than this many days. Set 0 to disable age pruning.
 # Startup-only: restart envsbot after changing this value.
 MESSAGE_CACHE_MAX_AGE_DAYS = 30
-
-
-# ================= BACKUPS =================
-
-# Managed ZIP backups are written here. The default is ignored by git. Archives
-# include bot.db, config.py, vcard.py and chat_slang.csv when present.
-BACKUP_DIR = 'data/backups'
-
-# Keep this many managed backup archives after creating a new one.
-BACKUP_KEEP = 15
-
-# Also prune managed backup archives older than this many days. Set to 0 to disable
-# age-based pruning.
-BACKUP_RETENTION_DAYS = 0
-
-# Create a managed backup once during each bot process start. This also covers service
-# restarts, because a restart starts a fresh bot process.
-BACKUP_ON_START = True
 
 
 # ================= COMMAND RATE LIMITS =================
@@ -732,6 +743,8 @@ IDLERPG = {
     'export_event_limit': 50,
     # Export the complete active-season event history from SQLite.
     'export_full_season_events': False,
+    # Maximum events per append-friendly full-season export chunk.
+    'export_season_event_chunk_size': 1000,
     # Enable public IdleRPG JSON exports.
     'export_enabled': True,
     # Minimum interval between automatic public exports; zero exports after every state

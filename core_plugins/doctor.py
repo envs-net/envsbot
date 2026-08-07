@@ -10,7 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from bot.room_state import direct_roster_contacts
-from utils.backups import backup_dir, backup_keep, backup_retention_days, list_backups
+from utils.backups import (
+    backup_dir,
+    backup_keep,
+    backup_retention_days,
+    backup_smoke_test_on_create,
+    list_backups,
+    list_migration_snapshots,
+    migration_backup_keep,
+    migration_backup_retention_days,
+)
 from utils.command import COMMANDS, Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import (
@@ -342,12 +351,33 @@ async def _plugin_lines(bot: Any, *, full: bool) -> list[str]:
     return lines
 
 
+
+def _task_summary_text(supervisor: Any) -> tuple[bool, str]:
+    """Return health plus a lifecycle-aware background-task summary."""
+    details = getattr(supervisor, "summary_by_kind", None)
+    if callable(details):
+        counts = details()
+        failed = int(counts.get("failed", 0))
+        service_finished = int(counts.get("services_finished", 0))
+        healthy = failed == 0 and service_finished == 0
+        text = (
+            f"{int(counts.get('services_running', 0))} services running · "
+            f"{int(counts.get('one_shots_running', 0))} one-shots running · "
+            f"{int(counts.get('one_shots_completed', 0))} one-shots completed · "
+            f"{failed} failed"
+        )
+        if service_finished:
+            text += f" · {service_finished} services finished unexpectedly"
+        return healthy, text
+    running, failed, finished = supervisor.summary()
+    return failed == 0, f"{running} running, {failed} failed, {finished} finished"
+
 def _task_lines(bot: Any, *, full: bool) -> list[str]:
     supervisor = getattr(bot, "tasks", None)
     if supervisor is None:
         return [_line(False, "Tasks", "supervisor missing")]
     try:
-        running, failed, finished = supervisor.summary()
+        tasks_healthy, task_summary = _task_summary_text(supervisor)
     except Exception as exc:
         return [_line(False, "Tasks", str(exc))]
     snapshot_getter = getattr(supervisor, "snapshot", None)
@@ -361,7 +391,7 @@ def _task_lines(bot: Any, *, full: bool) -> list[str]:
         if getattr(task, "circuit_state", "closed") == "open"
     ]
     lines = [
-        _line(failed == 0, "Background tasks", f"{running} running, {failed} failed, {finished} finished"),
+        _line(tasks_healthy, "Background tasks", task_summary),
         _line(
             not open_circuits,
             "Task circuits",
@@ -409,7 +439,18 @@ def _backup_lines() -> list[str]:
         _line(exists or writable, "Backup directory", str(directory)),
         _line(writable, "Backup writable", "yes" if writable else "no"),
         _line(True, "Backup retention", f"keep={backup_keep()}, days={backup_retention_days()}"),
+        _line(
+            backup_smoke_test_on_create(),
+            "Backup restore smoke test",
+            "required on create" if backup_smoke_test_on_create() else "disabled",
+        ),
         _line(True, "Managed backups", str(len(backups))),
+        _line(
+            True,
+            "Pre-migration snapshots",
+            f"{len(list_migration_snapshots(directory=directory))} · "
+            f"keep={migration_backup_keep()}, days={migration_backup_retention_days()}",
+        ),
     ]
     if backups:
         lines.append(_line(True, "Latest backup", f"{backups[0].name} · {backups[0].created_at}"))
@@ -693,10 +734,10 @@ def _release_task_line(bot: Any) -> str:
     if supervisor is None:
         return _line(None, "Background tasks", "supervisor unavailable")
     try:
-        running, failed, finished = supervisor.summary()
+        healthy, summary = _task_summary_text(supervisor)
     except Exception as exc:
         return _line(False, "Background tasks", str(exc))
-    return _line(failed == 0, "Background tasks", f"{running} running, {failed} failed, {finished} finished")
+    return _line(healthy, "Background tasks", summary)
 
 
 async def _release_migration_line(bot: Any) -> str:

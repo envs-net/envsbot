@@ -254,8 +254,12 @@ possible. The queue resumes after reconnects and process restarts.
 `dead` deliberately omits message bodies. `status` also reports configured count
 and byte limits plus the largest destination/category backlog. `doctor database`
 reports pending and dead counts, the oldest pending age and whether the worker is
-running. Dead letters are retained for `OUTBOX_DEAD_RETENTION_DAYS` and pruned
-automatically; setting the retention to `0` disables age-based dead-letter cleanup.
+running. Durable stanzas also keep one stable XEP-0359 `origin-id` across every
+retry. This does not turn XMPP into a strict exactly-once transport, but it lets
+servers/clients recognize a replay if the bot dies after transport acceptance
+and before the outbox row can be marked sent. Dead letters are retained for
+`OUTBOX_DEAD_RETENTION_DAYS` and pruned automatically; setting the retention to
+`0` disables age-based dead-letter cleanup.
 
 ## Task circuits and systemd watchdog
 

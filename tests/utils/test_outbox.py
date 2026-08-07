@@ -25,6 +25,7 @@ async def test_outbox_defers_unjoined_room_without_failure_attempt():
         destination="room@conference.example.org",
         message_type="groupchat",
         attempts=0,
+        origin_id="origin-defer",
     )
 
     await runtime._send_one(queued)
@@ -51,6 +52,7 @@ async def test_outbox_sends_and_deletes_claimed_message():
         message_type="groupchat",
         category="rss",
         attempts=0,
+        origin_id="origin-send",
     )
 
     await runtime._send_one(queued)
@@ -84,3 +86,21 @@ async def test_outbox_graceful_stop_is_expected_service_exit():
 
     with pytest.raises(ExpectedTaskExit):
         await runtime._supervised_run()
+
+def test_ensure_message_origin_id_reuses_explicit_id():
+    from utils.outbox import ensure_message_origin_id
+
+    class Message:
+        def __init__(self):
+            self.data = {"origin_id": {}}
+
+        def __getitem__(self, key):
+            return self.data[key]
+
+        def __setitem__(self, key, value):
+            self.data[key] = value
+
+    message = Message()
+    assert ensure_message_origin_id(message, "stable-123") == "stable-123"
+    assert message.data["id"] == "stable-123"
+    assert message.data["origin_id"]["id"] == "stable-123"

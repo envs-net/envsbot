@@ -249,15 +249,19 @@ IDLERPG = {
     "event_log_limit": 200,
     "export_event_limit": 50,
     "export_full_season_events": False,
+    "export_season_event_chunk_size": 1000,
 }
 ```
 
 `event_log_limit` controls the compact recent-event log used by bot commands.
 `export_event_limit` controls how many recent events are written to
 `events.json` for lightweight consumers. When `export_full_season_events` is
-enabled, the bot additionally writes `season_events.json` with every event
-recorded during the active season. The full-season file is reset when a new
-season starts and removed when the option is disabled.
+enabled, `season_events.json` becomes a small chunk manifest and the complete
+active-season history is stored in append-friendly `season-events/NNNNNN.json`
+files. Automatic exports query SQLite only for events appended since the last
+successful export and normally rewrite only the final partial chunk or create a
+new chunk. A season rollover performs a clean full rebuild; disabling the option
+removes both the manifest and generated chunks.
 
 ## Quests
 
@@ -401,6 +405,8 @@ For an envs.net-style installation in `/srv/envsbot/envsbot`, that means:
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/hall_of_fame.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/events.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/season_events.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/season-events/000001.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/season-events/000002.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/profiles/<character>.json
 ```
 
@@ -702,9 +708,10 @@ makes battle events more likely compared to item and alignment events.
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `event_log_limit` | `200` | Maximum number of events kept in the compact recent-event log used by bot commands and `events.json`. |
-| `event_retention_days` | `90` | Maximum age in the compact recent-event log. Set to `0` to keep it by count only; the active-season export is unaffected. |
+| `event_retention_days` | `90` | Maximum age for completed-season event rows and the compact recent-event cache. Set to `0` to disable age pruning. Active-season history and currently retained recent events are never removed. |
 | `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. |
-| `export_full_season_events` | `False` | Also export the complete active-season history to `season_events.json`. When disabled, only the limited `events.json` feed is published and stale full-season files are removed. |
+| `export_full_season_events` | `False` | Export the complete active-season history through a small `season_events.json` manifest plus append-friendly `season-events/*.json` chunks. When disabled, only the limited `events.json` feed is published and stale full-season files/chunks are removed. |
+| `export_season_event_chunk_size` | `1000` | Maximum events per full-season export chunk. Changing it causes the next automatic export to rebuild the active-season chunk set safely. |
 
 Achievements are awarded automatically for long idling, level milestones,
 battles, quests, unique items, godsends, calamities and item collection.

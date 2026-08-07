@@ -37,6 +37,7 @@ def bot():
             done_at=None,
             cancelled=False,
             last_error=None,
+            kind="service",
         ),
         TaskInfo(
             plugin="xkcd",
@@ -55,6 +56,7 @@ def bot():
             done_at="2026-06-22T08:01:00+00:00",
             cancelled=False,
             last_error="RuntimeError: boom",
+            kind="service",
         ),
     ])
     return bot
@@ -67,10 +69,9 @@ async def test_tasks_default_lists_summary_and_compact_lines(bot, msg):
     reply = bot.reply.call_args.args[1]
     assert reply[0] == "🧵 Background tasks"
     text = "\n".join(reply)
-    assert "1 running" in text
+    assert "1 services running" in text
+    assert "1 one-shots completed" in text
     assert "1 failed" in text
-    assert "0 cancelled" in text
-    assert "1 done" in text
     assert any("rss/feed-loop" in line and "running" in line for line in reply)
     assert any("birthday_notify/birthday-loop" in line and "failed" in line for line in reply)
 

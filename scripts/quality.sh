@@ -15,6 +15,7 @@ ruff check --select I,UP,B \
   core_plugins/doctor.py \
   core_plugins/users/roles.py \
   database/idlerpg.py \
+  database/manager.py \
   database/locking.py \
   database/outbox.py \
   database/command_usage.py \
@@ -42,6 +43,7 @@ ruff check --select I,UP,B \
 
 mypy \
   database/idlerpg.py \
+  database/manager.py \
   database/locking.py \
   database/outbox.py \
   database/command_usage.py \

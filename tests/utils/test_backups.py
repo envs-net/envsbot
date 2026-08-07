@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
+import time
 import zipfile
 from types import SimpleNamespace
 
@@ -49,6 +52,9 @@ def backup_env(tmp_path, monkeypatch):
     monkeypatch.setitem(backups.config, "db", str(db_path))
     monkeypatch.setitem(backups.config, "backup_dir", str(backup_dir))
     monkeypatch.setitem(backups.config, "backup_keep", 15)
+    # Most legacy backup tests use a byte fixture rather than a real SQLite DB.
+    # Dedicated tests below exercise the new restore smoke verification.
+    monkeypatch.setitem(backups.config, "backup_smoke_test_on_create", False)
     return SimpleNamespace(root=tmp_path, db_path=db_path, backup_dir=backup_dir)
 
 
@@ -334,3 +340,93 @@ def test_parse_archive_created_at_normalizes_z_and_cross_day_offsets():
     assert backups._parse_archive_created_at("") is None
     assert backups._parse_archive_created_at("   ") is None
     assert backups._parse_archive_created_at("2026-01-02ZT03:04:05") is None
+
+@pytest.mark.asyncio
+async def test_create_backup_smoke_verifies_real_sqlite_snapshot(backup_env, monkeypatch):
+    backup_env.db_path.unlink()
+    connection = sqlite3.connect(backup_env.db_path)
+    try:
+        connection.execute("CREATE TABLE sample (value TEXT)")
+        connection.execute("INSERT INTO sample VALUES ('ok')")
+        connection.commit()
+    finally:
+        connection.close()
+    monkeypatch.setitem(backups.config, "backup_smoke_test_on_create", True)
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+
+    archive = await backups.create_backup(bot, reason="verified", prune=False)
+
+    smoke = backups.smoke_test_backup(archive)
+    assert smoke["ok"] is True
+    assert smoke["database_integrity"] == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_create_backup_rejects_invalid_sqlite_when_smoke_required(
+    backup_env, monkeypatch
+):
+    monkeypatch.setitem(backups.config, "backup_smoke_test_on_create", True)
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+
+    with pytest.raises(backups.BackupError, match="restore smoke test"):
+        await backups.create_backup(bot, reason="invalid", prune=False)
+
+    assert not list(backup_env.backup_dir.glob("*.zip"))
+
+
+def test_migration_snapshot_retention_supports_count_age_and_dry_run(
+    backup_env, monkeypatch
+):
+    backup_env.backup_dir.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    snapshots = []
+    for index, age_days in enumerate((1, 2, 120)):
+        path = backup_env.backup_dir / (
+            f"{backups.MIGRATION_BACKUP_PREFIX}-2026010{index + 1}-000000.sqlite3"
+        )
+        path.write_bytes(b"snapshot")
+        stamp = now - age_days * 86400
+        os.utime(path, (stamp, stamp))
+        snapshots.append(path)
+
+    planned = backups.plan_migration_snapshot_prune(
+        directory=backup_env.backup_dir,
+        keep=2,
+        days=90,
+    )
+    assert planned == [snapshots[2]]
+    dry_run = backups.prune_migration_snapshots(
+        directory=backup_env.backup_dir,
+        keep=2,
+        days=90,
+        dry_run=True,
+    )
+    assert dry_run == [snapshots[2]]
+    assert snapshots[2].exists()
+
+    removed = backups.prune_migration_snapshots(
+        directory=backup_env.backup_dir,
+        keep=2,
+        days=90,
+    )
+    assert removed == [snapshots[2]]
+    assert not snapshots[2].exists()
+
+
+def test_verify_sqlite_snapshot_checks_integrity_and_foreign_keys(tmp_path):
+    path = tmp_path / "snapshot.sqlite3"
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+        connection.execute(
+            "CREATE TABLE child (parent_id INTEGER REFERENCES parent(id))"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = backups.verify_sqlite_snapshot(path)
+    assert result["ok"] is True
+    assert result["database_integrity"] == ["ok"]
+    assert result["foreign_key_violations"] == 0

@@ -9,6 +9,8 @@ from typing import Any
 
 from slixmpp.xmlstream import ET
 
+from utils.outbox import ensure_message_origin_id
+
 log = logging.getLogger(__name__)
 
 
@@ -30,6 +32,13 @@ class MessageMixin:
         reminders: their own cursor/state can advance because the central
         outbox owns the remaining delivery retries.
         """
+        origin_id: str | None = None
+        if persist:
+            # Attach the durable identity before the *first* transport attempt.
+            # If this send is accepted but the process dies before durable state
+            # is cleared, outbox recovery will replay the same XEP-0359 ID.
+            origin_id = ensure_message_origin_id(message)
+
         try:
             result = message.send()
             if inspect.isawaitable(result):
@@ -51,6 +60,7 @@ class MessageMixin:
                         category=category,
                         dedupe_key=dedupe_key,
                         max_attempts=max_attempts,
+                        origin_id=origin_id,
                     )
                     if queued_id is not None:
                         log.warning(

@@ -42,6 +42,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
         "0006_outbox",
         "0007_command_usage",
         "0008_outbox_dead_timestamp",
+        "0009_outbox_origin_id",
     }
     await db.close()
 
@@ -245,7 +246,7 @@ async def test_database_manager_integrity_check_stringifies_unusual_rows():
 
     assert await db.integrity_check() == ["ok", "bad-row"]
     await db.optimize()
-    assert db.conn.queries == ["PRAGMA integrity_check;", "PRAGMA optimize;", "commit"]
+    assert db.conn.queries == ["PRAGMA integrity_check;", "PRAGMA optimize;"]
 
 
 @pytest.mark.asyncio
@@ -354,5 +355,76 @@ async def test_database_maintenance_optimizes_checkpoints_and_prunes(tmp_db_path
         assert state["last_duration_ms"] >= 0
         assert state["last_wal_checkpoint"] is not None
         db.command_usage.prune.assert_awaited_once_with(retention_days=1)
+    finally:
+        await db.close()
+
+@pytest.mark.asyncio
+async def test_nested_database_transactions_rollback_only_inner_scope(tmp_db_path):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        async with db.transaction(label="outer") as conn:
+            await conn.execute(
+                "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+                ("outer@conf", "Outer"),
+            )
+            with pytest.raises(RuntimeError, match="inner failed"):
+                async with db.transaction(label="inner") as inner:
+                    await inner.execute(
+                        "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+                        ("inner@conf", "Inner"),
+                    )
+                    raise RuntimeError("inner failed")
+            await conn.execute(
+                "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+                ("after@conf", "After"),
+            )
+
+        rows = await db.fetch_all("SELECT room_jid FROM rooms ORDER BY room_jid")
+        assert [row["room_jid"] for row in rows] == ["after@conf", "outer@conf"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_transaction_rolls_back_outer_scope_on_cancelled_error(tmp_db_path):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            async with db.transaction(label="cancelled") as conn:
+                await conn.execute(
+                    "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+                    ("cancelled@conf", "Cancelled"),
+                )
+                raise asyncio.CancelledError
+
+        assert await db.fetch_one(
+            "SELECT room_jid FROM rooms WHERE room_jid=?",
+            ("cancelled@conf",),
+        ) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_write_helpers_commit_atomically(tmp_db_path):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        await db.write(
+            "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+            ("write@conf", "Write"),
+        )
+        await db.write_many(
+            "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+            (("many-a@conf", "A"), ("many-b@conf", "B")),
+        )
+        rows = await db.fetch_all("SELECT room_jid FROM rooms ORDER BY room_jid")
+        assert [row["room_jid"] for row in rows] == [
+            "many-a@conf",
+            "many-b@conf",
+            "write@conf",
+        ]
     finally:
         await db.close()

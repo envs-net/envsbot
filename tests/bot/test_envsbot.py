@@ -144,6 +144,40 @@ async def test_safe_send_message_sync_and_async(bot):
 
 
 @pytest.mark.asyncio
+async def test_durable_send_persists_same_origin_id_used_for_first_attempt(bot):
+    class Message:
+        def __init__(self):
+            self.data = {"id": "", "origin_id": {"id": ""}}
+
+        def __getitem__(self, key):
+            return self.data[key]
+
+        def __setitem__(self, key, value):
+            self.data[key] = value
+
+        def send(self):
+            return False
+
+    message = Message()
+    enqueue = AsyncMock(return_value=42)
+    bot.outbox = types.SimpleNamespace(enqueue_message=enqueue)
+
+    assert await bot._safe_send_message(
+        message,
+        persist=True,
+        category="rss",
+        dedupe_key="rss:stable",
+    ) is True
+
+    origin_id = message.data["origin_id"]["id"]
+    assert len(origin_id) == 32
+    assert message.data["id"] == origin_id
+    enqueue.assert_awaited_once()
+    assert enqueue.await_args.kwargs["origin_id"] == origin_id
+    assert enqueue.await_args.kwargs["dedupe_key"] == "rss:stable"
+
+
+@pytest.mark.asyncio
 async def test_reply_groupchat_and_private(monkeypatch, bot):
     monkeypatch.setattr(bot, "_reply_send_wrapper", AsyncMock())
     msg_obj = MagicMock()

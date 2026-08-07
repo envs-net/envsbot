@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import logging
 import time
+import uuid
 from typing import Any
 
 from bot.room_state import JOINED_ROOMS
@@ -23,6 +24,28 @@ def message_dedupe_key(category: str, destination: str, body: str) -> str:
         f"{category}\0{destination}\0{body}".encode()
     ).hexdigest()
     return f"{category}:{digest}"
+
+
+def ensure_message_origin_id(message: Any, origin_id: str | None = None) -> str:
+    """Attach and return one stable XEP-0359 origin ID for a send attempt.
+
+    Durable sends call this *before* the first transport attempt and persist the
+    returned value if delivery ownership moves to the outbox.  Every retry then
+    reuses the same ID, so a server/client can recognize a replay after the
+    process died between transport acceptance and ``mark_sent()``.
+    """
+    stable = str(origin_id or "").strip() or uuid.uuid4().hex
+    try:
+        message["id"] = stable
+    except Exception:
+        log.debug("[OUTBOX] Could not set stable stanza id", exc_info=True)
+    try:
+        message["origin_id"]["id"] = stable
+    except Exception:
+        # Production EnvsBot registers xep_0359.  Keep the normal stanza id as
+        # a compatibility fallback for lightweight test doubles.
+        log.debug("[OUTBOX] Could not attach XEP-0359 origin-id", exc_info=True)
+    return stable
 
 
 async def durable_send(
@@ -137,6 +160,7 @@ class PersistentOutbox:
         dedupe_key: str | None = None,
         max_attempts: int | None = None,
         available_at: int | None = None,
+        origin_id: str | None = None,
     ) -> int | None:
         if not self.enabled or self.store is None:
             return None
@@ -149,6 +173,7 @@ class PersistentOutbox:
                 message_type=message_type,
                 category=category,
                 dedupe_key=key,
+                origin_id=origin_id,
                 max_attempts=(
                     int(max_attempts)
                     if max_attempts is not None
@@ -183,6 +208,7 @@ class PersistentOutbox:
         category: str = "message",
         dedupe_key: str | None = None,
         max_attempts: int | None = None,
+        origin_id: str | None = None,
     ) -> int | None:
         try:
             destination = str(message["to"])
@@ -198,6 +224,7 @@ class PersistentOutbox:
             category=category,
             dedupe_key=dedupe_key,
             max_attempts=max_attempts,
+            origin_id=origin_id,
         )
 
     def _room_ready(self, destination: str, message_type: str) -> bool:
@@ -233,6 +260,7 @@ class PersistentOutbox:
                 mbody=queued.body,
                 mtype=queued.message_type,
             )
+            ensure_message_origin_id(message, queued.origin_id)
             sent = await self.bot._safe_send_message(message, persist=False)
             if sent is False:
                 raise RuntimeError("Slixmpp did not accept the stanza")
