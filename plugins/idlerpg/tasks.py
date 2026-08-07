@@ -1,17 +1,22 @@
 """Split module for plugins/idlerpg.py: tasks."""
 
 from __future__ import annotations
+
 import asyncio
 import random
+import time
 from functools import partial
+from typing import Any, cast
+
+from utils.performance import observe
 from utils.task_supervisor import (
     create_plugin_task,
     create_resilient_plugin_task,
     sleep_with_heartbeat,
 )
+
 from .handlers import on_message, on_muc_presence
 from .state import _checkpoint_room_clock, _flush_idlerpg_store
-
 
 _ROOM_TASK_LOCKS: dict[str, asyncio.Lock] = {}
 _ROOM_TICK_LOCKS: dict[str, asyncio.Lock] = {}
@@ -177,8 +182,12 @@ async def _game_loop(bot, room_jid: str) -> None:
 
 async def _tick_room(bot, room_jid: str, *, announce: bool = False) -> None:
     room_jid = str(room_jid)
-    async with _room_lock(_ROOM_TICK_LOCKS, room_jid):
-        await _tick_room_locked(bot, room_jid, announce=announce)
+    started_perf = time.perf_counter()
+    try:
+        async with _room_lock(_ROOM_TICK_LOCKS, room_jid):
+            await _tick_room_locked(bot, room_jid, announce=announce)
+    finally:
+        observe("idlerpg_tick", time.perf_counter() - started_perf)
 
 
 async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> None:
@@ -189,13 +198,13 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
     delta = max(0, min(now - last_tick, 24 * 3600))
     room["last_tick"] = now
     if delta <= 0:
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         return
 
     players = room.get("players", {})
     if not isinstance(players, dict):
         room["players"] = {}
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         return
 
     online_jids = _dep_state._online_jids(room_jid)
@@ -260,7 +269,7 @@ async def _tick_room_locked(bot, room_jid: str, *, announce: bool = False) -> No
     messages.extend(achievement_messages)
     for text in messages:
         _dep_export._record_event(room, "game", text)
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     if announce:
         announced: list[str] = []
         for text in messages[:8]:
@@ -325,11 +334,11 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     """Return IdleRPG room/task diagnostics."""
     state = await get_runtime_state(bot, room_jid=room_jid)
     scope = f" for {room_jid}" if room_jid else ""
-    tasks = int(state.get("tasks", 0) or 0)
-    players = int(state.get("players", 0) or 0)
-    online = int(state.get("online_players", 0) or 0)
-    rooms = int(state.get("rooms", 0) or 0)
-    quests = int(state.get("active_quests", 0) or 0)
+    tasks = int(cast(Any, state.get("tasks", 0)) or 0)
+    players = int(cast(Any, state.get("players", 0)) or 0)
+    online = int(cast(Any, state.get("online_players", 0)) or 0)
+    rooms = int(cast(Any, state.get("rooms", 0)) or 0)
+    quests = int(cast(Any, state.get("active_quests", 0)) or 0)
     ok = tasks > 0 or rooms == 0
     icon = "✅" if ok else "⚠️"
     lines = [
@@ -368,7 +377,7 @@ async def cleanup_room_state(bot, room_jid: str):
     rooms = data.get("rooms") if isinstance(data, dict) else None
     if isinstance(rooms, dict):
         rooms.pop(room_jid, None)
-        await _dep_state._set_data(bot, data, force_export=True)
+        await _dep_state._set_data(bot, data, room_jid=room_jid, force_export=True)
 
 
 async def restart_tasks(bot):

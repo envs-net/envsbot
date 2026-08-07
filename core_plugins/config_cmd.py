@@ -10,18 +10,20 @@ import tempfile
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
 
+from utils.audit import audit_event
+from utils.backups import create_backup
 from utils.command import Role, command
 from utils.config import (
-    ConfigError,
+    _LOWER_TO_PYTHON_CONFIG_KEY,
     NORMALIZED_CONFIG_KEYS,
     PYTHON_CONFIG_KEY_MAP,
-    _LOWER_TO_PYTHON_CONFIG_KEY,
     STARTUP_ONLY_KEYS,
+    ConfigError,
     apply_runtime_config,
     config,
     config_change_lines,
-    get_config_display_sections,
     get_config_diff_sections,
+    get_config_display_sections,
     get_runtime_config_path,
     load_config,
     load_default_config_for_diff,
@@ -29,12 +31,13 @@ from utils.config import (
     startup_change_lines,
     validate_config,
 )
-from utils.formatting import format_page, paginate_lines, parse_page_args
+from utils.config.spec import sensitive_keys
 from utils.file_security import PRIVATE_FILE_MODE
-from utils.audit import audit_event
-from utils.backups import create_backup
+from utils.formatting import format_page, paginate_lines, parse_page_args
+from utils.redaction import is_secret_key as _central_is_secret_key
+from utils.redaction import redact_named as _central_redact_named
+from utils.redaction import redact_value as _central_redact
 from utils.room_features import clear_room_feature_caches
-from utils.redaction import is_secret_key as _central_is_secret_key, redact_named as _central_redact_named, redact_value as _central_redact
 
 PLUGIN_META = {
     "name": "config_cmd",
@@ -45,6 +48,7 @@ PLUGIN_META = {
 
 _CONFIG_EDIT_BACKUP_REASON = "before-config-edit"
 _CONFIG_EDIT_SECTION = "# Runtime config edits"
+_DECLARED_SENSITIVE_KEYS = sensitive_keys()
 _PROTECTED_CONFIG_KEYS = {
     "owner",
     "admins",
@@ -291,6 +295,9 @@ async def _apply_config_reload(bot, sender: str, before: dict, new_config: dict)
 
 
 def _is_secret_key(key: str) -> bool:
+    normalized = _display_key_to_normalized(str(key))
+    if normalized in _DECLARED_SENSITIVE_KEYS:
+        return True
     return _central_is_secret_key(key)
 
 

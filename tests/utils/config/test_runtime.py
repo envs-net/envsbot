@@ -377,3 +377,27 @@ def test_duck_runtime_values_refresh_all_global_defaults():
     assert values["DUCK_TIMEOUT"] == 300
     assert values["COUNT_COMMAND_MESSAGES"] is True
     assert values["DUCK_STATE_SAVE_EVERY"] == 5
+
+
+def test_nested_schema_covers_reloadable_runtime_values():
+    from utils.config.spec import DUCK_FIELDS, IDLERPG_FIELDS, USER_FIELDS
+
+    idlerpg_expected = {
+        runtime_key
+        for field in IDLERPG_FIELDS.values()
+        for runtime_key in field.runtime_keys
+    }
+    duck_expected = {
+        runtime_key
+        for field in DUCK_FIELDS.values()
+        for runtime_key in field.runtime_keys
+    }
+    user_expected = {
+        runtime_key
+        for field in USER_FIELDS.values()
+        for runtime_key in field.runtime_keys
+    }
+
+    assert idlerpg_expected == runtime._idlerpg_values({}).keys()
+    assert duck_expected <= runtime._duck_values({}).keys()
+    assert user_expected == {"MAX_ROOM_NICKS"}

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from functools import lru_cache
-from typing import Any, Awaitable, Callable, Coroutine, Protocol, cast
+from typing import Any, Protocol, cast
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class BotLike(Protocol):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 async def sleep_with_heartbeat(
@@ -381,10 +382,10 @@ class TaskSupervisor:
                     max_backoff,
                     initial_backoff * (2 ** max(0, consecutive - 1)),
                 )
-                next_at = datetime.now(timezone.utc).timestamp() + delay
+                next_at = datetime.now(UTC).timestamp() + delay
                 meta["circuit_state"] = "half-open"
                 meta["next_restart_at"] = datetime.fromtimestamp(
-                    next_at, timezone.utc
+                    next_at, UTC
                 ).isoformat(timespec="seconds")
                 log.warning(
                     "[TASKS] Restarting %s/%s in %.1fs after failure %d/%d: %s",
@@ -481,7 +482,7 @@ class TaskSupervisor:
 
     def stale_tasks(self, *, max_age_seconds: float = 3600.0) -> list[TaskInfo]:
         """Return running tasks whose heartbeat is older than max_age_seconds."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stale: list[TaskInfo] = []
         for info in self.snapshot(include_done=False):
             if info.status != "running" or not info.heartbeat_at:
@@ -489,8 +490,8 @@ class TaskSupervisor:
             try:
                 heartbeat = datetime.fromisoformat(info.heartbeat_at)
                 if heartbeat.tzinfo is None:
-                    heartbeat = heartbeat.replace(tzinfo=timezone.utc)
-                age = (now - heartbeat.astimezone(timezone.utc)).total_seconds()
+                    heartbeat = heartbeat.replace(tzinfo=UTC)
+                age = (now - heartbeat.astimezone(UTC)).total_seconds()
             except Exception:
                 age = max_age_seconds + 1
             if age > max_age_seconds:

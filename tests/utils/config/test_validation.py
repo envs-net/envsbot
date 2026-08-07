@@ -548,3 +548,25 @@ def test_validate_config_rejects_invalid_default_pagination():
         config_mod.validate_config(cfg, require_required_keys=True)
 
     assert "default_pagination: expected 'all' or positive integer" in str(exc.value)
+
+
+def test_validate_config_checks_declared_nested_settings():
+    config_mod.validate_config({"idlerpg": {"event_chance": 0.25}})
+    config_mod.validate_config({"idlerpg": {"export_public_base_url": ""}})
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config({"idlerpg": {"event_chance": "often"}})
+    assert "idlerpg.event_chance: expected int or float" in str(exc.value)
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config({"ducks": {"count_commands": "yes"}})
+    assert "ducks.count_commands: expected bool" in str(exc.value)
+
+
+def test_validate_config_rejects_unknown_nested_settings():
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(
+            {"idlerpg": {"export_full_season_eventz": True}}
+        )
+
+    assert "idlerpg.export_full_season_eventz: unknown setting" in str(exc.value)

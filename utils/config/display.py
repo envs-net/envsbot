@@ -1,18 +1,16 @@
 """Split module for utils/config.py: display."""
 
 from __future__ import annotations
+
 from pathlib import Path
 
 from .defaults import (
+    _LOWER_TO_PYTHON_CONFIG_KEY,
     BASE_DIR,
     CONFIG_DISPLAY_SECTIONS,
     DEFAULT_CONFIG,
+    DOCUMENTED_DEFAULT_CONFIG,
     PYTHON_CONFIG_KEY_MAP,
-    _LOWER_TO_PYTHON_CONFIG_KEY,
-)
-from .loader import (
-    _load_python_config,
-    _merge_room_plugin_default_config,
 )
 from .validation import validate_config
 
@@ -48,21 +46,8 @@ def _sample_config_path() -> Path:
 
 
 def load_default_config_for_diff() -> dict:
-    """Return documented defaults used by ``config diff``.
-
-    ``config_sample.py`` is the operator-facing source of truth for defaults.
-    We merge it onto ``DEFAULT_CONFIG`` so legacy/internal fallback keys still
-    have stable comparison values, then validate only optional types because
-    sample credentials are placeholders by design.
-    """
-    defaults = DEFAULT_CONFIG.copy()
-    sample_path = _sample_config_path()
-    if sample_path.exists():
-        loaded = _merge_room_plugin_default_config(
-            DEFAULT_CONFIG,
-            _load_python_config(sample_path),
-        )
-        defaults.update(loaded)
+    """Return operator-facing documented defaults from the declarative schema."""
+    defaults = DOCUMENTED_DEFAULT_CONFIG.copy()
     validate_config(defaults, require_required_keys=False)
     return defaults
 

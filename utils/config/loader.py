@@ -1,6 +1,7 @@
 """Split module for utils/config.py: loader."""
 
 from __future__ import annotations
+
 import importlib.util
 import json
 import os

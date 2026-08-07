@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import socket
 from dataclasses import dataclass
-from collections.abc import Callable, Mapping
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, cast
 from urllib.parse import urljoin
 
 import aiohttp
@@ -172,7 +172,7 @@ def _maybe_raise_for_status(resp: aiohttp.ClientResponse, *, raise_for_status: b
     status = int(getattr(resp, "status", 0) or 0)
     if status >= 400:
         raise aiohttp.ClientResponseError(
-            request_info=None,
+            request_info=cast(aiohttp.RequestInfo, getattr(resp, "request_info", None)),
             history=(),
             status=status,
             message="HTTP request failed",
@@ -264,7 +264,7 @@ def _decode_text(body: bytes, content_type: str, encoding: str | None = None) ->
 async def _validated_hop(
     url: str,
     *,
-    validator: Callable[..., object],
+    validator: Callable[..., Awaitable[object]],
     allow_private: bool,
     session_factory: Callable[..., aiohttp.ClientSession],
 ) -> tuple[str, aiohttp.BaseConnector | None]:
@@ -289,7 +289,7 @@ async def fetch_bytes(
     max_redirects: int | None = None,
     max_bytes: int | None = None,
     allow_private: bool | None = None,
-    validator: Callable[..., object] | None = None,
+    validator: Callable[..., Awaitable[object]] | None = None,
     session_factory: Callable[..., aiohttp.ClientSession] | None = None,
     raise_for_status: bool = True,
 ) -> HTTPFetchResult:
@@ -343,7 +343,7 @@ async def fetch_preview(
     max_redirects: int | None = None,
     max_bytes: int | None = None,
     allow_private: bool | None = None,
-    validator: Callable[..., object] | None = None,
+    validator: Callable[..., Awaitable[object]] | None = None,
     session_factory: Callable[..., aiohttp.ClientSession] | None = None,
     raise_for_status: bool = True,
     stop_when: Callable[[bytes], bool] | None = None,

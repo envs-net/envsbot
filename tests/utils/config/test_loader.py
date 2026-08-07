@@ -224,7 +224,7 @@ def test_load_config_merges_partial_room_plugin_defaults(tmp_path, monkeypatch):
     assert result["room_plugin_defaults"]["dice"] is True
 
 
-def test_sample_config_path_and_load_default_config_for_diff(tmp_path, monkeypatch):
+def test_sample_config_path_and_schema_defaults_are_independent(tmp_path, monkeypatch):
     sample = tmp_path / "config_sample.py"
     sample.write_text('COMMAND_PREFIX = "!"\nURLCHECK_WAIT_SECONDS = 7\n')
     monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
@@ -233,8 +233,8 @@ def test_sample_config_path_and_load_default_config_for_diff(tmp_path, monkeypat
     assert config_mod._sample_config_path() == sample
     defaults = config_mod.load_default_config_for_diff()
 
-    assert defaults["prefix"] == "!"
-    assert defaults["urlcheck_wait_seconds"] == 7
+    assert defaults["prefix"] == ","
+    assert defaults["urlcheck_wait_seconds"] == 120
 
 
 def test_load_default_config_for_diff_without_sample(tmp_path, monkeypatch):

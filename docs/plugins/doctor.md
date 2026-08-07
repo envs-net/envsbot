@@ -17,12 +17,12 @@ Operator health checks and runtime diagnostics.
 
 ### `,doctor`
 
-Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness.
+Run operator health checks for config, DB, rooms, plugins, tasks, performance, backups, network and release readiness.
 
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,doctor [config|database|rooms|plugins|tasks|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]`
+Usage: `,doctor [config|database|rooms|plugins|tasks|performance|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]`
 
 Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
 
@@ -52,6 +52,12 @@ Aliases: `,bot doctor`, `,bot health`, `,healthcheck`
   - Description: Check supervised background tasks and heartbeat state.
   - Examples:
     - `,doctor tasks full` — Show detailed task diagnostics.
+
+- `,doctor performance [full] [page|last|all]`
+  - Description: Show event-loop, DB, IdleRPG, outbox, RSS and command latency diagnostics.
+  - Aliases: `,doctor perf`
+  - Examples:
+    - `,doctor performance` — Inspect in-process performance counters.
 
 - `,doctor backups [page|last|all]`
   - Description: Check managed backups, retention and latest archive state.

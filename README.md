@@ -107,7 +107,7 @@ sudo systemctl start envsbot.service
 sudo journalctl -u envsbot.service -f
 ```
 
-Before updating, keep a copy of `config.py`, `vcard.py` and `bot.db`, or create
+Before updating, keep a copy of `config.py`, `vcard.py` and the configured `DB_FILE`, or create
 a managed bot backup with `,backup`. After updating, check `config_sample.py` for
 new options and compare your live config with `,config diff`.
 
@@ -132,7 +132,7 @@ OWNER = "admin@example.org"
 
 COMMAND_PREFIX = ","
 TIMEZONE = "Europe/Berlin"
-DB_FILE = "bot.db"
+DB_FILE = "data/bot.db"
 STOP_CMD = []
 STOP_CMD_TIMEOUT_SECONDS = 10
 
@@ -322,41 +322,26 @@ Reminder timezone notes: absolute reminders accept optional timezone tokens such
 
 ## Systemd Service
 
-Example service unit:
+For hardened production installs, keep application code read-only and separate
+runtime-writable files from `/srv/envsbot`:
 
-```ini
-[Unit]
-Description=EnvsBot XMPP bot
-Documentation=https://github.com/envs-net/envsbot
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=envsbot
-Group=envsbot
-WorkingDirectory=/srv/envsbot
-Environment=PYTHONUNBUFFERED=1
-UMask=0077
-ExecStart=/srv/envsbot/.venv/bin/envsbot
-Restart=on-failure
-RestartSec=5
-
-# Basic hardening. Adjust ReadWritePaths when using a different data/log path.
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-ReadWritePaths=/srv/envsbot
-
-[Install]
-WantedBy=multi-user.target
+```text
+/srv/envsbot/              application + virtualenv (read-only to the service)
+/etc/envsbot/config.py     runtime-editable configuration
+/var/lib/envsbot/          SQLite DB, backups, exports and runtime state
 ```
 
-Install and start. The repository unit remains a documented `/srv/envsbot`
-example; `envsbot systemd render` is safer for installations with custom paths:
+The supplied [`contrib/envsbot.service`](contrib/envsbot.service) uses
+`ProtectSystem=strict` and only grants writes to `/etc/envsbot` and
+`/var/lib/envsbot`. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and configure
+`DB_FILE`, `BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG
+`export_path` below `/var/lib/envsbot`.
+
+Use the deployment helper before installing or replacing the unit. Select the
+same external config path that the service should keep using:
 
 ```bash
+export ENVSBOT_CONFIG=/etc/envsbot/config.py
 envsbot systemd check
 envsbot systemd render | sudo tee /etc/systemd/system/envsbot.service >/dev/null
 sudo systemd-analyze verify /etc/systemd/system/envsbot.service
@@ -365,9 +350,10 @@ sudo systemctl enable --now envsbot.service
 journalctl -u envsbot.service -f
 ```
 
-The rendered service uses the active executable/configuration and includes
-`EnvironmentFile=-/etc/default/envsbot` for optional local environment
-overrides.
+`envsbot systemd check` now fails when a writable path would make the whole
+application tree writable. The rendered service derives only the required
+configuration/database/backup/export/runtime directories and accepts optional
+local environment overrides from `/etc/default/envsbot`.
 
 ---
 
@@ -401,9 +387,10 @@ Do **not** run `VACUUM` from inside the live bot process. Stop the bot first and
 ```bash
 systemctl stop envsbot.service
 
-sqlite3 bot.db "PRAGMA integrity_check;"
-sqlite3 bot.db "PRAGMA optimize;"
-sqlite3 bot.db "VACUUM;"
+DB_PATH="data/bot.db"  # use the DB_FILE path from your config
+sqlite3 "$DB_PATH" "PRAGMA integrity_check;"
+sqlite3 "$DB_PATH" "PRAGMA optimize;"
+sqlite3 "$DB_PATH" "VACUUM;"
 
 systemctl start envsbot.service
 ```
@@ -424,8 +411,10 @@ pytest
 ```
 
 Use `constraints/python312.txt` instead when the environment runs Python 3.12.
-Dependency snapshots are updated intentionally with
-`scripts/update-constraints.sh`; see [`constraints/README.md`](constraints/README.md).
+Dependency snapshots pin the complete transitive dependency closure. Reproduce
+the reviewed pins with `scripts/update-constraints.sh`, or deliberately refresh
+them with `scripts/update-constraints.sh <3.12|3.13> --refresh`; see
+[`constraints/README.md`](constraints/README.md).
 
 Run without coverage when you only want a quick local check:
 

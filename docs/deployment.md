@@ -5,13 +5,21 @@ systemd-based Linux host.
 
 ## Layout
 
-A small dedicated user and one application directory keeps runtime files,
-configuration and logs easy to reason about:
+Use a dedicated service account and separate immutable application code from
+runtime-writable configuration/state:
 
 ```bash
 sudo useradd --system --home /srv/envsbot --shell /usr/sbin/nologin envsbot
 sudo mkdir -p /srv/envsbot
-sudo chown envsbot:envsbot /srv/envsbot
+sudo install -d -o envsbot -g envsbot -m 0750 /etc/envsbot /var/lib/envsbot
+```
+
+Recommended layout:
+
+```text
+/srv/envsbot/              repository + virtualenv
+/etc/envsbot/config.py     runtime-editable config
+/var/lib/envsbot/          database, backups, exports and runtime state
 ```
 
 Clone or copy the repository to `/srv/envsbot`, then create a virtualenv:
@@ -35,12 +43,17 @@ started with:
 
 ## Configuration
 
-Create production config files from the samples:
+Create the runtime configuration outside the application tree:
 
 ```bash
-cp config_sample.py config.py
+sudo cp config_sample.py /etc/envsbot/config.py
+sudo chown envsbot:envsbot /etc/envsbot/config.py
+sudo chmod 0600 /etc/envsbot/config.py
 cp vcard_sample.py vcard.py
 ```
+
+The supplied systemd unit sets `ENVSBOT_CONFIG=/etc/envsbot/config.py`. For a
+manual shell start, export the same variable first.
 
 Then edit at least:
 
@@ -51,8 +64,21 @@ OWNER = "admin@example.org"
 ROOMS = []
 ```
 
-Keep local runtime files such as a custom avatar, `bot.db`, backups and logs in
-`/srv/envsbot` or a directory that is writable by the `envsbot` user.
+For the hardened unit, place mutable state below `/var/lib/envsbot`, for
+example:
+
+```python
+DB_FILE = "/var/lib/envsbot/bot.db"
+BACKUP_DIR = "/var/lib/envsbot/backups"
+RESTART_NOTIFICATION_FILE = "/var/lib/envsbot/restart_notification.json"
+# In the existing IDLERPG dictionary:
+# "export_path": "/var/lib/envsbot/idlerpg",
+```
+
+Do not grant write access to `/srv/envsbot` merely to accommodate a database or
+config file there. `envsbot systemd check` treats that as a hardening failure.
+Existing installations can keep their current data while planning the move, but
+should move these paths before installing the strict rendered unit.
 
 ## systemd
 
@@ -68,6 +94,7 @@ and writable paths cannot silently drift:
 
 ```bash
 . /srv/envsbot/.venv/bin/activate
+export ENVSBOT_CONFIG=/etc/envsbot/config.py
 envsbot systemd check
 envsbot systemd render | sudo tee /etc/systemd/system/envsbot.service >/dev/null
 sudo systemd-analyze verify /etc/systemd/system/envsbot.service
@@ -127,9 +154,10 @@ Stop the bot before manual SQLite maintenance:
 
 ```bash
 sudo systemctl stop envsbot.service
-sqlite3 bot.db "PRAGMA integrity_check;"
-sqlite3 bot.db "PRAGMA optimize;"
-sqlite3 bot.db "VACUUM;"
+DB_PATH="/var/lib/envsbot/bot.db"  # use the DB_FILE path from your config
+sqlite3 "$DB_PATH" "PRAGMA integrity_check;"
+sqlite3 "$DB_PATH" "PRAGMA optimize;"
+sqlite3 "$DB_PATH" "VACUUM;"
 sudo systemctl start envsbot.service
 ```
 
@@ -170,11 +198,12 @@ systemd as well as setting `WATCHDOG_ENABLED = False`; when systemd explicitly
 requests heartbeats, the bot keeps sending them to avoid an endless restart
 loop.
 
-The example unit also enables strict filesystem and kernel hardening. When the
-database, backup directory or IdleRPG public export lives outside
-`/srv/envsbot`, every required writable location must be listed in
-`ReadWritePaths=`. `envsbot systemd render` derives those paths from the active
-configuration automatically.
+The example unit also enables strict filesystem and kernel hardening. The
+application checkout itself is intentionally absent from `ReadWritePaths=`.
+`envsbot systemd render` derives only the runtime-writable config, database,
+backup, IdleRPG export and restart-notification directories from the active
+configuration. `envsbot systemd check` fails if those settings would force the
+whole application tree (or one of its parents) to become writable.
 
 ## Deployment quality gate
 
@@ -186,9 +215,10 @@ scripts/quality.sh
 ```
 
 Use the constraints file matching the interpreter (`python312.txt` or
-`python313.txt`). Regenerate reviewed snapshots explicitly with
-`scripts/update-constraints.sh` rather than allowing CI or production installs
-to pick newly released dependency versions implicitly.
+`python313.txt`). The snapshots include the complete transitive dependency
+closure. `scripts/update-constraints.sh <version>` reproduces the reviewed lock;
+use `--refresh` only for an intentional dependency-update commit. CI also runs
+`scripts/check_constraints.py` to reject an unpinned transitive dependency.
 
 It checks Python compilation, generated command documentation, focused Ruff and
 mypy rules, the test suite with runtime and deprecation warnings treated as

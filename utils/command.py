@@ -333,17 +333,16 @@ def _register(name: str, cmd: Command):
     if not tokens:
         return
 
-    if not hasattr(cmd.handler, "__commands__"):
-        cmd.handler.__commands__ = []
-    else:
-        if not isinstance(cmd.handler.__commands__, list):
-            cmd.handler.__commands__ = []
+    registered = getattr(cmd.handler, "__commands__", None)
+    if not isinstance(registered, list):
+        registered = []
+        setattr(cmd.handler, "__commands__", registered)
 
     entry = (name, cmd)
 
     # Prevent duplicate registrations during plugin reload
-    if entry not in cmd.handler.__commands__:
-        cmd.handler.__commands__.append((name, cmd))
+    if entry not in registered:
+        registered.append((name, cmd))
 
 
 def command(
@@ -395,16 +394,16 @@ def command(
         for alias in aliases:
             _register(alias, cmd)
 
-        func._command = name
-        func._command_names = [name] + aliases
-        func._required_role = role
-        func._aliases = aliases
-        func._command_short = short
-        func._command_usage = usage
-        func._command_examples = examples
-        func._command_subcommands = subcommands
-        func._command_category = category
-        func._command_context = context
+        setattr(func, "_command", name)
+        setattr(func, "_command_names", [name] + aliases)
+        setattr(func, "_required_role", role)
+        setattr(func, "_aliases", aliases)
+        setattr(func, "_command_short", short)
+        setattr(func, "_command_usage", usage)
+        setattr(func, "_command_examples", examples)
+        setattr(func, "_command_subcommands", subcommands)
+        setattr(func, "_command_category", category)
+        setattr(func, "_command_context", context)
 
         return func
 

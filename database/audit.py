@@ -56,10 +56,10 @@ class AuditLog:
         actor: str | None = None,
         target: str | None = None,
         event: str | None = None,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[object]]:
         """Build a WHERE clause and params for audit filters."""
-        where = []
-        params = []
+        where: list[str] = []
+        params: list[object] = []
         if actor:
             where.append("actor = ?")
             params.append(actor)

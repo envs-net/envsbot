@@ -1,15 +1,18 @@
 """Split module for plugins/idlerpg.py: state."""
 
 from __future__ import annotations
+
 import asyncio
 import copy
 import inspect
 import random
 import time
 from typing import Any
+
+from bot.room_state import JOINED_ROOMS
 from core_plugins import _core
 from utils.command import Role
-from bot.room_state import JOINED_ROOMS
+from utils.performance import observe
 
 
 def _blank_room() -> dict[str, Any]:
@@ -21,8 +24,6 @@ def _blank_room() -> dict[str, Any]:
         "season": _dep_seasons._blank_season(now),
         "hall_of_fame": [],
         "events": [],
-        "season_events": [],
-        "season_events_started_at": now,
         "last_tick": now,
         "next_top_announce_at": now + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0,
         "next_topic_update_at": now + _dep_config.TOPIC_UPDATE_INTERVAL if _dep_config.TOPIC_UPDATE_INTERVAL > 0 else 0,
@@ -49,6 +50,18 @@ def _cached_data(bot) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _strip_legacy_season_event_cache(data: dict[str, Any]) -> None:
+    """Drop legacy full-season event lists from normalized in-memory state."""
+    rooms = data.get("rooms") if isinstance(data, dict) else None
+    if not isinstance(rooms, dict):
+        return
+    for room in rooms.values():
+        if not isinstance(room, dict):
+            continue
+        room.pop("season_events", None)
+        room.pop("season_events_started_at", None)
+
+
 async def _get_data(bot) -> dict[str, Any]:
     normalized = _normalized_store(bot)
     if normalized is None:
@@ -61,6 +74,8 @@ async def _get_data(bot) -> dict[str, Any]:
         return cached
 
     data = await normalized.load_state()
+    if isinstance(data, dict):
+        _strip_legacy_season_event_cache(data)
     rooms = data.get("rooms", {}) if isinstance(data, dict) else {}
     if not isinstance(rooms, dict) or not rooms:
         legacy = await _legacy_store(bot)
@@ -73,6 +88,7 @@ async def _get_data(bot) -> dict[str, Any]:
         ) and legacy_data["rooms"]:
             data = legacy_data
             await normalized.save_state(data)
+            _strip_legacy_season_event_cache(data)
             delete_global = getattr(legacy, "delete_global", None)
             if callable(delete_global):
                 await delete_global(_dep_constants.IDLERPG_DATA_KEY)
@@ -84,7 +100,7 @@ async def _get_data(bot) -> dict[str, Any]:
         elif not isinstance(data, dict):
             data = {}
 
-    setattr(bot, "_idlerpg_state_cache", data)
+    bot._idlerpg_state_cache = data
     return data
 
 
@@ -145,12 +161,17 @@ async def _set_data(
     bot,
     data: dict[str, Any],
     *,
+    room_jid: str | None = None,
     force_export: bool = False,
 ) -> None:
     normalized = _normalized_store(bot)
     if normalized is not None:
-        await normalized.save_state(data)
-        setattr(bot, "_idlerpg_state_cache", data)
+        await normalized.save_state(
+            data,
+            room_jids={str(room_jid)} if room_jid else None,
+        )
+        _strip_legacy_season_event_cache(data)
+        bot._idlerpg_state_cache = data
     else:
         store = await _legacy_store(bot)
         await store.set_global(_dep_constants.IDLERPG_DATA_KEY, data)
@@ -194,8 +215,31 @@ async def _refresh_public_export(
             )
             return False
 
+        season_events_by_room: dict[str, list[dict[str, Any]]] | None = None
+        normalized = _normalized_store(bot)
+        if _dep_config.EXPORT_FULL_SEASON_EVENTS and normalized is not None:
+            loader = getattr(normalized, "load_season_events", None)
+            if callable(loader):
+                season_events_by_room = {}
+                for room_jid, enabled in enabled_rooms.items():
+                    if not enabled:
+                        continue
+                    room = rooms.get(room_jid) if isinstance(rooms, dict) else None
+                    if not isinstance(room, dict):
+                        continue
+                    season = room.get("season")
+                    started_at = (
+                        int(season.get("started_at", 0) or 0)
+                        if isinstance(season, dict)
+                        else 0
+                    )
+                    season_events_by_room[str(room_jid)] = await loader(
+                        str(room_jid), started_at
+                    )
+
         # deepcopy must happen before yielding to the worker so the worker never
-        # observes game-state mutations from later commands or ticks.
+        # observes game-state mutations from later commands or ticks. Full season
+        # history is intentionally fetched separately and never copied into state.
         snapshot = copy.deepcopy(data)
         started_at = _dep_formatting._now()
         started_perf = time.perf_counter()
@@ -205,11 +249,19 @@ async def _refresh_public_export(
             "last_error": "",
         })
         try:
-            result = await asyncio.to_thread(
-                _dep_export._export_public_state,
-                snapshot,
-                dict(enabled_rooms),
-            )
+            if season_events_by_room is None:
+                result = await asyncio.to_thread(
+                    _dep_export._export_public_state,
+                    snapshot,
+                    dict(enabled_rooms),
+                )
+            else:
+                result = await asyncio.to_thread(
+                    _dep_export._export_public_state,
+                    snapshot,
+                    dict(enabled_rooms),
+                    season_events_by_room,
+                )
         except Exception as exc:
             result = {
                 "ok": False,
@@ -217,7 +269,9 @@ async def _refresh_public_export(
             }
 
         finished_at = _dep_formatting._now()
-        duration_ms = max(0, int((time.perf_counter() - started_perf) * 1000))
+        elapsed = time.perf_counter() - started_perf
+        duration_ms = max(0, int(elapsed * 1000))
+        observe("idlerpg_export", elapsed)
         result = result if isinstance(result, dict) else {"ok": True}
         ok = bool(result.get("ok", True))
         _PUBLIC_EXPORT_RUNTIME.update({
@@ -295,7 +349,7 @@ async def _checkpoint_room_clock(bot, room_jid: str, *, flush: bool = False) -> 
         previous = now
     room["last_tick"] = now
     room["last_task_checkpoint_at"] = now
-    await _set_data(bot, data)
+    await _set_data(bot, data, room_jid=room_jid)
     if flush:
         await _flush_idlerpg_store(bot)
     return max(0, now - previous)
@@ -333,7 +387,6 @@ def _room_bucket(data: dict[str, Any], room_jid: str) -> dict[str, Any]:
     room.setdefault("season", _dep_seasons._blank_season(_dep_formatting._now()))
     room.setdefault("hall_of_fame", [])
     room.setdefault("events", [])
-    _dep_export._ensure_season_events(room)
     _dep_export._prune_events(room)
     room.setdefault("last_tick", _dep_formatting._now())
     room.setdefault("next_top_announce_at", _dep_formatting._now() + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0)

@@ -1,16 +1,18 @@
 """Split module for plugins/idlerpg.py: commands."""
 
 from __future__ import annotations
+
 import random
 import time
 from typing import Any
+
+from core_plugins import _core
+from utils.audit import audit_event
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from utils.audit import audit_event
 from utils.formatting import format_page, parse_page_args
-from core_plugins import _core
-from .handlers import _message_actor_nick, _remember_player_nick
 
+from .handlers import _message_actor_nick, _remember_player_nick
 
 _PLAYER_HELP_SECTION = "Player commands"
 _ADMIN_HELP_SECTION = "Room owner/admin commands"
@@ -80,7 +82,7 @@ async def _handle_register(bot, sender_jid: str, args: list[str], msg, is_room: 
     players[sender_jid] = player
     _dep_state._rebuild_name_index(room)
     _dep_export._record_event(room, "register", f"Welcome {name}, the {char_class}!", players=[name])
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     await _dep_tasks._ensure_game_task(bot, room_jid)
     await audit_event(bot, "idlerpg_register", actor=sender_jid, target=room_jid, details={"name": name})
     _dep_formatting._reply(
@@ -106,7 +108,7 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
     _remember_player_nick(player, msg)
     pending = player.get("pending_logout_penalty") if isinstance(player.get("pending_logout_penalty"), dict) else {}
     if not pending and _dep_state._is_player_online(room_jid, str(_jid or sender_jid), player):
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         _dep_formatting._reply(
             bot,
             msg,
@@ -146,7 +148,7 @@ async def _handle_login(bot, sender_jid: str, msg, is_room: bool) -> None:
         f"Next level in {_dep_formatting._duration_clock(player.get('next', 0))}."
     )
     _dep_export._record_event(room, "login", login_text, players=[_dep_formatting._display_player(player)])
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     await _dep_tasks._ensure_game_task(bot, room_jid)
     if _dep_config.ANNOUNCE_LOGIN:
         _dep_formatting._system_reply(bot, room_jid, login_text)
@@ -179,7 +181,7 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
             f"{name} logged out. Logout penalty is pending for {_dep_formatting._duration_clock(_dep_config.LOGOUT_GRACE_SECONDS)}.",
             players=[name],
         )
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         _dep_formatting._reply(
             bot,
             msg,
@@ -201,7 +203,7 @@ async def _handle_logout(bot, sender_jid: str, msg, is_room: bool) -> None:
         )
         for text in quest_messages:
             _dep_export._record_event(room, "quest", text)
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     _dep_formatting._reply(
         bot,
         msg,
@@ -410,7 +412,7 @@ async def _handle_duel(bot, sender_jid: str, args: list[str], msg, is_room: bool
             players=[_dep_formatting._display_player(attacker), _dep_formatting._display_player(defender)],
             data={"distance": round(distance, 2)},
         )
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     await audit_event(
         bot,
         "idlerpg_duel",
@@ -437,7 +439,7 @@ async def _handle_align(bot, sender_jid: str, args: list[str], msg, is_room: boo
         return
     player["alignment"] = args[1].lower()[:1]
     _dep_export._record_event(room, "alignment", f"{player['name']} changed alignment to {args[1].lower()}.", players=[player['name']])
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     _dep_formatting._reply(bot, msg, f"⚖️ {player['name']} is now {args[1].lower()}.")
 
 
@@ -574,14 +576,14 @@ async def _handle_title(bot, sender_jid: str, args: list[str], msg, is_room: boo
     requested = args[1].lower()
     if requested in {"none", "clear", "off"}:
         player["title"] = ""
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         _dep_formatting._reply(bot, msg, f"✅ {_dep_formatting._display_player(player)} cleared their title.")
         return
     if requested not in achievements:
         _dep_formatting._reply(bot, msg, f"❌ You have not unlocked that achievement title. Use `{_dep_formatting._command_prefix(bot)}idlerpg title list`.")
         return
     player["title"] = requested
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     _dep_formatting._reply(bot, msg, f"✅ {_dep_formatting._display_player(player)} now uses title: {_dep_leveling._achievement_title(requested)}.")
 
 
@@ -687,7 +689,7 @@ async def _handle_hof(bot, sender_jid: str, args: list[str], msg, is_room: bool)
                 return
             removed = len(room.get("hall_of_fame", []) if isinstance(room.get("hall_of_fame"), list) else [])
             room["hall_of_fame"] = []
-            await _dep_state._set_data(bot, data)
+            await _dep_state._set_data(bot, data, room_jid=room_jid)
             await audit_event(bot, "idlerpg_hof_clear", actor=sender_jid, target=room_jid, details={"removed": removed})
             _dep_formatting._reply(bot, msg, f"✅ IdleRPG Hall of Fame cleared for {room_jid}. Removed {removed} entries.")
             return
@@ -719,7 +721,7 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
             _dep_formatting._reply(bot, msg, "⛔ Only room owners/admins can discard IdleRPG seasons.")
             return
         result = _dep_seasons._discard_season(room)
-        await _dep_state._set_data(bot, data, force_export=True)
+        await _dep_state._set_data(bot, data, room_jid=room_jid, force_export=True)
         await audit_event(bot, "idlerpg_season_discard", actor=sender_jid, target=room_jid, details=result)
         _dep_formatting._reply(
             bot,
@@ -735,7 +737,7 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
             return
         reset_players = subcmd == "reset"
         snapshot = _dep_seasons._end_season(room_jid, room, reset_players=reset_players)
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         _dep_formatting._reply(
             bot,
             msg,
@@ -751,7 +753,7 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
         room["season"] = season
         if subcmd == "clear-end":
             season["ends_at"] = 0
-            await _dep_state._set_data(bot, data)
+            await _dep_state._set_data(bot, data, room_jid=room_jid)
             await audit_event(bot, "idlerpg_season_clear_end", actor=sender_jid, target=room_jid, details={"season_id": season.get("id")})
             _dep_formatting._reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
             return
@@ -760,17 +762,18 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
             amount = _dep_seasons._season_duration_seconds()
             if amount <= 0:
                 season["ends_at"] = 0
-                await _dep_state._set_data(bot, data)
+                await _dep_state._set_data(bot, data, room_jid=room_jid)
                 await audit_event(bot, "idlerpg_season_extend", actor=sender_jid, target=room_jid, details={"season_id": season.get("id"), "duration": 0})
                 _dep_formatting._reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} is now manual/endless.")
                 return
         elif duration_arg in {"0", "manual", "endless", "forever", "clear", "none"}:
             amount = 0
         else:
-            amount = _core.parse_duration(duration_arg)
-            if amount is None:
+            parsed_amount = _core.parse_duration(duration_arg)
+            if parsed_amount is None:
                 _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg season extend [duration|manual]")
                 return
+            amount = parsed_amount
         if amount <= 0:
             season["ends_at"] = 0
             action = "manual/endless"
@@ -778,7 +781,7 @@ async def _handle_season(bot, sender_jid: str, args: list[str], msg, is_room: bo
             base = max(int(season.get("ends_at", 0) or 0), _dep_formatting._now())
             season["ends_at"] = base + int(amount)
             action = f"extended by {_dep_formatting._duration(amount)}"
-        await _dep_state._set_data(bot, data)
+        await _dep_state._set_data(bot, data, room_jid=room_jid)
         await audit_event(bot, "idlerpg_season_extend", actor=sender_jid, target=room_jid, details={"season_id": season.get("id"), "duration": int(amount)})
         _dep_formatting._reply(bot, msg, f"✅ IdleRPG season {season.get('id', 'unknown')} {action}. Ends in {_dep_seasons._season_end_summary(season)}.")
         return
@@ -807,7 +810,7 @@ async def _handle_announce_top(bot, sender_jid: str, msg, is_room: bool) -> None
     room = _dep_state._room_bucket(data, room_jid)
     _dep_formatting._system_reply(bot, room_jid, "\n".join(_dep_formatting._format_top_lines(room, limit=_dep_config.ANNOUNCE_TOP_LIMIT, room_jid=room_jid)))
     room["next_top_announce_at"] = _dep_formatting._now() + _dep_config.ANNOUNCE_TOP_INTERVAL if _dep_config.ANNOUNCE_TOP_INTERVAL > 0 else 0
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     _dep_formatting._reply(bot, msg, "✅ IdleRPG top players announced.")
 
 
@@ -824,7 +827,7 @@ async def _handle_topic_update(bot, sender_jid: str, args: list[str], msg, is_ro
     custom_text = " ".join(str(part) for part in args[2:]).strip() if len(args) > 2 else None
     _dep_formatting._maybe_set_room_topic(bot, room_jid, room, custom_text=custom_text, force=True)
     room["next_topic_update_at"] = _dep_formatting._now() + _dep_config.TOPIC_UPDATE_INTERVAL if _dep_config.TOPIC_UPDATE_INTERVAL > 0 else 0
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     preview = _dep_formatting._topic_text(room, custom_text=custom_text)[:250]
     _dep_formatting._reply(bot, msg, f"✅ IdleRPG room topic update requested: {preview}")
 
@@ -857,7 +860,7 @@ async def _handle_remove_me(bot, sender_jid: str, msg, is_room: bool) -> None:
     name = _dep_formatting._display_player(player)
     room.get("players", {}).pop(sender_jid, None)
     _dep_state._rebuild_name_index(room)
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     await audit_event(bot, "idlerpg_remove_me", actor=sender_jid, target=room_jid, details={"name": name})
     _dep_formatting._reply(bot, msg, f"🗑️ IdleRPG character {name} removed.")
 
@@ -977,7 +980,7 @@ async def _handle_delold(bot, sender_jid: str, args: list[str], msg, is_room: bo
         f"Removed {len(removed_names)} offline character(s) inactive for at least {days} days.",
         players=removed_names,
     )
-    await _dep_state._set_data(bot, data, force_export=True)
+    await _dep_state._set_data(bot, data, room_jid=room_jid, force_export=True)
     await audit_event(
         bot,
         "idlerpg_delold",
@@ -1054,7 +1057,7 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         room.get("players", {}).pop(str(jid), None)
         _dep_state._rebuild_name_index(room)
         text = f"🗑️ Deleted IdleRPG character {name}."
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     await audit_event(bot, f"idlerpg_{subcmd}", actor=sender_jid, target=room_jid, details={"character": name})
     _dep_formatting._reply(bot, msg, text)
     return True

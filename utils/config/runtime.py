@@ -5,11 +5,16 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
+from utils.config.spec import (
+    DUCK_FIELDS,
+    IDLERPG_FIELDS,
+    USER_FIELDS,
+    startup_only_keys,
+)
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.redaction import redact_named
-from utils.config.spec import startup_only_keys
 
 log = logging.getLogger(__name__)
 
@@ -79,11 +84,11 @@ def _set_module_values(module_name: str, values: Mapping[str, object]) -> int:
 
 
 def _to_int(value: object, default: int) -> int:
-    return int(value if value is not None else default)
+    return int(cast(Any, value) if value is not None else default)
 
 
 def _to_float(value: object, default: float) -> float:
-    return float(value if value is not None else default)
+    return float(cast(Any, value) if value is not None else default)
 
 
 def _to_bool(value: object, default: bool = False) -> bool:
@@ -113,150 +118,145 @@ def _nested_value(
 
 
 def _idlerpg_values(cfg: Mapping[str, object]) -> dict[str, object]:
-    def item(key: str, legacy_key: str, default: object) -> object:
-        return _nested_value(cfg, "idlerpg", key, legacy_key, default)
+    def item(key: str) -> object:
+        field = IDLERPG_FIELDS[key]
+        legacy_key = field.legacy_key or f"idlerpg_{key}"
+        group = _cfg_group(cfg, "idlerpg")
+        if (
+            key == "map_step_per_second"
+            and key not in group
+            and legacy_key not in cfg
+        ):
+            return item("map_step_per_tick")
+        value = _nested_value(cfg, "idlerpg", key, legacy_key, field.default)
+        return field.default if value is None else value
 
     export_public_base_url = _to_str(
-        item("export_public_base_url", "idlerpg_export_public_base_url", ""),
+        item("export_public_base_url"),
         "",
     ).rstrip("/")
     website_public_base_url = _to_str(
-        item(
-            "website_public_base_url",
-            "idlerpg_website_public_base_url",
-            "",
-        ),
+        item("website_public_base_url"),
         "",
     ).rstrip("/")
     if not website_public_base_url and export_public_base_url.lower().endswith("/data"):
         website_public_base_url = export_public_base_url[:-5]
-    topic_custom_text = _to_str(
-        item("topic_custom_text", "idlerpg_topic_custom_text", ""),
-        "",
-    ) or website_public_base_url or export_public_base_url or "IdleRPG"
-    map_step_per_second = item(
-        "map_step_per_second",
-        "idlerpg_map_step_per_second",
-        item("map_step_per_tick", "idlerpg_map_step_per_tick", 1),
+    topic_custom_text = (
+        _to_str(item("topic_custom_text"), "")
+        or export_public_base_url
+        or "IdleRPG"
     )
+    map_step_per_second = item("map_step_per_second")
     quest_grid_min_points = max(
         2,
-        _to_int(item("quest_grid_min_points", "idlerpg_quest_grid_min_points", 2), 2),
+        _to_int(item("quest_grid_min_points"), 2),
     )
     quest_grid_max_points = max(
         quest_grid_min_points,
-        _to_int(item("quest_grid_max_points", "idlerpg_quest_grid_max_points", 3), 3),
+        _to_int(item("quest_grid_max_points"), 3),
     )
 
     return {
-        "TICK_SECONDS": _to_int(item("tick_seconds", "idlerpg_tick_seconds", 60) or 60, 60),
-        "RP_BASE": _to_int(item("rp_base", "idlerpg_rp_base", 600) or 600, 600),
-        "RP_STEP": _to_float(item("rp_step", "idlerpg_rp_step", 1.16) or 1.16, 1.16),
-        "PENALTY_STEP": _to_float(item("penalty_step", "idlerpg_penalty_step", 1.14) or 1.14, 1.14),
-        "MESSAGE_PENALTY": _to_int(item("message_penalty", "idlerpg_message_penalty", 1) or 1, 1),
-        "LOGOUT_PENALTY": _to_int(item("logout_penalty", "idlerpg_logout_penalty", 20) or 20, 20),
-        "LOGOUT_GRACE_SECONDS": _to_int(item("logout_grace_seconds", "idlerpg_logout_grace_seconds", 300) or 0, 0),
-        "MAX_PENALTY": _to_int(item("max_penalty", "idlerpg_max_penalty", 604800) or 0, 0),
-        "PAGE_SIZE": _to_int(item("page_size", "idlerpg_page_size", 10) or 10, 10),
-        "MAP_X": _to_int(item("map_x", "idlerpg_map_x", 500) or 500, 500),
-        "MAP_Y": _to_int(item("map_y", "idlerpg_map_y", 500) or 500, 500),
-        "QUEST_MIN_LEVEL": _to_int(item("quest_min_level", "idlerpg_quest_min_level", 40) or 40, 40),
-        "QUEST_INTERVAL": _to_int(item("quest_interval", "idlerpg_quest_interval", 21600) or 21600, 21600),
-        "QUEST_MIN_DURATION": _to_int(item("quest_min_duration", "idlerpg_quest_min_duration", 43200) or 43200, 43200),
-        "QUEST_MAX_DURATION": _to_int(item("quest_max_duration", "idlerpg_quest_max_duration", 86400) or 86400, 86400),
-        "QUEST_TIME_ENABLED": _to_bool(item("quest_time_enabled", "idlerpg_quest_time_enabled", True), True),
-        "QUEST_GRID_ENABLED": _to_bool(item("quest_grid_enabled", "idlerpg_quest_grid_enabled", True), True),
-        "QUEST_TIME_WEIGHT": _to_float(item("quest_time_weight", "idlerpg_quest_time_weight", 0.5) or 0.0, 0.5),
-        "QUEST_GRID_WEIGHT": _to_float(item("quest_grid_weight", "idlerpg_quest_grid_weight", 0.5) or 0.0, 0.5),
-        "QUEST_TIME_MIN_DURATION": _to_int(item("quest_time_min_duration", "idlerpg_quest_time_min_duration", 43200) or 43200, 43200),
-        "QUEST_TIME_MAX_DURATION": _to_int(item("quest_time_max_duration", "idlerpg_quest_time_max_duration", 86400) or 86400, 86400),
+        "TICK_SECONDS": _to_int(item("tick_seconds") or 60, 60),
+        "RP_BASE": _to_int(item("rp_base") or 600, 600),
+        "RP_STEP": _to_float(item("rp_step") or 1.16, 1.16),
+        "PENALTY_STEP": _to_float(item("penalty_step") or 1.14, 1.14),
+        "MESSAGE_PENALTY": _to_int(item("message_penalty") or 1, 1),
+        "LOGOUT_PENALTY": _to_int(item("logout_penalty") or 20, 20),
+        "LOGOUT_GRACE_SECONDS": _to_int(item("logout_grace_seconds") or 0, 0),
+        "MAX_PENALTY": _to_int(item("max_penalty") or 0, 0),
+        "PAGE_SIZE": _to_int(item("page_size") or 10, 10),
+        "MAP_X": _to_int(item("map_x") or 500, 500),
+        "MAP_Y": _to_int(item("map_y") or 500, 500),
+        "QUEST_MIN_LEVEL": _to_int(item("quest_min_level") or 40, 40),
+        "QUEST_INTERVAL": _to_int(item("quest_interval") or 21600, 21600),
+        "QUEST_MIN_DURATION": _to_int(item("quest_min_duration") or 43200, 43200),
+        "QUEST_MAX_DURATION": _to_int(item("quest_max_duration") or 86400, 86400),
+        "QUEST_TIME_ENABLED": _to_bool(item("quest_time_enabled"), True),
+        "QUEST_GRID_ENABLED": _to_bool(item("quest_grid_enabled"), True),
+        "QUEST_TIME_WEIGHT": _to_float(item("quest_time_weight") or 0.0, 0.5),
+        "QUEST_GRID_WEIGHT": _to_float(item("quest_grid_weight") or 0.0, 0.5),
+        "QUEST_TIME_MIN_DURATION": _to_int(item("quest_time_min_duration") or 43200, 43200),
+        "QUEST_TIME_MAX_DURATION": _to_int(item("quest_time_max_duration") or 86400, 86400),
         "QUEST_MAX_PER_DAY": max(
             0,
-            _to_int(item("quest_max_per_day", "idlerpg_quest_max_per_day", 2), 2),
+            _to_int(item("quest_max_per_day"), 2),
         ),
         "QUEST_GRID_MIN_POINTS": quest_grid_min_points,
         "QUEST_GRID_MAX_POINTS": quest_grid_max_points,
-        "EVENT_CHANCE": _to_float(item("event_chance", "idlerpg_event_chance", 0.01), 0.01),
-        "ITEM_CHANCE": _to_float(item("item_chance", "idlerpg_item_chance", 0.20), 0.20),
-        "BATTLE_EVENT_WEIGHT": _to_float(item("battle_event_weight", "idlerpg_battle_event_weight", 0.55), 0.55),
-        "ITEM_EVENT_WEIGHT": _to_float(item("item_event_weight", "idlerpg_item_event_weight", 0.15), 0.15),
-        "ALIGNMENT_EVENT_WEIGHT": _to_float(item("alignment_event_weight", "idlerpg_alignment_event_weight", 0.10), 0.10),
-        "CRITICAL_STRIKE_CHANCE": _to_float(item("critical_strike_chance", "idlerpg_critical_strike_chance", 1 / 35), 1 / 35),
-        "CRITICAL_STRIKE_CHANCE_GOOD": _to_float(item("critical_strike_chance_good", "idlerpg_critical_strike_chance_good", 1 / 50), 1 / 50),
-        "CRITICAL_STRIKE_CHANCE_EVIL": _to_float(item("critical_strike_chance_evil", "idlerpg_critical_strike_chance_evil", 1 / 20), 1 / 20),
-        "ITEM_DROP_CHANCE": _to_float(item("item_drop_chance", "idlerpg_item_drop_chance", 0.02), 0.02),
-        "TEAM_BATTLE_EVENT_WEIGHT": _to_float(item("team_battle_event_weight", "idlerpg_team_battle_event_weight", 0.08), 0.08),
-        "BOSS_EVENT_WEIGHT": _to_float(item("boss_event_weight", "idlerpg_boss_event_weight", 0.06), 0.06),
-        "BOSS_MIN_PLAYERS": _to_int(item("boss_min_players", "idlerpg_boss_min_players", 3), 3),
-        "BOSS_MAX_PLAYERS": _to_int(item("boss_max_players", "idlerpg_boss_max_players", 5), 5),
-        "BOSS_MIN_LEVEL": _to_int(item("boss_min_level", "idlerpg_boss_min_level", 10), 10),
-        "BOSS_REWARD_PERCENT": _to_int(item("boss_reward_percent", "idlerpg_boss_reward_percent", 12), 12),
-        "BOSS_LOSS_PERCENT": _to_int(item("boss_loss_percent", "idlerpg_boss_loss_percent", 4), 4),
-        "BOSS_POWER_MIN_FACTOR": _to_float(item("boss_power_min_factor", "idlerpg_boss_power_min_factor", 0.75), 0.75),
-        "BOSS_POWER_MAX_FACTOR": _to_float(item("boss_power_max_factor", "idlerpg_boss_power_max_factor", 1.25), 1.25),
-        "BATTLE_WIN_MIN_PERCENT": _to_int(item("battle_win_min_percent", "idlerpg_battle_win_min_percent", 7) or 7, 7),
-        "BATTLE_LOSS_MIN_PERCENT": _to_int(item("battle_loss_min_percent", "idlerpg_battle_loss_min_percent", 7) or 7, 7),
-        "CRITICAL_MIN_PERCENT": _to_int(item("critical_min_percent", "idlerpg_critical_min_percent", 5) or 5, 5),
-        "CRITICAL_MAX_PERCENT": _to_int(item("critical_max_percent", "idlerpg_critical_max_percent", 25) or 25, 25),
-        "GODSEND_MIN_PERCENT": _to_int(item("godsend_min_percent", "idlerpg_godsend_min_percent", 5) or 5, 5),
-        "GODSEND_MAX_PERCENT": _to_int(item("godsend_max_percent", "idlerpg_godsend_max_percent", 12) or 12, 12),
-        "CALAMITY_MIN_PERCENT": _to_int(item("calamity_min_percent", "idlerpg_calamity_min_percent", 5) or 5, 5),
-        "CALAMITY_MAX_PERCENT": _to_int(item("calamity_max_percent", "idlerpg_calamity_max_percent", 12) or 12, 12),
-        "ALIGNMENT_BONUS_PERCENT": _to_int(item("alignment_bonus_percent", "idlerpg_alignment_bonus_percent", 7) or 7, 7),
-        "QUEST_REWARD_PERCENT": _to_int(item("quest_reward_percent", "idlerpg_quest_reward_percent", 25) or 25, 25),
-        "QUEST_MIN_ONLINE_SECONDS": _to_int(item("quest_min_online_seconds", "idlerpg_quest_min_online_seconds", 36000) or 0, 0),
-        "TEAM_BATTLE_PERCENT": _to_int(item("team_battle_percent", "idlerpg_team_battle_percent", 20) or 20, 20),
-        "UNIQUE_ITEMS_ENABLED": _to_bool(item("unique_items_enabled", "idlerpg_unique_items_enabled", True), True),
-        "UNIQUE_ITEM_MIN_LEVEL": _to_int(item("unique_item_min_level", "idlerpg_unique_item_min_level", 25) or 25, 25),
-        "UNIQUE_ITEM_CHANCE": _to_float(item("unique_item_chance", "idlerpg_unique_item_chance", 0.025), 0.025),
-        "EVENT_LOG_LIMIT": _to_int(item("event_log_limit", "idlerpg_event_log_limit", 200) or 200, 200),
-        "EVENT_RETENTION_DAYS": _to_int(item("event_retention_days", "idlerpg_event_retention_days", 90) or 0, 0),
-        "EXPORT_EVENT_LIMIT": _to_int(item("export_event_limit", "idlerpg_export_event_limit", 50) or 50, 50),
+        "EVENT_CHANCE": _to_float(item("event_chance"), 0.01),
+        "ITEM_CHANCE": _to_float(item("item_chance"), 0.20),
+        "BATTLE_EVENT_WEIGHT": _to_float(item("battle_event_weight"), 0.55),
+        "ITEM_EVENT_WEIGHT": _to_float(item("item_event_weight"), 0.15),
+        "ALIGNMENT_EVENT_WEIGHT": _to_float(item("alignment_event_weight"), 0.10),
+        "CRITICAL_STRIKE_CHANCE": _to_float(item("critical_strike_chance"), 1 / 35),
+        "CRITICAL_STRIKE_CHANCE_GOOD": _to_float(item("critical_strike_chance_good"), 1 / 50),
+        "CRITICAL_STRIKE_CHANCE_EVIL": _to_float(item("critical_strike_chance_evil"), 1 / 20),
+        "ITEM_DROP_CHANCE": _to_float(item("item_drop_chance"), 0.02),
+        "TEAM_BATTLE_EVENT_WEIGHT": _to_float(item("team_battle_event_weight"), 0.08),
+        "BOSS_EVENT_WEIGHT": _to_float(item("boss_event_weight"), 0.06),
+        "BOSS_MIN_PLAYERS": _to_int(item("boss_min_players"), 3),
+        "BOSS_MAX_PLAYERS": _to_int(item("boss_max_players"), 5),
+        "BOSS_MIN_LEVEL": _to_int(item("boss_min_level"), 10),
+        "BOSS_REWARD_PERCENT": _to_int(item("boss_reward_percent"), 12),
+        "BOSS_LOSS_PERCENT": _to_int(item("boss_loss_percent"), 4),
+        "BOSS_POWER_MIN_FACTOR": _to_float(item("boss_power_min_factor"), 0.75),
+        "BOSS_POWER_MAX_FACTOR": _to_float(item("boss_power_max_factor"), 1.25),
+        "BATTLE_WIN_MIN_PERCENT": _to_int(item("battle_win_min_percent") or 7, 7),
+        "BATTLE_LOSS_MIN_PERCENT": _to_int(item("battle_loss_min_percent") or 7, 7),
+        "CRITICAL_MIN_PERCENT": _to_int(item("critical_min_percent") or 5, 5),
+        "CRITICAL_MAX_PERCENT": _to_int(item("critical_max_percent") or 25, 25),
+        "GODSEND_MIN_PERCENT": _to_int(item("godsend_min_percent") or 5, 5),
+        "GODSEND_MAX_PERCENT": _to_int(item("godsend_max_percent") or 12, 12),
+        "CALAMITY_MIN_PERCENT": _to_int(item("calamity_min_percent") or 5, 5),
+        "CALAMITY_MAX_PERCENT": _to_int(item("calamity_max_percent") or 12, 12),
+        "ALIGNMENT_BONUS_PERCENT": _to_int(item("alignment_bonus_percent") or 7, 7),
+        "QUEST_REWARD_PERCENT": _to_int(item("quest_reward_percent") or 25, 25),
+        "QUEST_MIN_ONLINE_SECONDS": _to_int(item("quest_min_online_seconds") or 0, 0),
+        "TEAM_BATTLE_PERCENT": _to_int(item("team_battle_percent") or 20, 20),
+        "UNIQUE_ITEMS_ENABLED": _to_bool(item("unique_items_enabled"), True),
+        "UNIQUE_ITEM_MIN_LEVEL": _to_int(item("unique_item_min_level") or 25, 25),
+        "UNIQUE_ITEM_CHANCE": _to_float(item("unique_item_chance"), 0.025),
+        "EVENT_LOG_LIMIT": _to_int(item("event_log_limit") or 200, 200),
+        "EVENT_RETENTION_DAYS": _to_int(item("event_retention_days") or 0, 0),
+        "EXPORT_EVENT_LIMIT": _to_int(item("export_event_limit") or 50, 50),
         "EXPORT_FULL_SEASON_EVENTS": _to_bool(
-            item(
-                "export_full_season_events",
-                "idlerpg_export_full_season_events",
-                False,
-            ),
+            item("export_full_season_events"),
             False,
         ),
-        "EXPORT_ENABLED": _to_bool(item("export_enabled", "idlerpg_export_enabled", True), True),
+        "EXPORT_ENABLED": _to_bool(item("export_enabled"), True),
         "EXPORT_INTERVAL_SECONDS": _to_int(
-            item(
-                "export_interval_seconds",
-                "idlerpg_export_interval_seconds",
-                300,
-            )
+            item("export_interval_seconds")
             or 0,
             0,
         ),
-        "EXPORT_PATH": _to_str(item("export_path", "idlerpg_export_path", "data/idlerpg") or "data/idlerpg", "data/idlerpg"),
+        "EXPORT_PATH": _to_str(item("export_path") or "data/idlerpg", "data/idlerpg"),
         "EXPORT_PUBLIC_BASE_URL": export_public_base_url,
         "WEBSITE_PUBLIC_BASE_URL": website_public_base_url,
-        "EXPORT_TOP_LIMIT": _to_int(item("export_top_limit", "idlerpg_export_top_limit", 50) or 50, 50),
-        "SEASON_ENABLED": _to_bool(item("season_enabled", "idlerpg_season_enabled", False), False),
-        "SEASON_DURATION_DAYS": _to_int(item("season_duration_days", "idlerpg_season_duration_days", 90) or 0, 0),
-        "SEASON_RESET_ON_ROLLOVER": _to_bool(item("season_reset_on_rollover", "idlerpg_season_reset_on_rollover", False), False),
-        "SEASON_HOF_SIZE": _to_int(item("season_hof_size", "idlerpg_season_hof_size", 10) or 10, 10),
+        "EXPORT_TOP_LIMIT": _to_int(item("export_top_limit") or 50, 50),
+        "SEASON_ENABLED": _to_bool(item("season_enabled"), False),
+        "SEASON_DURATION_DAYS": _to_int(item("season_duration_days") or 0, 0),
+        "SEASON_RESET_ON_ROLLOVER": _to_bool(item("season_reset_on_rollover"), False),
+        "SEASON_HOF_SIZE": _to_int(item("season_hof_size") or 10, 10),
         "MAP_STEP_PER_SECOND": _to_int(map_step_per_second or 0, 0),
         "MAP_STEP_PER_TICK": _to_int(map_step_per_second or 0, 0),
-        "GRID_BATTLE_ENABLED": _to_bool(item("grid_battle_enabled", "idlerpg_grid_battle_enabled", True), True),
-        "QUEST_GRID_STEP_SECONDS": _to_int(item("quest_grid_step_seconds", "idlerpg_quest_grid_step_seconds", 30) or 30, 30),
-        "COUNT_COMMAND_MESSAGES": _to_bool(item("count_command_messages", "idlerpg_count_command_messages", False), False),
-        "ANNOUNCE_LOGIN": _to_bool(item("announce_login", "idlerpg_announce_login", True), True),
-        "ANNOUNCE_TOP_INTERVAL": _to_int(item("announce_top_interval", "idlerpg_announce_top_interval", 21600) or 0, 0),
-        "ANNOUNCE_TOP_LIMIT": _to_int(item("announce_top_limit", "idlerpg_announce_top_limit", 5) or 5, 5),
-        "UPDATE_ROOM_TOPIC": _to_bool(item("update_room_topic", "idlerpg_update_room_topic", False), False),
-        "TOPIC_UPDATE_INTERVAL": _to_int(item("topic_update_interval", "idlerpg_topic_update_interval", 14400) or 0, 0),
+        "GRID_BATTLE_ENABLED": _to_bool(item("grid_battle_enabled"), True),
+        "QUEST_GRID_STEP_SECONDS": _to_int(item("quest_grid_step_seconds") or 30, 30),
+        "COUNT_COMMAND_MESSAGES": _to_bool(item("count_command_messages"), False),
+        "ANNOUNCE_LOGIN": _to_bool(item("announce_login"), True),
+        "ANNOUNCE_TOP_INTERVAL": _to_int(item("announce_top_interval") or 0, 0),
+        "ANNOUNCE_TOP_LIMIT": _to_int(item("announce_top_limit") or 5, 5),
+        "UPDATE_ROOM_TOPIC": _to_bool(item("update_room_topic"), False),
+        "TOPIC_UPDATE_INTERVAL": _to_int(item("topic_update_interval") or 0, 0),
         "TOPIC_CUSTOM_TEXT": topic_custom_text.strip(),
-        "ITEM_DAMAGE_EVENT_WEIGHT": _to_float(item("item_damage_event_weight", "idlerpg_item_damage_event_weight", 0.08), 0.08),
-        "ITEM_STEAL_EVENT_WEIGHT": _to_float(item("item_steal_event_weight", "idlerpg_item_steal_event_weight", 0.04), 0.04),
-        "LEVEL_BATTLE_CHANCE_BELOW_25": _to_float(item("level_battle_chance_below_25", "idlerpg_level_battle_chance_below_25", 0.25), 0.25),
-        "LEVEL_BATTLE_CHANCE_AT_25": _to_float(item("level_battle_chance_at_25", "idlerpg_level_battle_chance_at_25", 1.0), 1.0),
-        "LEVEL_REWARD_MIN_LEVEL": _to_int(item("level_reward_min_level", "idlerpg_level_reward_min_level", 50) or 50, 50),
-        "SEASON_ACHIEVEMENT_GATES_ENABLED": _to_bool(item("season_achievement_gates_enabled", "idlerpg_season_achievement_gates_enabled", True), True),
-        "MANUAL_DUEL_MAX_DISTANCE": _to_int(item("manual_duel_max_distance", "idlerpg_manual_duel_max_distance", 10) or 10, 10),
-        "MANUAL_DUEL_COOLDOWN_SECONDS": _to_int(item("manual_duel_cooldown_seconds", "idlerpg_manual_duel_cooldown_seconds", 3600) or 0, 0),
+        "ITEM_DAMAGE_EVENT_WEIGHT": _to_float(item("item_damage_event_weight"), 0.08),
+        "ITEM_STEAL_EVENT_WEIGHT": _to_float(item("item_steal_event_weight"), 0.04),
+        "LEVEL_BATTLE_CHANCE_BELOW_25": _to_float(item("level_battle_chance_below_25"), 0.25),
+        "LEVEL_BATTLE_CHANCE_AT_25": _to_float(item("level_battle_chance_at_25"), 1.0),
+        "LEVEL_REWARD_MIN_LEVEL": _to_int(item("level_reward_min_level") or 50, 50),
+        "SEASON_ACHIEVEMENT_GATES_ENABLED": _to_bool(item("season_achievement_gates_enabled"), True),
+        "MANUAL_DUEL_MAX_DISTANCE": _to_int(item("manual_duel_max_distance") or 10, 10),
+        "MANUAL_DUEL_COOLDOWN_SECONDS": _to_int(item("manual_duel_cooldown_seconds") or 0, 0),
     }
 
 
@@ -295,29 +295,23 @@ def _rss_values(cfg: Mapping[str, object]) -> dict[str, object]:
 
 def _duck_values(cfg: Mapping[str, object]) -> dict[str, object]:
     duck_cfg = _cfg_group(cfg, "ducks")
-    min_messages = max(1, _to_int(duck_cfg.get("min_messages", 150), 150))
-    max_messages = max(
-        min_messages,
-        _to_int(duck_cfg.get("max_messages", 500), 500),
-    )
+
+    def item(key: str) -> object:
+        field = DUCK_FIELDS[key]
+        value = duck_cfg.get(key, field.default)
+        return field.default if value is None else value
+
+    min_messages = max(1, _to_int(item("min_messages"), 150))
+    max_messages = max(min_messages, _to_int(item("max_messages"), 500))
     return {
         "duck_cfg": duck_cfg,
         "DEFAULT_MIN_MESSAGES": min_messages,
         "DEFAULT_MAX_MESSAGES": max_messages,
-        "DUCK_SPAWN_CHANCE": max(
-            1,
-            _to_int(duck_cfg.get("spawn_chance", 20), 20),
-        ),
-        "MAX_DUCKS_PER_DAY": max(
-            0,
-            _to_int(duck_cfg.get("max_ducks_per_day", 3), 3),
-        ),
-        "DUCK_TIMEOUT": max(0, _to_int(duck_cfg.get("timeout", 0), 0)),
-        "COUNT_COMMAND_MESSAGES": _to_bool(duck_cfg.get("count_commands"), False),
-        "DUCK_STATE_SAVE_EVERY": max(
-            1,
-            _to_int(duck_cfg.get("state_save_every", 1), 1),
-        ),
+        "DUCK_SPAWN_CHANCE": max(1, _to_int(item("spawn_chance"), 20)),
+        "MAX_DUCKS_PER_DAY": max(0, _to_int(item("max_ducks_per_day"), 3)),
+        "DUCK_TIMEOUT": max(0, _to_int(item("timeout"), 0)),
+        "COUNT_COMMAND_MESSAGES": _to_bool(item("count_commands"), False),
+        "DUCK_STATE_SAVE_EVERY": max(1, _to_int(item("state_save_every"), 1)),
     }
 
 
@@ -333,7 +327,9 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             "UTC",
         ),
     }
-    max_room_nicks = _cfg_group(cfg, "users").get("max_room_nicks", 5)
+    max_room_nicks = _cfg_group(cfg, "users").get(
+        "max_room_nicks", USER_FIELDS["max_room_nicks"].default
+    )
     module_values: dict[str, dict[str, object]] = {
         "utils.formatting": {
             "DEFAULT_PAGINATION": cfg.get("default_pagination", "all"),

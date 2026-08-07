@@ -7,8 +7,9 @@ import os
 import pwd
 import shutil
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from utils.config import get_runtime_config_path
 
@@ -57,7 +58,7 @@ def _exec_start() -> str:
 def _unique_writable_paths(config: Mapping[str, Any]) -> list[Path]:
     paths = service_paths(config)
     candidates = [
-        paths["working_directory"],
+        paths["config"].parent,
         paths["database"].parent,
         paths["backup_directory"],
         paths["idlerpg_export"],
@@ -73,6 +74,15 @@ def _unique_writable_paths(config: Mapping[str, Any]) -> list[Path]:
     return result
 
 
+def _writable_paths_cover_project(config: Mapping[str, Any]) -> bool:
+    """Return whether writable paths make the application tree writable."""
+    project = PROJECT_ROOT.resolve()
+    return any(
+        path == project or path in project.parents
+        for path in _unique_writable_paths(config)
+    )
+
+
 def render_systemd_unit(
     config: Mapping[str, Any],
     *,
@@ -82,9 +92,10 @@ def render_systemd_unit(
 ) -> str:
     """Render a hardened unit using paths from the active installation."""
     workdir = PROJECT_ROOT.resolve()
+    config_path = service_paths(config)["config"]
     writable = " ".join(str(path) for path in _unique_writable_paths(config))
     exec_start = _exec_start()
-    return f"""[Unit]\nDescription=EnvsBot XMPP bot\nDocumentation=https://github.com/envs-net/envsbot\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=notify\nNotifyAccess=main\nUser={user}\nGroup={group}\nWorkingDirectory={workdir}\nEnvironmentFile=-{environment_file}\nEnvironment=PYTHONUNBUFFERED=1\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=5\nWatchdogSec=60\nTimeoutStopSec=45\nUMask=0077\n\nNoNewPrivileges=true\nPrivateTmp=true\nPrivateDevices=true\nProtectSystem=strict\nProtectHome=true\nProtectKernelTunables=true\nProtectKernelModules=true\nProtectKernelLogs=true\nProtectControlGroups=true\nRestrictSUIDSGID=true\nLockPersonality=true\nCapabilityBoundingSet=\nAmbientCapabilities=\nReadWritePaths={writable}\n\n[Install]\nWantedBy=multi-user.target\n"""
+    return f"""[Unit]\nDescription=EnvsBot XMPP bot\nDocumentation=https://github.com/envs-net/envsbot\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=notify\nNotifyAccess=main\nUser={user}\nGroup={group}\nWorkingDirectory={workdir}\nEnvironmentFile=-{environment_file}\nEnvironment=PYTHONUNBUFFERED=1\nEnvironment=ENVSBOT_CONFIG={config_path}\nExecStart={exec_start}\nRestart=on-failure\nRestartSec=5\nWatchdogSec=60\nTimeoutStopSec=45\nUMask=0077\n\nNoNewPrivileges=true\nPrivateTmp=true\nPrivateDevices=true\nProtectSystem=strict\nProtectHome=true\nProtectKernelTunables=true\nProtectKernelModules=true\nProtectKernelLogs=true\nProtectControlGroups=true\nRestrictSUIDSGID=true\nLockPersonality=true\nCapabilityBoundingSet=\nAmbientCapabilities=\nReadWritePaths={writable}\n\n[Install]\nWantedBy=multi-user.target\n"""
 
 
 def _account_access(path: Path, *, user: str, group: str, write: bool = False, execute: bool = False) -> bool:
@@ -183,6 +194,11 @@ def check_systemd_installation(
 
     writable = _unique_writable_paths(config)
     checks.append((bool(writable), "ReadWritePaths: " + " ".join(map(str, writable))))
+    checks.append((
+        not _writable_paths_cover_project(config),
+        "Application tree read-only: move ENVSBOT_CONFIG and DB_FILE out of "
+        f"{PROJECT_ROOT.resolve()} if this check fails",
+    ))
 
     lines = [f"{'OK' if ok else 'FAIL'}  {text}" for ok, text in checks]
     lines.append(

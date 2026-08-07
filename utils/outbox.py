@@ -9,10 +9,10 @@ import logging
 import time
 from typing import Any
 
-from database.outbox import OutboxCapacityError
-from utils.task_supervisor import ExpectedTaskExit
-
 from bot.room_state import JOINED_ROOMS
+from database.outbox import OutboxCapacityError
+from utils.performance import observe
+from utils.task_supervisor import ExpectedTaskExit
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 def message_dedupe_key(category: str, destination: str, body: str) -> str:
     """Return a stable, privacy-preserving dedupe key."""
     digest = hashlib.sha256(
-        f"{category}\0{destination}\0{body}".encode("utf-8")
+        f"{category}\0{destination}\0{body}".encode()
     ).hexdigest()
     return f"{category}:{digest}"
 
@@ -119,7 +119,7 @@ class PersistentOutbox:
             return
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=max(0.1, timeout))
-        except asyncio.TimeoutError:
+        except TimeoutError:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         except asyncio.CancelledError:
@@ -213,6 +213,7 @@ class PersistentOutbox:
         return min(maximum, initial * (2 ** max(0, int(attempts))))
 
     async def _send_one(self, queued: Any) -> None:
+        started = time.perf_counter()
         store = self.store
         if store is None:
             raise RuntimeError("outbox store is not initialized")
@@ -223,6 +224,7 @@ class PersistentOutbox:
                 retry_delay_seconds=self._retry_delay(queued.attempts),
                 reason="destination room is not joined",
             )
+            observe("outbox_delivery", time.perf_counter() - started)
             return
 
         try:
@@ -254,12 +256,14 @@ class PersistentOutbox:
                 report = getattr(alerts, "report_outbox_dead", None)
                 if callable(report):
                     await report(queued.id, queued.category)
+            observe("outbox_delivery", time.perf_counter() - started)
             return
 
         await store.mark_sent(queued.id)
         self.delivered += 1
         self.last_delivery_at = int(time.time())
         self.last_error = None
+        observe("outbox_delivery", time.perf_counter() - started)
 
     async def run_once(self) -> int:
         if not self.enabled or self.store is None:
@@ -305,7 +309,7 @@ class PersistentOutbox:
                         self.wakeup.wait(),
                         timeout=poll_seconds,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # A poll timeout is the normal trigger for the next queue
                     # scan when no producer explicitly wakes the worker.
                     continue

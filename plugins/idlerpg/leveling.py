@@ -1,6 +1,7 @@
 """Split module for plugins/idlerpg.py: leveling."""
 
 from __future__ import annotations
+
 from typing import Any
 
 
@@ -254,7 +255,7 @@ async def _penalize_player(
         )
         for text in quest_messages:
             _dep_export._record_event(room, "quest", text)
-    await _dep_state._set_data(bot, data)
+    await _dep_state._set_data(bot, data, room_jid=room_jid)
     if announce and changed:
         _dep_formatting._system_reply(
             bot,

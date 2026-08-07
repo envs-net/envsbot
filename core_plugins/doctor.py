@@ -21,12 +21,13 @@ from utils.config import (
     get_runtime_config_path,
     load_default_config_for_diff,
 )
-from utils.formatting import format_page, parse_page_args
 from utils.file_security import (
     format_mode,
     has_group_or_other_access,
     sensitive_permission_targets,
 )
+from utils.formatting import format_page, parse_page_args
+from utils.performance import snapshot as performance_snapshot
 from utils.updatecheck import check_for_updates_once
 from utils.version import display_version
 
@@ -67,6 +68,8 @@ _SECTION_ALIASES = {
     "task": "tasks",
     "backups": "backups",
     "backup": "backups",
+    "performance": "performance",
+    "perf": "performance",
     "network": "network",
     "http": "network",
     "release": "release",
@@ -106,7 +109,7 @@ _DEFAULT_SECTIONS = (
     "backups",
     "plugin-health",
 )
-_ALL_SECTIONS = _DEFAULT_SECTIONS + ("network", "release")
+_ALL_SECTIONS = _DEFAULT_SECTIONS + ("performance", "network", "release")
 
 
 def _line(ok: bool | None, label: str, text: str) -> str:
@@ -434,6 +437,75 @@ def _config_lines() -> list[str]:
     return lines
 
 
+def _performance_lines(bot: Any, *, full: bool) -> list[str]:
+    """Return compact in-process latency diagnostics."""
+    data = performance_snapshot()
+    timings = data.get("timings", {}) if isinstance(data, dict) else {}
+    groups = data.get("groups", {}) if isinstance(data, dict) else {}
+    lines: list[str] = []
+
+    watchdog = getattr(bot, "watchdog", None)
+    runtime_state = getattr(watchdog, "runtime_state", None)
+    if callable(runtime_state):
+        state = runtime_state()
+        if isinstance(state, dict):
+            lines.append(
+                _line(
+                    True,
+                    "Event-loop lag",
+                    f"last {float(state.get('last_lag_seconds', 0.0) or 0.0):.3f}s / "
+                    f"max {float(state.get('max_lag_seconds', 0.0) or 0.0):.3f}s",
+                )
+            )
+
+    labels = (
+        ("db_lock_wait", "DB lock wait"),
+        ("idlerpg_tick", "IdleRPG tick"),
+        ("idlerpg_save", "IdleRPG save"),
+        ("idlerpg_export", "IdleRPG export"),
+        ("outbox_delivery", "Outbox delivery"),
+        ("rss_fetch", "RSS fetch"),
+    )
+    for key, label in labels:
+        stats = timings.get(key) if isinstance(timings, dict) else None
+        if not isinstance(stats, dict) or not int(stats.get("count", 0) or 0):
+            continue
+        lines.append(
+            _line(
+                True,
+                label,
+                f"avg {float(stats.get('avg_ms', 0.0) or 0.0):.1f}ms / "
+                f"max {float(stats.get('max_ms', 0.0) or 0.0):.1f}ms / "
+                f"n={int(stats.get('count', 0) or 0)}",
+            )
+        )
+
+    group_specs = (("commands", "Slow commands"), ("rss_hosts", "Slow RSS hosts"))
+    limit = 10 if full else 3
+    for group_name, label in group_specs:
+        values = groups.get(group_name) if isinstance(groups, dict) else None
+        if not isinstance(values, dict) or not values:
+            continue
+        ranked = sorted(
+            (
+                (str(key), stats)
+                for key, stats in values.items()
+                if isinstance(stats, dict)
+            ),
+            key=lambda item: float(item[1].get("max_ms", 0.0) or 0.0),
+            reverse=True,
+        )[:limit]
+        detail = "; ".join(
+            f"{key} avg {float(stats.get('avg_ms', 0.0) or 0.0):.1f}ms "
+            f"max {float(stats.get('max_ms', 0.0) or 0.0):.1f}ms"
+            for key, stats in ranked
+        )
+        if detail:
+            lines.append(_line(True, label, detail))
+
+    return lines or [_line(None, "Performance", "no runtime samples collected yet")]
+
+
 def _network_lines() -> list[str]:
     private_fetch_allowed = bool(config.get("allow_private_fetch_urls", False))
     return [
@@ -491,8 +563,7 @@ def _command_docs_line() -> str:
             [sys.executable, str(script)],
             cwd=root,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=30,
             check=False,
         )
@@ -592,8 +663,7 @@ def _release_git_status_line() -> str:
             ["git", "status", "--short", "--untracked-files=no"],
             cwd=root,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=10,
             check=False,
         )
@@ -768,6 +838,8 @@ async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
         return _task_lines(bot, full=full)
     if section == "backups":
         return _backup_lines()
+    if section == "performance":
+        return _performance_lines(bot, full=full)
     if section == "network":
         return _network_lines()
     if section == "release":
@@ -836,8 +908,8 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
     "doctor",
     role=Role.ADMIN,
     aliases=["bot doctor", "healthcheck", "bot health"],
-    short="Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness.",
-    usage="{prefix}doctor [config|database|rooms|plugins|tasks|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]",
+    short="Run operator health checks for config, DB, rooms, plugins, tasks, performance, backups, network and release readiness.",
+    usage="{prefix}doctor [config|database|rooms|plugins|tasks|performance|backups|network|plugin-health|<plugin>|release|all|full] [page|last|all]",
     subcommands=[
         help_subcommand(
             "config",
@@ -868,6 +940,13 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
             "{prefix}doctor tasks [full] [page|last|all]",
             "Check supervised background tasks and heartbeat state.",
             examples=[help_example("{prefix}doctor tasks full", "Show detailed task diagnostics.")],
+        ),
+        help_subcommand(
+            "performance",
+            "{prefix}doctor performance [full] [page|last|all]",
+            "Show event-loop, DB, IdleRPG, outbox, RSS and command latency diagnostics.",
+            aliases=("perf",),
+            examples=[help_example("{prefix}doctor performance", "Inspect in-process performance counters.")],
         ),
         help_subcommand(
             "backups",
@@ -914,6 +993,7 @@ def _parse_doctor_sections(args: list[str]) -> tuple[bool, tuple[str, ...], list
         "{prefix}doctor rss",
         "{prefix}doctor translate",
         "{prefix}doctor tasks full",
+        "{prefix}doctor performance",
         "{prefix}doctor release",
     ],
     category="admin",

@@ -6,13 +6,16 @@ import asyncio
 import hashlib
 import html
 import logging
-import aiohttp
+import time
 from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
+import aiohttp
 from bs4 import BeautifulSoup
+
 from utils.config import config
 from utils.http_fetch import fetch_bytes
+from utils.performance import observe, observe_group
 from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL, validate_fetch_url_async
 
 from .config import (
@@ -172,7 +175,7 @@ def _generate_entry_id(title: str, description: str, link: str) -> str:
         return link
 
     # Hash title+description for unique IDs when no link available
-    combined = f"{title}|{description}".encode("utf-8")
+    combined = f"{title}|{description}".encode()
     return hashlib.sha256(combined).hexdigest()
 def _get_entry_id(entry) -> str:
     """Return the stable ID used for RSS duplicate detection."""
@@ -465,43 +468,35 @@ def _validate_parsed_feed(parsed, url: str):
 
     return parsed
 async def fetch_feed(url):
-    """
-    Fetch and parse RSS feed with proper URL handling.
+    """Fetch and parse one RSS/Atom feed with timing diagnostics."""
+    started = time.perf_counter()
+    host = urlparse(str(url)).hostname or "unknown"
+    try:
+        if not feedparser:
+            raise RuntimeError("feedparser module not installed")
 
-    Fetching is done with aiohttp so timeouts, redirects and private-network
-    safety checks are enforced before feedparser parses the response bytes.
+        body, _final_url, content_type = await _fetch_feed_bytes(url)
+        result = await asyncio.to_thread(
+            feedparser.parse,
+            body,
+            response_headers=(
+                {"content-type": content_type} if content_type else None
+            ),
+        )
+        result = _validate_parsed_feed(result, url)
 
-    Args:
-        url: Feed URL to fetch
-
-    Returns:
-        Parsed feed result
-    """
-    if not feedparser:
-        raise RuntimeError("feedparser module not installed")
-
-    body, _final_url, content_type = await _fetch_feed_bytes(url)
-
-    result = await asyncio.to_thread(
-        feedparser.parse,
-        body,
-        response_headers=(
-            {"content-type": content_type} if content_type else None
-        ),
-    )
-    result = _validate_parsed_feed(result, url)
-
-    # Force the feed URL to be the original URL we requested.  This keeps
-    # storage stable even when the server redirects the fetch request.
-    feed = _parsed_value(result, "feed", None)
-    if feed is not None:
-        _set_mapping_value(feed, "href", url)
-        _set_mapping_value(feed, "id", url)
-        feed_link = _extract_feed_link(feed, url)
-        if feed_link:
-            _set_mapping_value(feed, "link", feed_link)
-
-    return result
+        feed = _parsed_value(result, "feed", None)
+        if feed is not None:
+            _set_mapping_value(feed, "href", url)
+            _set_mapping_value(feed, "id", url)
+            feed_link = _extract_feed_link(feed, url)
+            if feed_link:
+                _set_mapping_value(feed, "link", feed_link)
+        return result
+    finally:
+        duration = time.perf_counter() - started
+        observe("rss_fetch", duration)
+        observe_group("rss_hosts", host, duration)
 def _entry_is_new(last_id, entry):
     entry_id = _get_entry_id(entry)
     if not entry_id:

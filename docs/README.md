@@ -29,7 +29,7 @@ Operational notes:
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status full` includes supervised background-task state.
 - `,tasks` shows supervised background tasks without the rest of the status output.
-- `,doctor` runs a compact operator health check; `,doctor full` includes more runtime detail.
+- `,doctor` runs a compact operator health check; `,doctor performance` shows in-process latency counters and `,doctor full` includes them in the detailed sweep.
 - `,plugin state <plugin> [room_jid]` shows plugin-provided runtime counters.
 - `,rooms diagnose <room_jid>` shows room, invite, plugin-toggle and plugin-state diagnostics.
 - `,version` shows the running EnvsBot version and the latest checked release.

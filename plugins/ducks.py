@@ -38,21 +38,21 @@ from collections.abc import Mapping
 from datetime import date
 from functools import partial
 
-
-from utils.command import command, Role
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from utils.config import config
 from core_plugins._core import (
-    _is_muc_pm,
-    _is_enabled_for_room,
-    handle_room_toggle_command,
     _ensure_user_exists,
+    _is_enabled_for_room,
+    _is_muc_pm,
     _is_public_muc,
     get_real_jid,
+    handle_room_toggle_command,
     muc_pm_sender_can_manage_room,
 )
-
+from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from utils.config import config
+from utils.config.spec import DUCK_FIELDS
 from utils.task_supervisor import create_plugin_task
+
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -93,17 +93,24 @@ ROOM_CONFIG_INT_MINIMUMS = {
 ROOM_CONFIG_CACHE: dict[str, dict[str, int | bool]] = {}
 
 duck_cfg = config.get("ducks", {})
-DEFAULT_MIN_MESSAGES = duck_cfg.get("min_messages", 150)
-DEFAULT_MAX_MESSAGES = duck_cfg.get("max_messages", 500)
-DUCK_SPAWN_CHANCE = duck_cfg.get("spawn_chance", 20)
-MAX_DUCKS_PER_DAY = duck_cfg.get("max_ducks_per_day", 3)
-DUCK_TIMEOUT = duck_cfg.get("timeout", 0)
-COUNT_COMMAND_MESSAGES = duck_cfg.get("count_commands", False)
+DEFAULT_MIN_MESSAGES = duck_cfg.get("min_messages", DUCK_FIELDS["min_messages"].default)
+DEFAULT_MAX_MESSAGES = duck_cfg.get("max_messages", DUCK_FIELDS["max_messages"].default)
+DUCK_SPAWN_CHANCE = duck_cfg.get("spawn_chance", DUCK_FIELDS["spawn_chance"].default)
+MAX_DUCKS_PER_DAY = duck_cfg.get(
+    "max_ducks_per_day", DUCK_FIELDS["max_ducks_per_day"].default
+)
+DUCK_TIMEOUT = duck_cfg.get("timeout", DUCK_FIELDS["timeout"].default)
+COUNT_COMMAND_MESSAGES = duck_cfg.get(
+    "count_commands", DUCK_FIELDS["count_commands"].default
+)
 
 try:
-    DUCK_STATE_SAVE_EVERY = max(1, int(duck_cfg.get("state_save_every", 1)))
+    DUCK_STATE_SAVE_EVERY = max(
+        1,
+        int(duck_cfg.get("state_save_every", DUCK_FIELDS["state_save_every"].default)),
+    )
 except (TypeError, ValueError):
-    DUCK_STATE_SAVE_EVERY = 1
+    DUCK_STATE_SAVE_EVERY = int(DUCK_FIELDS["state_save_every"].default)
 
 ACTIVE_DUCKS = {}              # room_jid -> timestamp
 PENDING_DUCKS = set()          # room_jid waiting for delayed spawn

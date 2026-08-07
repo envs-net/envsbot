@@ -1,6 +1,7 @@
 """Split module for utils/config.py: errors."""
 
 from __future__ import annotations
+
 import sys
 
 

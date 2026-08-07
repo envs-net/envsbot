@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import importlib
+import runpy
+from pathlib import Path
 
-from utils.config.spec import CONFIG_DISPLAY_SECTIONS, CONFIG_FIELDS
+from utils.config.spec import (
+    CONFIG_DISPLAY_SECTIONS,
+    CONFIG_FIELDS,
+    NESTED_CONFIG_FIELDS,
+    nested_config_defaults,
+)
 
 
 def test_config_sample_imports_and_exposes_safe_defaults():
@@ -91,3 +98,29 @@ def test_new_operational_defaults_are_declared():
     assert fields["task_stale_after_seconds"].python_key == "TASK_STALE_AFTER_SECONDS"
     assert fields["outbox_max_pending"].minimum_exclusive is True
     assert fields["admin_report_mode"].choices == ("daily", "problems_only")
+
+
+def test_declarative_schema_has_operator_metadata_for_every_field():
+    assert all(field.section.strip() for field in CONFIG_FIELDS.values())
+    assert all(field.description.strip() for field in CONFIG_FIELDS.values())
+    assert CONFIG_FIELDS["password"].sensitive is True
+    assert CONFIG_FIELDS["youtube_api_key"].sensitive is True
+
+
+def test_nested_config_schema_has_operator_metadata_and_defaults():
+    for group, fields in NESTED_CONFIG_FIELDS.items():
+        assert fields
+        assert all(field.description.strip() for field in fields.values())
+        assert CONFIG_FIELDS[group].sample == nested_config_defaults(group)
+
+    assert NESTED_CONFIG_FIELDS["idlerpg"]["export_full_season_events"].runtime_keys == (
+        "EXPORT_FULL_SEASON_EVENTS",
+    )
+
+
+def test_config_sample_is_generated_from_schema_exactly():
+    root = Path(__file__).resolve().parents[2]
+    namespace = runpy.run_path(str(root / "scripts" / "generate_config_sample.py"))
+    rendered = namespace["render_config_sample"]()
+
+    assert (root / "config_sample.py").read_text(encoding="utf-8") == rendered

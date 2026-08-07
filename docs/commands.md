@@ -140,7 +140,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,config show` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Show the effective config grouped like config_sample.py, with secrets redacted. |
 | `,config unset` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Reset one runtime-writable config value to the config_sample.py default. |
 | `,config validate` | [`config_cmd`](plugins/config_cmd.md) | `admin` | `private chat / MUC PM` | Validate the current config.py file. |
-| `,doctor` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, backups, network and release readiness. |
+| `,doctor` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run operator health checks for config, DB, rooms, plugins, tasks, performance, backups, network and release readiness. |
 | `,doctor failed` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
 | `,doctor release` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata. |
 | `,doctor warnings` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |

@@ -12,6 +12,7 @@ from typing import Any
 from utils.command import Role
 from utils.config import config
 from utils.logging_helpers import kv
+from utils.performance import observe_group
 from utils.redaction import redact_text, redact_value
 
 log = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ class CommandExecutor:
                     await asyncio.wait_for(result, timeout=timeout)
                 else:
                     await result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             status = "timeout"
             error_text = f"timeout after {timeout:g}s"
             log.warning(
@@ -178,6 +179,7 @@ class CommandExecutor:
             )
         finally:
             duration_ms = int((time.monotonic() - started) * 1000)
+            observe_group("commands", context.command_name, duration_ms / 1000.0)
             slow_threshold = self.slow_log_seconds()
             if slow_threshold > 0 and duration_ms >= int(slow_threshold * 1000):
                 log.info(

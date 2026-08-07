@@ -215,7 +215,8 @@ def _fail_quest(
     *,
     detail: str | None = None,
 ) -> None:
-    quest = room.get("quest") if isinstance(room.get("quest"), dict) else {}
+    raw_quest = room.get("quest")
+    quest: dict[str, Any] = raw_quest if isinstance(raw_quest, dict) else {}
     quest_kind = _quest_type(quest)
     players = room.get("players", {})
     questers = [str(jid) for jid in quest.get("questers", [])]

@@ -1,15 +1,16 @@
 """Split module for utils/config.py: validation."""
 
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 from zoneinfo import available_timezones
+
 import slixmpp
 
 from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
-from .spec import CONFIG_FIELDS
 from .errors import ConfigError
-
+from .spec import CONFIG_FIELDS, NESTED_CONFIG_FIELDS
 
 AVAILABLE_TIMEZONES = available_timezones()
 
@@ -247,6 +248,37 @@ def check_optional_keys(cfg):
     return errors
 
 
+def _validate_nested_config(cfg: dict[str, object], errors: list[str]) -> None:
+    """Validate declared options inside structured configuration groups."""
+    for group_name, fields in NESTED_CONFIG_FIELDS.items():
+        group = cfg.get(group_name)
+        if group is None or not isinstance(group, dict):
+            continue
+
+        for key, value in group.items():
+            field = fields.get(key)
+            dotted_key = f"{group_name}.{key}"
+            if field is None:
+                errors.append(f"{dotted_key}: unknown setting")
+                continue
+            if value is None:
+                continue
+            if field.accepted_type is str:
+                _validate_string(
+                    value,
+                    dotted_key,
+                    errors,
+                    allow_empty=field.allow_empty,
+                )
+                continue
+            if not _matches_expected_type(value, field.accepted_type):
+                errors.append(
+                    f"{dotted_key}: expected "
+                    f"{_expected_type_name(field.accepted_type)}, "
+                    f"got {type(value).__name__}"
+                )
+
+
 def _validate_room_plugin_defaults(cfg, errors):
     defaults = cfg.get("room_plugin_defaults")
     if defaults is None:
@@ -324,6 +356,7 @@ def validate_config(cfg, require_required_keys=False):
     _validate_avatar(cfg, errors, [])
     _validate_numeric_ranges(cfg, errors)
     _validate_room_plugin_defaults(cfg, errors)
+    _validate_nested_config(cfg, errors)
 
     if cfg.get("version_check_enabled") and not str(
         cfg.get("version_check_url", "")

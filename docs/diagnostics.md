@@ -15,10 +15,13 @@ The doctor command checks:
 - known rooms vs joined rooms
 - loaded/available plugins and registered commands
 - supervised background task summary
+- in-process performance timing for DB locks, IdleRPG, outbox, RSS and commands
 - backup directory and retention settings
 - plugin-provided health checks for RSS, IdleRPG, reminders, pins, weather, translate, URLCheck, birthdays, ducks, tell and karma
 
-Useful sections include `config`, `database`, `rooms`, `plugins`, `tasks`, `backups`, `network`, `plugin-health` and selected plugin names such as `rss`, `idlerpg`, `weather`, `translate` or `urlcheck`.
+Useful sections include `config`, `database`, `rooms`, `plugins`, `tasks`,
+`performance`, `backups`, `network`, `plugin-health` and selected plugin names
+such as `rss`, `idlerpg`, `weather`, `translate` or `urlcheck`.
 
 Examples:
 
@@ -28,10 +31,29 @@ Examples:
 ,doctor warnings
 ,doctor failed
 ,doctor tasks
+,doctor performance
 ,doctor rss
 ,doctor idlerpg
 ,doctor translate
 ```
+
+
+## In-process performance diagnostics
+
+`,doctor performance` exposes lightweight counters kept only in the running
+process. It reports event-loop lag plus average/maximum timings for SQLite lock
+waits, IdleRPG ticks/saves/exports, outbox delivery and RSS fetches. It also
+shows the slowest command names and RSS hosts. RSS measurements retain only the
+host name, not complete feed URLs.
+
+```text
+,doctor performance
+,doctor performance full
+,doctor full
+```
+
+The counters reset on process restart and intentionally do not require an
+external metrics service. They are diagnostics rather than long-term monitoring.
 
 ## Room diagnostics
 

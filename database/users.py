@@ -1,9 +1,9 @@
-import json
-import sqlite3
-import logging
 import asyncio
-from typing import Callable
-from datetime import datetime, timezone
+import json
+import logging
+import sqlite3
+from collections.abc import Callable
+from datetime import UTC, datetime, timezone
 
 from .locking import AsyncRLock
 
@@ -135,7 +135,7 @@ class PluginRuntimeStore:
             await self.set_global(key, value)
             return value
 
-    async def get(self, jid: str, key: str = None):
+    async def get(self, jid: str, key: str | None = None):
         """
         Retrieve runtime data for this plugin.
 
@@ -172,7 +172,7 @@ class PluginRuntimeStore:
         """
 
         # Get update time
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
@@ -193,7 +193,7 @@ class PluginRuntimeStore:
         """
         Delete a key from this plugin's runtime data (cached).
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
@@ -211,7 +211,7 @@ class PluginRuntimeStore:
         """
         Remove all runtime data for this plugin (cached).
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
@@ -340,7 +340,7 @@ class UserManager:
     # ------------------------------------------------------------------
 
     async def create(self, jid, nickname=None):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         if jid not in self._users_cache:
             self._users_cache[jid] = {
                 "jid": jid,
@@ -397,7 +397,7 @@ class UserManager:
         )
 
     async def update_last_seen(self, jid):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         await self.set(jid, "last_seen", now)
 
     async def delete(self, jid):

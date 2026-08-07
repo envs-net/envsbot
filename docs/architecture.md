@@ -214,15 +214,21 @@ Important state paths:
 
 `database.idlerpg.IdleRPGStateStore` keeps the active game model split across
 `idlerpg_rooms`, `idlerpg_players`, `idlerpg_seasons` and `idlerpg_events`.
-The plugin still works with one in-memory room dictionary, but persistence uses
-incremental row updates instead of rewriting one global JSON blob. The first
-load after migration imports legacy `users_runtime` state transactionally and
-then removes the old plugin-global value.
+The active game still uses an in-memory room dictionary for fast command/tick
+access, but the unbounded active-season event history no longer lives there.
+Only the bounded recent event feed is reconstructed into RAM; newly generated
+events are buffered until the next successful save and then remain append-only
+in `idlerpg_events`. Room-scoped saves update only the affected room while a
+full save is still available for cleanup/import operations. The first load after
+migration imports legacy `users_runtime` state transactionally and then removes
+the old plugin-global value.
 
 Public JSON export is deliberately separate from database persistence. The
-async state layer takes an immutable snapshot, serializes and writes it through
-`asyncio.to_thread()`, and uses one export lock to coalesce overlapping
-automatic refreshes.
+async state layer takes an immutable snapshot of normal game state, serializes
+and writes it through `asyncio.to_thread()`, and uses one export lock to coalesce
+overlapping automatic refreshes. When full-season export is enabled, that event
+history is queried from SQLite only for the export and is not copied into the
+long-lived game cache.
 
 ## Shared recent-message cache
 

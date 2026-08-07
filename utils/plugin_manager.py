@@ -15,10 +15,11 @@ All lifecycle operations are fully asynchronous and must be awaited.
 from __future__ import annotations
 
 import asyncio
+import builtins
 import importlib
-import pkgutil
 import inspect
 import logging
+import pkgutil
 from contextlib import asynccontextmanager
 from functools import wraps
 
@@ -759,7 +760,7 @@ class PluginManager:
             log.exception("[PLUGIN] error during reload of %s", name)
             return False, f"Error reloading {name}: {e}"
 
-    def _loaded_dependency_order(self) -> list[str]:
+    def _loaded_dependency_order(self) -> builtins.list[str]:
         """Return all loaded plugins in safe dependency-first order."""
         loaded = set(self.plugins)
         missing = {
@@ -791,6 +792,7 @@ class PluginManager:
             self._ready = False
             return True, "No plugins were loaded"
 
+        graph_error: str | None = None
         try:
             unload_order = list(reversed(self._loaded_dependency_order()))
         except Exception as exc:
@@ -841,7 +843,7 @@ class PluginManager:
             log.error("[PLUGIN] cannot reload all: %s", exc)
             return False, f"Cannot reload all plugins safely: {exc}"
 
-        unload_errors = []
+        unload_errors: builtins.list[str] = []
         for plugin_name in reversed(load_order):
             success, message = await self.unload(
                 plugin_name,
@@ -851,7 +853,7 @@ class PluginManager:
             if not success:
                 unload_errors.append(f"{plugin_name}: {message}")
 
-        load_failures = {}
+        load_failures: dict[str, str] = {}
         for plugin_name in load_order:
             if plugin_name in self.plugins:
                 continue
@@ -896,7 +898,7 @@ class PluginManager:
             if plugin_name not in discovered_set:
                 self.failed_plugins.pop(plugin_name, None)
         loaded = set(self.plugins).intersection(discovered)
-        failed = set()
+        failed: set[str] = set()
 
         # Simple topological sort: try to load plugins with their
         # dependencies first
@@ -1058,7 +1060,7 @@ class PluginManager:
             log.exception("[PLUGIN] invalid dependency graph before on_ready")
             order = list(self.plugins)
 
-        ready_failures = set()
+        ready_failures: set[str] = set()
         try:
             for name in order:
                 module = self.plugins.get(name)
@@ -1131,7 +1133,7 @@ class PluginManager:
     # HELPERS
     # --------------------------------------------------
 
-    async def metadata_issues(self, name: str) -> list:
+    async def metadata_issues(self, name: str) -> builtins.list:
         """Return metadata validation issues for one plugin."""
         try:
             module = self.plugins.get(name) or await self._import(self._module_path(name))
@@ -1141,14 +1143,14 @@ class PluginManager:
             return [PluginMetadataIssue(name, "error", f"cannot import metadata: {exc}")]
         return validate_plugin_metadata(name, meta, core=self.is_core_plugin(name))
 
-    async def all_metadata_issues(self) -> list:
+    async def all_metadata_issues(self) -> builtins.list:
         """Return metadata validation issues for all discoverable plugins."""
-        issues = []
+        issues: builtins.list = []
         for name in self.discover():
             issues.extend(await self.metadata_issues(name))
         return issues
 
-    async def plugin_doctor(self, name: str, room_jid: str | None = None) -> list[str]:
+    async def plugin_doctor(self, name: str, room_jid: str | None = None) -> builtins.list[str]:
         """Return plugin-provided doctor lines for diagnostics."""
         module = self.plugins.get(name)
         if module is None:
@@ -1198,7 +1200,7 @@ class PluginManager:
         loaded = set(self.plugins.keys())
         available = set(self.discover()) - loaded
 
-        result = {
+        result: dict[str, dict[str, builtins.list[str]]] = {
             "core": {"loaded": [], "available": []},
             "plugins": {"loaded": [], "available": []},
         }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import random
-from typing import Any
+from typing import Any, cast
 
 
 def _map_region_name(x: int | float, y: int | float) -> str:
@@ -13,8 +13,8 @@ def _map_region_name(x: int | float, y: int | float) -> str:
         return "the wilderness"
     for region in _dep_constants.MAP_REGIONS:
         if (
-            float(region["x1"]) <= px <= float(region["x2"])
-            and float(region["y1"]) <= py <= float(region["y2"])
+            float(cast(Any, region["x1"])) <= px <= float(cast(Any, region["x2"]))
+            and float(cast(Any, region["y1"])) <= py <= float(cast(Any, region["y2"]))
         ):
             return str(region["name"])
     return "the wilderness"

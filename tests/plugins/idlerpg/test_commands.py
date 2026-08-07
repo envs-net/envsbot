@@ -619,8 +619,8 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["season", "end"], msg, True)
     assert "Champion: Alice" in bot.replies[-1][0]
     assert room["hall_of_fame"][-1]["champion"] == "Alice"
-    assert len(room["season_events"]) == 1
-    assert "ended. Champion: Alice" in room["season_events"][0]["text"]
+    assert "season_events" not in room
+    assert "ended. Champion: Alice" in room["events"][-1]["text"]
     assert player["level"] == 12
     assert player["stats"]["battles_won"] == 7
 
@@ -639,8 +639,8 @@ async def test_season_hall_of_fame_and_manual_reset(monkeypatch):
     assert player["stats"] == {}
     assert player["achievements"] == ["founder"]
     assert player["title"] == ""
-    assert len(room["season_events"]) == 1
-    assert "ended. Champion: Alice" in room["season_events"][0]["text"]
+    assert "season_events" not in room
+    assert "ended. Champion: Alice" in room["events"][-1]["text"]
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["hof"], DummyMsg(), True)
     assert "Hall of Fame" in bot.replies[-1][0]
@@ -716,8 +716,8 @@ async def test_season_discard_confirm_skips_hall_of_fame_and_resets_current_stat
     assert player["last_manual_duel_at"] == 0
     assert not any(event.get("text") == "faulty season event" for event in room["events"])
     assert any("was discarded" in event.get("text", "") for event in room["events"])
-    assert len(room["season_events"]) == 1
-    assert "was discarded" in room["season_events"][0]["text"]
+    assert "season_events" not in room
+    assert "was discarded" in room["events"][-1]["text"]
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,13 @@
 import asyncio
 import time
-from collections import deque, defaultdict
-from typing import Tuple
+from collections import defaultdict, deque
+from typing import TypedDict
+
+
+class _ClientState(TypedDict):
+    tokens: float
+    last_refill: float
+    lock: asyncio.Lock
 
 
 class TokenBucketRateLimiter:
@@ -44,11 +50,10 @@ class TokenBucketRateLimiter:
         self.notify_cooldown = notify_cooldown
 
         # per-client state
-        self._state = {}  # client_id -> {tokens, last_refill, lock}
-        # client_id -> deque[timestamp_of_denial]
-        self._denials = defaultdict(deque)
-        self._block_info = {}  # client_id -> (blocked_until, block_count)
-        self._last_notify = {}  # client_id -> last_notification_time
+        self._state: dict[str, _ClientState] = {}
+        self._denials: defaultdict[str, deque[float]] = defaultdict(deque)
+        self._block_info: dict[str, tuple[float, int]] = {}
+        self._last_notify: dict[str, float] = {}
 
         # protect _state & book-keeping
         self._global_lock = asyncio.Lock()
@@ -56,7 +61,7 @@ class TokenBucketRateLimiter:
     def _now(self) -> float:
         return time.monotonic()
 
-    async def _ensure_client(self, client_id: str):
+    async def _ensure_client(self, client_id: str) -> None:
         async with self._global_lock:
             if client_id not in self._state:
                 now = self._now()
@@ -66,7 +71,7 @@ class TokenBucketRateLimiter:
                     "lock": asyncio.Lock(),
                 }
 
-    async def allow(self, client_id: str) -> Tuple[bool, float]:
+    async def allow(self, client_id: str) -> tuple[bool, float]:
         """
         Attempt to allow an action for client_id.
 

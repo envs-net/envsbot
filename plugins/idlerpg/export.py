@@ -11,14 +11,16 @@ expose private player JIDs.
 """
 
 from __future__ import annotations
+
 import json
 import re
 import shutil
 import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
-from utils.config import BASE_DIR
+
+from utils.config.defaults import BASE_DIR
 
 
 def _export_root() -> Path:
@@ -100,7 +102,7 @@ def _public_artifact_catalog() -> list[dict[str, Any]]:
             "max_item_level": _dep_items._unique_item_level(item.get("max_item_level")),
             "next_upgrade_level": _dep_items._next_unique_upgrade_level(slot, tier),
             "bonus": str(item.get("bonus") or ""),
-            "bonus_percent": int(item.get("bonus_percent", 0) or 0),
+            "bonus_percent": int(cast(Any, item.get("bonus_percent", 0)) or 0),
         })
     return catalog
 
@@ -253,7 +255,7 @@ def _clean_event_data(data: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(value, (int, float, bool)) or value is None:
             clean[key] = value
         elif isinstance(value, list):
-            cleaned_items = []
+            cleaned_items: list[Any] = []
             for item in value:
                 if isinstance(item, str):
                     cleaned_items.append(_sanitize_public_text(item))
@@ -292,32 +294,29 @@ def _season_started_at(room: dict[str, Any]) -> int:
 
 
 def _ensure_season_events(room: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return the complete event store for the active season.
+    """Return legacy in-memory season history without creating a cache.
 
-    Older persisted rooms do not have ``season_events`` yet.  Seed that store
-    from the retained regular event log so upgrades preserve as much of the
-    current season history as is still available.  Once present, this list is
-    intentionally not capped by ``EVENT_LOG_LIMIT`` because the public
-    ``season_events.json`` export must contain every event from the active
-    season.
+    Normalized persistence keeps complete season history in SQLite.  This
+    helper remains for legacy stores and direct export callers only.
     """
     if not isinstance(room, dict):
         return []
-
     started_at = _season_started_at(room)
     existing = room.get("season_events")
-    try:
-        stored_started_at = max(0, int(room.get("season_events_started_at", 0) or 0))
-    except (TypeError, ValueError):
-        stored_started_at = 0
-    if isinstance(existing, list) and stored_started_at == started_at:
-        return existing
+    if isinstance(existing, list):
+        try:
+            stored_started_at = max(
+                0, int(room.get("season_events_started_at", started_at) or 0)
+            )
+        except (TypeError, ValueError):
+            stored_started_at = 0
+        if stored_started_at == started_at:
+            return [event for event in existing if isinstance(event, dict)]
 
-    source = existing if isinstance(existing, list) else room.get("events", [])
+    source = room.get("events", [])
     if not isinstance(source, list):
-        source = []
-
-    season_events: list[dict[str, Any]] = []
+        return []
+    result: list[dict[str, Any]] = []
     for event in source:
         if not isinstance(event, dict):
             continue
@@ -327,16 +326,14 @@ def _ensure_season_events(room: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         if started_at > 0 and event_ts < started_at:
             continue
-        season_events.append(event)
-
-    room["season_events"] = season_events
-    room["season_events_started_at"] = started_at
-    return season_events
+        result.append(event)
+    return result
 
 
 def _reset_season_events(room: dict[str, Any]) -> None:
-    room["season_events"] = []
-    room["season_events_started_at"] = _season_started_at(room)
+    """Remove legacy full-season caches after a season boundary."""
+    room.pop("season_events", None)
+    room.pop("season_events_started_at", None)
 
 
 def _current_season_events(room: dict[str, Any]) -> list[dict[str, Any]]:
@@ -358,10 +355,14 @@ def _record_event(
     if not isinstance(events, list):
         events = []
         room["events"] = events
-    season_events = _ensure_season_events(room)
     _prune_events(room)
     events = room["events"]
-    entry: dict[str, Any] = {"ts": _dep_formatting._now(), "kind": _safe_event_kind(kind), "text": _sanitize_public_text(text)[:500]}
+    entry: dict[str, Any] = {
+        "ts": _dep_formatting._now(),
+        "kind": _safe_event_kind(kind),
+        "text": _sanitize_public_text(text)[:500],
+        "_season_started_at": _season_started_at(room),
+    }
     player_names = [_public_player_name(player) for player in (players or [])]
     player_names = [player for player in player_names if player]
     if player_names:
@@ -370,9 +371,12 @@ def _record_event(
     if clean_data:
         entry["data"] = clean_data
     events.append(entry)
-    season_events.append(dict(entry))
+    pending = room.setdefault("_pending_events", [])
+    if not isinstance(pending, list):
+        pending = []
+        room["_pending_events"] = pending
+    pending.append(dict(entry))
     _prune_events(room)
-
 
 def _event_public_record(event: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(event, dict):
@@ -509,6 +513,7 @@ def _export_room_state(
     room_jid: str,
     room: dict[str, Any],
     generated_at: int,
+    season_events: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     slug = _dep_formatting._room_slug(room_jid)
     room_dir = root / slug
@@ -544,7 +549,14 @@ def _export_room_state(
     season = room.get("season", {}) if isinstance(room.get("season"), dict) else {}
     events = _room_events(room, limit=_dep_config.EXPORT_EVENT_LIMIT)
     season_events = (
-        _current_season_events(room)
+        sorted(
+            [
+                _event_public_record(event)
+                for event in (season_events if season_events is not None else _ensure_season_events(room))
+                if isinstance(event, dict)
+            ],
+            key=lambda event: int(event.get("ts", 0) or 0),
+        )
         if _dep_config.EXPORT_FULL_SEASON_EVENTS
         else []
     )
@@ -622,6 +634,7 @@ def _export_room_state(
 def _export_public_state(
     data: dict[str, Any],
     enabled_rooms: dict[str, bool] | None = None,
+    season_events_by_room: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Write a complete public export and return compact diagnostics.
 
@@ -658,7 +671,14 @@ def _export_public_state(
             room_jid = str(room_jid)
             if room_jid not in enabled or not isinstance(room, dict):
                 continue
-            summary, room_payload = _export_room_state(root, room_jid, room, generated_at)
+            room_season_events = (
+                season_events_by_room.get(room_jid)
+                if isinstance(season_events_by_room, dict)
+                else None
+            )
+            summary, room_payload = _export_room_state(
+                root, room_jid, room, generated_at, room_season_events
+            )
             summaries.append(summary)
             current_slugs.add(str(summary["slug"]))
             exported_players += int(room_payload.get("players_total", 0) or 0)
@@ -668,7 +688,20 @@ def _export_public_state(
             if default_room_payload is None:
                 default_room_payload = room_payload
                 if _dep_config.EXPORT_FULL_SEASON_EVENTS:
-                    default_room_season_events = _current_season_events(room)
+                    default_room_season_events = (
+                        sorted(
+                            [
+                                _event_public_record(event)
+                                for event in (
+                                    room_season_events
+                                    if room_season_events is not None
+                                    else _ensure_season_events(room)
+                                )
+                                if isinstance(event, dict)
+                            ],
+                            key=lambda event: int(event.get("ts", 0) or 0),
+                        )
+                    )
 
         stale_slugs = previous_slugs - current_slugs
         stale_slugs.update(

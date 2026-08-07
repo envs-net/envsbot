@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import core_plugins.doctor as doctor
+from utils import performance
 
 
 class Cursor:
@@ -431,3 +432,29 @@ def test_release_permissions_line_reports_insecure_backup(bot, tmp_path, monkeyp
 
     archive.chmod(0o600)
     assert "✅ File permissions: owner-only" in doctor._release_permissions_line(bot)
+
+
+def test_performance_section_formats_runtime_metrics(bot):
+    performance.reset()
+    performance.observe("db_lock_wait", 0.012)
+    performance.observe("idlerpg_tick", 0.025)
+    performance.observe_group("commands", "doctor", 0.075)
+    bot.watchdog = SimpleNamespace(
+        runtime_state=lambda: {
+            "last_lag_seconds": 0.004,
+            "max_lag_seconds": 0.020,
+        }
+    )
+
+    lines = doctor._performance_lines(bot, full=False)
+
+    assert any("Event-loop lag" in line and "0.004s" in line for line in lines)
+    assert any("DB lock wait" in line and "12.0ms" in line for line in lines)
+    assert any("IdleRPG tick" in line and "25.0ms" in line for line in lines)
+    assert any("Slow commands" in line and "doctor" in line for line in lines)
+    performance.reset()
+
+
+def test_parse_doctor_sections_supports_performance_alias():
+    assert doctor._parse_doctor_sections(["performance"])[1] == ("performance",)
+    assert doctor._parse_doctor_sections(["perf"])[1] == ("performance",)

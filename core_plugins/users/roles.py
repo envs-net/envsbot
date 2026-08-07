@@ -1,9 +1,10 @@
 """Split module for core_plugins/users.py: roles."""
 
 import logging
-from utils.config import config
-from utils.command import Role
 
+from utils.command import Role
+from utils.config import config
+from utils.config.spec import USER_FIELDS
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +22,9 @@ def _command_prefix(bot=None) -> str:
     )
 
 
-MAX_ROOM_NICKS = config.get("users", {}).get("max_room_nicks", 5)
+MAX_ROOM_NICKS = config.get("users", {}).get(
+    "max_room_nicks", USER_FIELDS["max_room_nicks"].default
+)
 
 
 ASSIGNABLE_ROLES = (

@@ -111,9 +111,9 @@ async def get_real_jid(bot, msg):
         # )
         try:
             result = (
-                JOINED_ROOMS.get(room, {})
+                JOINED_ROOMS.get(str(room or ""), {})
                 .get("nicks", {})
-                .get(nick, {})
+                .get(str(nick or ""), {})
                 .get("jid", None)
             )
         except Exception:
@@ -345,9 +345,12 @@ async def get_real_jid_from_occupant(bot, msg, nick=None):
         else:
             jid = nicks.get(nick, {}).get("jid", None)
     except Exception as e:
-        s = "[CORE] 🟡 Error resolving real JID from occupant for"
-        s += "%s in %s: %s", msg["from"].resource, msg["from"].bare, e
-        log.warning(s)
+        log.warning(
+            "[CORE] 🟡 Error resolving real JID from occupant for %s in %s: %s",
+            msg["from"].resource,
+            msg["from"].bare,
+            e,
+        )
         jid = None
     return jid
 
@@ -614,6 +617,7 @@ async def handle_room_toggle_command(
                 bot.reply(msg, formatter(label))
                 return True
 
+            assert plugin is not None
             await set_room_feature(bot, room_jid, plugin, requested)
             formatter = _format_enabled if requested else _format_disabled
             bot.reply(msg, formatter(label))

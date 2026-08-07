@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
+
+from utils.performance import observe
 
 
 class AsyncRLock:
@@ -24,7 +27,9 @@ class AsyncRLock:
         if task is not None and task is self._owner:
             self._depth += 1
             return True
+        started = time.perf_counter()
         await self._lock.acquire()
+        observe("db_lock_wait", time.perf_counter() - started)
         self._owner = task
         self._depth = 1
         return True
@@ -38,7 +43,7 @@ class AsyncRLock:
             self._owner = None
             self._lock.release()
 
-    async def __aenter__(self) -> "AsyncRLock":
+    async def __aenter__(self) -> AsyncRLock:
         await self.acquire()
         return self
 

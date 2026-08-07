@@ -373,10 +373,14 @@ legacy plugin-global JSON blob on first access after the database migration.
 The migration is transactional; after a successful copy the legacy blob is
 removed. No manual conversion command is required.
 
-The in-memory game model remains unchanged for command and tick performance,
-but database writes now update only changed room/player/season rows and newly
-created events. A long current-season event history therefore no longer causes
-one increasingly large JSON document to be rewritten on every tick.
+The in-memory game model keeps only the bounded recent event feed used by
+commands and normal website views. Full active-season history is append-only in
+SQLite and is loaded on demand only when `export_full_season_events` requires
+it. Newly created events are kept in a short-lived pending buffer until a
+successful database save, so events cannot be lost merely because the recent
+feed was pruned before persistence. Room-scoped saves update only the affected
+room/player/season rows instead of re-walking every IdleRPG room after each
+action.
 
 The plugin can export public game state as JSON for a website or status page.
 By default the files are written below `data/idlerpg` inside the bot checkout.

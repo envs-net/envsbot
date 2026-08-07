@@ -46,3 +46,40 @@ def test_ci_constraint_files_exist():
     assert references
     missing = sorted(path for path in set(references) if not Path(path).is_file())
     assert missing == []
+
+
+def test_constraint_snapshots_are_exact_and_transitive():
+    """Snapshots should be full exact locks, not a copy of direct requirements."""
+    for path in (Path("constraints/python312.txt"), Path("constraints/python313.txt")):
+        pins = []
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            assert line.count("==") == 1, f"non-exact constraint in {path}: {line}"
+            name, version = line.split("==", 1)
+            assert name.strip()
+            assert version.strip()
+            pins.append(name.lower())
+
+        assert len(pins) >= 70
+        assert len(pins) == len(set(pins))
+
+    assert "pyyaml==6.0.3" in Path("constraints/python312.txt").read_text(encoding="utf-8").lower()
+    assert "pyyaml-ft==8.0.0" in Path("constraints/python313.txt").read_text(encoding="utf-8").lower()
+
+
+def test_ci_verifies_constraint_dependency_closure():
+    github = Path(".github/workflows/quality.yml").read_text(encoding="utf-8")
+    drone = Path(".drone.yml").read_text(encoding="utf-8")
+
+    assert "python scripts/check_constraints.py ${{ matrix.constraints }}" in github
+    assert "python scripts/check_constraints.py constraints/python312.txt" in drone
+    assert "python scripts/check_constraints.py constraints/python313.txt" in drone
+
+
+def test_github_actions_use_node24_generations():
+    workflow = Path(".github/workflows/quality.yml").read_text(encoding="utf-8")
+
+    assert "actions/checkout@v7" in workflow
+    assert "actions/setup-python@v7" in workflow

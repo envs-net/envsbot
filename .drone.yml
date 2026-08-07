@@ -7,8 +7,9 @@ steps:
 - name: quality-and-test
   image: python:3.12
   commands:
-    - pip install -c constraints/python312.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip install -c constraints/python312.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
+    - python scripts/check_constraints.py constraints/python312.txt
     - ./scripts/quality.sh
     - python -m build
     - pytest -W error::RuntimeWarning -W error::DeprecationWarning
@@ -28,8 +29,9 @@ steps:
 - name: quality-and-test
   image: python:3.13
   commands:
-    - pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
+    - python scripts/check_constraints.py constraints/python313.txt
     - ./scripts/quality.sh
     - python -m build
     - pytest -W error::RuntimeWarning -W error::DeprecationWarning

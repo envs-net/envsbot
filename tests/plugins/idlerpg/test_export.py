@@ -146,7 +146,7 @@ def test_public_events_redact_private_jids_from_text_players_and_data():
     assert "[redacted-jid]" in payload
 
 
-def test_current_season_event_store_is_not_capped_by_recent_log(monkeypatch):
+def test_record_event_keeps_only_bounded_recent_history_in_memory(monkeypatch):
     from plugins.idlerpg import config as idlerpg_config
     from plugins.idlerpg import formatting as idlerpg_formatting
 
@@ -154,7 +154,6 @@ def test_current_season_event_store_is_not_capped_by_recent_log(monkeypatch):
     room = idlerpg._blank_room()
     room["season"] = {"id": "season-a", "started_at": now, "ends_at": 0}
     room["events"] = []
-    room["season_events"] = []
     monkeypatch.setattr(idlerpg_config, "EVENT_LOG_LIMIT", 2)
     monkeypatch.setattr(idlerpg_config, "EVENT_RETENTION_DAYS", 0)
 
@@ -163,21 +162,14 @@ def test_current_season_event_store_is_not_capped_by_recent_log(monkeypatch):
         idlerpg._record_event(room, "game", f"event-{offset}")
 
     assert [event["text"] for event in room["events"]] == ["event-2", "event-3"]
-    assert [event["text"] for event in room["season_events"]] == [
-        "event-0",
-        "event-1",
-        "event-2",
-        "event-3",
-    ]
+    assert "season_events" not in room
     assert [event["text"] for event in idlerpg._current_season_events(room)] == [
-        "event-0",
-        "event-1",
         "event-2",
         "event-3",
     ]
 
 
-def test_room_bucket_migrates_retained_current_season_events():
+def test_room_bucket_does_not_create_full_season_event_cache():
     data = {
         "rooms": {
             "room@conf": {
@@ -193,7 +185,8 @@ def test_room_bucket_migrates_retained_current_season_events():
 
     room = idlerpg._room_bucket(data, "room@conf")
 
-    assert [event["text"] for event in room["season_events"]] == ["current season"]
+    assert "season_events" not in room
+    assert "season_events_started_at" not in room
 
 
 def test_full_season_event_export_can_be_disabled_and_removes_stale_files(

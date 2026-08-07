@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import random
-from typing import Any
+from typing import Any, cast
 
 
 def _unique_defs_by_name() -> dict[str, dict[str, Any]]:
@@ -39,7 +39,8 @@ def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
     unique_items = player.get("unique_items")
     if not isinstance(unique_items, dict):
         return []
-    item_levels = player.get("items") if isinstance(player.get("items"), dict) else {}
+    raw_item_levels = player.get("items")
+    item_levels = raw_item_levels if isinstance(raw_item_levels, dict) else {}
     defs = _unique_defs_by_name()
     bonuses: list[dict[str, Any]] = []
     for slot, name in unique_items.items():
@@ -62,7 +63,7 @@ def _unique_bonuses(player: dict[str, Any]) -> list[dict[str, Any]]:
             ),
             "next_upgrade_level": _next_unique_upgrade_level(str(item.get("slot") or slot), tier),
             "bonus": bonus,
-            "bonus_percent": int(item.get("bonus_percent", 0) or 0),
+            "bonus_percent": int(cast(Any, item.get("bonus_percent", 0)) or 0),
         })
     return bonuses
 
@@ -76,7 +77,7 @@ def _unique_item_slots(player: dict[str, Any]) -> set[str]:
 
 def _unique_bonus_percent(player: dict[str, Any], bonus: str) -> int:
     total = sum(
-        int(item.get("bonus_percent", 0) or 0)
+        int(cast(Any, item.get("bonus_percent", 0)) or 0)
         for item in _unique_bonuses(player)
         if item.get("bonus") == bonus
     )
@@ -154,8 +155,10 @@ def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
     if level < _dep_config.UNIQUE_ITEM_MIN_LEVEL or random.random() >= _dep_config.UNIQUE_ITEM_CHANCE:
         return None
 
-    unique_items = player.get("unique_items") if isinstance(player.get("unique_items"), dict) else {}
-    item_levels = player.get("items") if isinstance(player.get("items"), dict) else {}
+    raw_unique_items = player.get("unique_items")
+    unique_items = raw_unique_items if isinstance(raw_unique_items, dict) else {}
+    raw_item_levels = player.get("items")
+    item_levels = raw_item_levels if isinstance(raw_item_levels, dict) else {}
     defs = _unique_defs_by_name()
     eligible: list[tuple[dict[str, Any], int, int, str]] = []
     for raw_item in _dep_constants.UNIQUE_ITEMS:
@@ -190,7 +193,7 @@ def _roll_unique_item(player: dict[str, Any]) -> dict[str, Any] | None:
         "min_level": _unique_item_level(item.get("min_level")),
         "level": random.randint(low, high),
         "bonus": str(item.get("bonus") or ""),
-        "bonus_percent": int(item.get("bonus_percent", 0) or 0),
+        "bonus_percent": int(cast(Any, item.get("bonus_percent", 0)) or 0),
         "upgrade_from": existing_name,
     }
 
