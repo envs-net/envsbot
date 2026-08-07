@@ -580,6 +580,7 @@ def _config_restore_member(members: set[str]) -> str | None:
     """Return the config archive member matching the active config format."""
     config_path = get_runtime_config_path()
     suffix = config_path.suffix.lower()
+    candidates: tuple[str, ...]
     if suffix == ".py":
         candidates = ("config.py",)
     elif suffix == ".json":
