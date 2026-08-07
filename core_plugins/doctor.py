@@ -583,6 +583,70 @@ def _local_version_line(bot: Any) -> str:
     return _line(True, "Local version", display_version(raw_version))
 
 
+def _git_commits_ahead_of_release(remote_version: str) -> int | None:
+    """Return commits between the published release tag and local ``HEAD``.
+
+    ``None`` means the checkout cannot be compared reliably (for example a
+    source archive, a shallow checkout without tags, or a tag that is not an
+    ancestor of ``HEAD``).  This keeps the release check conservative while
+    allowing development checkouts to report unreleased commits even before
+    ``__version__`` is bumped.
+    """
+    root = _repo_root()
+    if not (root / ".git").exists():
+        return None
+
+    normalized = normalized_version(remote_version)
+    tag_candidates = (f"v{normalized}", normalized)
+    for tag in tag_candidates:
+        try:
+            resolve = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            return None
+        if resolve.returncode != 0:
+            continue
+
+        tag_commit = resolve.stdout.strip()
+        if not tag_commit:
+            continue
+        try:
+            ancestor = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", tag_commit, "HEAD"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+            if ancestor.returncode != 0:
+                return None
+            count = subprocess.run(
+                ["git", "rev-list", "--count", f"{tag_commit}..HEAD"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            return None
+        if count.returncode != 0:
+            return None
+        try:
+            return max(0, int(count.stdout.strip()))
+        except ValueError:
+            return None
+
+    return None
+
+
 async def _latest_release_line(bot: Any) -> str:
     """Return a release-check line for the latest published release."""
     try:
@@ -615,6 +679,13 @@ async def _latest_release_line(bot: Any) -> str:
             "Latest release",
             f"{display_version(remote_version)} (local build ahead / unreleased)",
         )
+    if local_parts == remote_parts:
+        commits_ahead = _git_commits_ahead_of_release(remote_version)
+        if commits_ahead is not None and commits_ahead > 0:
+            return _warning_line(
+                "Latest release",
+                f"{display_version(remote_version)} (local build ahead / unreleased)",
+            )
     return _line(True, "Latest release", f"{display_version(remote_version)} (current)")
 
 

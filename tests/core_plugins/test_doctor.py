@@ -200,6 +200,7 @@ async def test_doctor_release_section_reports_release_readiness(bot, monkeypatch
     monkeypatch.setattr(doctor, "_command_docs_line", lambda: "✅ Command docs: ok (126 commands)")
     monkeypatch.setattr(doctor, "_config_sample_line", lambda: "✅ Config sample: ok")
     monkeypatch.setattr(doctor, "_release_backup_line", lambda: "✅ Latest backup: backup.zip · now")
+    monkeypatch.setattr(doctor, "_git_commits_ahead_of_release", lambda _version: 0)
 
     async def metadata_issues():
         return []
@@ -228,6 +229,51 @@ async def test_latest_release_line_marks_local_unreleased_build_ahead(bot, monke
     line = await doctor._latest_release_line(bot)
 
     assert line == "⚠️ Latest release: v1.7.3 (local build ahead / unreleased)"
+
+
+@pytest.mark.asyncio
+async def test_latest_release_line_marks_same_version_with_unreleased_commits(bot, monkeypatch):
+    bot.version = "1.7.3"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(False, "1.7.3", None)),
+    )
+    monkeypatch.setattr(doctor, "_git_commits_ahead_of_release", lambda _version: 4)
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "⚠️ Latest release: v1.7.3 (local build ahead / unreleased)"
+
+
+@pytest.mark.asyncio
+async def test_latest_release_line_same_version_is_current_at_release_tag(bot, monkeypatch):
+    bot.version = "1.7.3"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(False, "1.7.3", None)),
+    )
+    monkeypatch.setattr(doctor, "_git_commits_ahead_of_release", lambda _version: 0)
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "✅ Latest release: v1.7.3 (current)"
+
+
+@pytest.mark.asyncio
+async def test_latest_release_line_same_version_falls_back_without_git_tag(bot, monkeypatch):
+    bot.version = "1.7.3"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(False, "1.7.3", None)),
+    )
+    monkeypatch.setattr(doctor, "_git_commits_ahead_of_release", lambda _version: None)
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "✅ Latest release: v1.7.3 (current)"
 
 
 @pytest.mark.asyncio
