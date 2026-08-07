@@ -1044,15 +1044,12 @@ def _export_public_state(
             room_jid = str(room_jid)
             if room_jid not in enabled or not isinstance(room, dict):
                 continue
-            has_season_entry = (
-                isinstance(season_events_by_room, dict)
-                and room_jid in season_events_by_room
-            )
-            room_season_events = (
-                season_events_by_room.get(room_jid)
-                if has_season_entry
-                else None
-            )
+            if isinstance(season_events_by_room, dict):
+                has_season_entry = room_jid in season_events_by_room
+                room_season_events = season_events_by_room.get(room_jid)
+            else:
+                has_season_entry = False
+                room_season_events = None
             preserve_season_events = has_season_entry and room_season_events is None
             room_season_count = (
                 season_event_counts_by_room.get(room_jid)

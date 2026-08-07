@@ -200,7 +200,7 @@ class DatabaseManager:
                     self._maintenance_loop(), name="database-maintenance"
                 )
         except Exception:
-            conn = self.conn
+            failed_conn = self.conn
             self.conn = None
             self.users = None
             self.rooms = None
@@ -210,9 +210,9 @@ class DatabaseManager:
             self.outbox = None
             self.command_usage = None
             self._running = False
-            if conn is not None:
+            if failed_conn is not None:
                 try:
-                    await conn.close()
+                    await failed_conn.close()
                 except Exception:
                     log.exception("[DB] Failed to close connection after startup error")
             raise

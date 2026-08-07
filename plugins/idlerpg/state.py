@@ -265,7 +265,7 @@ async def _refresh_public_export(
                         # No database read at all for an unchanged season stream.
                         season_events_by_room[key] = None
                         season_events_append_by_room[key] = False
-                    elif can_append:
+                    elif can_append and previous is not None:
                         # Fetch only rows inserted after the last successfully
                         # exported rowid. The chunk writer appends idempotently.
                         season_events_by_room[key] = await loader(
