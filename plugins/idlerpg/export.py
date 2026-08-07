@@ -17,6 +17,7 @@ import json
 import re
 import shutil
 import stat
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
@@ -693,11 +694,9 @@ def _prune_season_event_chunks(
     for path in directory.glob("*.json"):
         if path.name not in expected_names:
             _remove_export_path_safely(path)
-    try:
+    with suppress(OSError):
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
-    except OSError:
-        pass
 
 
 def _remove_season_event_export(

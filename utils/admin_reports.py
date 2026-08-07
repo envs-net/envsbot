@@ -70,16 +70,13 @@ async def build_daily_admin_report(bot: Any) -> str:
 
     joined, configured = await _room_counts(bot)
     tasks = getattr(bot, "tasks", None)
-    running = failed = finished = 0
+    failed = finished = 0
     task_label = "0 services running, 0 one-shots completed, 0 failed"
     circuits = 0
     if tasks is not None:
         details = getattr(tasks, "summary_by_kind", None)
         if callable(details):
             counts = details()
-            running = int(counts.get("services_running", 0)) + int(
-                counts.get("one_shots_running", 0)
-            )
             failed = int(counts.get("failed", 0))
             finished = int(counts.get("one_shots_completed", 0))
             task_label = (

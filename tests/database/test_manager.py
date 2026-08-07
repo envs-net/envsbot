@@ -9,6 +9,22 @@ from unittest.mock import AsyncMock
 from database.manager import DatabaseManager
 
 
+async def _insert_room_then_fail(conn, room_jid: str, nick: str) -> None:
+    await conn.execute(
+        "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+        (room_jid, nick),
+    )
+    raise RuntimeError("inner failed")
+
+
+async def _insert_room_then_cancel(conn, room_jid: str, nick: str) -> None:
+    await conn.execute(
+        "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
+        (room_jid, nick),
+    )
+    raise asyncio.CancelledError
+
+
 @pytest.mark.asyncio
 async def test_database_manager_init_and_connect(tmp_db_path):
     db = DatabaseManager(tmp_db_path)
@@ -370,11 +386,7 @@ async def test_nested_database_transactions_rollback_only_inner_scope(tmp_db_pat
             )
             with pytest.raises(RuntimeError, match="inner failed"):
                 async with db.transaction(label="inner") as inner:
-                    await inner.execute(
-                        "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
-                        ("inner@conf", "Inner"),
-                    )
-                    raise RuntimeError("inner failed")
+                    await _insert_room_then_fail(inner, "inner@conf", "Inner")
             await conn.execute(
                 "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
                 ("after@conf", "After"),
@@ -393,11 +405,7 @@ async def test_database_transaction_rolls_back_outer_scope_on_cancelled_error(tm
     try:
         with pytest.raises(asyncio.CancelledError):
             async with db.transaction(label="cancelled") as conn:
-                await conn.execute(
-                    "INSERT INTO rooms (room_jid, nick) VALUES (?, ?)",
-                    ("cancelled@conf", "Cancelled"),
-                )
-                raise asyncio.CancelledError
+                await _insert_room_then_cancel(conn, "cancelled@conf", "Cancelled")
 
         assert await db.fetch_one(
             "SELECT room_jid FROM rooms WHERE room_jid=?",

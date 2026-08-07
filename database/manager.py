@@ -519,7 +519,7 @@ class DatabaseManager:
                         self._stop_event.wait(),
                         timeout=self.flush_interval
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     if self.users:
                         await self._flush_with_retry()
         finally:
@@ -586,7 +586,7 @@ class DatabaseManager:
                         self._stop_event.wait(),
                         timeout=interval,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     stop_requested = False
                 if stop_requested:
                     break
@@ -679,7 +679,7 @@ class DatabaseManager:
             if flush_task is not None:
                 try:
                     await asyncio.wait_for(asyncio.shield(flush_task), timeout=5)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     flush_task.cancel()
                     await asyncio.gather(flush_task, return_exceptions=True)
                     log.warning("[DB] Timed out waiting for background flush task")
