@@ -95,3 +95,11 @@ def test_aiohttp_security_floor_and_locks():
 
     for path in (Path("constraints/python312.txt"), Path("constraints/python313.txt")):
         assert "aiohttp==3.14.3" in path.read_text(encoding="utf-8").lower()
+
+
+def test_quality_audits_exact_lock_without_no_deps_warning():
+    """The full lock can be resolved normally, avoiding pip-audit no-deps warnings."""
+    quality = Path("scripts/quality.sh").read_text(encoding="utf-8")
+
+    assert 'pip-audit -r "$constraint_file"' in quality
+    assert "--no-deps" not in quality

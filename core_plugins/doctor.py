@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import compileall
 import os
-import py_compile
 import subprocess
 import sys
 from pathlib import Path
@@ -630,7 +628,14 @@ def _release_permissions_line(bot: Any) -> str:
 
 
 def _release_python_compile_line() -> str:
-    """Return a release-check line for basic Python syntax/import safety."""
+    """Return a read-only-safe release check for Python syntax.
+
+    The production systemd unit intentionally mounts the application tree
+    read-only.  ``compileall``/``py_compile`` normally create ``__pycache__``
+    files, so using them here produced a false failure under
+    ``ProtectSystem=strict``.  Compiling source bytes directly performs the
+    same syntax compilation without writing into the checkout.
+    """
     root = _repo_root()
     targets = [
         root / "bot",
@@ -643,12 +648,16 @@ def _release_python_compile_line() -> str:
     ]
     try:
         for target in targets:
-            if target.is_dir():
-                if not compileall.compile_dir(target, quiet=2, maxlevels=20):
-                    return _line(False, "Python compile", f"failed in {target.name}")
-            elif target.exists():
-                py_compile.compile(str(target), doraise=True)
+            sources = sorted(target.rglob("*.py")) if target.is_dir() else [target]
+            for source in sources:
+                if not source.is_file():
+                    continue
+                compile(source.read_bytes(), str(source), "exec", dont_inherit=True)
         return _line(True, "Python compile", "ok")
+    except SyntaxError as exc:
+        filename = Path(exc.filename).name if exc.filename else "unknown"
+        line = f":{exc.lineno}" if exc.lineno else ""
+        return _line(False, "Python compile", f"{filename}{line}: {exc.msg}")
     except Exception as exc:
         return _line(False, "Python compile", str(exc))
 

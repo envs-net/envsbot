@@ -74,4 +74,4 @@ if [ ! -f "$constraint_file" ]; then
   echo "No audited dependency snapshot for Python ${python_minor}" >&2
   exit 1
 fi
-pip-audit -r "$constraint_file" --no-deps
+pip-audit -r "$constraint_file"

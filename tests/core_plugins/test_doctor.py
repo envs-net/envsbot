@@ -412,6 +412,38 @@ def test_release_backup_line_reports_empty_latest_and_errors(monkeypatch, tmp_pa
     assert doctor._release_backup_line() == "🔴 Latest backup: backup store failed"
 
 
+def test_release_python_compile_is_safe_for_read_only_checkout(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    package = root / "core_plugins"
+    package.mkdir(parents=True)
+    source = package / "example.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    source.chmod(0o444)
+    package.chmod(0o555)
+    root.chmod(0o555)
+    monkeypatch.setattr(doctor, "_repo_root", lambda: root)
+
+    try:
+        assert doctor._release_python_compile_line() == "✅ Python compile: ok"
+        assert not (package / "__pycache__").exists()
+    finally:
+        root.chmod(0o755)
+        package.chmod(0o755)
+        source.chmod(0o644)
+
+
+def test_release_python_compile_reports_syntax_error(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    package = root / "core_plugins"
+    package.mkdir(parents=True)
+    (package / "broken.py").write_text("if True print('broken')\n", encoding="utf-8")
+    monkeypatch.setattr(doctor, "_repo_root", lambda: root)
+
+    line = doctor._release_python_compile_line()
+
+    assert line.startswith("🔴 Python compile: broken.py:1:")
+
+
 def test_release_permissions_line_reports_insecure_backup(bot, tmp_path, monkeypatch):
     doctor.get_runtime_config_path().chmod(0o600)
     database = tmp_path / "bot.db"
