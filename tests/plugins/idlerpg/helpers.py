@@ -40,11 +40,15 @@ class DummyBot:
         self.boundjid = types.SimpleNamespace(bare="bot@envs.net")
         self.plugin = {"xep_0045": object()}
         self.presence = types.SimpleNamespace(joined_rooms={"room@conf": "envsbot"})
-        self.bot_plugins = types.SimpleNamespace(register_event=lambda *a, **k: None)
-        self.audit_events = []
-        self.tasks = types.SimpleNamespace(
-            create=lambda plugin, coro, name=None: DummyTask(coro, name)
+        def create_task(plugin, coro, name=None):
+            return DummyTask(coro, name)
+
+        self.bot_plugins = types.SimpleNamespace(
+            register_event=lambda *a, **k: None,
+            create_task=create_task,
         )
+        self.audit_events = []
+        self.tasks = types.SimpleNamespace(create=create_task)
 
     async def get_user_role(self, jid, room=None):
         if str(jid).startswith("admin@"):
@@ -96,9 +100,20 @@ class DummyMsg:
         return self.data.get(key, default)
 
 
+def _cancel_room_tasks():
+    for task in tuple(idlerpg.ROOM_TASKS.values()):
+        done = getattr(task, "done", None)
+        if callable(done) and done():
+            continue
+        cancel = getattr(task, "cancel", None)
+        if callable(cancel):
+            cancel()
+    idlerpg.ROOM_TASKS.clear()
+
+
 @pytest.fixture(autouse=True)
 def clear_idlerpg_state():
-    idlerpg.ROOM_TASKS.clear()
+    _cancel_room_tasks()
     getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
@@ -115,7 +130,7 @@ def clear_idlerpg_state():
         }
     }
     yield
-    idlerpg.ROOM_TASKS.clear()
+    _cancel_room_tasks()
     getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
     getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
     getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()

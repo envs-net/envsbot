@@ -61,6 +61,17 @@ async def test_enabled_rooms_and_task_sync_lifecycle(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dummy_bot_room_task_uses_plugin_manager_test_creator():
+    bot = DummyBot()
+
+    task = await idlerpg._ensure_game_task(bot, "room@conf")
+
+    assert isinstance(task, DummyTask)
+    assert idlerpg.ROOM_TASKS["room@conf"] is task
+    assert task.coro is not None
+
+
+@pytest.mark.asyncio
 async def test_ensure_game_task_cleans_duplicate_supervised_room_tasks():
     bot = DummyBot()
     bot.tasks = TaskSupervisor()
