@@ -50,8 +50,15 @@ PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
 Optional mutation testing:
 
 ```bash
-PYTHONPATH="$PWD" mutmut run
+./scripts/mutmut.sh fresh
+./scripts/mutmut.sh results
 ```
+
+Do not set `PYTHONPATH` to the repository root for mutmut 3. Mutmut runs
+pytest from its generated `./mutants` checkout, and forcing the original
+checkout onto `PYTHONPATH` can cause tests to import unmodified source files.
+Use `./scripts/mutmut.sh run` for normal follow-up runs after the initial fresh
+run.
 
 Live XMPP integration testing is opt-in and requires a dedicated test account
 and rooms. Do not run destructive or spammy tests against production rooms.
@@ -81,7 +88,8 @@ Recommended for larger changes:
 
 ```bash
 PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
-PYTHONPATH="$PWD" mutmut run
+./scripts/mutmut.sh fresh
+./scripts/mutmut.sh results
 ```
 
 ## AI-Assisted Changes

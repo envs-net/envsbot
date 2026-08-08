@@ -106,9 +106,12 @@ sudo systemctl start envsbot.service
 sudo journalctl -u envsbot.service -f
 ```
 
-Before updating, keep a copy of `config.py`, `vcard.py` and the configured `DB_FILE`, or create
-a managed bot backup with `,backup`. After updating, check `config_sample.py` for
-new options and compare your live config with `,config diff`.
+Before updating, keep a copy of the active config, the configured `DB_FILE` and
+mutable support files such as `vcard.py`/`chat_slang.csv`, or create a managed bot
+backup with `,backup`. Hardened installations normally keep these below
+`/etc/envsbot` and `RUNTIME_DATA_DIR` rather than inside the application checkout.
+After updating, check `config_sample.py` for new options and compare your live
+config with `,config diff`.
 
 ---
 
@@ -135,7 +138,7 @@ DB_FILE = "data/bot.db"
 STOP_CMD = []
 STOP_CMD_TIMEOUT_SECONDS = 10
 
-AVATAR_PATH = "data/avatar.jpg"
+AVATAR_PATH = "avatar.jpg"  # bundled default; use data/avatar.jpg for a custom file
 AVATAR_TYPE = "image/jpeg"
 ```
 
@@ -204,9 +207,14 @@ Copy `vcard_sample.py` to `vcard.py` and adjust the bot profile. EnvsBot can pub
 Avatar-related config keys:
 
 ```python
-AVATAR_PATH = "data/avatar.jpg"
+AVATAR_PATH = "avatar.jpg"  # bundled default
 AVATAR_TYPE = "image/jpeg"
 ```
+
+The default avatar is packaged with envsbot; no `avatar.jpg` needs to be copied
+into the repository root. Set `AVATAR_PATH = "data/avatar.jpg"` (or another
+path) to publish a custom avatar, or `AVATAR_PATH = None` to disable avatar
+publishing.
 
 Supported avatar MIME types are usually `image/jpeg` and `image/png`. The bot publishes the avatar hash in presence so MUC occupants can discover the avatar even if they do not have the bot in their roster.
 

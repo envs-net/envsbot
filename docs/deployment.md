@@ -85,7 +85,10 @@ RESTART_NOTIFICATION_FILE = "/var/lib/envsbot/restart_notification.json"
 slang review queues and profile hash markers). When it is unset, envsbot keeps the historical application-root
 location; setting it explicitly is required for a read-only hardened
 production checkout. The packaged `init_chat_slang.csv` is copied there automatically on
-first startup.
+first startup. The default avatar is bundled with the Python package as well, so
+production deployments do not need `avatar.jpg` or `init_chat_slang.csv` copies
+in the application root. Configure a separate `AVATAR_PATH` only when using a
+custom avatar.
 
 Do not grant write access to `/srv/envsbot` merely to accommodate a database,
 configuration or runtime support file there. `envsbot systemd check` treats that
