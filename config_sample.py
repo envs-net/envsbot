@@ -399,8 +399,8 @@ ALLOW_PRIVATE_FETCH_URLS = False
 
 # ================= VCARD / AVATAR =================
 
-# Bot avatar. Set AVATAR_PATH = None to disable avatar publishing. Put your own avatar
-# below data/ and do not overwrite the default repo avatar.
+# Bot avatar. Set AVATAR_PATH = None to disable avatar publishing. The default avatar
+# is bundled with envsbot; put custom avatars below data/.
 AVATAR_PATH = 'avatar.jpg'
 
 # Avatar type.

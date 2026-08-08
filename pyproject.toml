@@ -102,7 +102,6 @@ pytest_add_cli_args = ["--no-cov", "-q", "-x", "--tb=short", "--disable-warnings
 also_copy = [
     "config_sample.py",
     "vcard_sample.py",
-    "init_chat_slang.csv",
 ]
 
 [tool.pytest.ini_options]

@@ -27,7 +27,7 @@ def main() -> int:
         return 1
     wheel = wheels[0]
 
-    expected = {name: _digest(ROOT / name) for name in ASSETS}
+    expected = {name: _digest(ROOT / "utils" / "bundled" / name) for name in ASSETS}
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
         for name in ASSETS:
@@ -37,7 +37,7 @@ def main() -> int:
                 return 1
             actual = hashlib.sha256(archive.read(member)).hexdigest()
             if actual != expected[name]:
-                print(f"Wheel asset differs from repository source: {name}", file=sys.stderr)
+                print(f"Wheel asset differs from canonical bundled source: {name}", file=sys.stderr)
                 return 1
 
     with tempfile.TemporaryDirectory(prefix="envsbot-wheel-") as temp_name:
