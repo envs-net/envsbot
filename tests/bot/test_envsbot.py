@@ -1437,7 +1437,9 @@ def test_copy_initial_chat_slang_uses_configured_runtime_dir(tmp_path, monkeypat
     runtime_dir.mkdir()
     (app_dir / "init_chat_slang.csv").write_text("hello,world\n", encoding="utf-8")
 
-    monkeypatch.setattr(envsbot, "BASE_DIR", app_dir)
+    monkeypatch.setattr(
+        envsbot, "bundled_asset", lambda _name: app_dir / "init_chat_slang.csv"
+    )
     monkeypatch.setitem(envsbot.config, "runtime_data_dir", str(runtime_dir))
 
     envsbot.copy_initial_chat_slang()
