@@ -432,12 +432,12 @@ pytest --no-cov -q
 Run mutation tests with mutmut:
 
 ```bash
-mutmut run
-mutmut results
-mutmut browse
+./scripts/mutmut.sh run
+./scripts/mutmut.sh results
+./scripts/mutmut.sh browse
 ```
 
-The mutmut configuration in `pyproject.toml` explicitly lists the flat-layout source paths and disables coverage during mutant test runs.
+The mutmut configuration in `pyproject.toml` explicitly lists the flat-layout source paths and disables coverage during mutant test runs. `scripts/mutmut.sh` deliberately unsets `PYTHONPATH` so the generated `./mutants` checkout cannot be shadowed by the original sources. Use `./scripts/mutmut.sh fresh` for a clean full run.
 
 Drone CI is configured in `.drone.yml`.
 

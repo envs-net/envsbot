@@ -1,6 +1,49 @@
-import pytest
-import os
 import asyncio
+import os
+from pathlib import Path
+
+import pytest
+
+
+def _mutmut_pythonpath_conflicts(
+    cwd: Path,
+    pythonpath: str | None,
+) -> list[str]:
+    """Return PYTHONPATH entries that shadow mutmut's generated checkout."""
+    if cwd.name != "mutants" or not pythonpath:
+        return []
+
+    source_root = cwd.parent.resolve()
+    conflicts: list[str] = []
+    for raw_entry in pythonpath.split(os.pathsep):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        try:
+            resolved = Path(entry).expanduser().resolve()
+        except OSError:
+            continue
+        if resolved == source_root:
+            conflicts.append(entry)
+    return conflicts
+
+
+def pytest_sessionstart(session):
+    """Reject mutmut runs that would import the original source checkout."""
+    conflicts = _mutmut_pythonpath_conflicts(
+        Path.cwd().resolve(),
+        os.environ.get("PYTHONPATH"),
+    )
+    if not conflicts:
+        return
+
+    pytest.exit(
+        "Invalid mutmut environment: PYTHONPATH points at the original "
+        "repository while pytest is running from ./mutants. This can make "
+        "mutations appear to survive without testing them. Run "
+        "'./scripts/mutmut.sh fresh' (or unset PYTHONPATH and run mutmut).",
+        returncode=2,
+    )
 
 
 @pytest.fixture(scope='session')

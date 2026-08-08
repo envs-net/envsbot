@@ -59,9 +59,11 @@ default avatar are available outside a source checkout.
 Run mutation tests when practical:
 
 ```bash
-PYTHONPATH="$PWD" mutmut run
-PYTHONPATH="$PWD" mutmut results
+./scripts/mutmut.sh fresh
+./scripts/mutmut.sh results
 ```
+
+The final release mutation run must start from a fresh `mutants/` tree so cached results from earlier test/config revisions cannot leak into the release gate. Never set `PYTHONPATH` to the repository root for mutmut 3.
 
 Investigate any new `no tests` results before tagging. Long-lived surviving
 mutants should be reviewed, but not every survivor is necessarily a release

@@ -30,9 +30,9 @@ pytest
 Install development requirements and run:
 
 ```bash
-PYTHONPATH="$PWD" mutmut run
-mutmut results
-mutmut browse
+./scripts/mutmut.sh fresh
+./scripts/mutmut.sh results
+./scripts/mutmut.sh browse
 ```
 
-Mutmut source paths are configured in `pyproject.toml` because the repository uses a flat module plus package-directory layout.
+Mutmut source paths are configured in `pyproject.toml` because the repository uses a flat module plus package-directory layout. Do not set `PYTHONPATH` to the repository root for mutmut 3: pytest runs inside `./mutants`, and the original checkout would otherwise shadow the mutated modules. Use `fresh` after mutation configuration or broad test-suite changes; normal follow-up runs can use `./scripts/mutmut.sh run`.
