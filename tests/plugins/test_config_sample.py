@@ -12,6 +12,19 @@ from utils.config.spec import (
 )
 
 
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout when tests run from mutmut's copy."""
+    resolved = path.resolve()
+    search_from = resolved if resolved.is_dir() else resolved.parent
+    for candidate in (search_from, *search_from.parents):
+        if (
+            (candidate / "pyproject.toml").is_file()
+            and (candidate / "scripts" / "generate_config_sample.py").is_file()
+        ):
+            return candidate
+    return search_from
+
+
 def test_config_sample_imports_and_exposes_safe_defaults():
     sample = importlib.import_module("config_sample")
 
@@ -118,8 +131,22 @@ def test_nested_config_schema_has_operator_metadata_and_defaults():
     )
 
 
+def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path):
+    checkout = tmp_path / "checkout"
+    script = checkout / "scripts" / "generate_config_sample.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    (checkout / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    mutant_test = checkout / "mutants" / "tests" / "plugins" / "test_config_sample.py"
+    mutant_test.parent.mkdir(parents=True)
+    mutant_test.write_text("", encoding="utf-8")
+
+    assert _checkout_root(mutant_test) == checkout
+    assert _checkout_root(script) == checkout
+
+
 def test_config_sample_is_generated_from_schema_exactly():
-    root = Path(__file__).resolve().parents[2]
+    root = _checkout_root(Path(__file__))
     namespace = runpy.run_path(str(root / "scripts" / "generate_config_sample.py"))
     rendered = namespace["render_config_sample"]()
 

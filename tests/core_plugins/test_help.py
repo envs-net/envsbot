@@ -7,6 +7,7 @@ import pytest
 
 import core_plugins.help as help_plugin
 import utils.command as command_utils
+from utils.command_docs import _checkout_root
 from utils.command_registry import decorated_command_records
 
 import utils.config
@@ -1157,7 +1158,7 @@ async def test_help_store_getter_uses_help_plugin_store():
 
 
 def _command_decorator_metadata():
-    root = Path(help_plugin.__file__).resolve().parents[1]
+    root = _checkout_root(Path(help_plugin.__file__).resolve().parents[1])
     for rel in ("plugins", "core_plugins"):
         for path in sorted((root / rel).rglob("*.py")):
             tree = ast.parse(path.read_text())
