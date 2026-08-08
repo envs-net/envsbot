@@ -3,6 +3,9 @@ import itertools
 import types
 import pytest
 import plugins.idlerpg as idlerpg
+from plugins.idlerpg import handlers as idlerpg_handlers
+from plugins.idlerpg import state as idlerpg_state
+from plugins.idlerpg import tasks as idlerpg_tasks
 from core_plugins.rooms import JOINED_ROOMS
 from core_plugins import _core
 from utils.command import Role
@@ -111,15 +114,17 @@ def _cancel_room_tasks():
     idlerpg.ROOM_TASKS.clear()
 
 
+def _reset_idlerpg_runtime_state():
+    _cancel_room_tasks()
+    idlerpg_handlers._MESSAGE_PENALTY_SEEN.clear()
+    idlerpg_tasks._ROOM_TASK_LOCKS.clear()
+    idlerpg_tasks._ROOM_TICK_LOCKS.clear()
+    idlerpg_state._reset_public_export_schedule()
+
+
 @pytest.fixture(autouse=True)
 def clear_idlerpg_state():
-    _cancel_room_tasks()
-    getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
-    getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
-    getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
-    reset_export_schedule = getattr(idlerpg, "_reset_public_export_schedule", None)
-    if callable(reset_export_schedule):
-        reset_export_schedule()
+    _reset_idlerpg_runtime_state()
     JOINED_ROOMS.clear()
     _core.JOINED_ROOMS = JOINED_ROOMS
     JOINED_ROOMS["room@conf"] = {
@@ -130,13 +135,7 @@ def clear_idlerpg_state():
         }
     }
     yield
-    _cancel_room_tasks()
-    getattr(idlerpg, "_MESSAGE_PENALTY_SEEN", {}).clear()
-    getattr(idlerpg, "_ROOM_TASK_LOCKS", {}).clear()
-    getattr(idlerpg, "_ROOM_TICK_LOCKS", {}).clear()
-    reset_export_schedule = getattr(idlerpg, "_reset_public_export_schedule", None)
-    if callable(reset_export_schedule):
-        reset_export_schedule()
+    _reset_idlerpg_runtime_state()
     JOINED_ROOMS.clear()
 
 
