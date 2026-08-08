@@ -11,6 +11,7 @@ from typing import Any
 
 from database.manager import DatabaseManager
 from database.migrations import available_migrations
+from utils.bundled_assets import resolve_bundled_asset
 from utils.config import (
     ConfigError,
     collect_config_warnings,
@@ -18,13 +19,13 @@ from utils.config import (
     load_default_config_for_diff,
     validate_startup_config,
 )
-from utils.plugin_metadata import validate_plugin_metadata
 from utils.file_security import (
     ensure_private_directory,
     format_mode,
     has_group_or_other_access,
     sensitive_permission_targets,
 )
+from utils.plugin_metadata import validate_plugin_metadata
 from utils.redaction import redact_text
 
 log = logging.getLogger(__name__)
@@ -169,7 +170,7 @@ def _check_runtime_files(config: Mapping[str, Any]) -> tuple[bool, str]:
     checks: list[str] = []
     avatar = config.get("avatar")
     if avatar:
-        avatar_path = _runtime_path(avatar)
+        avatar_path = resolve_bundled_asset(str(avatar), base_dir=_PROJECT_ROOT)
         checks.append(f"avatar={'ok' if avatar_path.exists() else 'missing'}")
         if not avatar_path.exists():
             return False, f"runtime files: {', '.join(checks)}"

@@ -83,8 +83,8 @@ exclude = ["tests*", "mutants*"]
 [tool.setuptools.package-dir]
 "" = "."
 
-[tool.setuptools.data-files]
-"." = ["init_chat_slang.csv", "avatar.jpg"]
+[tool.setuptools.package-data]
+utils = ["bundled/*.csv", "bundled/*.jpg"]
 
 [tool.mutmut]
 # The project uses a flat layout plus package directories, so mutmut cannot

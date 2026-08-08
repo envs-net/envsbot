@@ -26,12 +26,13 @@ session starts or on plugin reload.
 
 import asyncio
 import hashlib
-import logging
-import os
 import importlib.util
 import inspect
+import logging
+import os
 
 from slixmpp.xmlstream import ET
+from utils.bundled_assets import resolve_bundled_asset
 from utils.config import config
 from utils.runtime_paths import profile_state_file, vcard_file
 
@@ -297,7 +298,8 @@ async def update_avatar(bot):
 
     try:
         try:
-            avatar = await asyncio.to_thread(_read_binary_file, avatar_path)
+            resolved_avatar = resolve_bundled_asset(str(avatar_path))
+            avatar = await asyncio.to_thread(_read_binary_file, resolved_avatar)
         except FileNotFoundError:
             log.warning("[_REG_PROFILE]🟡️ Avatar file not found")
             return

@@ -38,7 +38,6 @@ NORMALIZED_CONFIG_KEYS = (
 )
 
 
-
 _LOWER_TO_PYTHON_CONFIG_KEY = {
     normalized_key: python_key
     for python_key, normalized_key in PYTHON_CONFIG_KEY_MAP.items()

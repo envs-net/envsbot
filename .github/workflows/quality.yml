@@ -33,4 +33,5 @@ jobs:
       - run: python scripts/check_constraints.py ${{ matrix.constraints }}
       - run: ./scripts/quality.sh
       - run: python -m build
+      - run: python scripts/check_wheel.py
       - run: pytest -W error::RuntimeWarning -W error::DeprecationWarning

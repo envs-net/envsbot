@@ -81,27 +81,26 @@ envsbot
 Use tagged releases for updates as well. Do not update a production bot by
 blindly pulling `main`.
 
-Example update flow for a systemd installation:
+Example update flow for a systemd installation. Stop the running bot before
+changing the checkout, dependencies or schema, and deploy a tagged release rather
+than a moving `main` checkout:
 
 ```bash
 sudo systemctl stop envsbot.service
 
-sudo su - envsbot
 cd /srv/envsbot
-git fetch --tags
-LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
-git checkout "$LATEST_TAG"
+sudo -u envsbot git fetch --tags --prune
+LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | head -n1)"
+sudo -u envsbot git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
-source .venv/bin/activate
-pip install -c constraints/python313.txt -e .
-envsbot db status
-envsbot db migrate --dry-run
-envsbot db backup
-envsbot db migrate
-envsbot db check
-envsbot --check
-exit
+sudo -u envsbot .venv/bin/pip install -c constraints/python313.txt -e .
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db status
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db migrate --dry-run
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db backup
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db migrate
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db check
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot --check
 
 sudo systemctl start envsbot.service
 sudo journalctl -u envsbot.service -f

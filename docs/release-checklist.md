@@ -41,13 +41,20 @@ not recommend running a production bot from `main`.
 
 ## Test suite
 
-Run the local preflight and the full offline test suite:
+Run the local preflight, build/install smoke check and the full offline test suite:
 
 ```bash
 PYTHONPATH="$PWD" envsbot --check
+rm -rf build dist
+python -m build
+python scripts/check_wheel.py
 PYTHONPATH="$PWD" pytest --no-cov -q
 PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
 ```
+
+The wheel smoke test installs the built wheel into a temporary environment and
+verifies that packaged runtime defaults such as `init_chat_slang.csv` and the
+default avatar are available outside a source checkout.
 
 Run mutation tests when practical:
 

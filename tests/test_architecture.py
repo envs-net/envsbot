@@ -312,7 +312,6 @@ def _string_membership_sets(path: Path, variable_name: str) -> list[set[str]]:
     return values
 
 
-
 def _dict_string_keys_for_named_value(path: Path, value_name: str) -> set[str]:
     """Return literal dict keys that map directly to one named handler."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

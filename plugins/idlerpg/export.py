@@ -813,7 +813,6 @@ def _public_rules() -> dict[str, Any]:
     }
 
 
-
 _SEASON_EVENT_FORMAT = "chunked-v1"
 _SEASON_EVENT_CHUNK_DIR = "season-events"
 

@@ -133,22 +133,34 @@ configuration or a broken local checkout prevents a restart.
 
 ## Updates
 
-For a normal update:
+Stop the service before changing application code, dependencies or the database
+schema. Production deployments should move between tagged releases rather than
+blindly pulling `main` while the old process is still running:
 
 ```bash
+sudo systemctl stop envsbot.service
+
 cd /srv/envsbot
-git pull
-. .venv/bin/activate
-pip install -c constraints/python313.txt -e .
-envsbot db status
-envsbot db migrate --dry-run
-envsbot db backup
-envsbot db migrate
-envsbot db check
-envsbot --check
-sudo systemctl restart envsbot.service
+sudo -u envsbot git fetch --tags --prune
+LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | head -n1)"
+sudo -u envsbot git checkout "$LATEST_TAG"
+echo "Using EnvsBot release $LATEST_TAG"
+
+sudo -u envsbot .venv/bin/pip install -c constraints/python313.txt -e .
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db status
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db migrate --dry-run
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db backup
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db migrate
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db check
+sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot --check
+
+sudo systemctl start envsbot.service
 sudo journalctl -u envsbot.service -n 100 --no-pager
 ```
+
+If any pre-start step fails, leave the service stopped, correct the problem and
+rerun the checks. Do not start the previous code against a database that has
+already been migrated by a newer release.
 
 `envsbot --check` is a local preflight check. It does not connect to XMPP,
 but it validates configuration loading, plugin imports, command metadata,

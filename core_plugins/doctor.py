@@ -20,6 +20,7 @@ from utils.backups import (
     migration_backup_keep,
     migration_backup_retention_days,
 )
+from utils.bundled_assets import resolve_bundled_asset
 from utils.command import COMMANDS, Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import (
@@ -351,7 +352,6 @@ async def _plugin_lines(bot: Any, *, full: bool) -> list[str]:
     return lines
 
 
-
 def _task_summary_text(supervisor: Any) -> tuple[bool, str]:
     """Return health plus a lifecycle-aware background-task summary."""
     details = getattr(supervisor, "summary_by_kind", None)
@@ -469,9 +469,7 @@ def _config_lines() -> list[str]:
         _line(True, "SQLite WAL", "enabled" if config.get("database_wal_enabled", False) else "disabled"),
     ]
     if avatar:
-        avatar_path = Path(str(avatar))
-        if not avatar_path.is_absolute():
-            avatar_path = Path.cwd() / avatar_path
+        avatar_path = resolve_bundled_asset(str(avatar), base_dir=_repo_root())
         lines.append(_line(avatar_path.exists(), "Avatar file", str(avatar_path)))
     return lines
 
@@ -680,7 +678,10 @@ async def _latest_release_line(bot: Any) -> str:
             f"{display_version(remote_version)} (local build ahead / unreleased)",
         )
     if local_parts == remote_parts:
-        commits_ahead = _git_commits_ahead_of_release(remote_version)
+        commits_ahead = await asyncio.to_thread(
+            _git_commits_ahead_of_release,
+            remote_version,
+        )
         if commits_ahead is not None and commits_ahead > 0:
             return _warning_line(
                 "Latest release",

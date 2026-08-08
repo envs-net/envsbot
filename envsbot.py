@@ -30,6 +30,7 @@ from bot.permissions import PermissionMixin
 from bot.routing import MessageRoutingMixin
 from bot.room_state import room_state
 from database.manager import DatabaseManager
+from utils.bundled_assets import bundled_asset
 from utils.command import Role
 from utils.command import check_permission as _check_permission
 from utils.command import resolve_command as _resolve_command
@@ -41,7 +42,6 @@ from utils.config import (
     setup_logging,
     validate_startup_config,
 )
-from utils.config.defaults import BASE_DIR
 from utils.message_cache import MessageCache
 from utils.runtime_paths import chat_slang_file
 from utils.plugin_manager import PluginManager
@@ -261,7 +261,7 @@ def copy_initial_chat_slang(
     target: str | os.PathLike[str] | None = None,
 ) -> None:
     """Copy the packaged chat-slang defaults into the writable runtime area."""
-    source_path = Path(source) if source is not None else BASE_DIR / "init_chat_slang.csv"
+    source_path = Path(source) if source is not None else bundled_asset("init_chat_slang.csv")
     target_path = Path(target) if target is not None else chat_slang_file(config)
     if source_path.exists() and not target_path.exists():
         try:

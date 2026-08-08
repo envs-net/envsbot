@@ -495,8 +495,6 @@ async def test_resilient_task_restarts_then_recovers():
     assert info.last_error is None
 
 
-
-
 @pytest.mark.asyncio
 async def test_service_task_treats_normal_return_as_failure_and_opens_circuit():
     supervisor = TaskSupervisor()

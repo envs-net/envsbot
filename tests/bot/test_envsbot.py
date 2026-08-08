@@ -1570,3 +1570,15 @@ def test_cli_uses_sys_argv_when_arguments_are_omitted(monkeypatch):
 
     assert envsbot.cli() == 0
     assert calls == ["copy", "preflight"]
+
+
+def test_copy_initial_chat_slang_uses_bundled_default(monkeypatch, tmp_path):
+    source = tmp_path / "packaged.csv"
+    target = tmp_path / "runtime" / "chat_slang.csv"
+    source.write_text("hello,world\n", encoding="utf-8")
+    monkeypatch.setattr(envsbot, "bundled_asset", lambda _name: source)
+    monkeypatch.setattr(envsbot, "chat_slang_file", lambda _config: target)
+
+    envsbot.copy_initial_chat_slang()
+
+    assert target.read_text(encoding="utf-8") == "hello,world\n"

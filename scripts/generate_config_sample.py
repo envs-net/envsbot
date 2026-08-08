@@ -27,7 +27,6 @@ def _render_value(value: object) -> list[str]:
     return rendered.splitlines()
 
 
-
 def _render_nested_value(group: str) -> list[str]:
     lines = ["{"]
     for key, field in NESTED_CONFIG_FIELDS[group].items():

@@ -103,3 +103,23 @@ def test_quality_audits_exact_lock_without_no_deps_warning():
 
     assert 'pip-audit -r "$constraint_file"' in quality
     assert "--no-deps" not in quality
+
+
+def test_wheel_packages_runtime_defaults_inside_utils():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    package_data = pyproject["tool"]["setuptools"]["package-data"]
+
+    assert "data-files" not in pyproject["tool"]["setuptools"]
+    assert set(package_data["utils"]) >= {"bundled/*.csv", "bundled/*.jpg"}
+    assert Path("utils/bundled/init_chat_slang.csv").read_bytes() == Path(
+        "init_chat_slang.csv"
+    ).read_bytes()
+    assert Path("utils/bundled/avatar.jpg").read_bytes() == Path("avatar.jpg").read_bytes()
+
+
+def test_ci_installs_and_smoke_tests_built_wheel():
+    github = Path(".github/workflows/quality.yml").read_text(encoding="utf-8")
+    drone = Path(".drone.yml").read_text(encoding="utf-8")
+
+    assert "python scripts/check_wheel.py" in github
+    assert drone.count("python scripts/check_wheel.py") == 2

@@ -8,6 +8,8 @@ from zoneinfo import available_timezones
 
 import slixmpp
 
+from utils.bundled_assets import resolve_bundled_asset
+
 from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
 from .errors import ConfigError
 from .spec import CONFIG_FIELDS, NESTED_CONFIG_FIELDS
@@ -181,9 +183,7 @@ def _validate_avatar(cfg, errors, warnings):
                 "avatar: file extension does not match avatar_type image/jpeg")
 
     if avatar:
-        avatar_path = Path(avatar)
-        if not avatar_path.is_absolute():
-            avatar_path = BASE_DIR / avatar_path
+        avatar_path = resolve_bundled_asset(avatar, base_dir=BASE_DIR)
 
         if not avatar_path.exists():
             warnings.append(f"avatar: file does not exist: {avatar_path}")
@@ -295,7 +295,6 @@ def _validate_room_plugin_defaults(cfg, errors):
                 f"room_plugin_defaults.{plugin}: expected bool, "
                 f"got {type(enabled).__name__}"
             )
-
 
 
 def validate_config(cfg, require_required_keys=False):

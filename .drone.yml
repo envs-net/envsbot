@@ -12,6 +12,7 @@ steps:
     - python scripts/check_constraints.py constraints/python312.txt
     - ./scripts/quality.sh
     - python -m build
+    - python scripts/check_wheel.py
     - pytest -W error::RuntimeWarning -W error::DeprecationWarning
 
 trigger:
@@ -34,6 +35,7 @@ steps:
     - python scripts/check_constraints.py constraints/python313.txt
     - ./scripts/quality.sh
     - python -m build
+    - python scripts/check_wheel.py
     - pytest -W error::RuntimeWarning -W error::DeprecationWarning
 
 trigger:
