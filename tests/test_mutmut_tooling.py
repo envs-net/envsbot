@@ -5,7 +5,32 @@ import subprocess
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout when tests run from mutmut's copy."""
+    resolved = path.resolve()
+    search_from = resolved if resolved.is_dir() else resolved.parent
+    for candidate in (search_from, *search_from.parents):
+        if (
+            (candidate / "pyproject.toml").is_file()
+            and (candidate / "scripts" / "mutmut.sh").is_file()
+        ):
+            return candidate
+    return search_from
+
+
+ROOT = _checkout_root(Path(__file__))
+
+
+def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path):
+    repo = tmp_path / "repo"
+    mutants_test = repo / "mutants" / "tests" / "test_example.py"
+    (repo / "scripts").mkdir(parents=True)
+    mutants_test.parent.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (repo / "scripts" / "mutmut.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert _checkout_root(mutants_test) == repo
+    assert _checkout_root(repo) == repo
 
 
 def _load_test_conftest():
