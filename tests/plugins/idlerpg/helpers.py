@@ -1,6 +1,7 @@
 import asyncio
 import itertools
 import types
+from importlib import import_module
 
 import pytest
 
@@ -13,6 +14,8 @@ from plugins.idlerpg import handlers as idlerpg_handlers
 from plugins.idlerpg import state as idlerpg_state
 from plugins.idlerpg import tasks as idlerpg_tasks
 from utils.command import Role
+
+idlerpg = import_module("plugins.idlerpg")
 
 
 class DummyStore:
