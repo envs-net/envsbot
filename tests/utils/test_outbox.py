@@ -128,11 +128,9 @@ async def test_outbox_stop_signals_worker_and_waits_for_clean_exit():
 
 @pytest.mark.asyncio
 async def test_outbox_stop_uses_default_timeout(monkeypatch):
-    import utils.outbox as outbox_module
-
     runtime = PersistentOutbox(SimpleNamespace(config={}))
-    task = asyncio.create_task(asyncio.sleep(0))
-    await task
+    task = asyncio.get_running_loop().create_future()
+    task.set_result(None)
     runtime.task = task
     seen = {}
 
@@ -140,7 +138,7 @@ async def test_outbox_stop_uses_default_timeout(monkeypatch):
         seen["timeout"] = timeout
         return await awaitable
 
-    monkeypatch.setattr(outbox_module.asyncio, "wait_for", wait_for)
+    monkeypatch.setattr("utils.outbox.asyncio.wait_for", wait_for)
 
     await runtime.stop()
 
