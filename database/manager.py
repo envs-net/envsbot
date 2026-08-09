@@ -172,6 +172,38 @@ class DatabaseManager:
         if callable(heartbeat):
             heartbeat("_runtime", name)
 
+    async def _wait_for_stop_with_heartbeat(
+        self,
+        name: str,
+        delay: float,
+        *,
+        heartbeat_interval: float | None = None,
+    ) -> bool:
+        """Wait for shutdown while keeping an intentionally idle worker fresh.
+
+        Returns ``True`` when shutdown was requested and ``False`` when the
+        requested delay elapsed.  The wait is split into heartbeat-sized chunks
+        so long configured intervals do not look like hung supervised tasks,
+        while ``_stop_event`` can still wake the worker immediately.
+        """
+        remaining = max(0.0, float(delay))
+        if heartbeat_interval is None:
+            try:
+                stale_after = float(config.get("task_stale_after_seconds", 3600) or 3600)
+            except (TypeError, ValueError):
+                stale_after = 3600.0
+            heartbeat_interval = min(300.0, stale_after / 2.0)
+        heartbeat_every = max(0.001, float(heartbeat_interval))
+        while remaining > 0 and not self._stop_event.is_set():
+            self._heartbeat(name)
+            step = min(remaining, heartbeat_every)
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=step)
+                return True
+            except TimeoutError:
+                remaining -= step
+        return self._stop_event.is_set()
+
     async def _supervised_flush_loop(self) -> None:
         await self._flush_loop()
         if self._stop_event.is_set():
@@ -560,15 +592,13 @@ class DatabaseManager:
         """Background loop that flushes data periodically with retry logic."""
         try:
             while not self._stop_event.is_set():
-                self._heartbeat("database-flush")
-                try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(),
-                        timeout=self.flush_interval
-                    )
-                except TimeoutError:
-                    if self.users:
-                        await self._flush_with_retry()
+                if await self._wait_for_stop_with_heartbeat(
+                    "database-flush",
+                    self.flush_interval,
+                ):
+                    break
+                if self.users:
+                    await self._flush_with_retry()
         finally:
             # final guaranteed flush with retry
             if self.users:
@@ -627,16 +657,10 @@ class DatabaseManager:
         interval = max(60, int(config.get("database_maintenance_interval_seconds", 21600) or 21600))
         try:
             while not self._stop_event.is_set():
-                self._heartbeat("database-maintenance")
-                stop_requested = True
-                try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(),
-                        timeout=interval,
-                    )
-                except TimeoutError:
-                    stop_requested = False
-                if stop_requested:
+                if await self._wait_for_stop_with_heartbeat(
+                    "database-maintenance",
+                    interval,
+                ):
                     break
                 try:
                     await self.run_maintenance()

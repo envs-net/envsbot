@@ -566,6 +566,25 @@ def test_parse_doctor_sections_supports_performance_alias():
     assert doctor._parse_doctor_sections(["performance"])[1] == ("performance",)
     assert doctor._parse_doctor_sections(["perf"])[1] == ("performance",)
 
+def test_task_lines_use_configured_stale_threshold(monkeypatch):
+    stale_tasks = MagicMock(return_value=[])
+    supervisor = SimpleNamespace(
+        summary=lambda: (1, 0, 0),
+        stale_tasks=stale_tasks,
+    )
+    bot = SimpleNamespace(tasks=supervisor)
+    monkeypatch.setattr(
+        doctor,
+        "config",
+        {"task_stale_after_seconds": 7200},
+    )
+
+    lines = doctor._task_lines(bot, full=True)
+
+    stale_tasks.assert_called_once_with(max_age_seconds=7200.0)
+    assert "✅ Task heartbeat: ok" in lines
+
+
 def test_task_summary_text_distinguishes_one_shots_from_services():
     supervisor = SimpleNamespace(
         summary_by_kind=lambda: {

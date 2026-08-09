@@ -149,12 +149,16 @@ async def test_failed_load_cleans_events_and_tasks(monkeypatch):
     async def _never():
         await asyncio.sleep(3600)
 
+    created_coroutines = []
+
     def handler(*_args):
         return None
 
     async def on_load(bot_arg):
         bot_arg.bot_plugins.register_event("bad", "message", handler)
-        bot_arg.bot_plugins.create_task("bad", _never(), name="bad-task")
+        coroutine = _never()
+        created_coroutines.append(coroutine)
+        bot_arg.bot_plugins.create_task("bad", coroutine, name="bad-task")
 
     @command("dupe", role=Role.USER)
     async def duplicate(_bot, _msg, _args):
@@ -177,6 +181,7 @@ async def test_failed_load_cleans_events_and_tasks(monkeypatch):
         ("del", "message", handler),
     ]
     assert bot.tasks.created == [("bad", "bad-task")]
+    assert inspect.getcoroutinestate(created_coroutines[0]) == inspect.CORO_CLOSED
     bot.tasks.cancel_plugin.assert_awaited_once_with("bad")
     assert tuple("dupe".split()) in registry.index
     assert registry.by_plugin == {"existing": {tuple("dupe".split())}}
@@ -874,6 +879,23 @@ def test_topological_sort_rejects_cycles():
         pm._topological_sort(["A", "B"])
 
 
+def test_create_task_closes_coroutine_when_supervisor_creation_fails():
+    bot = FakeBot()
+    bot.tasks = types.SimpleNamespace(
+        create=MagicMock(side_effect=RuntimeError("create failed")),
+    )
+    pm = PluginManager(bot)
+
+    async def worker():
+        return None
+
+    coroutine = worker()
+    with pytest.raises(RuntimeError, match="create failed"):
+        pm.create_task("demo", coroutine, name="demo-task")
+
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
+
+
 @pytest.mark.asyncio
 async def test_event_task_on_ready_and_detailed_info(monkeypatch):
     class EventBot(FakeBot):
@@ -900,7 +922,9 @@ async def test_event_task_on_ready_and_detailed_info(monkeypatch):
     async def never_run():
         await plugin_manager.asyncio.sleep(10)
 
-    assert pm.create_task("demo", never_run(), name="demo-task") == ("demo", "demo-task")
+    coroutine = never_run()
+    assert pm.create_task("demo", coroutine, name="demo-task") == ("demo", "demo-task")
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
     assert await pm._cancel_plugin_tasks("demo") == 2
 
     ready = []

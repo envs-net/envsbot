@@ -20,6 +20,7 @@ import importlib
 import inspect
 import logging
 import pkgutil
+from collections.abc import Coroutine
 from contextlib import asynccontextmanager
 from functools import wraps
 
@@ -49,23 +50,59 @@ from utils.task_supervisor import wait_for_runtime_ready
 log = logging.getLogger(__name__)
 
 
-async def _run_plugin_awaitable_when_ready(bot, awaitable):
-    """Run an already-created plugin awaitable after runtime readiness.
+class _RuntimeReadyCoroutine(Coroutine):
+    """Coroutine wrapper that also owns the deferred plugin awaitable.
 
-    If the wrapper is cancelled while startup is still gated, close a coroutine
-    whose execution never started so Python does not emit an un-awaited coroutine
-    warning during shutdown or a failed startup.
+    ``PluginManager.create_task()`` receives an already-created coroutine.  If
+    task creation or plugin loading aborts before the readiness wrapper ever
+    starts, closing only that outer wrapper does not execute its body/finally
+    block.  Keeping explicit ownership here ensures the original coroutine is
+    closed as well and cannot leak an ``un-awaited coroutine`` warning.
     """
-    started = False
-    try:
-        await wait_for_runtime_ready(bot)
-        started = True
-        return await awaitable
-    finally:
-        if not started:
-            close = getattr(awaitable, "close", None)
-            if callable(close):
-                close()
+
+    def __init__(self, bot, awaitable):
+        self._bot = bot
+        self._awaitable = awaitable
+        self._awaitable_started = False
+        self._awaitable_closed = False
+        self._runner = self._run()
+        self._closed = False
+
+    async def _run(self):
+        try:
+            await wait_for_runtime_ready(self._bot)
+            self._awaitable_started = True
+            return await self._awaitable
+        finally:
+            if not self._awaitable_started:
+                self._close_awaitable()
+
+    def _close_awaitable(self):
+        if self._awaitable_closed:
+            return
+        self._awaitable_closed = True
+        close = getattr(self._awaitable, "close", None)
+        if callable(close):
+            close()
+
+    def __await__(self):
+        return self._runner.__await__()
+
+    def send(self, value):
+        return self._runner.send(value)
+
+    def throw(self, *args):
+        return self._runner.throw(*args)
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._runner.close()
+        finally:
+            if not self._awaitable_started:
+                self._close_awaitable()
 
 
 async def _run_plugin_factory_when_ready(bot, factory):
@@ -298,12 +335,15 @@ class PluginManager:
         for long-running loops. The manager cancels these tasks on unload and
         exposes them to the status command.
         """
-        deferred = _run_plugin_awaitable_when_ready(self.bot, coro)
+        deferred = _RuntimeReadyCoroutine(self.bot, coro)
         supervisor = getattr(self.bot, "tasks", None)
-        if supervisor is None:
-            task = asyncio.create_task(deferred, name=name)
-            return task
-        return supervisor.create(plugin_name, deferred, name=name)
+        try:
+            if supervisor is None:
+                return asyncio.create_task(deferred, name=name)
+            return supervisor.create(plugin_name, deferred, name=name)
+        except Exception:
+            deferred.close()
+            raise
 
     def create_resilient_task(
         self,

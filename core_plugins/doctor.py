@@ -419,8 +419,18 @@ def _task_lines(bot: Any, *, full: bool) -> list[str]:
     stale = getattr(supervisor, "stale_tasks", None)
     if callable(stale):
         try:
-            stale_items = stale()
-            lines.append(_line(not stale_items, "Task heartbeat", "ok" if not stale_items else f"{len(stale_items)} stale"))
+            try:
+                max_age = float(config.get("task_stale_after_seconds", 3600) or 3600)
+            except Exception:
+                max_age = 3600.0
+            stale_items = stale(max_age_seconds=max_age)
+            lines.append(
+                _line(
+                    not stale_items,
+                    "Task heartbeat",
+                    "ok" if not stale_items else f"{len(stale_items)} stale",
+                )
+            )
             if full:
                 for task in stale_items[:20]:
                     lines.append(_line(False, "Stale task", f"{task.plugin}/{task.name}"))

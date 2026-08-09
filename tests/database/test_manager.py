@@ -4,7 +4,7 @@ import types
 
 import pytest
 import aiosqlite
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from database.manager import DatabaseManager
 
@@ -436,6 +436,57 @@ async def test_database_write_helpers_commit_atomically(tmp_db_path):
         ]
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_idle_wait_refreshes_heartbeat_and_remains_stoppable(tmp_db_path):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    db._heartbeat = MagicMock()
+
+    stopped = await db._wait_for_stop_with_heartbeat(
+        "database-maintenance",
+        0.025,
+        heartbeat_interval=0.01,
+    )
+
+    assert stopped is False
+    assert db._heartbeat.call_count >= 2
+    assert all(
+        call.args == ("database-maintenance",)
+        for call in db._heartbeat.call_args_list
+    )
+
+    waiting = asyncio.create_task(
+        db._wait_for_stop_with_heartbeat(
+            "database-maintenance",
+            60,
+            heartbeat_interval=0.01,
+        )
+    )
+    await asyncio.sleep(0)
+    db._stop_event.set()
+    assert await asyncio.wait_for(waiting, timeout=0.2) is True
+
+
+@pytest.mark.asyncio
+async def test_database_maintenance_loop_uses_heartbeat_wait(tmp_db_path, monkeypatch):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    wait_for_stop = AsyncMock(side_effect=[False, True])
+    db._wait_for_stop_with_heartbeat = wait_for_stop
+    db.run_maintenance = AsyncMock(return_value={})
+    monkeypatch.setitem(
+        sys.modules[DatabaseManager.__module__].config,
+        "database_maintenance_interval_seconds",
+        21600,
+    )
+
+    await db._maintenance_loop()
+
+    assert [item.args for item in wait_for_stop.await_args_list] == [
+        ("database-maintenance", 21600),
+        ("database-maintenance", 21600),
+    ]
+    db.run_maintenance.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
