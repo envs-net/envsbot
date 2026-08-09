@@ -163,63 +163,96 @@ class LifecycleMixin:
             log.exception("[BACKUP] event=startup_backup status=failed")
 
     async def on_start(self, event: Any) -> None:
-        """Handle slixmpp session_start."""
+        """Handle slixmpp session_start and expose readiness only after startup."""
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
             session_ready.set()
-        self.accepting_commands = True
+        # The transport is available now, but DB/cache/plugins are not ready yet.
+        # Message routing checks this flag before touching runtime state.
+        self.accepting_commands = False
         self.connection_start_time = datetime.now()
+
         try:
-            self["xep_0030"].add_feature("http://jabber.org/protocol/muc#user")
-        except Exception:
-            log.debug("[BOT] Could not advertise MUC-PM feature", exc_info=True)
+            try:
+                self["xep_0030"].add_feature("http://jabber.org/protocol/muc#user")
+            except Exception:
+                log.debug("[BOT] Could not advertise MUC-PM feature", exc_info=True)
 
-        self.presence.broadcast()
-        await self.get_roster()
-        await self.db.connect()
-        await self.message_cache.start(self.db.message_cache)
-        outbox = getattr(self, "outbox", None)
-        outbox_store = getattr(self.db, "outbox", None)
-        outbox_start = getattr(outbox, "start", None)
-        if callable(outbox_start) and outbox_store is not None:
-            await outbox_start(outbox_store)
+            self.presence.broadcast()
+            await self.get_roster()
+            await self.db.connect()
+            await self.message_cache.start(self.db.message_cache)
+            outbox = getattr(self, "outbox", None)
+            outbox_store = getattr(self.db, "outbox", None)
+            outbox_start = getattr(outbox, "start", None)
+            if callable(outbox_start) and outbox_store is not None:
+                await outbox_start(outbox_store)
 
-        await self.bot_plugins.load_all()
-        await self.bot_plugins.call_on_ready()
-        await self._create_startup_backup()
-        await self._send_restart_notification()
-        watchdog_start = getattr(getattr(self, "watchdog", None), "start", None)
-        if callable(watchdog_start):
-            await watchdog_start()
-        alerts_start = getattr(getattr(self, "alerts", None), "start", None)
-        if callable(alerts_start):
-            await alerts_start()
+            await self.bot_plugins.load_all()
+            await self.bot_plugins.call_on_ready()
+            await self._create_startup_backup()
+            await self._send_restart_notification()
 
-        self.presence.broadcast()
-        self.roster.auto_subscribe = True
+            alerts_start = getattr(getattr(self, "alerts", None), "start", None)
+            if callable(alerts_start):
+                await alerts_start()
+            watchdog = getattr(self, "watchdog", None)
+            watchdog_start = getattr(watchdog, "start", None)
+            if callable(watchdog_start):
+                await watchdog_start()
 
-        failed = getattr(self.bot_plugins, "failed_plugins", None)
-        try:
-            failed_count = len(failed or {})
-        except TypeError:
-            failed_count = 0
-        loaded_count = len(getattr(self.bot_plugins, "plugins", {}) or {})
-        startup_status = "degraded" if failed_count else "ok"
-        startup_log = log.warning if failed_count else log.info
-        startup_log(
-            "[BOT] event=startup status=%s loaded_plugins=%d failed_plugins=%d rooms=%d",
-            startup_status,
-            loaded_count,
-            failed_count,
-            len(getattr(self.presence, "joined_rooms", {}) or {}),
-        )
-        if failed_count:
-            log.warning(
-                "[BOT] ⚠️ Bot started with %d plugin load failure(s)",
+            self.presence.broadcast()
+            self.roster.auto_subscribe = True
+
+            failed = getattr(self.bot_plugins, "failed_plugins", None)
+            try:
+                failed_count = len(failed or {})
+            except TypeError:
+                failed_count = 0
+            loaded_count = len(getattr(self.bot_plugins, "plugins", {}) or {})
+            startup_status = "degraded" if failed_count else "ok"
+            startup_log = log.warning if failed_count else log.info
+
+            # From this point every dependency needed by message routing is up.
+            self.accepting_commands = True
+            notify_ready = getattr(watchdog, "notify_ready", None)
+            if callable(notify_ready):
+                notify_ready()
+
+            startup_log(
+                "[BOT] event=startup status=%s loaded_plugins=%d failed_plugins=%d rooms=%d",
+                startup_status,
+                loaded_count,
                 failed_count,
+                len(getattr(self.presence, "joined_rooms", {}) or {}),
             )
-        else:
-            log.info("[BOT] ✅ Bot started successfully")
+            if failed_count:
+                log.warning(
+                    "[BOT] ⚠️ Bot started with %d plugin load failure(s)",
+                    failed_count,
+                )
+            else:
+                log.info("[BOT] ✅ Bot started successfully")
+        except Exception:
+            # session_start exceptions otherwise leave a connected process with
+            # only part of its runtime initialized. Make the failure fatal so
+            # Restart=on-failure can recover from a clean process state.
+            self.accepting_commands = False
+            if session_ready is not None:
+                session_ready.clear()
+            self._requested_exit_code = 1
+            log.exception("[BOT] event=startup status=failed")
+            disconnect = getattr(self, "disconnect", None)
+            if callable(disconnect):
+                try:
+                    disconnect()
+                except Exception:
+                    log.exception("[BOT] Failed to disconnect after startup failure")
+            try:
+                await self.shutdown_runtime()
+            except Exception:
+                log.exception("[BOT] Failed to clean up partial startup")
+            raise
 
     def on_session_end(self, event: Any) -> None:
         """Stop new outbound work as soon as the XMPP session ends."""
@@ -228,8 +261,8 @@ class LifecycleMixin:
             session_ready.clear()
         self.accepting_commands = False
 
-    async def shutdown_runtime(self) -> None:
-        """Run the ordered shutdown once, even when callers race."""
+    async def shutdown_runtime(self) -> bool:
+        """Run the ordered shutdown once and report whether it was fully clean."""
         lock = getattr(self, "_shutdown_lock", None)
         if lock is None:
             lock = asyncio.Lock()
@@ -237,16 +270,22 @@ class LifecycleMixin:
 
         async with lock:
             if getattr(self, "_shutdown_complete", False):
-                return
+                return bool(getattr(self, "_shutdown_clean", False))
+            clean = False
             try:
-                await self._shutdown_runtime_once()
+                clean = bool(await self._shutdown_runtime_once())
+                return clean
             finally:
+                self._shutdown_clean = clean
                 self._shutdown_complete = True
 
-    async def _shutdown_runtime_once(self) -> None:
+    async def _shutdown_runtime_once(self) -> bool:
         """Best-effort ordered shutdown of tasks, cache and database."""
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self.accepting_commands = False
+        session_ready = getattr(self, "session_ready", None)
+        if session_ready is not None:
+            session_ready.clear()
 
         alerts_status = "skipped"
         try:
@@ -431,3 +470,4 @@ class LifecycleMixin:
                 db=db_status,
             ),
         )
+        return overall_status == "ok"

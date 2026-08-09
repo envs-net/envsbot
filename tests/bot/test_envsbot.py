@@ -69,6 +69,7 @@ def bot(monkeypatch):
                          MagicMock(send=MagicMock(return_value=None))):
         b = ControlledBot()
     b.session_ready.set()
+    b.accepting_commands = True
     b.default_ns = "jabber:client"
     b.Message = MagicMock()
     b._XMLStream__event_handlers = {}
@@ -718,6 +719,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert bot.last_update_notified_version is None
     assert bot.connection_start_time is None
     assert bot.session_ready.is_set() is False
+    assert bot.accepting_commands is False
     assert bot._startup_backup_done is False
     assert bot.db.path == "envsbot.sqlite3"
     assert bot.db.task_supervisor is bot.tasks
@@ -881,6 +883,36 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
     bot.handle_command.assert_awaited_with(
         ",status", private_msg["from"], None, private_msg, False
     )
+
+
+@pytest.mark.asyncio
+async def test_message_routing_ignores_all_runtime_work_until_startup_is_ready(bot):
+    bot.accepting_commands = False
+    bot._cache_incoming_message = AsyncMock()
+    bot.handle_command = AsyncMock()
+    bot.bot_plugins.dispatch_runtime_event = AsyncMock()
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+
+    room_msg = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    private_msg = {
+        "type": "chat",
+        "body": ",status",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+
+    await bot.on_muc_message(room_msg)
+    await bot.on_private_message(private_msg)
+
+    bot._cache_incoming_message.assert_not_awaited()
+    bot.bot_plugins.dispatch_runtime_event.assert_not_awaited()
+    bot.handle_command.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1165,6 +1197,13 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     )
     bot._create_startup_backup = AsyncMock(side_effect=lambda: calls.append("backup"))
     bot._send_restart_notification = AsyncMock(side_effect=lambda: calls.append("restart"))
+    bot.alerts = types.SimpleNamespace(
+        start=AsyncMock(side_effect=lambda: calls.append("alerts")),
+    )
+    bot.watchdog = types.SimpleNamespace(
+        start=AsyncMock(side_effect=lambda: calls.append("watchdog")),
+        notify_ready=MagicMock(side_effect=lambda: calls.append("systemd-ready")),
+    )
     bot.roster = types.SimpleNamespace(auto_subscribe=False)
 
     await envsbot.Bot.on_start(bot, object())
@@ -1174,8 +1213,45 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     assert bot.accepting_commands is True
     assert features == [("xep_0030", "http://jabber.org/protocol/muc#user")]
     assert broadcasts == ["broadcast", "broadcast"]
-    assert calls == ["roster", "db", "cache", "load_all", "ready", "backup", "restart"]
+    assert calls == [
+        "roster",
+        "db",
+        "cache",
+        "load_all",
+        "ready",
+        "backup",
+        "restart",
+        "alerts",
+        "watchdog",
+        "systemd-ready",
+    ]
     assert bot.roster.auto_subscribe is True
+
+
+@pytest.mark.asyncio
+async def test_on_start_failure_closes_routing_and_requests_process_restart(monkeypatch, bot):
+    monkeypatch.setattr(
+        envsbot.Bot,
+        "__getitem__",
+        lambda self, key: types.SimpleNamespace(add_feature=lambda feature: None),
+        raising=False,
+    )
+    bot.presence = types.SimpleNamespace(broadcast=lambda: None, joined_rooms={})
+    bot.get_roster = AsyncMock()
+    bot.db = types.SimpleNamespace(connect=AsyncMock(side_effect=RuntimeError("db down")))
+    bot.shutdown_runtime = AsyncMock()
+    bot.disconnect = MagicMock()
+    bot.accepting_commands = True
+    bot.session_ready.clear()
+
+    with pytest.raises(RuntimeError, match="db down"):
+        await envsbot.Bot.on_start(bot, object())
+
+    assert bot.accepting_commands is False
+    assert bot.session_ready.is_set() is False
+    assert bot._requested_exit_code == 1
+    bot.disconnect.assert_called_once_with()
+    bot.shutdown_runtime.assert_awaited_once_with()
 
 
 def test_on_session_end_marks_transport_unavailable(bot):
@@ -1214,6 +1290,8 @@ async def test_on_start_reports_degraded_plugin_state(monkeypatch, bot, caplog):
     )
     bot._create_startup_backup = AsyncMock()
     bot._send_restart_notification = AsyncMock()
+    bot.alerts = types.SimpleNamespace(start=AsyncMock())
+    bot.watchdog = types.SimpleNamespace(start=AsyncMock(), notify_ready=MagicMock())
     bot.roster = types.SimpleNamespace(auto_subscribe=False)
 
     with caplog.at_level(logging.INFO, logger="bot.lifecycle"):

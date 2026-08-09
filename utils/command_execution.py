@@ -133,7 +133,12 @@ class CommandExecutor:
             log.error("[BOT]🔴 Command '%s' has no handler", context.command_name)
             return
 
-        timeout = self.timeout_seconds()
+        timeout_override = getattr(cmd_obj, "timeout_seconds", None)
+        timeout = (
+            self.timeout_seconds()
+            if timeout_override is None
+            else max(0.0, float(timeout_override))
+        )
         started = time.monotonic()
         status = "ok"
         error_text: str | None = None

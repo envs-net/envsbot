@@ -317,6 +317,7 @@ class Command:
     subcommands: List[object] = field(default_factory=list)
     category: str = ""
     context: str = "any"
+    timeout_seconds: float | None = None
 
 
 COMMANDS = CommandRegistry()
@@ -355,6 +356,7 @@ def command(
     subcommands: Optional[List[object]] = None,
     category: str = "",
     context: str = "any",
+    timeout_seconds: float | None = None,
 ):
     """
     Decorator to register a function as a command.
@@ -387,6 +389,7 @@ def command(
             subcommands=subcommands,
             category=category,
             context=context,
+            timeout_seconds=timeout_seconds,
         )
 
         _register(name, cmd)
@@ -404,6 +407,7 @@ def command(
         setattr(func, "_command_subcommands", subcommands)
         setattr(func, "_command_category", category)
         setattr(func, "_command_context", context)
+        setattr(func, "_command_timeout_seconds", timeout_seconds)
 
         return func
 

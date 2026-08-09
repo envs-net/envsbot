@@ -127,11 +127,14 @@ Test restore only on a disposable instance:
 ```
 
 The restore command verifies and stages the selected archive before changing
-live files, creates a checksum-verified safety backup and automatically attempts
-rollback on a failed live restore. The database and active config are restored
-online. Configured `vcard.py` and `chat_slang.csv` files below
-`RUNTIME_DATA_DIR` are restored online too; legacy copies inside the read-only
-application checkout remain in the archive for manual/offline recovery.
+runtime files, creates a checksum-verified safety backup, then fully quiesces
+plugins/workers/outbox/cache/database before publishing restored state. It never
+resumes the old Python process afterwards: success and post-quiesce failures both
+lead to restart code `75`, so the standard `Restart=on-failure` systemd unit
+starts a fresh process. Configured `vcard.py` and `chat_slang.csv` files below
+`RUNTIME_DATA_DIR` are restored with the database/config; legacy copies inside
+the read-only application checkout remain in the archive for manual/offline
+recovery. After quiescing, the exact closed runtime files are staged for rollback before restored state is published; the earlier verified safety backup remains an additional recovery point.
 
 ## GitHub / mirror checks
 

@@ -59,6 +59,31 @@ async def test_command_executor_reports_timeout(monkeypatch):
     assert bot.audit.await_args.kwargs["details"]["status"] == "timeout"
 
 
+
+
+@pytest.mark.asyncio
+async def test_command_executor_allows_command_specific_timeout_override(monkeypatch):
+    monkeypatch.setitem(ce.config, "command_timeout_seconds", 0.001)
+    bot = SimpleNamespace(audit=AsyncMock(), reply=MagicMock(), reply_error=MagicMock())
+    bot._command_error_message = MagicMock(return_value="friendly error")
+    completed = False
+
+    async def guarded(*_args):
+        nonlocal completed
+        await asyncio.sleep(0.01)
+        completed = True
+
+    await ce.CommandExecutor(bot).execute(
+        SimpleNamespace(handler=guarded, timeout_seconds=0),
+        _context(),
+        MagicMock(),
+    )
+
+    assert completed is True
+    bot.reply_error.assert_not_called()
+    assert bot.audit.await_args.kwargs["details"]["status"] == "ok"
+
+
 @pytest.mark.asyncio
 async def test_command_executor_does_not_audit_regular_user(monkeypatch):
     monkeypatch.setitem(ce.config, "command_timeout_seconds", 5)

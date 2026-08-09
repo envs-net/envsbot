@@ -44,16 +44,15 @@ Managed archives are written to `BACKUP_DIR`, which defaults to `data/backups`.
 When `BACKUP_ON_START = True`, envsbot creates one startup backup per process
 start; this also covers service restarts. Each archive contains `bot.db`,
 `config.py`, `vcard.py`, `chat_slang.csv` and a `manifest.json` when those
-files exist. Restore is owner-only. Before changing live files, envsbot fully
+files exist. Restore is owner-only. Before changing runtime files, envsbot fully
 verifies the selected archive, stages the runtime files and creates a
-checksum-verified safety backup. The online restore replaces `bot.db`, the active
-config and configured `vcard.py`/`chat_slang.csv` files when those support files
-live outside the application checkout (normally below `RUNTIME_DATA_DIR`).
-Legacy support files inside the read-only source tree remain available in the
-archive for offline/manual restore.
-If a live replacement or database reconnect fails, envsbot attempts to roll
-the runtime files back from the safety backup. Restart envsbot after restoring
-the config.
+checksum-verified safety backup. It then stops command handling, plugins,
+supervised workers, the persistent outbox, message cache and database before
+replacing `bot.db`, the active config and writable support files below
+`RUNTIME_DATA_DIR`. Legacy support files inside the read-only source tree remain
+available in the archive for offline/manual restore. The old Python process is
+never resumed against restored state: envsbot exits with restart code `75` and
+the standard `Restart=on-failure` systemd service starts a fresh process. After shutdown, envsbot snapshots the exact closed runtime files before publishing restored state. If a file replacement fails, it rolls back from that quiesced snapshot; the verified safety backup remains available as an additional recovery point. A fresh restart is still required.
 
 Backup archives contain secrets such as the bot password and optional API keys.
 Keep them private and include them in your normal server backup policy.

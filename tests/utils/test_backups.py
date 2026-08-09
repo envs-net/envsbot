@@ -6,6 +6,7 @@ import sqlite3
 import time
 import zipfile
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -30,18 +31,6 @@ class FakeDB:
         self.closed = True
 
     async def connect(self):
-        self.connected = True
-
-
-class ReconnectOnceFailDB(FakeDB):
-    def __init__(self, path):
-        super().__init__(path)
-        self.connect_attempts = 0
-
-    async def connect(self):
-        self.connect_attempts += 1
-        if self.connect_attempts == 1:
-            raise RuntimeError("reconnect failed")
         self.connected = True
 
 
@@ -138,7 +127,7 @@ async def test_create_backup_offloads_archive_work_and_pruning(backup_env, monke
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_restores_files_and_reconnects_database(backup_env):
+async def test_restore_backup_quiesces_runtime_and_requires_fresh_process(backup_env):
     _write_sqlite_value(backup_env.db_path, "backup")
     bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
     archive = await backups.create_backup(bot, reason="before change")
@@ -151,7 +140,7 @@ async def test_restore_backup_restores_files_and_reconnects_database(backup_env)
     result = await backups.restore_backup(bot, archive)
 
     assert bot.db.closed is True
-    assert bot.db.connected is True
+    assert bot.db.connected is False
     assert _read_sqlite_value(backup_env.db_path) == "backup"
     assert (backup_env.root / "config.py").read_text(encoding="utf-8") == 'JID = "bot@example.org"\n'
     assert (backup_env.root / "vcard.py").read_text(encoding="utf-8") == "BROKEN = True\n"
@@ -160,6 +149,7 @@ async def test_restore_backup_restores_files_and_reconnects_database(backup_env)
     assert result["restored"] == ["bot.db", "config.py"]
     assert result["manual_restore"] == ["vcard.py", "chat_slang.csv"]
     assert result["safety_backup"].endswith("restore-safety.zip")
+    assert result["restart_required"] is True
 
 
 def test_resolve_backup_rejects_path_traversal(backup_env):
@@ -232,7 +222,7 @@ def test_backup_resolve_details_prune_and_safe_members(backup_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_backup_restore_reconnects_after_restore_error(backup_env, monkeypatch):
+async def test_backup_restore_rolls_back_after_quiesced_restore_error(backup_env, monkeypatch):
     _write_sqlite_value(backup_env.db_path, "backup")
     bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
     archive = await backups.create_backup(bot, reason="restore failure")
@@ -251,11 +241,11 @@ async def test_backup_restore_reconnects_after_restore_error(backup_env, monkeyp
 
     monkeypatch.setattr(backups, "_replace_from_stage", fail_second_replace)
 
-    with pytest.raises(backups.BackupError, match="rolled back"):
+    with pytest.raises(backups.RestoreRuntimeQuiescedError, match="rolled back"):
         await backups.restore_backup(bot, archive)
 
     assert bot.db.closed is True
-    assert bot.db.connected is True
+    assert bot.db.connected is False
     assert _read_sqlite_value(backup_env.db_path) == "current"
     assert (backup_env.root / "config.py").read_text(encoding="utf-8") == "CURRENT = True\n"
 
@@ -277,20 +267,105 @@ async def test_restore_rejects_invalid_database_before_live_changes(backup_env):
 
 
 @pytest.mark.asyncio
-async def test_restore_rolls_back_when_database_reconnect_fails(backup_env):
+async def test_restore_uses_full_runtime_shutdown_before_publishing_files(backup_env, monkeypatch):
     _write_sqlite_value(backup_env.db_path, "backup")
-    bot = SimpleNamespace(db=ReconnectOnceFailDB(backup_env.db_path))
-    archive = await backups.create_backup(bot, reason="before reconnect failure")
+    base_bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(base_bot, reason="before runtime quiesce")
     _write_sqlite_value(backup_env.db_path, "current")
+
+    events: list[str] = []
+
+    async def shutdown_runtime():
+        events.append("shutdown")
+        await base_bot.db.close()
+
+    original_apply = backups._apply_staged_entries
+
+    def tracked_apply(staged, specs):
+        events.append("apply")
+        return original_apply(staged, specs)
+
+    bot = SimpleNamespace(
+        db=base_bot.db,
+        accepting_commands=True,
+        session_ready=SimpleNamespace(clear=lambda: events.append("session-clear")),
+        shutdown_runtime=shutdown_runtime,
+    )
+    monkeypatch.setattr(backups, "_apply_staged_entries", tracked_apply)
+
+    result = await backups.restore_backup(bot, archive)
+
+    assert events[:3] == ["session-clear", "shutdown", "apply"]
+    assert bot.accepting_commands is False
+    assert bot.db.closed is True
+    assert bot.db.connected is False
+    assert _read_sqlite_value(backup_env.db_path) == "backup"
+    assert result["restart_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_restore_rollback_uses_exact_state_after_shutdown_flush(backup_env, monkeypatch):
+    _write_sqlite_value(backup_env.db_path, "backup")
+    base_bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(base_bot, reason="before rollback flush")
+    _write_sqlite_value(backup_env.db_path, "current-before-shutdown")
     (backup_env.root / "config.py").write_text("CURRENT = True\n", encoding="utf-8")
 
-    with pytest.raises(backups.BackupError, match="rolled back"):
+    async def shutdown_runtime():
+        _write_sqlite_value(backup_env.db_path, "current-after-shutdown")
+        await base_bot.db.close()
+        return True
+
+    original_replace = backups._replace_from_stage
+    replace_calls = 0
+
+    def fail_second_replace(source, target):
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 2:
+            raise OSError("simulated replace failure")
+        original_replace(source, target)
+
+    bot = SimpleNamespace(
+        db=base_bot.db,
+        accepting_commands=True,
+        shutdown_runtime=shutdown_runtime,
+    )
+    monkeypatch.setattr(backups, "_replace_from_stage", fail_second_replace)
+
+    with pytest.raises(backups.RestoreRuntimeQuiescedError, match="rolled back"):
         await backups.restore_backup(bot, archive)
 
-    assert bot.db.connect_attempts == 2
-    assert bot.db.connected is True
-    assert _read_sqlite_value(backup_env.db_path) == "current"
+    assert _read_sqlite_value(backup_env.db_path) == "current-after-shutdown"
     assert (backup_env.root / "config.py").read_text(encoding="utf-8") == "CURRENT = True\n"
+
+
+@pytest.mark.asyncio
+async def test_restore_refuses_to_publish_files_when_runtime_shutdown_is_partial(
+    backup_env, monkeypatch
+):
+    _write_sqlite_value(backup_env.db_path, "backup")
+    base_bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(base_bot, reason="partial shutdown")
+    _write_sqlite_value(backup_env.db_path, "current")
+
+    tracked_apply = MagicMock(wraps=backups._apply_staged_entries)
+    monkeypatch.setattr(backups, "_apply_staged_entries", tracked_apply)
+    bot = SimpleNamespace(
+        db=base_bot.db,
+        accepting_commands=True,
+        shutdown_runtime=AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(
+        backups.RestoreRuntimeQuiescedError,
+        match="runtime shutdown was incomplete",
+    ):
+        await backups.restore_backup(bot, archive)
+
+    tracked_apply.assert_not_called()
+    assert _read_sqlite_value(backup_env.db_path) == "current"
+    assert bot.accepting_commands is False
 
 
 def test_plan_backup_prune_supports_dry_run_and_age(backup_env):
@@ -568,3 +643,4 @@ async def test_restore_support_files_online_when_runtime_dir_is_outside_app_tree
         "chat_slang.csv",
     ]
     assert result["manual_restore"] == []
+    assert result["restart_required"] is True

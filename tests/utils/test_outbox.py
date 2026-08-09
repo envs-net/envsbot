@@ -71,6 +71,7 @@ async def test_outbox_uses_resilient_service_supervision():
 
     await runtime.start(store)
 
+    store.recover_inflight.assert_awaited_once_with(older_than_seconds=0)
     supervisor.create_resilient.assert_called_once_with(
         "_runtime",
         runtime._supervised_run,
@@ -230,3 +231,37 @@ async def test_outbox_enqueue_message_rejects_unserializable_message():
 
     assert await runtime.enqueue_message({"body": "missing destination"}) is None
     runtime.enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "expected_timeout", "expected_batch"),
+    [
+        ({}, 300, 20),
+        ({"outbox_inflight_timeout_seconds": 17, "outbox_batch_size": 7}, 17, 7),
+    ],
+)
+async def test_outbox_run_once_recovers_stale_inflight_before_claiming_due(
+    config, expected_timeout, expected_batch
+):
+    events: list[object] = []
+
+    async def recover_inflight(*, older_than_seconds):
+        events.append(("recover", older_than_seconds))
+        return 2
+
+    async def claim_due(*, limit):
+        events.append(("claim", limit))
+        return []
+
+    runtime = PersistentOutbox(SimpleNamespace(config=config))
+    runtime.store = SimpleNamespace(
+        recover_inflight=recover_inflight,
+        claim_due=claim_due,
+    )
+
+    assert await runtime.run_once() == 0
+    assert events == [
+        ("recover", expected_timeout),
+        ("claim", expected_batch),
+    ]

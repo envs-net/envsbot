@@ -67,8 +67,8 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
         close=close,
     )
 
-    await bot.shutdown_runtime()
-    await bot.shutdown_runtime()
+    assert await bot.shutdown_runtime() is True
+    assert await bot.shutdown_runtime() is True
 
     assert bot.accepting_commands is False
     # Supervised cache/DB workers must drain themselves before the global
@@ -105,7 +105,7 @@ async def test_shutdown_runtime_drains_reply_tasks_before_plugins():
         close=close,
     )
 
-    await bot.shutdown_runtime()
+    assert await bot.shutdown_runtime() is True
 
     assert events == ["replies:3.0", "plugins", "cache", "tasks:10.0", "db"]
 
@@ -122,12 +122,12 @@ async def test_shutdown_runtime_handles_skipped_and_failed_components():
         raise RuntimeError("db failed")
 
     bot = DummyLifecycle(unload=unload_all, cancel_all=cancel_all, close=close)
-    await bot.shutdown_runtime()
+    assert await bot.shutdown_runtime() is False
 
     assert bot.accepting_commands is False
 
     skipped = DummyLifecycle(close=AsyncMock())
-    await skipped.shutdown_runtime()
+    assert await skipped.shutdown_runtime() is True
     assert skipped.accepting_commands is False
 
 
@@ -142,7 +142,7 @@ async def test_shutdown_runtime_reports_partial_plugin_cleanup(caplog):
     bot = DummyLifecycle(unload=unload_all, close=close)
 
     with caplog.at_level("INFO", logger="bot.lifecycle"):
-        await bot.shutdown_runtime()
+        assert await bot.shutdown_runtime() is False
 
     assert "phase=plugins status=partial" in caplog.text
     assert "phase=done" in caplog.text

@@ -77,7 +77,6 @@ class RuntimeWatchdog:
         # a healthy process forever. Disable WatchdogSec in the unit as well to
         # turn monitoring off completely.
         self.state.enabled = configured or self.state.systemd_active
-        sd_notify("READY=1\nSTATUS=EnvsBot startup complete")
         if not self.state.enabled or self.task is not None:
             return
         self.stop_event = asyncio.Event()
@@ -92,7 +91,15 @@ class RuntimeWatchdog:
         else:
             self.task = asyncio.create_task(self._run(), name="runtime-watchdog")
         self.state.worker_running = True
-        sd_notify("READY=1\nSTATUS=EnvsBot started and monitoring event-loop health")
+
+    def notify_ready(self) -> bool:
+        """Tell systemd only after the complete application startup succeeded."""
+        status = (
+            "EnvsBot started and monitoring event-loop health"
+            if self.state.enabled
+            else "EnvsBot startup complete"
+        )
+        return sd_notify(f"READY=1\nSTATUS={status}")
 
     async def stop(self) -> None:
         self.stop_event.set()

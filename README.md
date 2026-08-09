@@ -395,7 +395,7 @@ Commands:
 ,restore last confirm
 ```
 
-Restore is owner-only. Before changing live files, envsbot fully verifies the selected archive, stages the runtime files and creates a checksum-verified safety backup. `bot.db` and the active config are restored online. Configured `vcard.py` and `chat_slang.csv` files are also restored online when they live in `RUNTIME_DATA_DIR` outside the read-only application checkout; legacy copies inside the source tree remain available for offline/manual restore. A failed live restore is rolled back from the safety backup when possible. Restart the bot after restoring the config. Backup archives contain secrets and should be protected like `config.py`.
+Restore is owner-only. Before changing runtime files, envsbot fully verifies the selected archive, stages every restore input and creates a checksum-verified safety backup. It then stops command handling, plugins, supervised workers, the outbox, message cache and database before replacing `bot.db`, the active config and writable support files. The old Python process is never resumed against restored state: after success, or after any failure that happened after runtime quiescing, envsbot exits with restart code `75` so the normal `Restart=on-failure` systemd unit starts a fresh process. A failed file replacement is rolled back from an exact snapshot taken after runtime shutdown; the verified safety backup is preserved as an additional recovery point. Legacy support-file copies inside the read-only source tree remain available for offline/manual recovery. Backup archives contain secrets and should be protected like `config.py`.
 
 ## SQLite Maintenance
 

@@ -28,6 +28,9 @@ async def test_watchdog_disabled_still_sends_ready(monkeypatch):
 
     assert runtime.task is None
     assert runtime.state.enabled is False
+    assert notifications == []
+
+    assert runtime.notify_ready() is False
     assert notifications == ["READY=1\nSTATUS=EnvsBot startup complete"]
 
 
@@ -46,7 +49,11 @@ async def test_systemd_watchdog_forces_worker_when_unit_requires_it(monkeypatch)
         assert runtime.state.enabled is True
         assert runtime.state.systemd_active is True
         assert runtime.task is not None
-        assert notifications[0].startswith("READY=1")
+        assert notifications == []
+        assert runtime.notify_ready() is True
+        assert notifications == [
+            "READY=1\nSTATUS=EnvsBot started and monitoring event-loop health"
+        ]
     finally:
         await runtime.stop()
 

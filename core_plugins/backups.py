@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 
 from utils.audit import audit_event
 from utils.backups import (
     BackupError,
+    RestoreRuntimeQuiescedError,
     backup_details,
     create_backup,
     list_backups,
@@ -22,6 +24,23 @@ from utils.command import Role, command
 from utils.formatting import format_page, parse_page_args, status_icon
 
 log = logging.getLogger(__name__)
+
+_RESTART_EXIT_CODE = 75
+
+
+async def _await_reply_delivery(task) -> None:
+    """Wait for the pre-restore acknowledgement when reply() returned a task."""
+    if inspect.isawaitable(task):
+        await asyncio.shield(task)
+
+
+def _request_restore_restart(bot) -> None:
+    """Exit non-zero after a quiesced restore so systemd starts a fresh process."""
+    bot._requested_exit_code = _RESTART_EXIT_CODE
+    disconnect = getattr(bot, "disconnect", None)
+    if callable(disconnect):
+        disconnect()
+
 
 PLUGIN_META = {
     "name": "backups",
@@ -340,9 +359,10 @@ def _format_restore_plan_lines(plan: dict) -> list[str]:
     examples=["{prefix}restore last confirm"],
     category="admin",
     context="private chat / MUC PM",
+    timeout_seconds=0,
 )
 async def backup_restore(bot, sender, nick, args, msg, is_room):
-    """Restore a managed ZIP backup after explicit confirmation."""
+    """Restore a managed ZIP backup and restart into the restored state."""
     if len(args) == 2 and args[1].lower() in {"dry-run", "dryrun", "check", "plan"}:
         try:
             archive = resolve_backup(args[0])
@@ -357,46 +377,61 @@ async def backup_restore(bot, sender, nick, args, msg, is_room):
         bot.reply_warn(
             msg,
             f"Usage: {bot.prefix}restore <archive|last> <dry-run|confirm>\n"
-            "Live restore overwrites bot.db and the active config when present. "
-            "Configured vcard/chat-slang support files are also restored online "
-            "when they live outside the read-only application checkout; legacy "
-            "source-tree copies stay in the archive for offline/manual restore. "
-            "The selected backup is fully verified and a safety backup is created "
-            "before any live file is replaced.",
+            "Restore fully verifies and stages the selected backup, creates a "
+            "verified safety backup, then stops mutable runtime activity before "
+            "replacing bot.db, the active config and writable support files. "
+            "After the restore, envsbot exits with the restart code so the normal "
+            "systemd Restart=on-failure unit starts a fresh process. Legacy "
+            "source-tree copies stay in the archive for offline/manual recovery.",
         )
         return
 
     try:
         archive = resolve_backup(args[0])
+    except BackupError as exc:
+        bot.reply_error(msg, str(exc))
+        return
+
+    await audit_event(
+        bot,
+        "backup_restore_requested",
+        actor=sender,
+        target=archive.name,
+        details={"automatic_restart": True},
+    )
+    acknowledgement = bot.reply(
+        msg,
+        "🔄 Restore starting. The archive will be verified and a safety backup "
+        "created first. If validation succeeds, envsbot will stop its runtime, "
+        "restore the files and restart automatically. This chat may go silent "
+        "during the handover.",
+    )
+    await _await_reply_delivery(acknowledgement)
+
+    try:
         result = await restore_backup(bot, archive)
+    except RestoreRuntimeQuiescedError as exc:
+        # The runtime is deliberately no longer safe to resume, even when the
+        # original files were rolled back successfully. Always start fresh.
+        log.error("[BACKUP] Restore failed after runtime quiesce: %s", exc)
+        _request_restore_restart(bot)
+        return
     except BackupError as exc:
         bot.reply_error(msg, str(exc))
         return
     except Exception as exc:
         log.exception("[BACKUP] Restore failed")
+        if getattr(bot, "_shutdown_complete", False):
+            _request_restore_restart(bot)
+            return
         bot.reply_error(msg, f"Restore failed: {exc}")
         return
 
-    await audit_event(
-        bot,
-        "backup_restored",
-        actor=sender,
-        target=result["archive"],
-        details={
-            "restored": result["restored"],
-            "manual_restore": result.get("manual_restore", []),
-            "safety_backup": result["safety_backup"],
-        },
+    log.info(
+        "[BACKUP] restore status=ok archive=%s restored=%s manual=%s safety=%s restart=required",
+        result["archive"],
+        result["restored"],
+        result.get("manual_restore", []),
+        result["safety_backup"],
     )
-    restored = ", ".join(result["restored"]) or "nothing"
-    manual_restore = ", ".join(result.get("manual_restore") or []) or "none"
-    bot.reply_ok(
-        msg,
-        "Backup restored.\n"
-        f"Archive: {result['archive']}\n"
-        f"Restored online: {restored}\n"
-        f"Offline/manual only: {manual_restore}\n"
-        f"Safety backup: {result['safety_backup']}\n"
-        "Restart the bot after restoring the config. Source-tree files should "
-        "only be restored while the service is stopped.",
-    )
+    _request_restore_restart(bot)

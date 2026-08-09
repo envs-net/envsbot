@@ -150,9 +150,12 @@ class Bot(
         self._startup_backup_done = False
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False
+        self._shutdown_clean = False
         # Unexpected disconnects should be restarted by Restart=on-failure.
         self._requested_exit_code = 1
-        self.accepting_commands = True
+        # Message routing stays closed until LifecycleMixin.on_start() has
+        # initialized DB, caches, outbox and plugins successfully.
+        self.accepting_commands = False
 
         self.rate_limiter = TokenBucketRateLimiter(
             capacity=int(config.get("command_rate_limit_capacity", 4)),

@@ -297,6 +297,19 @@ class PersistentOutbox:
         if not self.enabled or self.store is None:
             return 0
         config = getattr(self.bot, "config", {}) or {}
+        inflight_timeout = max(
+            1,
+            int(config.get("outbox_inflight_timeout_seconds", 300) or 300),
+        )
+        recovered = await self.store.recover_inflight(
+            older_than_seconds=inflight_timeout,
+        )
+        if recovered:
+            log.warning(
+                "[OUTBOX] Recovered %d stale inflight message(s) older than %ds",
+                recovered,
+                inflight_timeout,
+            )
         batch_size = max(1, int(config.get("outbox_batch_size", 20) or 20))
         queued = await self.store.claim_due(limit=batch_size)
         for message in queued:

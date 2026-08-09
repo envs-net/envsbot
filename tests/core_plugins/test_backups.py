@@ -17,6 +17,9 @@ def bot():
     bot.reply_error = MagicMock()
     bot.reply_warn = MagicMock()
     bot.reply_usage = MagicMock()
+    bot.disconnect = MagicMock()
+    bot._requested_exit_code = 1
+    bot._shutdown_complete = False
     return bot
 
 
@@ -51,6 +54,16 @@ async def test_backup_list_formats_empty_result(bot, msg, monkeypatch):
     assert "No backups found." in reply_lines
 
 
+
+
+def test_restore_command_disables_generic_command_timeout():
+    metadata = getattr(backups_plugin.backup_restore, "__commands__", [])
+    restore_commands = [cmd for name, cmd in metadata if name == "restore"]
+
+    assert len(restore_commands) == 1
+    assert restore_commands[0].timeout_seconds == 0
+
+
 @pytest.mark.asyncio
 async def test_restore_requires_explicit_confirmation(bot, msg):
     await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last"], msg, False)
@@ -60,28 +73,37 @@ async def test_restore_requires_explicit_confirmation(bot, msg):
 
 
 @pytest.mark.asyncio
-async def test_restore_runs_with_confirmation(bot, msg, monkeypatch):
+async def test_restore_runs_with_confirmation_and_requests_fresh_process(bot, msg, monkeypatch):
     resolve = MagicMock(return_value=Path("backup.zip"))
     restore = AsyncMock(return_value={
         "archive": "backup.zip",
         "restored": ["bot.db", "config.py"],
         "manual_restore": ["vcard.py", "chat_slang.csv"],
         "safety_backup": "safety.zip",
+        "restart_required": True,
     })
     audit = AsyncMock()
     monkeypatch.setattr(backups_plugin, "resolve_backup", resolve)
     monkeypatch.setattr(backups_plugin, "restore_backup", restore)
     monkeypatch.setattr(backups_plugin, "audit_event", audit)
 
-    await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last", "confirm"], msg, False)
+    await backups_plugin.backup_restore(
+        bot, "owner@example.org", "owner", ["last", "confirm"], msg, False
+    )
 
     resolve.assert_called_once_with("last")
     restore.assert_awaited_once_with(bot, Path("backup.zip"))
-    audit.assert_awaited_once()
-    bot.reply_ok.assert_called_once()
-    reply = bot.reply_ok.call_args.args[1]
-    assert "Backup restored" in reply
-    assert "Offline/manual only: vcard.py, chat_slang.csv" in reply
+    audit.assert_awaited_once_with(
+        bot,
+        "backup_restore_requested",
+        actor="owner@example.org",
+        target="backup.zip",
+        details={"automatic_restart": True},
+    )
+    assert "Restore starting" in bot.reply.call_args.args[1]
+    bot.reply_ok.assert_not_called()
+    assert bot._requested_exit_code == 75
+    bot.disconnect.assert_called_once_with()
 
 
 def test_backup_formatting_helpers():
@@ -191,15 +213,54 @@ async def test_backup_show_handles_empty_manifest_lists(bot, msg, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_backup_restore_handles_backup_and_generic_errors(bot, msg, monkeypatch):
-    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(side_effect=backups_plugin.BackupError("bad archive")))
-    await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["bad.zip", "confirm"], msg, False)
+async def test_backup_restore_handles_pre_quiesce_and_generic_errors(bot, msg, monkeypatch):
+    monkeypatch.setattr(
+        backups_plugin,
+        "resolve_backup",
+        MagicMock(side_effect=backups_plugin.BackupError("bad archive")),
+    )
+    await backups_plugin.backup_restore(
+        bot, "owner@example.org", "owner", ["bad.zip", "confirm"], msg, False
+    )
     bot.reply_error.assert_called_with(msg, "bad archive")
+    bot.disconnect.assert_not_called()
 
-    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr(backups_plugin, "restore_backup", AsyncMock(side_effect=RuntimeError("boom")))
-    await backups_plugin.backup_restore(bot, "owner@example.org", "owner", ["last", "confirm"], msg, False)
+    bot.reply_error.reset_mock()
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=Path("backup.zip")))
+    monkeypatch.setattr(backups_plugin, "audit_event", AsyncMock())
+    monkeypatch.setattr(
+        backups_plugin,
+        "restore_backup",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    await backups_plugin.backup_restore(
+        bot, "owner@example.org", "owner", ["last", "confirm"], msg, False
+    )
     assert "Restore failed: boom" in bot.reply_error.call_args.args[1]
+    bot.disconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_backup_restore_restarts_after_post_quiesce_failure(bot, msg, monkeypatch):
+    monkeypatch.setattr(backups_plugin, "resolve_backup", MagicMock(return_value=Path("backup.zip")))
+    monkeypatch.setattr(backups_plugin, "audit_event", AsyncMock())
+    monkeypatch.setattr(
+        backups_plugin,
+        "restore_backup",
+        AsyncMock(
+            side_effect=backups_plugin.RestoreRuntimeQuiescedError(
+                "restore rolled back; restart required"
+            )
+        ),
+    )
+
+    await backups_plugin.backup_restore(
+        bot, "owner@example.org", "owner", ["last", "confirm"], msg, False
+    )
+
+    assert bot._requested_exit_code == 75
+    bot.disconnect.assert_called_once_with()
+    bot.reply_error.assert_not_called()
 
 
 def test_parse_prune_args():

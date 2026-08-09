@@ -52,6 +52,10 @@ class BackupError(Exception):
     """Raised when a managed backup or restore operation fails."""
 
 
+class RestoreRuntimeQuiescedError(BackupError):
+    """Restore failed after runtime shutdown; the process must restart."""
+
+
 @dataclass(frozen=True)
 class BackupArchive:
     """Small listing entry for one backup archive."""
@@ -721,15 +725,39 @@ def _rollback_staged_entries(
     specs: list[tuple[str, Path]],
     original_exists: dict[Path, bool],
 ) -> None:
-    """Restore pre-restore target contents after a failed live restore."""
+    """Restore exact pre-restore target contents after a failed live restore."""
     for _entry, target in specs:
         if original_exists.get(target, False):
             source = staged_by_target.get(target)
             if source is None:
-                raise BackupError(f"Safety backup is missing rollback target: {target}")
+                raise BackupError(f"Rollback stage is missing target: {target}")
             _replace_from_stage(source, target)
         else:
             target.unlink(missing_ok=True)
+
+
+def _stage_live_targets(
+    specs: list[tuple[str, Path]],
+    stage_root: Path,
+) -> tuple[dict[Path, Path], dict[Path, bool]]:
+    """Snapshot closed live targets for exact rollback immediately before restore."""
+    staged_by_target: dict[Path, Path] = {}
+    original_exists: dict[Path, bool] = {}
+    for index, (_entry, target) in enumerate(specs):
+        exists = target.exists()
+        original_exists[target] = exists
+        if not exists:
+            continue
+        if not target.is_file():
+            raise BackupError(f"Restore target is not a regular file: {target}")
+        staged = stage_root / f"{index:03d}-{target.name}"
+        with target.open("rb") as source, staged.open("wb") as handle:
+            shutil.copyfileobj(source, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(staged, PRIVATE_FILE_MODE)
+        staged_by_target[target] = staged
+    return staged_by_target, original_exists
 
 
 async def _close_database(bot: Any) -> bool:
@@ -741,20 +769,41 @@ async def _close_database(bot: Any) -> bool:
     return True
 
 
-async def _connect_database(bot: Any) -> None:
-    db = getattr(bot, "db", None)
-    connect = getattr(db, "connect", None)
-    if callable(connect):
-        await _maybe_await(connect())
+async def _quiesce_runtime_for_restore(bot: Any) -> None:
+    """Stop all mutable runtime activity before replacing live state files."""
+    if hasattr(bot, "accepting_commands"):
+        bot.accepting_commands = False
+    session_ready = getattr(bot, "session_ready", None)
+    clear = getattr(session_ready, "clear", None)
+    if callable(clear):
+        clear()
+
+    shutdown_runtime = getattr(bot, "shutdown_runtime", None)
+    if callable(shutdown_runtime):
+        clean = await _maybe_await(shutdown_runtime())
+        if clean is False:
+            raise BackupError("runtime shutdown was incomplete")
+        return
+
+    # Lightweight embedders/tests may not expose the full lifecycle mixin.
+    if not await _close_database(bot):
+        raise BackupError("runtime exposes neither shutdown_runtime nor a closable database")
 
 
 async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
-    """Safely restore runtime files and reconnect the database when possible.
+    """Restore verified runtime files after fully quiescing the bot.
 
-    Mutable support files are restored online when they live outside the
-    application checkout. Legacy source-tree copies remain in the archive for
-    offline/manual recovery so hardened deployments never require write access
-    to the read-only application tree.
+    Verification, staging and the safety backup happen while the current
+    runtime is still healthy. Immediately before publishing restored files,
+    all mutable bot activity is stopped through ``shutdown_runtime()``. The
+    database is intentionally *not* reconnected afterwards: callers must exit
+    and start a fresh process so no pre-restore in-memory state can overwrite
+    restored data.
+
+    Mutable support files are restored when they live outside the application
+    checkout. Legacy source-tree copies remain in the archive for offline/manual
+    recovery so hardened deployments never require write access to the read-only
+    application tree.
     """
     archive_path = archive_path.resolve()
     smoke = await asyncio.to_thread(smoke_test_backup, archive_path)
@@ -769,7 +818,7 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
         members = _safe_members(archive)
     restore_specs, manual_entries = _restore_specs(members)
     if not restore_specs:
-        raise BackupError("Backup contains no runtime files that can be restored online.")
+        raise BackupError("Backup contains no runtime files supported by managed restore.")
 
     with tempfile.TemporaryDirectory(prefix="envsbot-restore-stage-") as stage_name:
         stage_root = Path(stage_name)
@@ -783,8 +832,6 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
             restore_specs,
             restore_stage,
         )
-        original_exists = {target: target.exists() for _entry, target in restore_specs}
-
         # Do not prune while the selected archive or safety archive is needed.
         safety_backup = await create_backup(
             bot,
@@ -800,75 +847,60 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
                 f"{errors or 'unknown error'}"
             )
 
-        with zipfile.ZipFile(safety_backup) as archive:
-            safety_members = _safe_members(archive)
-        safety_specs = _restore_specs(safety_members)[0]
-        safety_by_target = {target: entry for entry, target in safety_specs}
-        rollback_specs: list[tuple[str, Path]] = []
-        for _entry, target in restore_specs:
-            if not original_exists[target]:
-                continue
-            safety_entry = safety_by_target.get(target)
-            if safety_entry is None:
-                raise BackupError(
-                    f"Safety backup cannot roll back restore target: {target}"
-                )
-            rollback_specs.append((safety_entry, target))
-        staged_rollback = await asyncio.to_thread(
-            _stage_archive_entries,
-            safety_backup,
-            rollback_specs,
-            rollback_stage,
-        )
-        rollback_by_target = {
-            target: staged_rollback[safety_entry]
-            for safety_entry, target in rollback_specs
-        }
+        try:
+            await _quiesce_runtime_for_restore(bot)
+        except Exception as quiesce_error:
+            raise RestoreRuntimeQuiescedError(
+                "Could not safely quiesce the bot before restore; a process "
+                f"restart is required: {quiesce_error}"
+            ) from quiesce_error
+
+        # shutdown_runtime() flushes and closes mutable state. Snapshot the exact
+        # closed files now, rather than relying only on the earlier safety backup,
+        # so rollback cannot lose writes made between that backup and shutdown.
+        try:
+            rollback_by_target, original_exists = await asyncio.to_thread(
+                _stage_live_targets,
+                restore_specs,
+                rollback_stage,
+            )
+        except Exception as rollback_stage_error:
+            raise RestoreRuntimeQuiescedError(
+                "Could not stage the quiesced runtime for rollback; no restore "
+                "files were published and a process restart is required: "
+                f"{rollback_stage_error}"
+            ) from rollback_stage_error
 
         restored: list[str] = []
-        try:
-            closed_db = await _close_database(bot)
-        except Exception as close_error:
-            with suppress(Exception):
-                await _connect_database(bot)
-            raise BackupError(
-                f"Could not close database before restore: {close_error}"
-            ) from close_error
-
         try:
             restored = await asyncio.to_thread(
                 _apply_staged_entries,
                 staged_restore,
                 restore_specs,
             )
-            if closed_db:
-                await _connect_database(bot)
         except Exception as restore_error:
             rollback_error: Exception | None = None
             try:
-                # A failed reconnect may leave a partially-open DB connection.
-                # Close it best-effort before restoring the original DB bytes.
-                with suppress(Exception):
-                    await _close_database(bot)
                 await asyncio.to_thread(
                     _rollback_staged_entries,
                     rollback_by_target,
                     restore_specs,
                     original_exists,
                 )
-                await _connect_database(bot)
             except Exception as exc:
                 rollback_error = exc
 
             if rollback_error is not None:
-                raise BackupError(
+                raise RestoreRuntimeQuiescedError(
                     "Restore failed and automatic rollback also failed; "
                     f"safety backup {safety_backup.name} was preserved. "
+                    "The bot must restart before any further operation. "
                     f"Restore error: {restore_error}; rollback error: {rollback_error}"
                 ) from restore_error
-            raise BackupError(
-                "Restore failed; original runtime files were rolled back from "
-                f"{safety_backup.name}: {restore_error}"
+            raise RestoreRuntimeQuiescedError(
+                "Restore failed; exact pre-restore runtime files were rolled back. "
+                f"Safety backup {safety_backup.name} was preserved. The bot must "
+                f"restart before any further operation: {restore_error}"
             ) from restore_error
 
     try:
@@ -885,6 +917,7 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
         "restored": restored,
         "manual_restore": manual_entries,
         "safety_backup": safety_backup.name,
+        "restart_required": True,
     }
 
 

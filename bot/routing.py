@@ -27,7 +27,9 @@ class MessageRoutingMixin:
             )
 
     async def on_muc_message(self, msg: Any) -> None:
-        """Handle public groupchat messages."""
+        """Handle public groupchat messages only while the runtime is ready."""
+        if not getattr(self, "accepting_commands", False):
+            return
         try:
             room = msg["from"].bare
             nick = msg.get("mucnick")
@@ -47,7 +49,9 @@ class MessageRoutingMixin:
             log.exception("[BOT] Error in on_muc_message: %s", exc)
 
     async def on_private_message(self, msg: Any) -> None:
-        """Handle direct messages and MUC private messages."""
+        """Handle direct messages and MUC private messages only when ready."""
+        if not getattr(self, "accepting_commands", False):
+            return
         try:
             if msg["type"] in ("chat", "normal"):
                 await self._cache_incoming_message(msg, is_room=False)
