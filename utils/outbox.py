@@ -13,7 +13,7 @@ from typing import Any
 from bot.room_state import JOINED_ROOMS
 from database.outbox import OutboxCapacityError
 from utils.performance import observe
-from utils.task_supervisor import ExpectedTaskExit
+from utils.task_supervisor import ExpectedTaskExit, runtime_is_ready
 
 log = logging.getLogger(__name__)
 
@@ -294,7 +294,7 @@ class PersistentOutbox:
         observe("outbox_delivery", time.perf_counter() - started)
 
     async def run_once(self) -> int:
-        if not self.enabled or self.store is None:
+        if not self.enabled or self.store is None or not runtime_is_ready(self.bot):
             return 0
         config = getattr(self.bot, "config", {}) or {}
         inflight_timeout = max(

@@ -44,8 +44,34 @@ from utils.plugin_manager_lifecycle import (
     run_hook,
 )
 from utils.plugin_metadata import validate_plugin_metadata
+from utils.task_supervisor import wait_for_runtime_ready
 
 log = logging.getLogger(__name__)
+
+
+async def _run_plugin_awaitable_when_ready(bot, awaitable):
+    """Run an already-created plugin awaitable after runtime readiness.
+
+    If the wrapper is cancelled while startup is still gated, close a coroutine
+    whose execution never started so Python does not emit an un-awaited coroutine
+    warning during shutdown or a failed startup.
+    """
+    started = False
+    try:
+        await wait_for_runtime_ready(bot)
+        started = True
+        return await awaitable
+    finally:
+        if not started:
+            close = getattr(awaitable, "close", None)
+            if callable(close):
+                close()
+
+
+async def _run_plugin_factory_when_ready(bot, factory):
+    """Create and run a resilient plugin worker only after runtime readiness."""
+    await wait_for_runtime_ready(bot)
+    return await factory()
 
 
 def _serialized_lifecycle(method):
@@ -272,11 +298,12 @@ class PluginManager:
         for long-running loops. The manager cancels these tasks on unload and
         exposes them to the status command.
         """
+        deferred = _run_plugin_awaitable_when_ready(self.bot, coro)
         supervisor = getattr(self.bot, "tasks", None)
         if supervisor is None:
-            task = asyncio.create_task(coro, name=name)
+            task = asyncio.create_task(deferred, name=name)
             return task
-        return supervisor.create(plugin_name, coro, name=name)
+        return supervisor.create(plugin_name, deferred, name=name)
 
     def create_resilient_task(
         self,
@@ -288,12 +315,16 @@ class PluginManager:
         service=True,
     ):
         """Create a supervised task with restart backoff and circuit breaking."""
+
+        def ready_factory():
+            return _run_plugin_factory_when_ready(self.bot, factory)
+
         supervisor = getattr(self.bot, "tasks", None)
         if supervisor is None:
-            return asyncio.create_task(factory(), name=name)
+            return asyncio.create_task(ready_factory(), name=name)
         return supervisor.create_resilient(
             plugin_name,
-            factory,
+            ready_factory,
             name=name,
             max_restarts=max_restarts,
             service=service,

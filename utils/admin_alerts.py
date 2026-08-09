@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from utils.admin_notify import notify_admin
+from utils.task_supervisor import wait_for_runtime_ready
 
 log = logging.getLogger(__name__)
 
@@ -376,6 +377,7 @@ class AdminAlertManager:
             self._last_error = None
 
     async def _run(self) -> None:
+        await wait_for_runtime_ready(self.bot)
         config = getattr(self.bot, "config", {}) or {}
         interval = max(30, int(config.get("admin_alert_interval_seconds", 60) or 60))
         while True:

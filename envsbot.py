@@ -135,6 +135,9 @@ class Bot(
         self.last_update_notified_version = None
         self.connection_start_time = None
         self.session_ready = asyncio.Event()
+        # Background plugin work stays paused until the complete runtime is
+        # initialized and any queued restart-complete notification has been sent.
+        self.runtime_ready = asyncio.Event()
         self.tasks = TaskSupervisor()
         self.tasks.bot = self
         self.command_executor = CommandExecutor(self)

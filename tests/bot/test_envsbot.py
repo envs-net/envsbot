@@ -719,6 +719,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert bot.last_update_notified_version is None
     assert bot.connection_start_time is None
     assert bot.session_ready.is_set() is False
+    assert bot.runtime_ready.is_set() is False
     assert bot.accepting_commands is False
     assert bot._startup_backup_done is False
     assert bot.db.path == "envsbot.sqlite3"
@@ -1196,7 +1197,12 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         call_on_ready=AsyncMock(side_effect=lambda: calls.append("ready")),
     )
     bot._create_startup_backup = AsyncMock(side_effect=lambda: calls.append("backup"))
-    bot._send_restart_notification = AsyncMock(side_effect=lambda: calls.append("restart"))
+
+    async def record_restart_notification():
+        assert bot.runtime_ready.is_set() is False
+        calls.append("restart")
+
+    bot._send_restart_notification = AsyncMock(side_effect=record_restart_notification)
     bot.alerts = types.SimpleNamespace(
         start=AsyncMock(side_effect=lambda: calls.append("alerts")),
     )
@@ -1210,6 +1216,7 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
 
     assert bot.connection_start_time is not None
     assert bot.session_ready.is_set() is True
+    assert bot.runtime_ready.is_set() is True
     assert bot.accepting_commands is True
     assert features == [("xep_0030", "http://jabber.org/protocol/muc#user")]
     assert broadcasts == ["broadcast", "broadcast"]
@@ -1220,9 +1227,9 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         "load_all",
         "ready",
         "backup",
-        "restart",
         "alerts",
         "watchdog",
+        "restart",
         "systemd-ready",
     ]
     assert bot.roster.auto_subscribe is True
@@ -1243,12 +1250,14 @@ async def test_on_start_failure_closes_routing_and_requests_process_restart(monk
     bot.disconnect = MagicMock()
     bot.accepting_commands = True
     bot.session_ready.clear()
+    bot.runtime_ready.set()
 
     with pytest.raises(RuntimeError, match="db down"):
         await envsbot.Bot.on_start(bot, object())
 
     assert bot.accepting_commands is False
     assert bot.session_ready.is_set() is False
+    assert bot.runtime_ready.is_set() is False
     assert bot._requested_exit_code == 1
     bot.disconnect.assert_called_once_with()
     bot.shutdown_runtime.assert_awaited_once_with()
@@ -1256,11 +1265,13 @@ async def test_on_start_failure_closes_routing_and_requests_process_restart(monk
 
 def test_on_session_end_marks_transport_unavailable(bot):
     bot.session_ready.set()
+    bot.runtime_ready.set()
     bot.accepting_commands = True
 
     envsbot.Bot.on_session_end(bot, object())
 
     assert bot.session_ready.is_set() is False
+    assert bot.runtime_ready.is_set() is False
     assert bot.accepting_commands is False
 
 

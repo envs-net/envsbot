@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -30,6 +31,8 @@ class DummyLifecycle(lifecycle.LifecycleMixin):
         drain_replies=None,
     ):
         self.accepting_commands = True
+        self.runtime_ready = asyncio.Event()
+        self.runtime_ready.set()
         self.config = config or {}
         self.bot_plugins = SimpleNamespace(unload_all=unload) if unload is not None else SimpleNamespace()
         self.tasks = SimpleNamespace(cancel_all=cancel_all) if cancel_all is not None else SimpleNamespace()
@@ -71,6 +74,7 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
     assert await bot.shutdown_runtime() is True
 
     assert bot.accepting_commands is False
+    assert bot.runtime_ready.is_set() is False
     # Supervised cache/DB workers must drain themselves before the global
     # supervisor cancellation so queued persistence is not discarded.
     assert events == ["plugins", "cache", "tasks:10.0", "db"]

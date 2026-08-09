@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -100,3 +101,25 @@ async def test_event_loop_recovery_reports_current_healthy_lag(monkeypatch):
         "(warning 2.000s)"
     )
     assert "2.721s" not in recovery
+
+
+@pytest.mark.asyncio
+async def test_alert_worker_waits_for_runtime_ready():
+    runtime_ready = asyncio.Event()
+    bot = SimpleNamespace(config={}, runtime_ready=runtime_ready)
+    manager = AdminAlertManager(bot)
+    manager.run_once = AsyncMock()
+
+    task = asyncio.create_task(manager._run())
+    await asyncio.sleep(0)
+
+    assert manager.run_once.await_count == 0
+    assert task.done() is False
+
+    runtime_ready.set()
+    await asyncio.sleep(0)
+
+    assert manager.run_once.await_count == 1
+    task.cancel()
+    result = await asyncio.gather(task, return_exceptions=True)
+    assert isinstance(result[0], asyncio.CancelledError)

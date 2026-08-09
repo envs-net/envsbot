@@ -234,6 +234,29 @@ async def test_outbox_enqueue_message_rejects_unserializable_message():
 
 
 @pytest.mark.asyncio
+async def test_outbox_does_not_claim_messages_before_runtime_ready():
+    runtime_ready = asyncio.Event()
+    store = SimpleNamespace(
+        recover_inflight=AsyncMock(return_value=0),
+        claim_due=AsyncMock(return_value=[]),
+    )
+    runtime = PersistentOutbox(
+        SimpleNamespace(config={}, runtime_ready=runtime_ready)
+    )
+    runtime.store = store
+
+    assert await runtime.run_once() == 0
+    store.recover_inflight.assert_not_awaited()
+    store.claim_due.assert_not_awaited()
+
+    runtime_ready.set()
+
+    assert await runtime.run_once() == 0
+    store.recover_inflight.assert_awaited_once_with(older_than_seconds=300)
+    store.claim_due.assert_awaited_once_with(limit=20)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("config", "expected_timeout", "expected_batch"),
     [

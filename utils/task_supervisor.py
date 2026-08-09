@@ -30,6 +30,29 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def runtime_is_ready(bot: Any) -> bool:
+    """Return whether autonomous runtime work may proceed.
+
+    Bots created before the readiness gate (and lightweight test doubles) keep
+    the historical immediate behavior by omitting ``runtime_ready``.
+    """
+    runtime_ready = getattr(bot, "runtime_ready", None)
+    if runtime_ready is None:
+        return True
+    is_set = getattr(runtime_ready, "is_set", None)
+    return bool(is_set()) if callable(is_set) else True
+
+
+async def wait_for_runtime_ready(bot: Any) -> None:
+    """Wait until startup has released autonomous background work."""
+    if runtime_is_ready(bot):
+        return
+    runtime_ready = getattr(bot, "runtime_ready", None)
+    wait = getattr(runtime_ready, "wait", None)
+    if callable(wait):
+        await wait()
+
+
 async def sleep_with_heartbeat(
     bot: Any,
     plugin: str,

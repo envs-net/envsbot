@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -77,3 +78,22 @@ async def test_watchdog_uses_resilient_service_supervision(monkeypatch):
         name="runtime-watchdog",
         service=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_watchdog_worker_waits_for_runtime_ready():
+    runtime_ready = asyncio.Event()
+    runtime = watchdog.RuntimeWatchdog(
+        SimpleNamespace(config={}, runtime_ready=runtime_ready, tasks=None)
+    )
+    runtime.stop_event.set()
+
+    task = asyncio.create_task(runtime._run())
+    await asyncio.sleep(0)
+
+    assert task.done() is False
+
+    runtime_ready.set()
+    await task
+
+    assert task.done() is True

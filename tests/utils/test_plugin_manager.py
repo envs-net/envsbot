@@ -934,6 +934,76 @@ async def test_event_task_on_ready_and_detailed_info(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_plugin_one_shot_task_waits_for_runtime_ready():
+    bot = FakeBot()
+    bot.runtime_ready = asyncio.Event()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+    started = []
+
+    async def worker():
+        started.append("worker")
+        return "done"
+
+    task = pm.create_task("demo", worker(), name="demo-worker")
+    await asyncio.sleep(0)
+
+    assert started == []
+    assert task.done() is False
+
+    bot.runtime_ready.set()
+
+    assert await task == "done"
+    assert started == ["worker"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_resilient_task_waits_for_runtime_ready():
+    bot = FakeBot()
+    bot.runtime_ready = asyncio.Event()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+    started = []
+
+    async def worker():
+        started.append("worker")
+        return "done"
+
+    task = pm.create_resilient_task(
+        "demo",
+        worker,
+        name="demo-service",
+        service=False,
+    )
+    await asyncio.sleep(0)
+
+    assert started == []
+    assert task.done() is False
+
+    bot.runtime_ready.set()
+
+    assert await task == "done"
+    assert started == ["worker"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_gated_plugin_task_closes_unstarted_coroutine():
+    bot = FakeBot()
+    bot.runtime_ready = asyncio.Event()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+
+    async def worker():
+        return "unused"
+
+    coro = worker()
+    task = pm.create_task("demo", coro, name="demo-worker")
+    await asyncio.sleep(0)
+    task.cancel()
+    result = await asyncio.gather(task, return_exceptions=True)
+
+    assert isinstance(result[0], asyncio.CancelledError)
+    assert coro.cr_frame is None
+
+
+@pytest.mark.asyncio
 async def test_call_on_ready_uses_dependency_order_and_marks_runtime_ready():
     pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
     calls = []
@@ -1169,11 +1239,13 @@ def test_create_resilient_task_delegates_to_supervisor():
     result = manager.create_resilient_task("demo", factory)
 
     assert result is expected
-    supervisor.create_resilient.assert_called_once_with(
-        "demo",
-        factory,
-        name=None,
-        max_restarts=None,
-        service=True,
-    )
+    supervisor.create_resilient.assert_called_once()
+    args, kwargs = supervisor.create_resilient.call_args
+    assert args[0] == "demo"
+    assert callable(args[1])
+    assert kwargs == {
+        "name": None,
+        "max_restarts": None,
+        "service": True,
+    }
     factory.assert_not_called()

@@ -167,6 +167,9 @@ class LifecycleMixin:
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
             session_ready.set()
+        runtime_ready = getattr(self, "runtime_ready", None)
+        if runtime_ready is not None:
+            runtime_ready.clear()
         # The transport is available now, but DB/cache/plugins are not ready yet.
         # Message routing checks this flag before touching runtime state.
         self.accepting_commands = False
@@ -191,7 +194,6 @@ class LifecycleMixin:
             await self.bot_plugins.load_all()
             await self.bot_plugins.call_on_ready()
             await self._create_startup_backup()
-            await self._send_restart_notification()
 
             alerts_start = getattr(getattr(self, "alerts", None), "start", None)
             if callable(alerts_start):
@@ -213,8 +215,21 @@ class LifecycleMixin:
             startup_status = "degraded" if failed_count else "ok"
             startup_log = log.warning if failed_count else log.info
 
+            # Keep autonomous plugin workers behind the restart-complete stanza.
+            # Slixmpp queues outbound stanzas in order, so opening runtime_ready
+            # only after this await keeps RSS/reminders/etc. behind the visible
+            # restart confirmation while still allowing that confirmation itself
+            # to use the established XMPP transport.
+            await self._send_restart_notification()
+
             # From this point every dependency needed by message routing is up.
             self.accepting_commands = True
+            if runtime_ready is not None:
+                runtime_ready.set()
+            outbox_wakeup = getattr(outbox, "wakeup", None)
+            wake_outbox = getattr(outbox_wakeup, "set", None)
+            if callable(wake_outbox):
+                wake_outbox()
             notify_ready = getattr(watchdog, "notify_ready", None)
             if callable(notify_ready):
                 notify_ready()
@@ -238,6 +253,8 @@ class LifecycleMixin:
             # only part of its runtime initialized. Make the failure fatal so
             # Restart=on-failure can recover from a clean process state.
             self.accepting_commands = False
+            if runtime_ready is not None:
+                runtime_ready.clear()
             if session_ready is not None:
                 session_ready.clear()
             self._requested_exit_code = 1
@@ -259,6 +276,9 @@ class LifecycleMixin:
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
             session_ready.clear()
+        runtime_ready = getattr(self, "runtime_ready", None)
+        if runtime_ready is not None:
+            runtime_ready.clear()
         self.accepting_commands = False
 
     async def shutdown_runtime(self) -> bool:
@@ -283,6 +303,9 @@ class LifecycleMixin:
         """Best-effort ordered shutdown of tasks, cache and database."""
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self.accepting_commands = False
+        runtime_ready = getattr(self, "runtime_ready", None)
+        if runtime_ready is not None:
+            runtime_ready.clear()
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
             session_ready.clear()

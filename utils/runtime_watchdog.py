@@ -10,6 +10,8 @@ import time
 from dataclasses import dataclass, asdict
 from typing import Any
 
+from utils.task_supervisor import wait_for_runtime_ready
+
 log = logging.getLogger(__name__)
 
 
@@ -112,6 +114,7 @@ class RuntimeWatchdog:
         sd_notify("STOPPING=1\nSTATUS=EnvsBot shutting down")
 
     async def _run(self) -> None:
+        await wait_for_runtime_ready(self.bot)
         config = getattr(self.bot, "config", {}) or {}
         configured_interval = max(
             1.0,
