@@ -64,6 +64,14 @@ def test_write_hash_file_error(monkeypatch, tmp_path):
     _reg_profile.write_hash(str(path), "abc")
 
 
+def test_load_vcard_xml_does_not_create_bytecode_cache(tmp_path):
+    vcard_py = tmp_path / "vcard.py"
+    vcard_py.write_text('VCARD = "<vCard/>"\n', encoding="utf-8")
+
+    assert _reg_profile._load_vcard_xml(vcard_py) == "<vCard/>"
+    assert not (tmp_path / "__pycache__").exists()
+
+
 # --- VCARD BUILDER ---
 
 def test_build_vcard_basic_and_nested():
@@ -96,6 +104,30 @@ def test_build_vcard_basic_and_nested():
 # --- update_vcard ---
 
 @pytest.mark.asyncio
+async def test_profile_network_updates_skip_when_session_is_not_ready(monkeypatch):
+    warnings = []
+    bot = types.SimpleNamespace(
+        session_ready=types.SimpleNamespace(is_set=lambda: False),
+    )
+    monkeypatch.setattr(
+        _reg_profile,
+        "log",
+        types.SimpleNamespace(warning=lambda msg: warnings.append(msg)),
+    )
+    monkeypatch.setattr(
+        _reg_profile,
+        "vcard_file",
+        lambda _config: (_ for _ in ()).throw(AssertionError("vcard_file called")),
+    )
+
+    await _reg_profile.update_vcard(bot)
+    await _reg_profile.update_avatar(bot)
+
+    assert len(warnings) == 2
+    assert all("XMPP session is not ready" in message for message in warnings)
+
+
+@pytest.mark.asyncio
 async def test_update_vcard_py_missing(monkeypatch):
     log_msgs = []
 
@@ -122,21 +154,6 @@ async def test_update_vcard_import_error(monkeypatch, tmp_path):
     monkeypatch.setattr(_reg_profile.os.path, "dirname",
                         lambda p: str(vcard_py.parent))
 
-    import importlib.util
-
-    orig_spec_from_file_location = importlib.util.spec_from_file_location
-
-    def our_spec_from_file_location(name, location):
-        # Force our vcard_py spec
-        spec = orig_spec_from_file_location(name, str(vcard_py))
-        return spec
-
-    monkeypatch.setattr(
-        _reg_profile.importlib.util,
-        "spec_from_file_location",
-        our_spec_from_file_location,
-    )
-
     error_msgs = []
     monkeypatch.setattr(
         _reg_profile,
@@ -160,20 +177,6 @@ async def test_update_vcard_not_str(monkeypatch, tmp_path):
                         lambda p: str(vcard_py.parent))
     monkeypatch.setattr(_reg_profile.os.path, "dirname",
                         lambda p: str(vcard_py.parent))
-
-    import importlib.util
-
-    orig_spec_from_file_location = importlib.util.spec_from_file_location
-
-    def our_spec_from_file_location(name, location):
-        spec = orig_spec_from_file_location(name, str(vcard_py))
-        return spec
-
-    monkeypatch.setattr(
-        _reg_profile.importlib.util,
-        "spec_from_file_location",
-        our_spec_from_file_location,
-    )
 
     error_msgs = []
     monkeypatch.setattr(
@@ -201,20 +204,6 @@ async def test_update_vcard_no_change(monkeypatch, tmp_path):
                         lambda p: str(vcard_py.parent))
     monkeypatch.setattr(_reg_profile.os.path, "dirname",
                         lambda p: str(vcard_py.parent))
-
-    import importlib.util
-
-    orig_spec_from_file_location = importlib.util.spec_from_file_location
-
-    def our_spec_from_file_location(name, location):
-        spec = orig_spec_from_file_location(name, str(vcard_py))
-        return spec
-
-    monkeypatch.setattr(
-        _reg_profile.importlib.util,
-        "spec_from_file_location",
-        our_spec_from_file_location,
-    )
 
     # patch SHA1 to return fixed; patch read_hash to match
     fixed_hash = "deadbeef"
@@ -245,20 +234,6 @@ async def test_update_vcard_success(monkeypatch, tmp_path):
                         lambda p: str(vcard_py.parent))
     monkeypatch.setattr(_reg_profile.os.path, "dirname",
                         lambda p: str(vcard_py.parent))
-
-    import importlib.util
-
-    orig_spec_from_file_location = importlib.util.spec_from_file_location
-
-    def our_spec_from_file_location(name, location):
-        spec = orig_spec_from_file_location(name, str(vcard_py))
-        return spec
-
-    monkeypatch.setattr(
-        _reg_profile.importlib.util,
-        "spec_from_file_location",
-        our_spec_from_file_location,
-    )
 
     # simulate hash changed
     monkeypatch.setattr(_reg_profile, "sha1", lambda b: "newhash12")
@@ -557,8 +532,6 @@ async def test_update_avatar_all_paths(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_setup_profile_user_entry(monkeypatch):
     # happy path: user exists
-    got_roster_called = []
-
     class FakeDBUsers:
         async def get(self, jid):
             return {"jid": jid}
@@ -567,9 +540,6 @@ async def test_setup_profile_user_entry(monkeypatch):
             assert False
 
     class FakeBot:
-        async def get_roster(self):
-            got_roster_called.append(True)
-
         boundjid = type("bjid", (), {"bare": "jidval"})()
         db = types.SimpleNamespace(users=FakeDBUsers())
 
@@ -591,7 +561,7 @@ async def test_setup_profile_user_entry(monkeypatch):
 
     await _reg_profile.setup_profile(FakeBot())
 
-    assert got_roster_called and wrote
+    assert wrote
 
 
 @pytest.mark.asyncio
@@ -607,9 +577,6 @@ async def test_setup_profile_user_created(monkeypatch):
             called.append(("create", jid, nick))
 
     class FakeBot:
-        async def get_roster(self):
-            called.append("roster")
-
         boundjid = type("bjid", (), {"bare": "jidval"})()
         db = types.SimpleNamespace(users=FakeDBUsers())
 
@@ -645,9 +612,6 @@ async def test_setup_profile_user_create_error(monkeypatch):
             raise Exception("fail!")
 
     class FakeBot:
-        async def get_roster(self):
-            called.append("roster")
-
         boundjid = type("bjid", (), {"bare": "jidval"})()
         db = types.SimpleNamespace(users=FakeDBUsers())
 
@@ -689,11 +653,14 @@ async def test_on_load_and_on_ready(monkeypatch):
         boundjid = type("Jid", (), {"bare": "jidval"})()
         db = types.SimpleNamespace(users=DummyUsers())
 
-    monkeypatch.setattr(_reg_profile, "setup_profile",
-                        lambda bot: _awaitable(None))
+    async def fake_setup_profile(bot):
+        called.append("setup_profile")
+
+    monkeypatch.setattr(_reg_profile, "setup_profile", fake_setup_profile)
 
     await _reg_profile.on_load(Bot())
 
+    assert "setup_profile" not in called
     assert "xep_0054" in called
     assert "xep_0084" in called
     assert "xep_0153" in called
@@ -704,6 +671,7 @@ async def test_on_load_and_on_ready(monkeypatch):
 
     await _reg_profile.on_ready(Bot())
 
+    assert "setup_profile" in called
     assert any(isinstance(x, tuple) and x[1] == "TIMEZONE" for x in called)
 
 

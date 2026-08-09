@@ -26,14 +26,15 @@ session starts or on plugin reload.
 
 import asyncio
 import hashlib
-import importlib.util
 import inspect
 import logging
 import os
 
+from bot.connection import session_is_ready
 from slixmpp.xmlstream import ET
 from utils.bundled_assets import resolve_bundled_asset
 from utils.config import config
+from utils.python_source import load_python_namespace
 from utils.runtime_paths import profile_state_file, vcard_file
 
 PLUGIN_META = {
@@ -86,15 +87,11 @@ def read_hash(path):
 
 
 def _load_vcard_xml(path):
-    """Load the configured vCard XML string from a Python file."""
+    """Load the configured vCard XML string without writing bytecode caches."""
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    spec = importlib.util.spec_from_file_location("vcard", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load vCard module from {path}")
-    vcardmod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(vcardmod)
-    return vcardmod.VCARD
+    namespace = load_python_namespace(path, module_name="_envsbot_runtime_vcard")
+    return namespace["VCARD"]
 
 
 def _read_binary_file(path):
@@ -194,6 +191,10 @@ async def update_vcard(bot):
     Uses VCARD global from vcard.py (XML, as string).
     Skips update if hash matches.
     """
+    if not session_is_ready(bot):
+        log.warning("[_REG_PROFILE] vCard update skipped: XMPP session is not ready")
+        return
+
     vcard_py_path = str(vcard_file(config))
     try:
         VCARD = await asyncio.to_thread(_load_vcard_xml, vcard_py_path)
@@ -290,6 +291,10 @@ async def update_avatar(bot):
     automatically receive avatar updates.
     """
 
+    if not session_is_ready(bot):
+        log.warning("[_REG_PROFILE] Avatar update skipped: XMPP session is not ready")
+        return
+
     avatar_path = config.get("avatar")
     avatar_type = config.get("avatar_type")
 
@@ -370,15 +375,14 @@ async def setup_profile(bot):
     This function performs all profile-related tasks once
     the XMPP session has started:
 
-    1. Ensures the roster is available.
+    1. Ensures the bot has a user record.
     2. Updates the vCard if necessary.
     3. Publishes a new avatar if it has changed.
 
-    This function is triggered automatically by the
-    ``session_start`` event handler registered by the plugin.
+    The bot lifecycle already requested the roster before plugin readiness.
+    Profile publication therefore runs from ``on_ready`` rather than during
+    module loading.
     """
-
-    await bot.get_roster()
 
     try:
         um = bot.db.users
@@ -424,8 +428,6 @@ async def on_load(bot):
     bot.register_plugin("xep_0153")
     bot.register_plugin("xep_0163")
 
-    await setup_profile(bot)
-
 
 async def on_ready(bot):
     """
@@ -437,6 +439,10 @@ async def on_ready(bot):
     bot : Bot
         The main bot instance.
     """
+    # Network profile publication belongs in the readiness phase, after all
+    # plugins are loaded and while the XMPP session is known to be established.
+    await setup_profile(bot)
+
     # Set timezone on startup from config file
     store = bot.db.users.plugin("vcard")
     await store.set(str(bot.boundjid.bare), "TIMEZONE", config.get("timezone",

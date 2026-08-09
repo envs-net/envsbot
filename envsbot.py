@@ -134,6 +134,7 @@ class Bot(
         self.last_version_check_result = None
         self.last_update_notified_version = None
         self.connection_start_time = None
+        self.session_ready = asyncio.Event()
         self.tasks = TaskSupervisor()
         self.tasks.bot = self
         self.command_executor = CommandExecutor(self)
@@ -176,6 +177,7 @@ class Bot(
         self.bot_plugins = PluginManager(self)
 
         self.add_event_handler("session_start", self.on_start)
+        self.add_event_handler("session_end", self.on_session_end)
         self.add_event_handler("groupchat_message", self.on_muc_message)
         self.add_event_handler("message", self.on_private_message)
 

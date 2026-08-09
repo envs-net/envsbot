@@ -53,6 +53,19 @@ def test_load_config_loads_python(tmp_path, monkeypatch):
     assert result["custom"] == "extra"
 
 
+def test_load_python_config_does_not_create_bytecode_cache(tmp_path, monkeypatch):
+    (tmp_path / "config.py").write_text(
+        'COMMAND_PREFIX = ";"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_loader, "BASE_DIR", tmp_path)
+
+    result = config_mod.load_config()
+
+    assert result["prefix"] == ";"
+    assert not (tmp_path / "__pycache__").exists()
+
+
 def test_load_config_with_partial_override_when_not_strict(tmp_path,
                                                            monkeypatch):
     (tmp_path / "config.py").write_text('COMMAND_PREFIX = ";"\n')

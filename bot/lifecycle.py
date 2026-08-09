@@ -164,6 +164,10 @@ class LifecycleMixin:
 
     async def on_start(self, event: Any) -> None:
         """Handle slixmpp session_start."""
+        session_ready = getattr(self, "session_ready", None)
+        if session_ready is not None:
+            session_ready.set()
+        self.accepting_commands = True
         self.connection_start_time = datetime.now()
         try:
             self["xep_0030"].add_feature("http://jabber.org/protocol/muc#user")
@@ -216,6 +220,13 @@ class LifecycleMixin:
             )
         else:
             log.info("[BOT] ✅ Bot started successfully")
+
+    def on_session_end(self, event: Any) -> None:
+        """Stop new outbound work as soon as the XMPP session ends."""
+        session_ready = getattr(self, "session_ready", None)
+        if session_ready is not None:
+            session_ready.clear()
+        self.accepting_commands = False
 
     async def shutdown_runtime(self) -> None:
         """Run the ordered shutdown once, even when callers race."""

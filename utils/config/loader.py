@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,6 +14,8 @@ from .defaults import (
     NORMALIZED_CONFIG_KEYS,
     PYTHON_CONFIG_KEY_MAP,
 )
+from utils.python_source import load_python_namespace
+
 from .errors import ConfigError
 from .validation import validate_config
 
@@ -78,12 +79,7 @@ def _load_python_config(path: Path) -> dict:
 
     module_name = "_envsbot_runtime_config"
     try:
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
-            raise ConfigError(f"Failed to load {path.name}: no import loader available")
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        namespace = load_python_namespace(path, module_name=module_name)
     except SyntaxError as e:
         raise ConfigError(_format_python_error(e, path)) from e
     except ConfigError:
@@ -92,7 +88,7 @@ def _load_python_config(path: Path) -> dict:
         raise ConfigError(f"Failed to load {path.name}: {e}") from e
 
     loaded = {}
-    for name, value in vars(module).items():
+    for name, value in namespace.items():
         if name.startswith("_"):
             continue
 

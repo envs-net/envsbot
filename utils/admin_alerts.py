@@ -83,6 +83,7 @@ class AdminAlertManager:
         summary: str,
         *,
         fingerprint: str = "",
+        resolved_summary: str | None = None,
     ) -> None:
         now = int(time.time())
         config = getattr(self.bot, "config", {}) or {}
@@ -112,7 +113,8 @@ class AdminAlertManager:
             previous = state.summary or summary
             state.summary = summary
             state.fingerprint = ""
-            await self._notify(f"✅ Resolved: {previous}", key=key, transition="resolved")
+            resolved = resolved_summary or previous
+            await self._notify(f"✅ Resolved: {resolved}", key=key, transition="resolved")
 
     async def report_task_circuit(self, plugin: str, name: str, error: str) -> None:
         """Open a task-circuit alert immediately; polling handles recovery."""
@@ -347,6 +349,10 @@ class AdminAlertManager:
             lag >= warning,
             f"Event-loop lag is {lag:.3f}s (warning {warning:.3f}s)",
             fingerprint="lag",
+            resolved_summary=(
+                f"Event-loop lag recovered to {lag:.3f}s "
+                f"(warning {warning:.3f}s)"
+            ),
         )
 
     async def run_once(self) -> None:

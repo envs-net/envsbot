@@ -68,6 +68,7 @@ def bot(monkeypatch):
                          "make_message", lambda self, *a, **k:
                          MagicMock(send=MagicMock(return_value=None))):
         b = ControlledBot()
+    b.session_ready.set()
     b.default_ns = "jabber:client"
     b.Message = MagicMock()
     b._XMLStream__event_handlers = {}
@@ -141,6 +142,31 @@ async def test_safe_send_message_sync_and_async(bot):
         raise Exception("fail")
     msg.send.side_effect = raise_exc
     assert await bot._safe_send_message(msg) is False
+
+
+@pytest.mark.asyncio
+async def test_safe_send_does_not_queue_into_slixmpp_after_session_end(bot):
+    message = MagicMock()
+    bot.session_ready.clear()
+
+    assert await bot._safe_send_message(message) is False
+    message.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_durable_send_persists_without_transport_attempt_when_disconnected(bot):
+    message = MagicMock()
+    message.__getitem__.side_effect = lambda key: {
+        "to": "user@example.org",
+        "body": "hello",
+    }.get(key, "")
+    enqueue = AsyncMock(return_value=7)
+    bot.outbox = types.SimpleNamespace(enqueue_message=enqueue)
+    bot.session_ready.clear()
+
+    assert await bot._safe_send_message(message, persist=True, category="rss") is True
+    message.send.assert_not_called()
+    enqueue.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -691,6 +717,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert bot.last_version_check_result is None
     assert bot.last_update_notified_version is None
     assert bot.connection_start_time is None
+    assert bot.session_ready.is_set() is False
     assert bot._startup_backup_done is False
     assert bot.db.path == "envsbot.sqlite3"
     assert bot.db.task_supervisor is bot.tasks
@@ -714,6 +741,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     ]
     assert event_handlers == [
         ("session_start", "on_start"),
+        ("session_end", "on_session_end"),
         ("groupchat_message", "on_muc_message"),
         ("message", "on_private_message"),
     ]
@@ -1142,10 +1170,22 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     await envsbot.Bot.on_start(bot, object())
 
     assert bot.connection_start_time is not None
+    assert bot.session_ready.is_set() is True
+    assert bot.accepting_commands is True
     assert features == [("xep_0030", "http://jabber.org/protocol/muc#user")]
     assert broadcasts == ["broadcast", "broadcast"]
     assert calls == ["roster", "db", "cache", "load_all", "ready", "backup", "restart"]
     assert bot.roster.auto_subscribe is True
+
+
+def test_on_session_end_marks_transport_unavailable(bot):
+    bot.session_ready.set()
+    bot.accepting_commands = True
+
+    envsbot.Bot.on_session_end(bot, object())
+
+    assert bot.session_ready.is_set() is False
+    assert bot.accepting_commands is False
 
 
 @pytest.mark.asyncio

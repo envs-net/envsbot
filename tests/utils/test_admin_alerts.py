@@ -75,3 +75,28 @@ async def test_task_circuit_hook_sends_immediate_alert(monkeypatch):
     assert send.await_count == 1
     assert "rss/feed-worker" in send.await_args.args[1]
     assert manager.runtime_state()["active"] == 1
+
+
+@pytest.mark.asyncio
+async def test_event_loop_recovery_reports_current_healthy_lag(monkeypatch):
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr("utils.admin_alerts.notify_admin", send)
+    state = SimpleNamespace(last_lag_seconds=2.721)
+    bot = SimpleNamespace(
+        config={"watchdog_lag_warning_seconds": 2.0},
+        watchdog=SimpleNamespace(state=state),
+    )
+    manager = AdminAlertManager(bot)
+
+    await manager.report_event_loop_lag(2.594, 2.0)
+    await manager.report_event_loop_lag(2.721, 2.0)
+    state.last_lag_seconds = 0.125
+    await manager._check_watchdog()
+
+    assert send.await_count == 2
+    recovery = send.await_args.args[1]
+    assert recovery == (
+        "✅ Resolved: Event-loop lag recovered to 0.125s "
+        "(warning 2.000s)"
+    )
+    assert "2.721s" not in recovery

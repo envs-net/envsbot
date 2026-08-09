@@ -9,6 +9,7 @@ from typing import Any
 
 from slixmpp.xmlstream import ET
 
+from bot.connection import session_is_ready
 from utils.outbox import ensure_message_origin_id
 
 log = logging.getLogger(__name__)
@@ -39,16 +40,20 @@ class MessageMixin:
             # is cleared, outbox recovery will replay the same XEP-0359 ID.
             origin_id = ensure_message_origin_id(message)
 
-        try:
-            result = message.send()
-            if inspect.isawaitable(result):
-                result = await result
-            if result is not False:
-                return True
-            error: Exception = RuntimeError("Slixmpp did not accept the stanza")
-        except Exception as exc:
-            error = exc
-            log.exception("[BOT] Failed to send message: %s", exc)
+        if not session_is_ready(self):
+            error: Exception = RuntimeError("XMPP session is not ready")
+            log.debug("[BOT] Deferring send because the XMPP session is not ready")
+        else:
+            try:
+                result = message.send()
+                if inspect.isawaitable(result):
+                    result = await result
+                if result is not False:
+                    return True
+                error = RuntimeError("Slixmpp did not accept the stanza")
+            except Exception as exc:
+                error = exc
+                log.exception("[BOT] Failed to send message: %s", exc)
 
         if persist:
             outbox = getattr(self, "outbox", None)

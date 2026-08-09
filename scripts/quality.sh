@@ -33,6 +33,7 @@ ruff check --select I,UP,B \
   plugins/idlerpg/tasks.py \
   plugins/rss/fetch.py \
   utils/bundled_assets.py \
+  utils/python_source.py \
   utils/command_execution.py \
   utils/config \
   utils/task_supervisor.py \
@@ -62,6 +63,7 @@ mypy \
   plugins/idlerpg/tasks.py \
   plugins/rss/fetch.py \
   utils/bundled_assets.py \
+  utils/python_source.py \
   utils/command_execution.py \
   utils/config \
   utils/task_supervisor.py \

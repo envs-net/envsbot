@@ -345,7 +345,11 @@ The supplied [`contrib/envsbot.service`](contrib/envsbot.service) uses
 `LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `RUNTIME_DATA_DIR`,
 `BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below
 `/var/lib/envsbot`. `RUNTIME_DATA_DIR` holds writable support files such as
-`vcard.py`, `chat_slang.csv` and profile hash markers.
+`vcard.py`, `chat_slang.csv` and profile hash markers. Runtime `config.py` and
+`vcard.py` are read without writing adjacent Python bytecode caches. Logging is
+written both to the configured rotating file and stderr; under systemd the
+stderr copy is available through `journalctl` (and may also reach syslog when
+the host forwards journal records).
 
 Use the deployment helper before installing or replacing the unit. Select the
 same external config path that the service should keep using:

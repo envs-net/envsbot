@@ -23,6 +23,12 @@ Recommended layout:
 /var/log/envsbot/          rotating file logs (journald receives console logs too)
 ```
 
+The two log destinations are intentional: envsbot writes one rotating file and
+also emits the same records to stderr, which systemd captures in the journal.
+If the host forwards journald to rsyslog/syslog, the console copy can therefore
+appear there as well; that is host-side forwarding, not a third envsbot log
+handler.
+
 Clone or copy the repository to `/srv/envsbot`, then create a virtualenv:
 
 ```bash
@@ -89,6 +95,12 @@ first startup. The default avatar is bundled with the Python package as well, so
 production deployments do not need `avatar.jpg` or `init_chat_slang.csv` copies
 in the application root. Configure a separate `AVATAR_PATH` only when using a
 custom avatar.
+
+Runtime Python data files are executed directly from source instead of being
+imported as modules, so current releases do not create `__pycache__` beside
+`/etc/envsbot/config.py` or `/var/lib/envsbot/vcard.py`. An old cache left by a
+previous release is unused and can be removed safely, for example with
+`sudo rm -rf /etc/envsbot/__pycache__`.
 
 Do not grant write access to `/srv/envsbot` merely to accommodate a database,
 configuration or runtime support file there. `envsbot systemd check` treats that

@@ -50,6 +50,22 @@ def boundjid_domain(xmpp: Any) -> str | None:
     return None
 
 
+def session_is_ready(xmpp: Any) -> bool:
+    """Return whether envsbot's established XMPP session is still usable.
+
+    Lightweight test doubles and third-party embedders that do not expose the
+    envsbot session marker retain the historical behavior and are treated as
+    ready.
+    """
+    marker = getattr(xmpp, "session_ready", None)
+    if marker is None:
+        return True
+    is_set = getattr(marker, "is_set", None)
+    if not callable(is_set):
+        return True
+    return bool(is_set())
+
+
 def connect_signature_parameters(connect_method: Any) -> Mapping[str, inspect.Parameter]:
     """Return inspectable connect() parameters, or an empty mapping."""
     try:
