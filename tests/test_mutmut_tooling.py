@@ -1,7 +1,9 @@
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 
@@ -140,3 +142,26 @@ def test_docs_do_not_recommend_repository_pythonpath_for_mutmut():
 
     assert 'PYTHONPATH="$PWD" mutmut' not in docs
     assert "./scripts/mutmut.sh" in docs
+
+
+def test_mutmut_targets_only_covered_lines_and_skips_logging_noise():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    config = pyproject["tool"]["mutmut"]
+
+    assert config["mutate_only_covered_lines"] is True
+
+    patterns = [re.compile(pattern) for pattern in config["do_not_mutate_patterns"]]
+    for logging_call in (
+        'log.info("connected")',
+        '_dep_config.log.exception("failed")',
+        'logger.warning("slow")',
+    ):
+        assert any(pattern.search(logging_call) for pattern in patterns)
+
+    # User-visible and semantic strings must remain in the mutation surface.
+    for semantic_line in (
+        'return "warning"',
+        'await bot.reply(msg, "failed")',
+        'state["status"] = "healthy"',
+    ):
+        assert not any(pattern.search(semantic_line) for pattern in patterns)

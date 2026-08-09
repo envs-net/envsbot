@@ -99,6 +99,16 @@ source_paths = [
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = ["--no-cov", "-q", "-x", "--tb=short", "--disable-warnings"]
+# Mutate only statements actually exercised by the clean suite.  Mutmut 3
+# otherwise mutates every line of a function as soon as that function is hit
+# once, which turns unexecuted branches into misleading survivors.
+mutate_only_covered_lines = true
+# Exact logging text is operational telemetry rather than program semantics.
+# Keep mutations for returned/replied/admin-alert text; only logging calls are
+# excluded from the mutation surface.
+do_not_mutate_patterns = [
+    '(?:^|\.)(?:log|logger)\.(?:debug|info|warning|error|exception|critical)\(',
+]
 also_copy = [
     "config_sample.py",
     "vcard_sample.py",
