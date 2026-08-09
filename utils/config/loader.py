@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+from utils.python_source import load_python_namespace
+
 from .defaults import (
     BASE_DIR,
     CONFIG_FILENAME,
@@ -14,8 +16,6 @@ from .defaults import (
     NORMALIZED_CONFIG_KEYS,
     PYTHON_CONFIG_KEY_MAP,
 )
-from utils.python_source import load_python_namespace
-
 from .errors import ConfigError
 from .validation import validate_config
 
