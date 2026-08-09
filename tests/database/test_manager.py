@@ -106,6 +106,23 @@ async def test_manual_flush_raises_after_retries(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_database_manager_close_reports_final_flush_failure_and_still_closes(
+    tmp_db_path, monkeypatch
+):
+    db = DatabaseManager(tmp_db_path)
+    await db.connect(start_background=False)
+    db.users.flush_all = AsyncMock(side_effect=RuntimeError("write failed"))
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="final database flush failed during close"):
+        await db.close()
+
+    assert db.conn is None
+    assert db.users is None
+    assert db.rooms is None
+
+
+@pytest.mark.asyncio
 async def test_database_manager_close_flushes(tmp_db_path):
     db = DatabaseManager(tmp_db_path)
     await db.connect()

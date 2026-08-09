@@ -94,6 +94,6 @@ async def test_watchdog_worker_waits_for_runtime_ready():
     assert task.done() is False
 
     runtime_ready.set()
-    await task
+    assert await task is None
 
     assert task.done() is True

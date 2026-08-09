@@ -763,8 +763,9 @@ class DatabaseManager:
         """Stop background tasks, flush caches, and close idempotently."""
         async with self._close_lock:
             await self.stop_background_tasks(timeout=5.0)
+            final_flush_ok = True
             if self.users is not None:
-                await self._flush_with_retry(raise_on_failure=False)
+                final_flush_ok = await self._flush_with_retry(raise_on_failure=False)
 
             conn = self.conn
             self.conn = None
@@ -782,6 +783,9 @@ class DatabaseManager:
             self.idlerpg = None
             self.outbox = None
             self.command_usage = None
+
+            if not final_flush_ok:
+                raise RuntimeError("final database flush failed during close")
 
     async def execute(
         self,
