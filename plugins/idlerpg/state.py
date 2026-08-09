@@ -188,6 +188,14 @@ async def _set_data(
 
 _SeasonRevision = tuple[int, tuple[int, int]]
 _SeasonEventsByRoom = dict[str, list[dict[str, Any]] | None]
+_PublicExportInputs = tuple[
+    dict[str, Any],
+    dict[str, bool],
+    _SeasonEventsByRoom | None,
+    dict[str, int] | None,
+    dict[str, bool] | None,
+    dict[str, _SeasonRevision],
+]
 
 
 async def _prepare_public_export_season_events(
@@ -354,6 +362,87 @@ def _record_public_export_result(
     return False
 
 
+async def _prepare_public_export_inputs(
+    bot,
+    data: dict[str, Any] | None,
+    *,
+    force: bool,
+) -> _PublicExportInputs | None:
+    """Build one stable state/event input set for the public export worker."""
+    normalized = _normalized_store(bot)
+    snapshot_loader = getattr(normalized, "load_export_snapshot", None)
+    snapshot: dict[str, Any]
+    season_events_by_room: _SeasonEventsByRoom | None
+    season_event_counts_by_room: dict[str, int] | None
+    season_events_append_by_room: dict[str, bool] | None
+    pending_season_revisions: dict[str, _SeasonRevision]
+    uses_db_snapshot: bool
+    if callable(snapshot_loader):
+        try:
+            (
+                snapshot,
+                season_events_by_room,
+                season_event_counts_by_room,
+                season_events_append_by_room,
+                pending_season_revisions,
+            ) = await snapshot_loader(
+                previous_revisions=dict(_PUBLIC_EXPORT_SEASON_REVISIONS),
+                force=force,
+                include_full_season_events=bool(
+                    _dep_config.EXPORT_FULL_SEASON_EVENTS
+                ),
+            )
+        except Exception:
+            _dep_config.log.exception(
+                "[IDLERPG] Could not build DB-consistent public export snapshot"
+            )
+            return None
+        uses_db_snapshot = True
+    else:
+        if data is None:
+            data = await _get_data(bot)
+        # Copy before any later await so a legacy/fallback store still hands the
+        # worker one stable in-memory generation.
+        snapshot = copy.deepcopy(data)
+        season_events_by_room = None
+        season_event_counts_by_room = None
+        season_events_append_by_room = None
+        pending_season_revisions = {}
+        uses_db_snapshot = False
+
+    rooms_value = snapshot.get("rooms", {}) if isinstance(snapshot, dict) else {}
+    rooms = rooms_value if isinstance(rooms_value, dict) else {}
+    try:
+        enabled_rooms = await _enabled_rooms(bot, rooms.keys())
+    except Exception:
+        _dep_config.log.debug(
+            "[IDLERPG] Could not resolve enabled rooms for public export",
+            exc_info=True,
+        )
+        return None
+
+    if not uses_db_snapshot:
+        (
+            season_events_by_room,
+            season_event_counts_by_room,
+            season_events_append_by_room,
+            pending_season_revisions,
+        ) = await _prepare_public_export_season_events(
+            bot,
+            rooms,
+            enabled_rooms,
+            force=force,
+        )
+    return (
+        snapshot,
+        enabled_rooms,
+        season_events_by_room,
+        season_event_counts_by_room,
+        season_events_append_by_room,
+        pending_season_revisions,
+    )
+
+
 async def _refresh_public_export(
     bot,
     data: dict[str, Any] | None = None,
@@ -370,35 +459,18 @@ async def _refresh_public_export(
         if not force and interval > 0 and now < _PUBLIC_EXPORT_SCHEDULE["next_at"]:
             return False
 
-        if data is None:
-            data = await _get_data(bot)
-        rooms_value = data.get("rooms", {}) if isinstance(data, dict) else {}
-        rooms = rooms_value if isinstance(rooms_value, dict) else {}
-        try:
-            enabled_rooms = await _enabled_rooms(bot, rooms.keys())
-        except Exception:
-            _dep_config.log.debug(
-                "[IDLERPG] Could not resolve enabled rooms for public export",
-                exc_info=True,
-            )
+        prepared = await _prepare_public_export_inputs(bot, data, force=force)
+        if prepared is None:
             return False
-
         (
+            snapshot,
+            enabled_rooms,
             season_events_by_room,
             season_event_counts_by_room,
             season_events_append_by_room,
             pending_season_revisions,
-        ) = await _prepare_public_export_season_events(
-            bot,
-            rooms,
-            enabled_rooms,
-            force=force,
-        )
+        ) = prepared
 
-        # Snapshot before yielding to the worker: the thread must never observe
-        # game-state mutations from later commands/ticks. Full season history is
-        # fetched separately and therefore never copied into the mutable state.
-        snapshot = copy.deepcopy(data)
         started_at = _dep_formatting._now()
         started_perf = time.perf_counter()
         _PUBLIC_EXPORT_RUNTIME.update({

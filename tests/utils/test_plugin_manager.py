@@ -1009,6 +1009,35 @@ async def test_plugin_resilient_task_waits_for_runtime_ready():
 
 
 @pytest.mark.asyncio
+async def test_resilient_ready_gate_sets_initial_service_heartbeat():
+    bot = FakeBot()
+    bot.runtime_ready = asyncio.Event()
+    heartbeats = []
+    bot.tasks = types.SimpleNamespace(
+        heartbeat=lambda plugin, name: heartbeats.append((plugin, name))
+    )
+
+    async def worker():
+        return "done"
+
+    task = asyncio.create_task(
+        plugin_manager._run_plugin_factory_when_ready(
+            bot,
+            worker,
+            plugin="demo",
+            name="demo-service",
+        )
+    )
+    await asyncio.sleep(0)
+    assert heartbeats == []
+
+    bot.runtime_ready.set()
+
+    assert await task == "done"
+    assert heartbeats == [("demo", "demo-service")]
+
+
+@pytest.mark.asyncio
 async def test_cancelled_gated_plugin_task_closes_unstarted_coroutine():
     bot = FakeBot()
     bot.runtime_ready = asyncio.Event()

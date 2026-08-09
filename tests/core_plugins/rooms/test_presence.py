@@ -480,3 +480,26 @@ async def test_reconcile_autojoin_rooms_respects_intentional_leave(fake_bot):
 
     assert summary["intentional"] == 1
     fake_bot.plugin["xep_0045"].join_muc.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_room_join_health_loop_uses_heartbeat_aware_wait(fake_bot, monkeypatch):
+    waits = []
+
+    async def heartbeat_wait(bot, plugin, name, delay):
+        waits.append((bot, plugin, name, delay))
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(rooms_lifecycle, "sleep_with_heartbeat", heartbeat_wait)
+
+    with pytest.raises(asyncio.CancelledError):
+        await rooms_lifecycle.room_join_health_loop(fake_bot)
+
+    assert waits == [
+        (
+            fake_bot,
+            "rooms",
+            rooms_lifecycle._ROOM_HEALTH_TASK_NAME,
+            rooms_lifecycle._ROOM_HEALTH_CHECK_INTERVAL_SECONDS,
+        )
+    ]

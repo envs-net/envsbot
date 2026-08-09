@@ -26,12 +26,12 @@ import psutil
 from bot.lifecycle import _restart_notification_paths
 from bot.room_state import direct_roster_contacts
 from core_plugins._core import JOINED_ROOMS
-from utils.command import COMMANDS, Role, command
-from utils.file_security import PRIVATE_FILE_MODE
-from utils.config import config
 from utils.audit import audit_event
-from utils.task_supervisor import create_plugin_task
+from utils.command import COMMANDS, Role, command
+from utils.config import config
+from utils.file_security import PRIVATE_FILE_MODE
 from utils.runtime_paths import vcard_file
+from utils.task_supervisor import create_resilient_plugin_task
 from utils.updatecheck import check_for_updates_once, version_check_worker
 from utils.version import __version__, display_version
 
@@ -869,10 +869,10 @@ async def on_ready(bot):
     existing = getattr(bot, "version_check_task", None)
     if existing is not None and not existing.done():
         return
-    bot.version_check_task = create_plugin_task(
+    bot.version_check_task = create_resilient_plugin_task(
         bot,
         "_admin",
-        version_check_worker(bot),
+        lambda: version_check_worker(bot),
         name="version-check",
     )
     log.info("[ADMIN] Version check worker started")

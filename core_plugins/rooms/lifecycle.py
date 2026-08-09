@@ -7,7 +7,11 @@ import time
 from functools import partial
 
 from utils.config import config
-from utils.task_supervisor import create_plugin_task, create_resilient_plugin_task
+from utils.task_supervisor import (
+    create_plugin_task,
+    create_resilient_plugin_task,
+    sleep_with_heartbeat,
+)
 
 from .invites import (
     cleanup_expired_room_invites,
@@ -284,7 +288,12 @@ def _touch_room_health_task(bot) -> None:
 async def room_join_health_loop(bot) -> None:
     """Periodically verify autojoin coverage and repair missing rooms."""
     while True:
-        await asyncio.sleep(_ROOM_HEALTH_CHECK_INTERVAL_SECONDS)
+        await sleep_with_heartbeat(
+            bot,
+            "rooms",
+            _ROOM_HEALTH_TASK_NAME,
+            _ROOM_HEALTH_CHECK_INTERVAL_SECONDS,
+        )
         try:
             summary = await reconcile_autojoin_rooms(bot)
         except asyncio.CancelledError:

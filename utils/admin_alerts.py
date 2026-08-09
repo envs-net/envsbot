@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from utils.admin_notify import notify_admin
-from utils.task_supervisor import wait_for_runtime_ready
+from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
 
 log = logging.getLogger(__name__)
 
@@ -377,16 +377,16 @@ class AdminAlertManager:
             self._last_error = None
 
     async def _run(self) -> None:
-        await wait_for_runtime_ready(self.bot)
+        await wait_for_runtime_ready(
+            self.bot, plugin="_runtime", name="admin-alert-manager"
+        )
         config = getattr(self.bot, "config", {}) or {}
         interval = max(30, int(config.get("admin_alert_interval_seconds", 60) or 60))
         while True:
             await self.run_once()
-            supervisor = getattr(self.bot, "tasks", None)
-            heartbeat = getattr(supervisor, "heartbeat", None)
-            if callable(heartbeat):
-                heartbeat("_runtime", "admin-alert-manager")
-            await asyncio.sleep(interval)
+            await sleep_with_heartbeat(
+                self.bot, "_runtime", "admin-alert-manager", interval
+            )
 
     def active_count(self) -> int:
         return sum(1 for state in self._states.values() if state.active)

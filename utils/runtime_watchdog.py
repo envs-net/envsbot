@@ -10,7 +10,10 @@ import time
 from dataclasses import dataclass, asdict
 from typing import Any
 
-from utils.task_supervisor import wait_for_runtime_ready
+from utils.task_supervisor import (
+    wait_for_event_with_heartbeat,
+    wait_for_runtime_ready,
+)
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +117,9 @@ class RuntimeWatchdog:
         sd_notify("STOPPING=1\nSTATUS=EnvsBot shutting down")
 
     async def _run(self) -> None:
-        await wait_for_runtime_ready(self.bot)
+        await wait_for_runtime_ready(
+            self.bot, plugin="_runtime", name="runtime-watchdog"
+        )
         config = getattr(self.bot, "config", {}) or {}
         configured_interval = max(
             1.0,
@@ -133,14 +138,13 @@ class RuntimeWatchdog:
         expected = loop.time() + interval
         try:
             while not self.stop_event.is_set():
-                stop_requested = True
-                try:
-                    await asyncio.wait_for(
-                        self.stop_event.wait(),
-                        timeout=interval,
-                    )
-                except asyncio.TimeoutError:
-                    stop_requested = False
+                stop_requested = await wait_for_event_with_heartbeat(
+                    self.bot,
+                    "_runtime",
+                    "runtime-watchdog",
+                    self.stop_event,
+                    interval,
+                )
                 if stop_requested:
                     break
 

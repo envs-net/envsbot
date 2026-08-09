@@ -866,3 +866,75 @@ def test_generation_id_changes_only_when_export_content_changes(tmp_path, monkey
     idlerpg._export_public_state(data, {room_jid: True})
     third = _assert_generation_hashes(room_dir)["generation_id"]
     assert third != second
+
+
+@pytest.mark.asyncio
+async def test_public_export_prefers_db_consistent_snapshot_over_mutable_cache(monkeypatch):
+    from plugins.idlerpg import config as idlerpg_config
+    from plugins.idlerpg import export as idlerpg_export
+    from plugins.idlerpg import state as idlerpg_state
+
+    room_jid = "room@conf"
+    persisted_room = idlerpg._blank_room()
+    persisted_room["season"] = {"id": "season-a", "started_at": 100, "ends_at": 0}
+    persisted_room["players"] = {
+        "alice@example.org": {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 4,
+            "next": 100,
+        }
+    }
+    persisted = {"rooms": {room_jid: persisted_room}}
+    mutable = {"rooms": {room_jid: idlerpg._blank_room()}}
+    mutable["rooms"][room_jid]["players"] = {
+        "alice@example.org": {
+            "name": "Alice",
+            "class": "sysadmin",
+            "level": 999,
+            "next": 1,
+        }
+    }
+    captured = []
+
+    class Normalized:
+        async def load_state(self):
+            return persisted
+
+        async def save_state(self, _data, *, room_jids=None):
+            return None
+
+        async def load_export_snapshot(self, **kwargs):
+            assert kwargs["force"] is False
+            return (
+                persisted,
+                {room_jid: [{"ts": 110, "kind": "game", "text": "persisted"}]},
+                {room_jid: 1},
+                {room_jid: False},
+                {room_jid: (100, (1, 7))},
+            )
+
+    async def enabled_rooms(_bot, room_jids=()):
+        # Mutating the live cache after the DB snapshot must not affect this export.
+        mutable["rooms"][room_jid]["players"]["alice@example.org"]["level"] = 1000
+        return {str(room): True for room in room_jids}
+
+    def export_state(data, enabled, events, counts, append):
+        captured.append((data, enabled, events, counts, append))
+        return {"ok": True}
+
+    bot = DummyBot()
+    bot.db.idlerpg = Normalized()
+    monkeypatch.setattr(idlerpg_config, "EXPORT_ENABLED", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_FULL_SEASON_EVENTS", True)
+    monkeypatch.setattr(idlerpg_config, "EXPORT_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(idlerpg_state, "_enabled_rooms", enabled_rooms)
+    monkeypatch.setattr(idlerpg_export, "_export_public_state", export_state)
+    idlerpg_state._reset_public_export_schedule()
+
+    assert await idlerpg_state._refresh_public_export(bot, mutable, force=False) is True
+
+    exported = captured[0][0]
+    assert exported["rooms"][room_jid]["players"]["alice@example.org"]["level"] == 4
+    assert captured[0][2][room_jid][0]["text"] == "persisted"
+    assert captured[0][3] == {room_jid: 1}

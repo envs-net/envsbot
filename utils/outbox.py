@@ -13,7 +13,11 @@ from typing import Any
 from bot.room_state import JOINED_ROOMS
 from database.outbox import OutboxCapacityError
 from utils.performance import observe
-from utils.task_supervisor import ExpectedTaskExit, runtime_is_ready
+from utils.task_supervisor import (
+    ExpectedTaskExit,
+    runtime_is_ready,
+    wait_for_event_with_heartbeat,
+)
 
 log = logging.getLogger(__name__)
 
@@ -345,15 +349,13 @@ class PersistentOutbox:
                     await asyncio.sleep(0)
                     continue
                 self.wakeup.clear()
-                try:
-                    await asyncio.wait_for(
-                        self.wakeup.wait(),
-                        timeout=poll_seconds,
-                    )
-                except TimeoutError:
-                    # A poll timeout is the normal trigger for the next queue
-                    # scan when no producer explicitly wakes the worker.
-                    continue
+                await wait_for_event_with_heartbeat(
+                    self.bot,
+                    "_runtime",
+                    "persistent-outbox",
+                    self.wakeup,
+                    poll_seconds,
+                )
         finally:
             self.wakeup.clear()
 

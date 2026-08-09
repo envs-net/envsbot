@@ -269,6 +269,22 @@ async def test_version_check_worker_cancelled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_version_check_worker_surfaces_unexpected_iteration_failure(monkeypatch):
+    async def broken(bot, announce=True):
+        raise RuntimeError("unexpected worker failure")
+
+    monkeypatch.setattr(
+        updatecheck,
+        "version_check_settings",
+        lambda: (True, 60, "https://example.test"),
+    )
+    monkeypatch.setattr(updatecheck, "check_for_updates_once", broken)
+
+    with pytest.raises(RuntimeError, match="unexpected worker failure"):
+        await updatecheck.version_check_worker(SimpleNamespace())
+
+
+@pytest.mark.asyncio
 async def test_send_update_notification_joins_muc_target(monkeypatch):
     monkeypatch.setitem(updatecheck.config, "version_check_url", "https://example.test/releases/latest")
     monkeypatch.setitem(updatecheck.config, "version_check_notify_jid", "room@conf.test")

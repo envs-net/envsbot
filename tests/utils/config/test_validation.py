@@ -570,3 +570,10 @@ def test_validate_config_rejects_unknown_nested_settings():
         )
 
     assert "idlerpg.export_full_season_eventz: unknown setting" in str(exc.value)
+
+
+def test_validate_config_rejects_too_short_task_stale_threshold():
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config({"task_stale_after_seconds": 30})
+
+    assert "task_stale_after_seconds" in str(exc.value)

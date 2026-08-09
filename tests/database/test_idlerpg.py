@@ -314,3 +314,102 @@ async def test_idlerpg_event_retention_prunes_only_old_completed_history(tmp_db_
         ]
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_idlerpg_export_snapshot_keeps_state_and_event_revision_together(tmp_db_path):
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect()
+    try:
+        state = _state()
+        await db.idlerpg.save_state(state)
+
+        (
+            first_state,
+            first_events,
+            first_counts,
+            first_append,
+            first_revisions,
+        ) = await db.idlerpg.load_export_snapshot(force=False)
+
+        assert first_state["rooms"]["room@conf"]["players"]["alice@example.org"]["level"] == 4
+        assert [event["text"] for event in first_events["room@conf"]] == [
+            "current event"
+        ]
+        assert first_counts == {"room@conf": 1}
+        assert first_append == {"room@conf": False}
+
+        (
+            unchanged_state,
+            unchanged_events,
+            unchanged_counts,
+            unchanged_append,
+            unchanged_revisions,
+        ) = await db.idlerpg.load_export_snapshot(
+            previous_revisions=first_revisions,
+            force=False,
+        )
+        assert unchanged_state == first_state
+        assert unchanged_events == {"room@conf": None}
+        assert unchanged_counts == {"room@conf": 1}
+        assert unchanged_append == {"room@conf": False}
+        assert unchanged_revisions == first_revisions
+
+        (
+            forced_state,
+            forced_events,
+            forced_counts,
+            forced_append,
+            forced_revisions,
+        ) = await db.idlerpg.load_export_snapshot(
+            previous_revisions=first_revisions,
+            force=True,
+        )
+        assert forced_state == first_state
+        assert [event["text"] for event in forced_events["room@conf"]] == [
+            "current event"
+        ]
+        assert forced_counts == {"room@conf": 1}
+        assert forced_append == {"room@conf": False}
+        assert forced_revisions == first_revisions
+
+        no_history = await db.idlerpg.load_export_snapshot(
+            previous_revisions=first_revisions,
+            include_full_season_events=False,
+        )
+        assert no_history[0] == first_state
+        assert no_history[1:] == (None, None, None, {})
+
+        changed = copy.deepcopy(first_state)
+        room = changed["rooms"]["room@conf"]
+        room["players"]["alice@example.org"]["level"] = 9
+        room["events"].append(
+            {
+                "ts": 120,
+                "kind": "game",
+                "text": "same commit as level nine",
+            }
+        )
+        await db.idlerpg.save_state(changed, room_jids={"room@conf"})
+
+        (
+            second_state,
+            second_events,
+            second_counts,
+            second_append,
+            second_revisions,
+        ) = await db.idlerpg.load_export_snapshot(
+            previous_revisions=first_revisions,
+            force=False,
+        )
+
+        assert second_state["rooms"]["room@conf"]["players"]["alice@example.org"]["level"] == 9
+        assert [event["text"] for event in second_events["room@conf"]] == [
+            "same commit as level nine"
+        ]
+        assert second_counts == {"room@conf": 2}
+        assert second_append == {"room@conf": True}
+        assert second_revisions["room@conf"][0] == 100
+        assert second_revisions["room@conf"][1][0] == 2
+    finally:
+        await db.close()

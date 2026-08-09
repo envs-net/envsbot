@@ -136,6 +136,20 @@ async def test_shutdown_runtime_handles_skipped_and_failed_components():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_runtime_reports_degraded_message_cache(caplog):
+    async def close_cache():
+        return False
+
+    bot = DummyLifecycle(close_cache=close_cache, close=AsyncMock())
+
+    with caplog.at_level("INFO", logger="bot.lifecycle"):
+        assert await bot.shutdown_runtime() is False
+
+    assert "phase=message_cache status=degraded" in caplog.text
+    assert "message_cache=degraded" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_shutdown_runtime_reports_partial_plugin_cleanup(caplog):
     async def unload_all():
         return False, "idlerpg checkpoint failed"

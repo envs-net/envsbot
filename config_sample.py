@@ -161,7 +161,8 @@ TASK_RESTART_MAX_SECONDS = 300.0
 # Startup-only: restart envsbot after changing this value.
 TASK_RESTART_RESET_SECONDS = 900.0
 
-# Heartbeats older than this are reported by `,tasks stale`.
+# Heartbeats older than this are reported by `,tasks stale`; values below 60 seconds
+# are rejected.
 TASK_STALE_AFTER_SECONDS = 3600.0
 
 

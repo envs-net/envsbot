@@ -105,9 +105,9 @@ class _RuntimeReadyCoroutine(Coroutine):
                 self._close_awaitable()
 
 
-async def _run_plugin_factory_when_ready(bot, factory):
+async def _run_plugin_factory_when_ready(bot, factory, *, plugin=None, name=None):
     """Create and run a resilient plugin worker only after runtime readiness."""
-    await wait_for_runtime_ready(bot)
+    await wait_for_runtime_ready(bot, plugin=plugin, name=name)
     return await factory()
 
 
@@ -357,7 +357,12 @@ class PluginManager:
         """Create a supervised task with restart backoff and circuit breaking."""
 
         def ready_factory():
-            return _run_plugin_factory_when_ready(self.bot, factory)
+            return _run_plugin_factory_when_ready(
+                self.bot,
+                factory,
+                plugin=plugin_name,
+                name=name or f"{plugin_name}-task",
+            )
 
         supervisor = getattr(self.bot, "tasks", None)
         if supervisor is None:

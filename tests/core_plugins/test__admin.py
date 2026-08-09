@@ -718,11 +718,16 @@ async def test_on_ready_version_worker_branches(monkeypatch, fake_bot):
     created = []
 
     monkeypatch.setattr(_admin, "version_check_worker", lambda bot: "worker")
-    monkeypatch.setattr(_admin, "create_plugin_task", lambda *a, **k: created.append((a, k)) or "task")
+    monkeypatch.setattr(
+        _admin,
+        "create_resilient_plugin_task",
+        lambda *a, **k: created.append((a, k)) or "task",
+    )
     fake_bot.version_check_task = types.SimpleNamespace(done=lambda: True)
     await _admin.on_ready(fake_bot)
     assert fake_bot.version_check_task == "task"
     assert created[0][0][1] == "_admin"
+    assert created[0][0][2]() == "worker"
     assert created[0][1]["name"] == "version-check"
 
 

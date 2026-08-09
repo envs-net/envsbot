@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from typing import Any
 
-from utils.task_supervisor import ExpectedTaskExit
+from utils.task_supervisor import ExpectedTaskExit, task_heartbeat_interval
 
 log = logging.getLogger(__name__)
 
@@ -243,10 +243,14 @@ class MessageCache:
             self.max_messages,
         )
 
-    async def close(self) -> None:
-        """Flush queued writes and stop the writer task."""
+    async def close(self) -> bool:
+        """Flush queued writes and report whether shutdown persistence is clean.
+
+        ``False`` means entries remain in the final retry backlog.  Callers can
+        then mark shutdown as partial instead of logging a misleading success.
+        """
         if not self._started or self._closing:
-            return
+            return not bool(self._retry_backlog)
 
         self._closing = True
         await self._queue.put(_STOP)
@@ -289,6 +293,7 @@ class MessageCache:
             self._queue.qsize(),
             len(self._retry_backlog),
         )
+        return not bool(self._retry_backlog)
 
     async def add_message(
         self,
@@ -394,8 +399,14 @@ class MessageCache:
     async def _writer_loop(self) -> None:
         while True:
             self._writer_heartbeat()
+            supervisor_bot = getattr(self.task_supervisor, "bot", None)
+            heartbeat_timeout = task_heartbeat_interval(
+                supervisor_bot, maximum=30.0
+            )
             try:
-                first = await asyncio.wait_for(self._queue.get(), timeout=300.0)
+                first = await asyncio.wait_for(
+                    self._queue.get(), timeout=heartbeat_timeout
+                )
             except TimeoutError:
                 continue
             if first is _STOP:

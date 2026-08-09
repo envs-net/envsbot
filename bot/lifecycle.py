@@ -403,8 +403,8 @@ class LifecycleMixin:
             message_cache = getattr(self, "message_cache", None)
             close_cache = getattr(message_cache, "close", None)
             if callable(close_cache):
-                await asyncio.wait_for(close_cache(), timeout=10.0)
-                cache_status = "ok"
+                cache_result = await asyncio.wait_for(close_cache(), timeout=10.0)
+                cache_status = "degraded" if cache_result is False else "ok"
         except Exception:
             cache_status = "failed"
             log.exception(

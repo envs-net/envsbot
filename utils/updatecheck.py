@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlsplit
 from urllib.parse import urlparse
 
 from utils.config import config
+from utils.task_supervisor import sleep_with_heartbeat
 from utils.version import __version__, display_version, normalized_version
 from utils.xmpp_notify import ensure_notification_target_joined, notification_message_type
 
@@ -222,11 +223,5 @@ async def version_check_worker(bot) -> None:
     """Periodically check whether a newer bot version is available."""
     while True:
         _enabled, interval, _release_url = version_check_settings()
-        try:
-            await check_for_updates_once(bot, announce=True)
-        except asyncio.CancelledError:
-            log.info("version_check_worker cancelled")
-            raise
-        except Exception as error:
-            log.warning("Error in version_check_worker: %s", error)
-        await asyncio.sleep(interval)
+        await check_for_updates_once(bot, announce=True)
+        await sleep_with_heartbeat(bot, "_admin", "version-check", interval)

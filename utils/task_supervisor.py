@@ -43,14 +43,43 @@ def runtime_is_ready(bot: Any) -> bool:
     return bool(is_set()) if callable(is_set) else True
 
 
-async def wait_for_runtime_ready(bot: Any) -> None:
-    """Wait until startup has released autonomous background work."""
-    if runtime_is_ready(bot):
-        return
-    runtime_ready = getattr(bot, "runtime_ready", None)
-    wait = getattr(runtime_ready, "wait", None)
-    if callable(wait):
-        await wait()
+async def wait_for_runtime_ready(
+    bot: Any,
+    *,
+    plugin: str | None = None,
+    name: str | None = None,
+) -> None:
+    """Wait until startup releases background work and mark service progress."""
+    if not runtime_is_ready(bot):
+        runtime_ready = getattr(bot, "runtime_ready", None)
+        wait = getattr(runtime_ready, "wait", None)
+        if callable(wait):
+            await wait()
+    if plugin is not None and name is not None:
+        _touch_heartbeat(bot, plugin, name)
+
+
+def task_heartbeat_interval(bot: Any, *, maximum: float = 30.0) -> float:
+    """Return a heartbeat cadence that stays safely below the stale threshold.
+
+    Operators may tune ``TASK_STALE_AFTER_SECONDS`` below the historical
+    five-minute heartbeat cadence.  A 30-second absolute ceiling also keeps an
+    in-progress wait safe when the threshold is lowered by runtime reload.
+    """
+    config = getattr(bot, "config", {}) or {}
+    try:
+        stale_after = float(config.get("task_stale_after_seconds", 3600.0) or 3600.0)
+    except (TypeError, ValueError):
+        stale_after = 3600.0
+    safe_maximum = max(0.05, float(maximum))
+    return max(0.05, min(safe_maximum, max(0.05, stale_after / 2.0)))
+
+
+def _touch_heartbeat(bot: Any, plugin: str, name: str) -> None:
+    supervisor = getattr(bot, "tasks", None)
+    heartbeat = getattr(supervisor, "heartbeat", None)
+    if callable(heartbeat):
+        heartbeat(plugin, name)
 
 
 async def sleep_with_heartbeat(
@@ -59,25 +88,51 @@ async def sleep_with_heartbeat(
     name: str,
     delay: float,
     *,
-    interval: float = 300.0,
+    interval: float = 30.0,
 ) -> None:
     """Sleep while keeping a supervised service task heartbeat fresh.
 
     Long, intentional waits (for example a daily report schedule or RSS
-    backoff) must not look like a hung worker to `tasks stale`.  The remaining
-    delay is decremented explicitly so tests can replace ``asyncio.sleep``
-    without requiring a real monotonic clock advance.
+    backoff) must not look like a hung worker to `tasks stale`.  The cadence is
+    capped by half of the configured stale threshold so custom operator values
+    remain safe.  The remaining delay is decremented explicitly so tests can
+    replace ``asyncio.sleep`` without requiring a real monotonic clock advance.
     """
     remaining = max(0.0, float(delay))
-    heartbeat_interval = max(1.0, float(interval))
+    heartbeat_interval = task_heartbeat_interval(bot, maximum=interval)
     while remaining > 0:
-        supervisor = getattr(bot, "tasks", None)
-        heartbeat = getattr(supervisor, "heartbeat", None)
-        if callable(heartbeat):
-            heartbeat(plugin, name)
+        _touch_heartbeat(bot, plugin, name)
         step = min(remaining, heartbeat_interval)
         await asyncio.sleep(step)
         remaining -= step
+
+
+async def wait_for_event_with_heartbeat(
+    bot: Any,
+    plugin: str,
+    name: str,
+    event: asyncio.Event,
+    delay: float,
+    *,
+    interval: float = 30.0,
+) -> bool:
+    """Wait up to ``delay`` seconds for an event while refreshing heartbeat.
+
+    Returns ``True`` when the event became set and ``False`` when the complete
+    delay elapsed.  This is the event-aware counterpart to
+    :func:`sleep_with_heartbeat` for stoppable/wakeable service loops.
+    """
+    remaining = max(0.0, float(delay))
+    heartbeat_interval = task_heartbeat_interval(bot, maximum=interval)
+    while remaining > 0 and not event.is_set():
+        _touch_heartbeat(bot, plugin, name)
+        step = min(remaining, heartbeat_interval)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=step)
+            return True
+        except TimeoutError:
+            remaining -= step
+    return event.is_set()
 
 
 @dataclass(frozen=True)
@@ -278,9 +333,9 @@ class TaskSupervisor:
             "created_at": _now(),
             "done_at": None,
             "last_error": None,
-            # A heartbeat is only meaningful after the task explicitly reports one.
-            # Initializing it with the creation time makes intentionally sleeping
-            # workers look stale even though they are healthy and still running.
+            # Keep explicit heartbeat state separate from creation time. Stale
+            # detection uses ``created_at`` only as the initial service progress
+            # marker; one-shot tasks without a heartbeat remain exempt.
             "heartbeat_at": None,
             "restart_count": 0,
             "circuit_state": "closed",
@@ -425,7 +480,7 @@ class TaskSupervisor:
                     restart_limit,
                     exc,
                 )
-                await asyncio.sleep(delay)
+                await sleep_with_heartbeat(self.bot, plugin, name, delay)
                 meta["circuit_state"] = "closed"
                 meta["next_restart_at"] = None
                 continue
@@ -528,14 +583,26 @@ class TaskSupervisor:
         return True
 
     def stale_tasks(self, *, max_age_seconds: float = 3600.0) -> list[TaskInfo]:
-        """Return running tasks whose heartbeat is older than max_age_seconds."""
+        """Return running tasks whose progress signal is too old.
+
+        A service that hangs before its first explicit heartbeat used to be
+        invisible forever.  For services only, creation time is therefore the
+        initial progress timestamp until the first heartbeat arrives.  One-shot
+        tasks keep the historical behavior because they are not required to
+        implement a heartbeat contract.
+        """
         now = datetime.now(UTC)
         stale: list[TaskInfo] = []
         for info in self.snapshot(include_done=False):
-            if info.status != "running" or not info.heartbeat_at:
+            if info.status != "running":
+                continue
+            progress_at = info.heartbeat_at
+            if not progress_at and info.kind == "service":
+                progress_at = info.created_at
+            if not progress_at:
                 continue
             try:
-                heartbeat = datetime.fromisoformat(info.heartbeat_at)
+                heartbeat = datetime.fromisoformat(progress_at)
                 if heartbeat.tzinfo is None:
                     heartbeat = heartbeat.replace(tzinfo=UTC)
                 age = (now - heartbeat.astimezone(UTC)).total_seconds()

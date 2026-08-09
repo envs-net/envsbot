@@ -318,3 +318,18 @@ async def test_message_cache_close_tolerates_pre_cancelled_writer_and_drains_que
 
     assert [entry["body"] for entry in store.saved] == ["queued"]
     assert cache._started is False
+
+
+@pytest.mark.asyncio
+async def test_message_cache_close_reports_unflushed_retry_backlog():
+    class FailingStore(FakeStore):
+        async def save_batch(self, entries, *, limit_per_conversation):
+            raise RuntimeError("disk unavailable")
+
+    cache = message_cache.MessageCache(max_messages=5)
+    await cache.start(FailingStore())
+    await cache.add_entry({"conversation": "room", "body": "queued"})
+
+    assert await cache.close() is False
+    assert cache.stats()["retry_backlog"] == 1
+    assert await cache.close() is False

@@ -119,11 +119,12 @@ its tasks through `restart_tasks(bot)` or `on_ready(bot)`.
 ,tasks restart rss
 ```
 
-`tasks stale` is read-only and reports supervised tasks whose heartbeat is older than `TASK_STALE_AFTER_SECONDS` (default: one hour). Restart support is intentionally opt-in per plugin.
+`tasks stale` is read-only and reports supervised tasks with an expired progress heartbeat (`TASK_STALE_AFTER_SECONDS`, default: one hour). Services that have not emitted their first heartbeat yet use creation time as the initial progress marker, so an early startup hang is still visible; ordinary one-shot tasks without a heartbeat remain exempt. Heartbeat-aware sleeps refresh at no more than half of this threshold and never wait more than 30 seconds between heartbeats; values below 60 seconds are rejected. Restart support is intentionally opt-in per plugin.
 
-Plugins with long-running loops should use `utils.task_supervisor.create_plugin_task()`
-instead of `asyncio.create_task()` so tasks appear in `,tasks`, are cancelled on
-plugin unload and can be restarted consistently.
+Plugins with long-running loops should use `utils.task_supervisor.create_resilient_plugin_task()`
+instead of `asyncio.create_task()` so tasks appear as services in `,tasks`, are
+cancelled on plugin unload and recover from unexpected worker failures with the
+shared restart/circuit-breaker policy.
 
 ## Backup retention
 

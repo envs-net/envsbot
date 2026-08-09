@@ -590,6 +590,89 @@ async def test_clear_plugin_failures_resets_open_circuit_diagnostics():
     assert supervisor.clear_plugin_failures("demo") == 1
     assert supervisor.summary()[1] == 0
     assert supervisor.snapshot(include_done=True) == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_ready_gate_sets_initial_service_heartbeat():
+    heartbeats = []
+
+    class Supervisor:
+        def heartbeat(self, plugin, name):
+            heartbeats.append((plugin, name))
+            return True
+
+    bot = SimpleNamespace(runtime_ready=asyncio.Event(), tasks=Supervisor())
+    waiter = asyncio.create_task(
+        ts.wait_for_runtime_ready(bot, plugin="runtime", name="service")
+    )
+    await asyncio.sleep(0)
+    assert heartbeats == []
+
+    bot.runtime_ready.set()
+
+    await waiter
+    assert heartbeats == [("runtime", "service")]
+
+
+def test_task_heartbeat_interval_tracks_configured_stale_threshold():
+    bot = SimpleNamespace(config={"task_stale_after_seconds": 120})
+    assert ts.task_heartbeat_interval(bot) == 30.0
+    assert ts.task_heartbeat_interval(bot, maximum=100) == 60.0
+    assert ts.task_heartbeat_interval(bot, maximum=20) == 20.0
+
+    invalid = SimpleNamespace(config={"task_stale_after_seconds": "bad"})
+    assert ts.task_heartbeat_interval(invalid) == 30.0
+
+
+@pytest.mark.asyncio
+async def test_service_without_first_heartbeat_becomes_stale():
+    supervisor = TaskSupervisor()
+
+    async def sleeper():
+        while True:
+            await asyncio.sleep(60)
+
+    task = supervisor.create(
+        "alpha", sleeper(), name="service-no-heartbeat", kind="service"
+    )
+    supervisor._tasks[task]["created_at"] = "2000-01-01T00:00:00+00:00"
+    supervisor._tasks[task]["heartbeat_at"] = None
+
+    stale = supervisor.stale_tasks(max_age_seconds=1)
+    assert [item.name for item in stale] == ["service-no-heartbeat"]
+
+    await supervisor.cancel_task(task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_event_with_heartbeat_uses_adaptive_chunks(monkeypatch):
+    calls = []
+    timeouts = []
+
+    class Supervisor:
+        def heartbeat(self, plugin, name):
+            calls.append((plugin, name))
+            return True
+
+    async def fake_wait_for(awaitable, timeout):
+        awaitable.close()
+        timeouts.append(timeout)
+        raise TimeoutError
+
+    monkeypatch.setattr(ts.asyncio, "wait_for", fake_wait_for)
+    bot = SimpleNamespace(
+        tasks=Supervisor(),
+        config={"task_stale_after_seconds": 4},
+    )
+
+    result = await ts.wait_for_event_with_heartbeat(
+        bot, "runtime", "worker", asyncio.Event(), 5, interval=300
+    )
+
+    assert result is False
+    assert timeouts == [2.0, 2.0, 1.0]
+    assert calls == [("runtime", "worker")] * 3
+
 @pytest.mark.asyncio
 async def test_sleep_with_heartbeat_refreshes_during_long_wait(monkeypatch):
     calls = []

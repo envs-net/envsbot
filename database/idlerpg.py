@@ -325,12 +325,11 @@ class IdleRPGStateStore:
 
         return prepared, recent_ids
 
-    async def season_event_revision(
+    async def _season_event_revision_locked(
         self,
         room_jid: str,
         season_started_at: int,
     ) -> tuple[int, int]:
-        """Return ``(event_count, max_rowid)`` for an append-only season stream."""
         row = await self.db.fetch_one(
             """
             SELECT COUNT(*) AS count,
@@ -347,6 +346,46 @@ class IdleRPGStateStore:
             max(0, int(row["max_rowid"] or 0)),
         )
 
+    async def season_event_revision(
+        self,
+        room_jid: str,
+        season_started_at: int,
+    ) -> tuple[int, int]:
+        """Return ``(event_count, max_rowid)`` for an append-only season stream."""
+        async with self._lock:
+            return await self._season_event_revision_locked(
+                room_jid, season_started_at
+            )
+
+    async def _load_season_events_locked(
+        self,
+        room_jid: str,
+        season_started_at: int,
+        *,
+        after_rowid: int = 0,
+    ) -> list[dict[str, Any]]:
+        rows = await self.db.fetch_all(
+            "SELECT rowid AS storage_rowid, event_id, season_started_at, data_json "
+            "FROM idlerpg_events "
+            "WHERE room_jid = ? AND season_started_at = ? AND rowid > ? "
+            "ORDER BY ts ASC, rowid ASC",
+            (
+                str(room_jid),
+                max(0, int(season_started_at)),
+                max(0, int(after_rowid)),
+            ),
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            event = _json_load(str(row["data_json"]), {})
+            if not isinstance(event, dict):
+                continue
+            event[_EVENT_ID_KEY] = str(row["event_id"])
+            event[_EVENT_SEASON_KEY] = _integer(row["season_started_at"])
+            event[_EVENT_ROWID_KEY] = _integer(row["storage_rowid"])
+            result.append(event)
+        return result
+
     async def load_season_events(
         self,
         room_jid: str,
@@ -361,27 +400,100 @@ class IdleRPGStateStore:
         the complete active season after every new event.
         """
         async with self._lock:
-            rows = await self.db.fetch_all(
-                "SELECT rowid AS storage_rowid, event_id, season_started_at, data_json "
-                "FROM idlerpg_events "
-                "WHERE room_jid = ? AND season_started_at = ? AND rowid > ? "
-                "ORDER BY ts ASC, rowid ASC",
-                (
-                    str(room_jid),
-                    max(0, int(season_started_at)),
-                    max(0, int(after_rowid)),
-                ),
+            return await self._load_season_events_locked(
+                room_jid,
+                season_started_at,
+                after_rowid=after_rowid,
             )
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            event = _json_load(str(row["data_json"]), {})
-            if not isinstance(event, dict):
-                continue
-            event[_EVENT_ID_KEY] = str(row["event_id"])
-            event[_EVENT_SEASON_KEY] = _integer(row["season_started_at"])
-            event[_EVENT_ROWID_KEY] = _integer(row["storage_rowid"])
-            result.append(event)
-        return result
+
+    async def load_export_snapshot(
+        self,
+        *,
+        previous_revisions: Mapping[str, tuple[int, tuple[int, int]]] | None = None,
+        force: bool = False,
+        include_full_season_events: bool = True,
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, list[dict[str, Any]] | None] | None,
+        dict[str, int] | None,
+        dict[str, bool] | None,
+        dict[str, tuple[int, tuple[int, int]]],
+    ]:
+        """Load one DB-consistent public-export snapshot.
+
+        State rows, season revisions and the selected event rows are all read
+        while holding the same IdleRPG store lock.  Concurrent game mutations
+        may continue in RAM, but they cannot commit through ``save_state`` until
+        this snapshot is complete.  Therefore one export generation can never
+        combine player/season state from one commit with event history from a
+        later commit.
+        """
+        previous = dict(previous_revisions or {})
+        async with self._lock:
+            # SAVEPOINT gives all SELECTs one SQLite read snapshot while the
+            # manager's task-reentrant transaction lock keeps other runtime DB
+            # work outside that boundary. The fetch helpers below may safely
+            # reacquire the same lock from this task.
+            async with self.db.transaction(label="idlerpg_export_snapshot"):
+                data = await self._load_state_locked()
+                if not include_full_season_events:
+                    return data, None, None, None, {}
+
+                events_by_room: dict[str, list[dict[str, Any]] | None] = {}
+                counts_by_room: dict[str, int] = {}
+                append_by_room: dict[str, bool] = {}
+                pending: dict[str, tuple[int, tuple[int, int]]] = {}
+                rooms_value = data.get("rooms", {}) if isinstance(data, dict) else {}
+                rooms = rooms_value if isinstance(rooms_value, Mapping) else {}
+                for raw_room_jid, raw_room in rooms.items():
+                    if not isinstance(raw_room, dict):
+                        continue
+                    room_jid = str(raw_room_jid)
+                    season = raw_room.get("season")
+                    started_at = (
+                        _integer(season.get("started_at"))
+                        if isinstance(season, Mapping)
+                        else 0
+                    )
+                    revision = await self._season_event_revision_locked(
+                        room_jid, started_at
+                    )
+                    revision_key = (started_at, revision)
+                    old_revision = previous.get(room_jid)
+                    pending[room_jid] = revision_key
+                    counts_by_room[room_jid] = int(revision[0])
+
+                    can_append = (
+                        not force
+                        and old_revision is not None
+                        and old_revision[0] == started_at
+                        and int(revision[0]) >= int(old_revision[1][0])
+                        and int(revision[1]) >= int(old_revision[1][1])
+                    )
+                    if old_revision == revision_key and not force:
+                        events_by_room[room_jid] = None
+                        append_by_room[room_jid] = False
+                        continue
+
+                    after_rowid = (
+                        int(old_revision[1][1])
+                        if can_append and old_revision is not None
+                        else 0
+                    )
+                    events_by_room[room_jid] = await self._load_season_events_locked(
+                        room_jid,
+                        started_at,
+                        after_rowid=after_rowid,
+                    )
+                    append_by_room[room_jid] = bool(can_append)
+
+                return (
+                    data,
+                    events_by_room,
+                    counts_by_room,
+                    append_by_room,
+                    pending,
+                )
 
     async def _delete_stale_rooms(
         self,
