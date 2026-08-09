@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+from collections.abc import Buffer
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -15,7 +16,7 @@ class _NoBytecodeSourceLoader(importlib.machinery.SourceFileLoader):
     def set_data(
         self,
         path: str,
-        data: bytes,
+        data: Buffer,
         *,
         _mode: int = 0o666,
     ) -> None:
