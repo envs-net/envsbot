@@ -88,7 +88,6 @@ class DatabaseManager:
         self._close_lock = asyncio.Lock()
         self.transaction_lock = AsyncRLock()
         self._savepoint_counter = 0
-        self._runtime_schema_expected = False
 
     def _connection(self) -> aiosqlite.Connection:
         """Return the live connection or fail with a clear lifecycle error."""
@@ -228,7 +227,6 @@ class DatabaseManager:
 
         self._stop_event = asyncio.Event()
         self._running = False
-        self._runtime_schema_expected = bool(run_migrations)
         try:
             conn = await aiosqlite.connect(self.path)
             self.conn = conn
@@ -290,7 +288,6 @@ class DatabaseManager:
             self.outbox = None
             self.command_usage = None
             self._running = False
-            self._runtime_schema_expected = False
             if failed_conn is not None:
                 try:
                     await failed_conn.close()
@@ -762,40 +759,12 @@ class DatabaseManager:
             await asyncio.gather(*tasks, return_exceptions=True)
             log.warning("[DB] Timed out waiting for supervised database workers")
 
-    async def _should_flush_users_on_close(self) -> bool:
-        """Return whether the user/runtime cache has a usable persistence schema.
-
-        ``connect(run_migrations=False)`` is intentionally used by migration and
-        schema-compatibility tooling before the application tables necessarily
-        exist.  In that mode a final user-cache flush is not applicable.  When
-        migrations were expected, missing runtime tables remain an error path:
-        ``close()`` still attempts the flush so the failure is surfaced instead
-        of being silently hidden.
-        """
-        if self.users is None or self.conn is None:
-            return False
-
-        try:
-            rows = await self.fetch_all(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name IN ('users', 'users_runtime')"
-            )
-        except Exception:
-            # Do not mask a broken live database.  Let the real flush attempt
-            # fail and propagate through close().
-            return True
-
-        table_names = {str(row["name"]) for row in rows}
-        if {"users", "users_runtime"} <= table_names:
-            return True
-        return self._runtime_schema_expected
-
     async def close(self) -> None:
         """Stop background tasks, flush caches, and close idempotently."""
         async with self._close_lock:
             await self.stop_background_tasks(timeout=5.0)
             final_flush_ok = True
-            if await self._should_flush_users_on_close():
+            if self.users is not None:
                 final_flush_ok = await self._flush_with_retry(raise_on_failure=False)
 
             conn = self.conn

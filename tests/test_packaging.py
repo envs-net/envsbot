@@ -108,6 +108,17 @@ def test_ci_verifies_constraint_dependency_closure():
     assert "python scripts/check_constraints.py constraints/python313.txt" in drone
 
 
+def test_ci_invokes_quality_script_via_shell():
+    """CI must not depend on executable bits or an exec-enabled workspace."""
+    github = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
+    drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
+
+    assert "sh scripts/quality.sh" in github
+    assert drone.count("sh scripts/quality.sh") == 2
+    assert "./scripts/quality.sh" not in github
+    assert "./scripts/quality.sh" not in drone
+
+
 def test_github_actions_use_node24_generations():
     workflow = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
 

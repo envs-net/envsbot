@@ -10,7 +10,7 @@ steps:
     - python -m pip install -c constraints/python312.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
     - python scripts/check_constraints.py constraints/python312.txt
-    - ./scripts/quality.sh
+    - sh scripts/quality.sh
     - python -m build
     - python scripts/check_wheel.py
     - pytest -W error::RuntimeWarning -W error::DeprecationWarning
@@ -33,7 +33,7 @@ steps:
     - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
     - python scripts/check_constraints.py constraints/python313.txt
-    - ./scripts/quality.sh
+    - sh scripts/quality.sh
     - python -m build
     - python scripts/check_wheel.py
     - pytest -W error::RuntimeWarning -W error::DeprecationWarning

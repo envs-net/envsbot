@@ -252,7 +252,7 @@ Development dependencies provide the local quality runner:
 
 ```bash
 pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
-scripts/quality.sh
+sh scripts/quality.sh
 ```
 
 Use the constraints file matching the interpreter (`python312.txt` or

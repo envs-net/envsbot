@@ -123,22 +123,6 @@ async def test_database_manager_close_reports_final_flush_failure_and_still_clos
 
 
 @pytest.mark.asyncio
-async def test_database_manager_close_skips_flush_without_runtime_schema(
-    tmp_path,
-):
-    db = DatabaseManager(str(tmp_path / "schema-only.db"))
-    await db.connect(run_migrations=False, start_background=False)
-    users = db.users
-    assert users is not None
-    users.flush_all = AsyncMock(side_effect=AssertionError("flush must not run"))
-
-    await db.close()
-
-    users.flush_all.assert_not_awaited()
-    assert db.conn is None
-
-
-@pytest.mark.asyncio
 async def test_database_manager_close_flushes(tmp_db_path):
     db = DatabaseManager(tmp_db_path)
     await db.connect()
