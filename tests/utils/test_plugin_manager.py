@@ -1155,3 +1155,25 @@ async def test_runtime_events_dispatch_and_cleanup():
     pm._runtime_event_handlers.pop("demo", None)
     await pm.dispatch_runtime_event("public_groupchat_message", "msg-2")
     assert calls == [("sync", "msg-1"), ("async", "msg-1")]
+
+
+def test_create_resilient_task_delegates_to_supervisor():
+    expected = object()
+    supervisor = types.SimpleNamespace(
+        create_resilient=MagicMock(return_value=expected)
+    )
+    bot = types.SimpleNamespace(tasks=supervisor)
+    manager = PluginManager(bot)
+    factory = MagicMock()
+
+    result = manager.create_resilient_task("demo", factory)
+
+    assert result is expected
+    supervisor.create_resilient.assert_called_once_with(
+        "demo",
+        factory,
+        name=None,
+        max_restarts=None,
+        service=True,
+    )
+    factory.assert_not_called()

@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from database.manager import DatabaseManager
-from database.outbox import OutboxCapacityError
+from database.outbox import OutboxCapacityError, OutboxStore
 
 
 @pytest.mark.asyncio
@@ -264,3 +267,31 @@ async def test_outbox_retry_keeps_stable_origin_id(tmp_db_path):
         assert retried.origin_id == "stable-origin"
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_outbox_dead_letters_uses_default_limit_and_returns_dicts():
+    rows = [
+        {
+            "id": index,
+            "destination": f"user-{index}@example.org",
+            "category": "admin",
+            "attempts": 1,
+            "max_attempts": 1,
+            "created_at": 100 + index,
+            "dead_at": 200 + index,
+            "last_error": f"failure-{index}",
+        }
+        for index in range(20, 0, -1)
+    ]
+    db = SimpleNamespace(fetch_all=AsyncMock(return_value=rows))
+    store = OutboxStore(db)
+
+    result = await store.dead_letters()
+
+    assert result == rows
+    db.fetch_all.assert_awaited_once()
+    sql, params = db.fetch_all.await_args.args
+    assert "WHERE status='dead'" in sql
+    assert "ORDER BY id DESC" in sql
+    assert params == (20,)

@@ -1,6 +1,7 @@
+import sys
 from datetime import datetime, timezone
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -86,3 +87,40 @@ async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch)
         "tasks: 24 services running, 0 one-shots running, "
         "1 one-shots completed, 0 failed, 0 open circuit(s)"
     ) in report
+
+
+def _fake_backups_module(monkeypatch, *, latest, result):
+    module = ModuleType("utils.backups")
+    module.list_backups = MagicMock(return_value=[latest])
+    module.verify_backup = MagicMock(return_value=result)
+    module.smoke_test_backup = MagicMock(return_value=result)
+    monkeypatch.setitem(sys.modules, "utils.backups", module)
+    return module
+
+
+@pytest.mark.asyncio
+async def test_backup_state_verifies_latest_backup(monkeypatch, tmp_path):
+    from utils.admin_reports import _backup_state
+
+    latest = SimpleNamespace(path=tmp_path / "latest.zip", name="latest.zip")
+    backups = _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
+
+    assert await _backup_state() == ("latest.zip", "ok")
+    backups.list_backups.assert_called_once_with()
+    backups.verify_backup.assert_called_once_with(latest.path)
+    backups.smoke_test_backup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_backup_state_smoke_tests_when_requested(monkeypatch, tmp_path):
+    from utils.admin_reports import _backup_state
+
+    latest = SimpleNamespace(path=tmp_path / "latest.zip", name="latest.zip")
+    backups = _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
+
+    assert await _backup_state(smoke_test=True) == (
+        "latest.zip",
+        "ok+restore-smoke",
+    )
+    backups.smoke_test_backup.assert_called_once_with(latest.path)
+    backups.verify_backup.assert_not_called()

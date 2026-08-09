@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -104,3 +105,130 @@ def test_ensure_message_origin_id_reuses_explicit_id():
     assert ensure_message_origin_id(message, "stable-123") == "stable-123"
     assert message.data["id"] == "stable-123"
     assert message.data["origin_id"]["id"] == "stable-123"
+
+
+@pytest.mark.asyncio
+async def test_outbox_stop_signals_worker_and_waits_for_clean_exit():
+    runtime = PersistentOutbox(SimpleNamespace(config={}))
+
+    async def worker():
+        await runtime.stop_event.wait()
+
+    task = asyncio.create_task(worker())
+    runtime.task = task
+
+    await runtime.stop(timeout=0.5)
+
+    assert runtime.stop_event.is_set()
+    assert runtime.wakeup.is_set()
+    assert runtime.task is None
+    assert task.done()
+    assert task.cancelled() is False
+
+
+@pytest.mark.asyncio
+async def test_outbox_stop_uses_default_timeout(monkeypatch):
+    import utils.outbox as outbox_module
+
+    runtime = PersistentOutbox(SimpleNamespace(config={}))
+    task = asyncio.create_task(asyncio.sleep(0))
+    await task
+    runtime.task = task
+    seen = {}
+
+    async def wait_for(awaitable, timeout):
+        seen["timeout"] = timeout
+        return await awaitable
+
+    monkeypatch.setattr(outbox_module.asyncio, "wait_for", wait_for)
+
+    await runtime.stop()
+
+    assert seen == {"timeout": 10.0}
+
+
+@pytest.mark.asyncio
+async def test_outbox_enqueue_uses_defaults_and_wakes_worker():
+    alerts = SimpleNamespace(report_outbox_capacity=AsyncMock())
+    store = SimpleNamespace(enqueue=AsyncMock(return_value=42))
+    bot = SimpleNamespace(config={}, alerts=alerts)
+    runtime = PersistentOutbox(bot)
+    runtime.store = store
+
+    result = await runtime.enqueue(
+        destination="user@example.org",
+        body="hello",
+        message_type="chat",
+    )
+
+    assert result == 42
+    store.enqueue.assert_awaited_once_with(
+        destination="user@example.org",
+        body="hello",
+        message_type="chat",
+        category="message",
+        dedupe_key=message_dedupe_key("message", "user@example.org", "hello"),
+        origin_id=None,
+        max_attempts=12,
+        available_at=None,
+        max_pending=10000,
+        max_bytes=50 * 1024 * 1024,
+        max_per_destination=1000,
+        max_per_category=5000,
+    )
+    assert runtime.wakeup.is_set()
+    alerts.report_outbox_capacity.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_outbox_enqueue_capacity_failure_is_reported_without_wakeup():
+    from database.outbox import OutboxCapacityError
+
+    report = AsyncMock()
+    store = SimpleNamespace(
+        enqueue=AsyncMock(side_effect=OutboxCapacityError("queue full"))
+    )
+    runtime = PersistentOutbox(
+        SimpleNamespace(
+            config={},
+            alerts=SimpleNamespace(report_outbox_capacity=report),
+        )
+    )
+    runtime.store = store
+
+    assert await runtime.enqueue(
+        destination="user@example.org", body="hello", message_type="chat"
+    ) is None
+    assert runtime.capacity_rejections == 1
+    assert runtime.last_error == "OutboxCapacityError: queue full"
+    assert runtime.wakeup.is_set() is False
+    report.assert_awaited_once_with("queue full")
+
+
+@pytest.mark.asyncio
+async def test_outbox_enqueue_message_uses_default_type_and_options():
+    runtime = PersistentOutbox(SimpleNamespace(config={}))
+    runtime.enqueue = AsyncMock(return_value=9)
+    message = {"to": "user@example.org", "body": "hello"}
+
+    result = await runtime.enqueue_message(message)
+
+    assert result == 9
+    runtime.enqueue.assert_awaited_once_with(
+        destination="user@example.org",
+        body="hello",
+        message_type="chat",
+        category="message",
+        dedupe_key=None,
+        max_attempts=None,
+        origin_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_outbox_enqueue_message_rejects_unserializable_message():
+    runtime = PersistentOutbox(SimpleNamespace(config={}))
+    runtime.enqueue = AsyncMock(return_value=9)
+
+    assert await runtime.enqueue_message({"body": "missing destination"}) is None
+    runtime.enqueue.assert_not_awaited()
