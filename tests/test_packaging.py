@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import runpy
+import stat
 import tomllib
 from pathlib import Path
 
@@ -116,6 +117,16 @@ def test_ci_invokes_quality_script_via_shell():
     assert drone.count("- sh scripts/quality.sh") == 2
     assert "./scripts/quality.sh" not in github
     assert "./scripts/quality.sh" not in drone
+
+
+def test_operator_shell_scripts_are_executable():
+    for relative_path in (
+        "scripts/quality.sh",
+        "scripts/mutmut.sh",
+        "scripts/update-constraints.sh",
+    ):
+        mode = (ROOT / relative_path).stat().st_mode
+        assert mode & stat.S_IXUSR, f"{relative_path} must be executable"
 
 
 def test_github_actions_use_node24_generations():
