@@ -4,7 +4,7 @@ import pytest
 import types
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import core_plugins._admin as _admin
 
@@ -420,6 +420,13 @@ def test_presence_connection_and_room_snapshots(monkeypatch):
     assert _admin._connection_line(
         types.SimpleNamespace(connection_start_time=BadConnectionTime())
     ) == "Connection: unknown"
+
+    aware_connection = datetime.now(timezone.utc) - timedelta(seconds=5)
+    aware_line = _admin._connection_line(
+        types.SimpleNamespace(connection_start_time=aware_connection)
+    )
+    assert aware_line.startswith("Connection: ")
+    assert aware_line != "Connection: unknown"
 
     assert _admin._room_occupant_count({"nicks": {"a": {}, "b": {}}}) == 2
     assert _admin._room_occupant_count({"nicks": ["a"]}) == 0

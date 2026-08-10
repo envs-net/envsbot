@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from utils.logging_helpers import kv
@@ -173,7 +173,7 @@ class LifecycleMixin:
         # The transport is available now, but DB/cache/plugins are not ready yet.
         # Message routing checks this flag before touching runtime state.
         self.accepting_commands = False
-        self.connection_start_time = datetime.now()
+        self.connection_start_time = datetime.now(timezone.utc)
 
         try:
             try:

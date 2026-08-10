@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -51,6 +51,30 @@ async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
     assert "backup: backup.zip (ok)" in report
     assert "commands (24h): 7 use(s), 0 failed" in report
     assert "http://" not in report and "https://" not in report
+
+
+@pytest.mark.asyncio
+async def test_daily_admin_report_handles_legacy_naive_local_start_time(monkeypatch):
+    monkeypatch.setattr(
+        "utils.admin_reports._backup_state",
+        AsyncMock(return_value=("backup.zip", "ok")),
+    )
+    bot = SimpleNamespace(
+        connection_start_time=datetime.now() - timedelta(hours=2),
+        config={},
+        presence=SimpleNamespace(joined_rooms={}),
+        tasks=None,
+        outbox=None,
+        db=SimpleNamespace(rooms=None, maintenance_state={}, command_usage=None),
+        bot_plugins=SimpleNamespace(failed_plugins={}),
+        watchdog=None,
+        alerts=None,
+    )
+
+    report = await build_daily_admin_report(bot)
+
+    assert "• uptime: 0s" not in report
+    assert "• uptime: unknown" not in report
 
 @pytest.mark.asyncio
 async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch):

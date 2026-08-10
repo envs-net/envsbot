@@ -1215,6 +1215,8 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     await envsbot.Bot.on_start(bot, object())
 
     assert bot.connection_start_time is not None
+    assert bot.connection_start_time.tzinfo is not None
+    assert bot.connection_start_time.utcoffset().total_seconds() == 0
     assert bot.session_ready.is_set() is True
     assert bot.runtime_ready.is_set() is True
     assert bot.accepting_commands is True

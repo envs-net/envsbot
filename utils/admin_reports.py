@@ -63,8 +63,10 @@ async def build_daily_admin_report(bot: Any) -> str:
     started = getattr(bot, "connection_start_time", None)
     if isinstance(started, datetime):
         if started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-        uptime = _duration(datetime.now(timezone.utc).timestamp() - started.timestamp())
+            started = started.astimezone()
+        uptime = _duration(
+            (datetime.now(timezone.utc) - started.astimezone(timezone.utc)).total_seconds()
+        )
     else:
         uptime = "unknown"
 

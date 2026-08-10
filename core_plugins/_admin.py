@@ -17,7 +17,7 @@ import os
 import platform
 import tempfile
 from contextlib import suppress
-from datetime import datetime
+from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
 
@@ -159,7 +159,9 @@ def _connection_line(bot) -> str:
     if not connection_start:
         return "Connection: unknown"
     try:
-        uptime = datetime.now() - connection_start
+        if connection_start.tzinfo is None:
+            connection_start = connection_start.astimezone()
+        uptime = datetime.now(timezone.utc) - connection_start.astimezone(timezone.utc)
         return f"Connection: {human_time(uptime.total_seconds())}"
     except Exception:
         log.debug("[ADMIN] Could not calculate connection uptime", exc_info=True)
