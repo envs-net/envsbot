@@ -720,6 +720,17 @@ def test_prepare_release_target_fetches_branches_without_bulk_tags(tmp_path, mon
     assert validated == ["v1.8.0"]
 
 
+def _git_test_env() -> dict[str, str]:
+    """Return a Git environment isolated from operator-specific config."""
+    env = os.environ.copy()
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env.pop("GIT_CONFIG", None)
+    env.pop("GIT_CONFIG_COUNT", None)
+    env.pop("GIT_CONFIG_PARAMETERS", None)
+    return env
+
+
 def _git_cmd(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -727,8 +738,33 @@ def _git_cmd(root: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=_git_test_env(),
     )
     return result.stdout.strip()
+
+
+def test_git_test_commands_ignore_global_signing_configuration(tmp_path, monkeypatch):
+    global_config = tmp_path / "global.gitconfig"
+    global_config.write_text(
+        "[tag]\n"
+        "\tgpgSign = true\n"
+        "[commit]\n"
+        "\tgpgSign = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_cmd(repo, "init", "-b", "main")
+    _git_cmd(repo, "config", "user.name", "envsbot tests")
+    _git_cmd(repo, "config", "user.email", "envsbot@example.invalid")
+    (repo / "value.txt").write_text("one\n", encoding="utf-8")
+    _git_cmd(repo, "add", "value.txt")
+    _git_cmd(repo, "commit", "-m", "one")
+    _git_cmd(repo, "tag", "v1.0.0")
+
+    assert _git_cmd(repo, "tag", "--list") == "v1.0.0"
 
 
 def _release_remote_checkout(tmp_path: Path):
@@ -747,8 +783,8 @@ def _release_remote_checkout(tmp_path: Path):
     (source / "value.txt").write_text("two\n", encoding="utf-8")
     _git_cmd(source, "commit", "-am", "two")
     _git_cmd(source, "tag", "v1.8.0")
-    subprocess.run(["git", "clone", "--bare", str(source), str(remote)], check=True, capture_output=True)
-    subprocess.run(["git", "clone", str(remote), str(checkout)], check=True, capture_output=True)
+    _git_cmd(tmp_path, "clone", "--bare", str(source), str(remote))
+    _git_cmd(tmp_path, "clone", str(remote), str(checkout))
 
     user = pwd.getpwuid(os.getuid()).pw_name
     group = grp.getgrgid(os.getgid()).gr_name
