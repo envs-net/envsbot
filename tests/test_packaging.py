@@ -250,3 +250,21 @@ def test_ci_installs_and_smoke_tests_built_wheel():
 
     assert "python scripts/check_wheel.py" in github
     assert drone.count("python scripts/check_wheel.py") == 2
+
+
+def test_scripts_readme_documents_all_repository_helpers():
+    scripts_dir = ROOT / "scripts"
+    readme = (scripts_dir / "README.md").read_text(encoding="utf-8")
+
+    helper_names = {
+        path.name
+        for path in scripts_dir.iterdir()
+        if path.is_file() and path.suffix in {".py", ".sh"}
+    }
+    assert helper_names
+    for helper_name in sorted(helper_names):
+        assert f"`{helper_name}`" in readme
+
+    assert "../docs/deployment.md" in readme
+    assert "../docs/release-checklist.md" in readme
+    assert "../constraints/README.md" in readme
