@@ -40,6 +40,31 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 
 ## Installation / Quickstart
 
+### Optional interactive deployment helper
+
+For production installs and updates, `./scripts/deploy.sh` can orchestrate the
+same safety checks shown in the manual examples below. A bare invocation only
+prints help and performs no action:
+
+```bash
+./scripts/deploy.sh
+./scripts/deploy.sh status
+./scripts/deploy.sh check
+./scripts/deploy.sh install --dry-run
+./scripts/deploy.sh update --dry-run
+```
+
+`install`/`update` require explicit confirmation, and stopping/starting systemd
+are confirmed separately. Existing config, database, vCard, operator-managed avatar and systemd
+unit files are preserved; an existing service file is never replaced. Use
+`--root`, `--venv`, `--config`, `--service`, `--user`, `--group` and `--unit`
+for non-standard layouts. See [`docs/deployment.md`](docs/deployment.md) for the
+complete safety model and supported environment overrides.
+
+The command-by-command installation/update instructions below remain fully
+supported.
+
+
 Requires **Python 3.12+**.
 
 For production installations, use the **latest tagged release** instead of the
@@ -64,10 +89,18 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -c constraints/python313.txt -e .
 
-cp config_sample.py config.py
+if [ ! -e config.py ]; then
+  install -m 0600 config_sample.py config.py
+else
+  echo "KEEP existing config.py"
+fi
 $EDITOR config.py
 
-cp vcard_sample.py vcard.py
+if [ ! -e vcard.py ]; then
+  install -m 0600 vcard_sample.py vcard.py
+else
+  echo "KEEP existing vcard.py"
+fi
 $EDITOR vcard.py
 
 envsbot --check
@@ -357,7 +390,13 @@ same external config path that the service should keep using:
 ```bash
 export ENVSBOT_CONFIG=/etc/envsbot/config.py
 envsbot systemd check
-envsbot systemd render | sudo tee /etc/systemd/system/envsbot.service >/dev/null
+envsbot systemd render > /tmp/envsbot.service.new
+if sudo test -e /etc/systemd/system/envsbot.service; then
+  echo "KEEP existing /etc/systemd/system/envsbot.service"
+  sudo diff -u /etc/systemd/system/envsbot.service /tmp/envsbot.service.new || true
+else
+  sudo install -m 0644 /tmp/envsbot.service.new /etc/systemd/system/envsbot.service
+fi
 sudo systemd-analyze verify /etc/systemd/system/envsbot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now envsbot.service

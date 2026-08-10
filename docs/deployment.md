@@ -14,7 +14,7 @@ sudo mkdir -p /srv/envsbot
 sudo install -d -o envsbot -g envsbot -m 0750 /etc/envsbot /var/lib/envsbot /var/log/envsbot
 ```
 
-Recommended layout:
+Recommended layout (all paths are examples and may be replaced by site-specific locations):
 
 ```text
 /srv/envsbot/              repository + virtualenv
@@ -48,18 +48,108 @@ started with:
 /srv/envsbot/.venv/bin/envsbot
 ```
 
+
+## Interactive deployment helper (optional)
+
+`./scripts/deploy.sh` provides an interactive, preservation-first wrapper around
+the same manual deployment steps documented below. Running the script **without
+a command only prints its help** and never installs or updates anything:
+
+```bash
+./scripts/deploy.sh
+./scripts/deploy.sh status
+./scripts/deploy.sh check
+./scripts/deploy.sh install --dry-run
+./scripts/deploy.sh update --dry-run
+```
+
+Actual installation and update operations require explicit confirmation. If an
+active systemd service must be stopped, that stop is confirmed separately. The
+script also asks separately before starting the service again. Declining a start
+leaves the service stopped. Declining a required stop aborts the update before
+application code, dependencies or the database schema are changed.
+
+The helper is deliberately conservative with operator-managed state:
+
+- an existing runtime config is kept and never replaced from `config_sample.py`;
+- an existing SQLite database is never replaced by deployment code;
+- an existing runtime `vcard.py` is kept;
+- an existing operator-managed/custom avatar file is kept (the packaged default asset may update with envsbot);
+- an existing systemd service/unit is **never overwritten** by the helper; and
+- an update refuses to continue with tracked local Git modifications.
+
+For legacy installations that still keep config, database, vCard or avatar files
+inside the application checkout, the update helper protects those files across
+the Git checkout and restores them if the target release would remove or replace
+them. Files outside the application checkout are never touched by Git in the
+first place. Database migrations still use the normal verified `envsbot db backup` workflow.
+
+Installations do not have to use `/srv/envsbot`, `/etc/envsbot` or the default
+service name. The helper derives the application root from its own checkout,
+uses `ENVSBOT_CONFIG` when set and inspects an existing systemd service account and unit path
+where possible. Non-standard layouts can be selected explicitly:
+
+```bash
+sudo ./scripts/deploy.sh status \
+  --root /opt/bots/envsbot \
+  --venv /opt/venvs/envsbot \
+  --config /opt/bot-config/envsbot.py \
+  --service my-envsbot.service \
+  --user botuser \
+  --group botgroup \
+  --unit /etc/systemd/system/my-envsbot.service
+```
+
+Useful environment overrides are `ENVSBOT_CONFIG`, `ENVSBOT_VENV`,
+`ENVSBOT_SERVICE`, `ENVSBOT_SERVICE_USER`, `ENVSBOT_SERVICE_GROUP`,
+`ENVSBOT_SYSTEMD_UNIT`, `ENVSBOT_DEPLOY_BASE_PYTHON` and
+`ENVSBOT_DEPLOY_PYTHON`. Command-line options take precedence.
+
+`install` starts from an existing envsbot source checkout and an existing service
+account; it deliberately does not create system users or clone a repository. Those
+minimal bootstrap steps remain explicit because account names, ownership and source
+locations vary between installations.
+
+A fresh `install` is resumable. If the configured config file is missing, the
+helper creates it once from `config_sample.py`, stops there and asks the operator
+to edit it. Rerunning `install` keeps that edited config, validates it, creates a
+missing vCard only when needed, optionally installs a **new** systemd unit and
+then asks whether the service should be started. The helper does not create or
+guess XMPP credentials.
+
+For updates, use a release tag:
+
+```bash
+sudo ./scripts/deploy.sh update --to v1.8.0
+# or let the helper select the newest version-sorted tag after git fetch:
+sudo ./scripts/deploy.sh update
+```
+
+The helper runs the same database status/dry-run/backup/migrate/check and local
+preflight steps shown in the manual update procedure below. If an update fails
+after the service was stopped, it intentionally leaves the service stopped; it
+does not automatically start older code against a database that may already
+have been migrated.
+
+The manual installation and update procedures below remain supported and are
+recommended when an operator wants full command-by-command control.
+
 ## Configuration
 
 Create the runtime configuration outside the application tree:
 
 ```bash
-sudo cp config_sample.py /etc/envsbot/config.py
-sudo chown envsbot:envsbot /etc/envsbot/config.py
-sudo chmod 0600 /etc/envsbot/config.py
+if ! sudo test -e /etc/envsbot/config.py; then
+  sudo install -o envsbot -g envsbot -m 0600 config_sample.py /etc/envsbot/config.py
+else
+  echo "KEEP existing /etc/envsbot/config.py"
+fi
 sudo install -d -o envsbot -g envsbot -m 0700 /var/lib/envsbot
-sudo cp vcard_sample.py /var/lib/envsbot/vcard.py
-sudo chown envsbot:envsbot /var/lib/envsbot/vcard.py
-sudo chmod 0600 /var/lib/envsbot/vcard.py
+if ! sudo test -e /var/lib/envsbot/vcard.py; then
+  sudo install -o envsbot -g envsbot -m 0600 vcard_sample.py /var/lib/envsbot/vcard.py
+else
+  echo "KEEP existing /var/lib/envsbot/vcard.py"
+fi
 ```
 
 The supplied systemd unit sets `ENVSBOT_CONFIG=/etc/envsbot/config.py`. For a
@@ -124,7 +214,14 @@ and writable paths cannot silently drift:
 . /srv/envsbot/.venv/bin/activate
 export ENVSBOT_CONFIG=/etc/envsbot/config.py
 envsbot systemd check
-envsbot systemd render | sudo tee /etc/systemd/system/envsbot.service >/dev/null
+envsbot systemd render > /tmp/envsbot.service.new
+if sudo test -e /etc/systemd/system/envsbot.service; then
+  echo "KEEP existing /etc/systemd/system/envsbot.service"
+  sudo diff -u /etc/systemd/system/envsbot.service /tmp/envsbot.service.new || true
+  echo "Review the diff and replace the unit manually only when intended."
+else
+  sudo install -m 0644 /tmp/envsbot.service.new /etc/systemd/system/envsbot.service
+fi
 sudo systemd-analyze verify /etc/systemd/system/envsbot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now envsbot.service
@@ -146,9 +243,9 @@ Optional hardening: after verifying `envsbot --check` works reliably on the
 host, add it as an `ExecStartPre=` command in the systemd unit so invalid
 configuration or a broken local checkout prevents a restart.
 
-## Updates
+## Manual updates
 
-Stop the service before changing application code, dependencies or the database
+The interactive helper above is optional. For a fully manual update, stop the service before changing application code, dependencies or the database
 schema. Production deployments should move between tagged releases rather than
 blindly pulling `main` while the old process is still running:
 

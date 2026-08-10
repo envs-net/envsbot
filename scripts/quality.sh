@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-python -m compileall -q envsbot.py bot core_plugins plugins database utils
+python -m compileall -q envsbot.py bot core_plugins plugins database utils scripts
 python scripts/check_command_docs.py
 python scripts/generate_config_sample.py --check
 

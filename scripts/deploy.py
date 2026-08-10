@@ -1,0 +1,830 @@
+#!/usr/bin/env python3
+"""Interactive, preservation-first deployment helper for envsbot.
+
+The helper intentionally orchestrates existing envsbot deployment primitives
+instead of replacing them.  A bare invocation prints help and changes nothing.
+"""
+
+from __future__ import annotations
+
+import argparse
+import filecmp
+import grp
+import json
+import os
+import pwd
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Sequence
+
+
+class DeployError(RuntimeError):
+    """Expected deployment failure with an operator-readable message."""
+
+
+class UserCancelled(DeployError):
+    """Raised when an interactive action is declined."""
+
+
+@dataclass(frozen=True)
+class Deployment:
+    root: Path
+    venv: Path
+    config: Path
+    service: str
+    service_user: str
+    service_group: str
+    unit: Path
+    python: str
+    dry_run: bool = False
+
+    @property
+    def envsbot(self) -> Path:
+        return self.venv / "bin" / "envsbot"
+
+    @property
+    def pip(self) -> Path:
+        return self.venv / "bin" / "pip"
+
+    @property
+    def venv_python(self) -> Path:
+        return self.venv / "bin" / "python"
+
+    @property
+    def environment(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["ENVSBOT_CONFIG"] = str(self.config)
+        return env
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _default_config(root: Path, service: str) -> Path:
+    configured = os.environ.get("ENVSBOT_CONFIG")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    systemd_config = _systemd_config_path(service)
+    if systemd_config is not None:
+        return systemd_config
+    hardened = Path("/etc/envsbot/config.py")
+    if hardened.exists():
+        return hardened
+    legacy_json = root / "config.json"
+    if not (root / "config.py").exists() and legacy_json.exists():
+        return legacy_json.resolve()
+    return (root / "config.py").resolve()
+
+
+def _systemd_property(service: str, prop: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", service, f"--property={prop}", "--value"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _systemd_config_path(service: str) -> Path | None:
+    environment = _systemd_property(service, "Environment")
+    if not environment:
+        return None
+    try:
+        values = shlex.split(environment)
+    except ValueError:
+        values = environment.split()
+    for value in values:
+        if value.startswith("ENVSBOT_CONFIG="):
+            configured = value.split("=", 1)[1].strip()
+            if configured:
+                path = Path(configured).expanduser()
+                if not path.is_absolute():
+                    workdir = _systemd_property(service, "WorkingDirectory")
+                    base = Path(workdir).expanduser() if workdir else _project_root()
+                    path = base / path
+                return path.resolve()
+    return None
+
+
+def _systemd_venv(service: str) -> Path | None:
+    exec_start = _systemd_property(service, "ExecStart")
+    marker = "path="
+    if marker not in exec_start:
+        return None
+    executable = exec_start.split(marker, 1)[1].split(";", 1)[0].strip()
+    path = Path(executable).expanduser()
+    if path.name == "envsbot" and path.parent.name == "bin":
+        return path.parent.parent.resolve()
+    return None
+
+
+def _default_service_account(service: str, prop: str, fallback: str) -> str:
+    env_name = f"ENVSBOT_SERVICE_{prop.upper()}"
+    configured = os.environ.get(env_name)
+    if configured:
+        return configured
+    discovered = _systemd_property(service, prop)
+    return discovered or fallback
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="./scripts/deploy.sh",
+        description=(
+            "Interactive, preservation-first envsbot deployment helper. "
+            "Running it without a command only shows this help."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  ./scripts/deploy.sh status
+  ./scripts/deploy.sh check
+  ./scripts/deploy.sh install --dry-run
+  sudo ./scripts/deploy.sh install --config /etc/envsbot/config.py
+  sudo ./scripts/deploy.sh update --to v1.8.0
+
+Paths are discovered from the current checkout and active configuration where
+possible.  Override non-standard installations with --root, --venv, --config,
+--service, --user, --group and --unit, or the documented ENVSBOT_* variables.
+
+Safety rules:
+  * install/update require an explicit confirmation;
+  * stopping and starting systemd are confirmed separately;
+  * existing config, database, vCard, operator avatar and systemd unit files are kept;
+  * an existing systemd unit is never replaced by this helper;
+  * update refuses a dirty tracked Git worktree;
+  * a failed update after stopping the service leaves it stopped.
+""",
+    )
+    parser.add_argument("command", nargs="?", choices=("status", "check", "install", "update"))
+    parser.add_argument("--root", type=Path, help="application checkout (default: current checkout)")
+    parser.add_argument("--venv", type=Path, help="virtualenv path (default: ROOT/.venv)")
+    parser.add_argument("--config", type=Path, help="runtime config path")
+    parser.add_argument(
+        "--service",
+        default=os.environ.get("ENVSBOT_SERVICE", "envsbot.service"),
+        help="systemd service name (default: envsbot.service)",
+    )
+    parser.add_argument("--user", help="systemd service user")
+    parser.add_argument("--group", help="systemd service group")
+    parser.add_argument("--unit", type=Path, help="systemd unit path")
+    parser.add_argument(
+        "--python",
+        default=os.environ.get("ENVSBOT_DEPLOY_BASE_PYTHON", "python3"),
+        help="base interpreter used to create a missing virtualenv",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="show the plan without changing anything")
+    parser.add_argument("--to", metavar="TAG", help="tag to install with update (default: newest local/fetched tag)")
+    return parser
+
+
+def _deployment(options: argparse.Namespace) -> Deployment:
+    root = (options.root or _project_root()).expanduser().resolve()
+    service = options.service
+    venv_value = options.venv or os.environ.get("ENVSBOT_VENV") or _systemd_venv(service) or root / ".venv"
+    venv = Path(venv_value).expanduser().resolve()
+    config = (options.config or _default_config(root, service)).expanduser().resolve()
+    user = options.user or _default_service_account(service, "User", "envsbot")
+    group = options.group or _default_service_account(service, "Group", user)
+    unit_value = options.unit or os.environ.get("ENVSBOT_SYSTEMD_UNIT")
+    if unit_value is None:
+        fragment = _systemd_property(service, "FragmentPath")
+        unit_name = service if service.endswith(".service") else f"{service}.service"
+        unit_value = fragment or f"/etc/systemd/system/{unit_name}"
+    unit = Path(unit_value).expanduser().resolve()
+    return Deployment(
+        root=root,
+        venv=venv,
+        config=config,
+        service=service,
+        service_user=user,
+        service_group=group,
+        unit=unit,
+        python=options.python,
+        dry_run=bool(options.dry_run),
+    )
+
+
+def _quote(args: Sequence[object]) -> str:
+    return " ".join(shlex.quote(str(item)) for item in args)
+
+
+def _run(
+    args: Sequence[object],
+    *,
+    deployment: Deployment | None = None,
+    as_service_user: bool = False,
+    capture: bool = False,
+    check: bool = True,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    command = [str(item) for item in args]
+    if as_service_user and deployment is not None:
+        current = pwd.getpwuid(os.geteuid()).pw_name
+        if deployment.service_user != current:
+            if os.geteuid() != 0:
+                raise DeployError(
+                    f"run this command as {deployment.service_user!r} or as root; "
+                    f"current user is {current!r}"
+                )
+            if shutil.which("runuser"):
+                command = ["runuser", "-u", deployment.service_user, "--", *command]
+            elif shutil.which("sudo"):
+                command = ["sudo", "-u", deployment.service_user, "--", *command]
+            else:
+                raise DeployError("runuser/sudo is required to execute commands as the service user")
+    print(f"+ {_quote(command)}")
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            cwd=str(cwd) if cwd else None,
+            env=deployment.environment if deployment else None,
+            capture_output=capture,
+            text=True,
+        )
+    except OSError as exc:
+        raise DeployError(f"could not execute {command[0]}: {exc}") from exc
+    if check and result.returncode != 0:
+        if capture:
+            if result.stdout.strip():
+                print(result.stdout.rstrip())
+            if result.stderr.strip():
+                print(result.stderr.rstrip(), file=sys.stderr)
+        raise DeployError(f"command failed with exit code {result.returncode}: {_quote(command)}")
+    return result
+
+
+def _confirm(prompt: str) -> bool:
+    try:
+        answer = input(f"{prompt} [y/N] ").strip().casefold()
+    except EOFError:
+        return False
+    return answer in {"y", "yes"}
+
+
+def _require_confirmation(prompt: str) -> None:
+    if not _confirm(prompt):
+        raise UserCancelled("cancelled by operator")
+
+
+def _require_source_tree(deployment: Deployment) -> None:
+    required = ("pyproject.toml", "config_sample.py", "vcard_sample.py", "scripts/deploy.sh")
+    missing = [name for name in required if not (deployment.root / name).is_file()]
+    if missing:
+        raise DeployError(
+            f"not an envsbot source checkout: {deployment.root} (missing: {', '.join(missing)})"
+        )
+
+
+def _account_exists(user: str) -> bool:
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        return False
+    return True
+
+
+def _ensure_parent(path: Path, deployment: Deployment, *, mode: int = 0o750) -> None:
+    if path.parent.exists():
+        return
+    path.parent.mkdir(parents=True, mode=mode)
+    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+        details = pwd.getpwnam(deployment.service_user)
+        try:
+            gid = grp.getgrnam(deployment.service_group).gr_gid
+        except KeyError:
+            gid = details.pw_gid
+        os.chown(path.parent, details.pw_uid, gid)
+
+
+def _copy_if_missing(source: Path, destination: Path, deployment: Deployment, *, mode: int) -> bool:
+    if destination.exists():
+        print(f"KEEP existing {destination}")
+        return False
+    _ensure_parent(destination, deployment)
+    try:
+        with source.open("rb") as source_file, destination.open("xb") as destination_file:
+            shutil.copyfileobj(source_file, destination_file)
+    except FileExistsError:
+        print(f"KEEP existing {destination}")
+        return False
+    destination.chmod(mode)
+    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+        details = pwd.getpwnam(deployment.service_user)
+        try:
+            gid = grp.getgrnam(deployment.service_group).gr_gid
+        except KeyError:
+            gid = details.pw_gid
+        os.chown(destination, details.pw_uid, gid)
+    print(f"CREATE {destination}")
+    return True
+
+
+def _venv_version(deployment: Deployment) -> tuple[int, int]:
+    if not deployment.venv_python.is_file():
+        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
+    result = _run(
+        [deployment.venv_python, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+        deployment=deployment,
+        capture=True,
+    )
+    try:
+        major, minor = result.stdout.strip().split(".", 1)
+        return int(major), int(minor)
+    except (TypeError, ValueError) as exc:
+        raise DeployError("could not determine virtualenv Python version") from exc
+
+
+def _constraint_file(deployment: Deployment) -> Path:
+    major, minor = _venv_version(deployment)
+    if major != 3 or minor not in {12, 13}:
+        raise DeployError(f"unsupported Python version {major}.{minor}; envsbot supports Python 3.12/3.13")
+    path = deployment.root / f"constraints/python3{minor}.txt"
+    if not path.is_file():
+        raise DeployError(f"constraint snapshot missing: {path}")
+    return path
+
+
+def _install_dependencies(deployment: Deployment) -> None:
+    constraints = _constraint_file(deployment)
+    _run(
+        [deployment.pip, "install", "-c", constraints, "-e", deployment.root],
+        deployment=deployment,
+        as_service_user=True,
+    )
+
+
+def _create_venv_if_missing(deployment: Deployment) -> None:
+    if deployment.venv_python.is_file():
+        print(f"KEEP existing virtualenv {deployment.venv}")
+        return
+    print(f"CREATE virtualenv {deployment.venv}")
+    _run(
+        [deployment.python, "-m", "venv", deployment.venv],
+        deployment=deployment,
+        as_service_user=True,
+    )
+
+
+def _runtime_paths(deployment: Deployment) -> dict[str, Path | None]:
+    code = r'''
+import json
+from pathlib import Path
+from utils.bundled_assets import resolve_bundled_asset
+from utils.config import config, get_runtime_config_path
+from utils.runtime_paths import vcard_file
+from utils.systemd_deploy import service_paths
+
+paths = service_paths(config)
+avatar_value = config.get("avatar")
+avatar = resolve_bundled_asset(str(avatar_value)) if avatar_value else None
+print(json.dumps({
+    "config": str(get_runtime_config_path().resolve()),
+    "database": str(paths["database"].resolve()),
+    "runtime_data": str(paths["runtime_data_directory"].resolve()),
+    "vcard": str(vcard_file(config).resolve()),
+    "avatar": str(avatar.resolve()) if avatar else None,
+}))
+'''
+    result = _run(
+        [deployment.venv_python, "-c", code],
+        deployment=deployment,
+        capture=True,
+        cwd=deployment.root,
+    )
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise DeployError("could not resolve runtime paths from the active configuration") from exc
+    return {name: (Path(value).resolve() if value else None) for name, value in data.items()}
+
+
+def _envsbot(deployment: Deployment, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    if not deployment.envsbot.is_file():
+        raise DeployError(f"envsbot executable not found: {deployment.envsbot}")
+    return _run(
+        [deployment.envsbot, *args],
+        deployment=deployment,
+        as_service_user=True,
+        capture=capture,
+        cwd=deployment.root,
+    )
+
+
+def _systemctl_exists(deployment: Deployment) -> bool:
+    if not shutil.which("systemctl"):
+        return False
+    result = _run(["systemctl", "cat", deployment.service], check=False, capture=True)
+    return result.returncode == 0
+
+
+def _service_active(deployment: Deployment) -> bool:
+    if not shutil.which("systemctl"):
+        return False
+    result = _run(["systemctl", "is-active", "--quiet", deployment.service], check=False)
+    return result.returncode == 0
+
+
+def _stop_active_service(deployment: Deployment, *, reason: str) -> bool:
+    if not _service_active(deployment):
+        print(f"Service {deployment.service} is not active; no stop required.")
+        return False
+    _require_confirmation(f"Stop {deployment.service} {reason}?")
+    _run(["systemctl", "stop", deployment.service])
+    return True
+
+
+def _ask_start(deployment: Deployment) -> None:
+    if not _systemctl_exists(deployment):
+        print(f"No installed systemd service {deployment.service}; not starting anything.")
+        return
+    if _service_active(deployment):
+        print(f"Service {deployment.service} is already active.")
+        return
+    if _confirm(f"Start {deployment.service} now?"):
+        _run(["systemctl", "start", deployment.service])
+        _run(["systemctl", "is-active", deployment.service])
+    else:
+        print(f"LEAVE {deployment.service} stopped (operator choice)")
+
+
+def _git(deployment: Deployment, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    return _run(
+        ["git", *args],
+        deployment=deployment,
+        as_service_user=True,
+        capture=capture,
+        cwd=deployment.root,
+    )
+
+
+def _require_clean_tracked_tree(deployment: Deployment) -> None:
+    result = _git(deployment, "status", "--porcelain", "--untracked-files=no", capture=True)
+    if result.stdout.strip():
+        raise DeployError(
+            "tracked Git worktree is not clean; commit/stash local code changes before updating\n"
+            + result.stdout.rstrip()
+        )
+
+
+def _current_revision(deployment: Deployment) -> str:
+    result = _git(deployment, "describe", "--tags", "--always", "--dirty", capture=True)
+    return result.stdout.strip() or "unknown"
+
+
+def _latest_tag(deployment: Deployment) -> str:
+    result = _git(deployment, "tag", "--sort=-v:refname", capture=True)
+    tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not tags:
+        raise DeployError("no Git release tags found")
+    return tags[0]
+
+
+def _validate_tag(deployment: Deployment, tag: str) -> None:
+    result = _git(
+        deployment,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/tags/{tag}^{{commit}}",
+        capture=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise DeployError(f"release tag does not exist: {tag}")
+
+
+def _relative_to_root(path: Path | None, root: Path) -> bool:
+    if path is None:
+        return False
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _protected_paths(deployment: Deployment) -> dict[str, Path]:
+    resolved = _runtime_paths(deployment)
+    protected: dict[str, Path] = {"config": deployment.config, "systemd unit": deployment.unit}
+    for name in ("database", "vcard", "avatar"):
+        path = resolved.get(name)
+        if path is None:
+            continue
+        if name == "avatar":
+            bundled_dir = (deployment.root / "utils" / "bundled").resolve()
+            try:
+                path.resolve().relative_to(bundled_dir)
+            except ValueError:
+                pass
+            else:
+                continue
+        protected[name] = path
+    return protected
+
+
+def _backup_project_protected_paths(
+    deployment: Deployment,
+    protected: dict[str, Path],
+    backup_dir: Path,
+) -> dict[str, tuple[Path, Path]]:
+    backups: dict[str, tuple[Path, Path]] = {}
+    for label, path in protected.items():
+        if not path.exists() or not path.is_file() or not _relative_to_root(path, deployment.root):
+            continue
+        target = backup_dir / f"{len(backups):02d}-{path.name}"
+        shutil.copy2(path, target)
+        backups[label] = (path, target)
+        print(f"PROTECT {label}: {path}")
+    return backups
+
+
+def _restore_project_protected_paths(backups: dict[str, tuple[Path, Path]]) -> None:
+    for label, (path, backup) in backups.items():
+        unchanged = path.is_file() and filecmp.cmp(path, backup, shallow=False)
+        if unchanged:
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup, path)
+        print(f"RESTORE protected {label}: {path}")
+
+
+def _print_paths(deployment: Deployment, *, runtime: dict[str, Path | None] | None = None) -> None:
+    print("Deployment paths:")
+    print(f"  application: {deployment.root}")
+    print(f"  virtualenv:  {deployment.venv}")
+    print(f"  config:      {deployment.config}")
+    print(f"  service:     {deployment.service}")
+    print(f"  service user: {deployment.service_user}")
+    print(f"  service group: {deployment.service_group}")
+    print(f"  unit:        {deployment.unit}")
+    if runtime:
+        for name in ("database", "runtime_data", "vcard", "avatar"):
+            value = runtime.get(name)
+            print(f"  {name.replace('_', ' '):12}{value or '-'}")
+
+
+def _install_plan(deployment: Deployment) -> None:
+    _print_paths(deployment)
+    print("\nInstall plan:")
+    print("  - keep every existing config/database/vCard/operator-avatar/systemd unit file")
+    print("  - create/reuse the configured virtualenv and install constrained dependencies")
+    print("  - create config.py from config_sample.py only when the config is missing")
+    print("  - create vcard.py from vcard_sample.py only when the configured vCard is missing")
+    print("  - install a newly rendered systemd unit only when no unit exists and you confirm it")
+    print("  - ask separately before starting the service")
+
+
+def _finish_install(deployment: Deployment, *, stopped: bool) -> int:
+    _create_venv_if_missing(deployment)
+    _install_dependencies(deployment)
+    created_config = _copy_if_missing(
+        deployment.root / "config_sample.py", deployment.config, deployment, mode=0o600
+    )
+    if created_config:
+        print(
+            "\nConfiguration was created but not guessed or edited. "
+            f"Edit {deployment.config} and rerun './scripts/deploy.sh install'."
+        )
+        print("No database, vCard or systemd unit was changed after creating the config.")
+        if stopped:
+            print(f"LEAVE {deployment.service} stopped until the new configuration has been reviewed.")
+        return 0
+
+    _envsbot(deployment, "--check")
+    runtime = _runtime_paths(deployment)
+    vcard = runtime.get("vcard")
+    if vcard is not None:
+        _copy_if_missing(deployment.root / "vcard_sample.py", vcard, deployment, mode=0o600)
+    for label in ("database", "avatar"):
+        path = runtime.get(label)
+        if path is not None and path.exists():
+            print(f"KEEP existing {label}: {path}")
+
+    _envsbot(
+        deployment,
+        "systemd",
+        "check",
+        "--user",
+        deployment.service_user,
+        "--group",
+        deployment.service_group,
+    )
+
+    if deployment.unit.exists() or _systemctl_exists(deployment):
+        print(f"KEEP existing systemd service file for {deployment.service}; it will not be replaced.")
+    elif _confirm(f"Install a new systemd unit at {deployment.unit}?"):
+        rendered = _envsbot(
+            deployment,
+            "systemd",
+            "render",
+            "--user",
+            deployment.service_user,
+            "--group",
+            deployment.service_group,
+            capture=True,
+        ).stdout
+        deployment.unit.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with deployment.unit.open("x", encoding="utf-8") as unit_file:
+                unit_file.write(rendered)
+        except FileExistsError:
+            print(f"KEEP existing {deployment.unit}; it appeared before installation completed.")
+        else:
+            deployment.unit.chmod(0o644)
+            print(f"CREATE {deployment.unit}")
+            if shutil.which("systemd-analyze"):
+                try:
+                    _run(["systemd-analyze", "verify", deployment.unit])
+                except DeployError:
+                    deployment.unit.unlink(missing_ok=True)
+                    print(f"REMOVE invalid newly created unit {deployment.unit}", file=sys.stderr)
+                    raise
+            _run(["systemctl", "daemon-reload"])
+    else:
+        print("SKIP systemd unit installation (operator choice)")
+
+    _ask_start(deployment)
+    return 0
+
+
+def install(deployment: Deployment) -> int:
+    _require_source_tree(deployment)
+    _install_plan(deployment)
+    if deployment.dry_run:
+        print("\nDRY RUN: no files, packages or services were changed.")
+        return 0
+    _require_confirmation("Proceed with the envsbot installation shown above?")
+    if not _account_exists(deployment.service_user):
+        raise DeployError(
+            f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
+        )
+    stopped = _stop_active_service(
+        deployment, reason="before installing dependencies and deployment files"
+    )
+    try:
+        return _finish_install(deployment, stopped=stopped)
+    except Exception:
+        if stopped:
+            print(
+                f"\nINSTALL FAILED: {deployment.service} was stopped and will remain stopped.",
+                file=sys.stderr,
+            )
+        raise
+
+def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
+    runtime = _runtime_paths(deployment) if deployment.venv_python.is_file() and deployment.config.exists() else None
+    _print_paths(deployment, runtime=runtime)
+    print("\nUpdate plan:")
+    print(f"  current: {_current_revision(deployment)}")
+    print(f"  target:  {requested_tag or 'newest release tag (resolved after git fetch)'}")
+    print("  - require a clean tracked Git worktree")
+    print("  - preserve config/database/vCard/operator-avatar/systemd unit files")
+    print("  - ask before stopping an active service")
+    print("  - fetch tags and checkout only a release tag")
+    print("  - install dependencies using the matching Python constraint snapshot")
+    print("  - run db status, migration dry-run, verified db backup, migrate and db check")
+    print("  - run envsbot --check and envsbot systemd check")
+    print("  - ask separately before starting the service")
+
+
+def update(deployment: Deployment, requested_tag: str | None) -> int:
+    _require_source_tree(deployment)
+    if not (deployment.root / ".git").exists():
+        raise DeployError(f"update requires a Git checkout: {deployment.root}")
+    if not deployment.envsbot.is_file() or not deployment.config.is_file():
+        raise DeployError("existing virtualenv/envsbot executable and runtime config are required for update")
+    _require_clean_tracked_tree(deployment)
+    _update_plan(deployment, requested_tag)
+    if deployment.dry_run:
+        print("\nDRY RUN: no Git refs, files, packages, database or services were changed.")
+        return 0
+    _require_confirmation("Proceed with the envsbot update plan shown above?")
+
+    protected = _protected_paths(deployment)
+    print("\nProtected operator files:")
+    for label, path in protected.items():
+        state = "exists" if path.exists() else "missing"
+        print(f"  {label}: {path} ({state})")
+
+    _git(deployment, "fetch", "--tags", "--prune")
+    target = requested_tag or _latest_tag(deployment)
+    _validate_tag(deployment, target)
+    print(f"Selected release: {target}")
+    _require_confirmation(f"Update {_current_revision(deployment)} to {target}?")
+
+    stopped = _stop_active_service(
+        deployment, reason="before changing code, dependencies and database schema"
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="envsbot-deploy-protect.") as temporary:
+            backups = _backup_project_protected_paths(
+                deployment, protected, Path(temporary)
+            )
+            _git(deployment, "checkout", target)
+            _restore_project_protected_paths(backups)
+
+        _install_dependencies(deployment)
+        _envsbot(deployment, "db", "status")
+        _envsbot(deployment, "db", "migrate", "--dry-run")
+        _envsbot(deployment, "db", "backup")
+        _envsbot(deployment, "db", "migrate")
+        _envsbot(deployment, "db", "check")
+        _envsbot(deployment, "--check")
+        _envsbot(
+            deployment,
+            "systemd",
+            "check",
+            "--user",
+            deployment.service_user,
+            "--group",
+            deployment.service_group,
+        )
+    except Exception:
+        if stopped:
+            print(
+                f"\nUPDATE FAILED: {deployment.service} was stopped and will remain stopped. "
+                "The helper does not automatically start old code against a possibly migrated database.",
+                file=sys.stderr,
+            )
+        raise
+
+    _ask_start(deployment)
+    print(f"Update to {target} completed.")
+    return 0
+
+
+def status(deployment: Deployment) -> int:
+    _require_source_tree(deployment)
+    runtime = None
+    if deployment.venv_python.is_file() and deployment.config.is_file():
+        try:
+            runtime = _runtime_paths(deployment)
+        except DeployError as exc:
+            print(f"Runtime paths: unavailable ({exc})")
+    _print_paths(deployment, runtime=runtime)
+    if (deployment.root / ".git").exists():
+        try:
+            print(f"  revision:    {_current_revision(deployment)}")
+            print(f"  local tag:   {_latest_tag(deployment)}")
+        except DeployError as exc:
+            print(f"  Git status:  unavailable ({exc})")
+    if shutil.which("systemctl"):
+        print(f"  service state:{'active' if _service_active(deployment) else 'inactive/not found'}")
+    return 0
+
+
+def check(deployment: Deployment) -> int:
+    _require_source_tree(deployment)
+    if not deployment.envsbot.is_file():
+        raise DeployError(f"envsbot executable not found: {deployment.envsbot}")
+    _envsbot(deployment, "--check")
+    _envsbot(
+        deployment,
+        "systemd",
+        "check",
+        "--user",
+        deployment.service_user,
+        "--group",
+        deployment.service_group,
+    )
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    options = parser.parse_args(argv)
+    if options.command is None:
+        parser.print_help()
+        return 0
+    if options.to and options.command != "update":
+        parser.error("--to is only valid with the update command")
+    deployment = _deployment(options)
+    try:
+        if options.command == "status":
+            return status(deployment)
+        if options.command == "check":
+            return check(deployment)
+        if options.command == "install":
+            return install(deployment)
+        return update(deployment, options.to)
+    except UserCancelled as exc:
+        print(f"deploy: {exc}")
+        return 2
+    except DeployError as exc:
+        print(f"deploy: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

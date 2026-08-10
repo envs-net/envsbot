@@ -121,6 +121,7 @@ def test_ci_invokes_quality_script_via_shell():
 
 def test_operator_shell_scripts_are_executable():
     for relative_path in (
+        "scripts/deploy.sh",
         "scripts/quality.sh",
         "scripts/mutmut.sh",
         "scripts/update-constraints.sh",
