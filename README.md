@@ -76,23 +76,36 @@ For production installations, use the **latest tagged release** instead of the
 `main` branch. The `main` branch is the active development branch and may contain
 changes that are not part of a stable release yet.
 
-The quickstart below automatically checks out the newest stable local `vX.Y.Z` tag.
+The quickstart below queries the remote and checks out the newest stable `vX.Y.Z` tag.
 You can also replace `LATEST_TAG` with an explicit release such as `vX.Y.Z`.
 
 ```bash
-sudo useradd -m -s /bin/bash envsbot -d /srv/envsbot
-sudo su - envsbot
+sudo useradd --system --home /srv/envsbot --shell /usr/sbin/nologin envsbot
+sudo install -d -o envsbot -g envsbot -m 0750 /srv/envsbot
+sudo -u envsbot -H bash
 
+# Run the remaining commands in this envsbot shell.
 cd /srv/envsbot
-git clone https://git.envs.net/envs/envsbot.git .
-git fetch --tags
-LATEST_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
+git clone --no-tags https://git.envs.net/envs/envsbot.git .
+REMOTE=origin
+LATEST_TAG="$(
+  git ls-remote --tags --refs --sort=-version:refname "$REMOTE" |
+  awk '{sub("^refs/tags/", "", $2); print $2}' |
+  grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+  head -n1
+)"
+test -n "$LATEST_TAG"
+git fetch --no-tags "$REMOTE" "refs/tags/$LATEST_TAG:refs/tags/$LATEST_TAG"
 git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
+PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+CONSTRAINTS="constraints/python${PYTHON_MINOR}.txt"
+test -f "$CONSTRAINTS"
+
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -c constraints/python313.txt -e .
+pip install -c "$CONSTRAINTS" -e .
 
 if [ ! -e config.py ]; then
   install -m 0600 config_sample.py config.py
@@ -127,12 +140,23 @@ than a moving `main` checkout:
 sudo systemctl stop envsbot.service
 
 cd /srv/envsbot
-sudo -u envsbot git fetch --tags --prune
-LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
+REMOTE=origin
+sudo -u envsbot git fetch --prune --no-tags "$REMOTE"
+LATEST_TAG="$(
+  sudo -u envsbot git ls-remote --tags --refs --sort=-version:refname "$REMOTE" |
+  awk '{sub("^refs/tags/", "", $2); print $2}' |
+  grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+  head -n1
+)"
+test -n "$LATEST_TAG"
+sudo -u envsbot git fetch --no-tags "$REMOTE" "refs/tags/$LATEST_TAG:refs/tags/$LATEST_TAG"
 sudo -u envsbot git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
-sudo -u envsbot .venv/bin/pip install -c constraints/python313.txt -e .
+PYTHON_MINOR="$(sudo -u envsbot .venv/bin/python -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+CONSTRAINTS="constraints/python${PYTHON_MINOR}.txt"
+test -f "$CONSTRAINTS"
+sudo -u envsbot .venv/bin/pip install -c "$CONSTRAINTS" -e .
 sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db status
 sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db migrate --dry-run
 sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db backup

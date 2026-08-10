@@ -9,7 +9,7 @@ This directory contains the operator and command documentation for EnvsBot.
 - [`help.md`](help.md) - runtime help behavior and usage examples
 - [`tutorial.md`](tutorial.md) - practical walkthrough for first setup, rooms, reminders, RSS and grants
 - [`maintenance.md`](maintenance.md) - offline SQLite maintenance workflow
-- [`deployment.md`](deployment.md) - install layout, console entrypoint and systemd unit
+- [`deployment.md`](deployment.md) - install/update helper, manual deployment, runtime layout and generated systemd unit
 - [`diagnostics.md`](diagnostics.md) - doctor checks, plugin state, task restart, audit filters and rate limits
 - [`architecture.md`](architecture.md) - runtime module layout, command flow and core responsibilities
 - [`idlerpg.md`](idlerpg.md) - IdleRPG game commands, configuration and diagnostics
@@ -20,9 +20,10 @@ Operational notes:
 
 - Core/admin plugins live in `core_plugins/`; optional feature plugins live in `plugins/`. Core plugins keep stable public names but cannot be unloaded at runtime.
 - Production installations should use the latest tagged release, not the moving `main` branch.
+  `./scripts/deploy.sh status`, `check`, `install` and `update` provide the preservation-first guided workflow; the full manual procedure remains documented in [`deployment.md`](deployment.md).
 - New operators should start with [`tutorial.md`](tutorial.md) before using the full command reference.
 - Runtime help should use `,help <plugin>` for plugin help and `,help ,<command>` for unambiguous command help.
-- Runtime configuration lives in `config.py`; copy `config_sample.py` and keep the file private.
+- Runtime configuration is loaded from `ENVSBOT_CONFIG` when set. A first source-tree run can use `config.py`; hardened systemd deployments normally use `/etc/envsbot/config.py`. Keep the active file private.
 - Managed backups live in `data/backups` by default; optional startup backups are controlled by `BACKUP_ON_START`.
 - Operator-tunable plugin limits, timeouts, default pagination and reminder timezone defaults are documented directly in `config_sample.py`.
 - `MESSAGE_CACHE_SIZE` controls the shared recent-message history retained per room or private conversation. Message bodies are stored in SQLite and restored after restart.

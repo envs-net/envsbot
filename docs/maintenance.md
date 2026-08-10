@@ -6,19 +6,24 @@ This document covers maintenance tasks that should be run by the server administ
 
 Do not run `VACUUM` from a live bot command. `VACUUM` rewrites the SQLite database file and should be performed during a planned maintenance window while envsbot is stopped.
 
-Recommended manual procedure:
+Recommended manual procedure. Set `DB_PATH` to the effective `DB_FILE` from
+your runtime configuration before running maintenance. Fresh source-tree
+installations default to `data/bot.db`; hardened deployments commonly use
+`/var/lib/envsbot/bot.db`.
 
 ```bash
+DB_PATH=/var/lib/envsbot/bot.db
 systemctl stop envsbot.service
 
-sqlite3 envsbot.db "PRAGMA integrity_check;"
-sqlite3 envsbot.db "PRAGMA optimize;"
-sqlite3 envsbot.db "VACUUM;"
+sqlite3 "$DB_PATH" "PRAGMA integrity_check;"
+sqlite3 "$DB_PATH" "PRAGMA optimize;"
+sqlite3 "$DB_PATH" "VACUUM;"
 
 systemctl start envsbot.service
 ```
 
-Adjust the service name and database path if your installation uses different names.
+Adjust the service name and `DB_PATH` for the active installation. Do not assume
+that the database lives in the current working directory.
 
 For a quick online status check from the bot, use:
 
@@ -52,7 +57,7 @@ replacing `bot.db`, the active config and writable support files below
 `RUNTIME_DATA_DIR`. Legacy support files inside the read-only source tree remain
 available in the archive for offline/manual restore. The old Python process is
 never resumed against restored state: envsbot exits with restart code `75` and
-the standard `Restart=on-failure` systemd service starts a fresh process. After shutdown, envsbot snapshots the exact closed runtime files before publishing restored state. If a file replacement fails, it rolls back from that quiesced snapshot; the verified safety backup remains available as an additional recovery point. A fresh restart is still required.
+the generated recommended `Restart=on-failure` systemd service starts a fresh process. After shutdown, envsbot snapshots the exact closed runtime files before publishing restored state. If a file replacement fails, it rolls back from that quiesced snapshot; the verified safety backup remains available as an additional recovery point. A fresh restart is still required.
 
 Backup archives contain secrets such as the bot password and optional API keys.
 Keep them private and include them in your normal server backup policy.

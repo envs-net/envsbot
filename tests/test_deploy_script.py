@@ -295,6 +295,47 @@ def test_deployment_docs_keep_helper_and_manual_workflows():
     assert "## Updating" in readme
 
 
+
+def test_operator_docs_use_safe_release_and_generated_systemd_workflows():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    diagnostics = (ROOT / "docs" / "diagnostics.md").read_text(encoding="utf-8")
+    idlerpg = (ROOT / "docs" / "idlerpg.md").read_text(encoding="utf-8")
+    maintenance = (ROOT / "docs" / "maintenance.md").read_text(encoding="utf-8")
+    docs_index = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+    tutorial = (ROOT / "docs" / "tutorial.md").read_text(encoding="utf-8")
+    release_checklist = (ROOT / "docs" / "release-checklist.md").read_text(
+        encoding="utf-8"
+    )
+
+    for document in (readme, deployment):
+        assert "git fetch --tags --prune" not in document
+        assert "git ls-remote --tags --refs --sort=-version:refname" in document
+        assert 'git fetch --no-tags "$REMOTE" "refs/tags/$LATEST_TAG:refs/tags/$LATEST_TAG"' in document
+        assert 'CONSTRAINTS="constraints/python${PYTHON_MINOR}.txt"' in document
+
+    assert "useradd -m" not in readme
+    assert "useradd --system --home /srv/envsbot --shell /usr/sbin/nologin envsbot" in readme
+
+    combined_systemd_docs = "\n".join((deployment, diagnostics, idlerpg))
+    assert "supplied systemd unit" not in combined_systemd_docs.lower()
+    assert "bundled systemd unit" not in combined_systemd_docs.lower()
+    assert "generated recommended systemd unit" in combined_systemd_docs.lower()
+
+    assert 'DB_PATH=/var/lib/envsbot/bot.db' in maintenance
+    assert 'sqlite3 "$DB_PATH" "VACUUM;"' in maintenance
+    assert "sqlite3 envsbot.db" not in maintenance
+
+    assert "install/update helper" in docs_index
+    assert "[`deployment.md`](deployment.md)" in tutorial
+
+    assert "- `docs/deployment.md`" in release_checklist
+    assert "./scripts/quality.sh" in release_checklist
+    assert "pytest -W error::RuntimeWarning -W error::DeprecationWarning" in release_checklist
+    assert "./scripts/mutmut.sh fresh" in release_checklist
+    assert "./scripts/deploy.sh update --dry-run" in release_checklist
+
+
 def test_deployment_discovers_existing_systemd_paths(tmp_path, monkeypatch):
     root = tmp_path / "checkout"
     root.mkdir()

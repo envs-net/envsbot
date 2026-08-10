@@ -276,7 +276,7 @@ notification. Inspect and reset it with:
 ```
 
 The runtime watchdog reports current and maximum event-loop lag in `doctor
-tasks`. With the supplied systemd unit it also feeds `WatchdogSec`; a process
+tasks`. With the generated recommended systemd unit it also feeds `WatchdogSec`; a process
 that is alive but no longer scheduling the event loop is restarted by systemd.
 
 ## Command usage statistics

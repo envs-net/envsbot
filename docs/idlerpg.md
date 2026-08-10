@@ -504,7 +504,7 @@ Make sure the bot can write there and the webserver can read there. Example:
 sudo install -d -o envsbot -g www-data -m 0755 /var/www/envs.net/idlerpg/data
 ```
 
-The bundled systemd unit intentionally uses `UMask=0077` for private bot
+The generated recommended systemd unit intentionally uses `UMask=0077` for private bot
 data. IdleRPG public exports explicitly add read/traverse access to generated
 room directories and JSON files, resulting in `0755` directories and `0644`
 files when no broader ACL or mode already exists. The pre-existing export base

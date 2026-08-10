@@ -31,6 +31,8 @@ Review at least:
 - `docs/README.md`
 - `docs/commands.md`
 - `docs/help.md`
+- `docs/deployment.md`
+- `docs/diagnostics.md`
 - `docs/maintenance.md`
 - `SECURITY.md`
 - `CONTRIBUTING.md`
@@ -41,22 +43,32 @@ not recommend running a production bot from `main`.
 
 ## Test suite
 
-Run the local preflight, build/install smoke check and the full offline test suite:
+Run the unified quality gate and the full warning-strict pytest suite from the
+release checkout:
 
 ```bash
-PYTHONPATH="$PWD" envsbot --check
+./scripts/quality.sh
+pytest -W error::RuntimeWarning -W error::DeprecationWarning
+```
+
+Then build and smoke-test the exact wheel that would be released:
+
+```bash
 rm -rf build dist
 python -m build
 python scripts/check_wheel.py
-PYTHONPATH="$PWD" pytest --no-cov -q
-PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
 ```
+
+The quality runner checks compilation, generated command/config documentation,
+Ruff, the hardened Ruff import/modernisation/Bugbear rules, mypy, the audited
+Python-version constraint snapshot and dependency advisories. The pytest
+configuration enforces the repository coverage floor.
 
 The wheel smoke test installs the built wheel into a temporary environment and
 verifies that packaged runtime defaults such as `init_chat_slang.csv` and the
 default avatar are available outside a source checkout.
 
-Run mutation tests when practical:
+Run the final mutation gate from a fresh mutant tree:
 
 ```bash
 ./scripts/mutmut.sh fresh
@@ -68,6 +80,21 @@ The final release mutation run must start from a fresh `mutants/` tree so cached
 Investigate any new `no tests` results before tagging. Long-lived surviving
 mutants should be reviewed, but not every survivor is necessarily a release
 blocker.
+
+## Deployment smoke test
+
+On a representative systemd deployment, verify the preservation-first helper
+against the installed paths before tagging:
+
+```bash
+./scripts/deploy.sh status
+./scripts/deploy.sh check
+./scripts/deploy.sh update --dry-run
+```
+
+`status` and `check` must resolve the expected application, virtualenv, config,
+service account, database and unit paths. The update dry-run must select only a
+stable release-tag workflow and must not stop the service or change files.
 
 ## Local smoke test
 
@@ -130,7 +157,7 @@ The restore command verifies and stages the selected archive before changing
 runtime files, creates a checksum-verified safety backup, then fully quiesces
 plugins/workers/outbox/cache/database before publishing restored state. It never
 resumes the old Python process afterwards: success and post-quiesce failures both
-lead to restart code `75`, so the standard `Restart=on-failure` systemd unit
+lead to restart code `75`, so the generated recommended `Restart=on-failure` systemd unit
 starts a fresh process. Configured `vcard.py` and `chat_slang.csv` files below
 `RUNTIME_DATA_DIR` are restored with the database/config; legacy copies inside
 the read-only application checkout remain in the archive for manual/offline

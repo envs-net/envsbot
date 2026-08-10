@@ -29,17 +29,24 @@ If the host forwards journald to rsyslog/syslog, the console copy can therefore
 appear there as well; that is host-side forwarding, not a third envsbot log
 handler.
 
-Clone or copy the repository to `/srv/envsbot`, then create a virtualenv:
+Clone or copy the repository to `/srv/envsbot`, then create a virtualenv. A
+Git-based production checkout should be pinned to a stable `vX.Y.Z` tag rather
+than `main`; use the preservation-first helper or the targeted tag-discovery
+procedure in [Manual updates](#manual-updates) instead of bulk-fetching tags.
 
 ```bash
 cd /srv/envsbot
+PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+CONSTRAINTS="constraints/python${PYTHON_MINOR}.txt"
+test -f "$CONSTRAINTS"
+
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -c constraints/python313.txt -e .
+pip install -c "$CONSTRAINTS" -e .
 ```
 
-Use `constraints/python312.txt` instead when the production interpreter is
-Python 3.12.
+Only Python versions with a checked-in audited constraint snapshot are supported
+by this workflow.
 
 The package installs a console entrypoint named `envsbot`, so the bot can be
 started with:
@@ -203,7 +210,7 @@ else
 fi
 ```
 
-The supplied systemd unit sets `ENVSBOT_CONFIG=/etc/envsbot/config.py`. For a
+The generated recommended systemd unit sets `ENVSBOT_CONFIG=/etc/envsbot/config.py`. For a
 manual shell start, export the same variable first.
 
 Then edit at least:
@@ -339,18 +346,33 @@ configuration or a broken local checkout prevents a restart.
 
 The interactive helper above is optional. For a fully manual update, stop the service before changing application code, dependencies or the database
 schema. Production deployments should move between tagged releases rather than
-blindly pulling `main` while the old process is still running:
+blindly pulling `main` while the old process is still running. The example below
+uses the same safe release-discovery model as the helper: refresh branches with
+`--no-tags`, query stable tags read-only, and fetch only the selected release
+tag. This avoids letting an unrelated conflicting local historical tag break a
+manual update:
 
 ```bash
 sudo systemctl stop envsbot.service
 
 cd /srv/envsbot
-sudo -u envsbot git fetch --tags --prune
-LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
+REMOTE=origin
+sudo -u envsbot git fetch --prune --no-tags "$REMOTE"
+LATEST_TAG="$(
+  sudo -u envsbot git ls-remote --tags --refs --sort=-version:refname "$REMOTE" |
+  awk '{sub("^refs/tags/", "", $2); print $2}' |
+  grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+  head -n1
+)"
+test -n "$LATEST_TAG"
+sudo -u envsbot git fetch --no-tags "$REMOTE" "refs/tags/$LATEST_TAG:refs/tags/$LATEST_TAG"
 sudo -u envsbot git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
-sudo -u envsbot .venv/bin/pip install -c constraints/python313.txt -e .
+PYTHON_MINOR="$(sudo -u envsbot .venv/bin/python -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+CONSTRAINTS="constraints/python${PYTHON_MINOR}.txt"
+test -f "$CONSTRAINTS"
+sudo -u envsbot .venv/bin/pip install -c "$CONSTRAINTS" -e .
 sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db status
 sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db migrate --dry-run
 sudo -u envsbot env ENVSBOT_CONFIG=/etc/envsbot/config.py .venv/bin/envsbot db backup

@@ -50,6 +50,11 @@ cp config_sample.py config.py
 $EDITOR config.py
 ```
 
+This source-tree `config.py` setup is convenient for a first local run. For a
+production systemd installation, prefer the hardened layout with
+`/etc/envsbot/config.py`, `/var/lib/envsbot/` and a generated service unit as
+documented in [`deployment.md`](deployment.md).
+
 Start the bot with your preferred service manager, then check that it responds:
 
 ```text
