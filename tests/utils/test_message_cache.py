@@ -330,6 +330,9 @@ async def test_message_cache_close_reports_unflushed_retry_backlog():
     await cache.start(FailingStore())
     await cache.add_entry({"conversation": "room", "body": "queued"})
 
-    assert await cache.close() is False
+    first_close_ok = await cache.close()
+    assert first_close_ok is False
     assert cache.stats()["retry_backlog"] == 1
-    assert await cache.close() is False
+
+    second_close_ok = await cache.close()
+    assert second_close_ok is False

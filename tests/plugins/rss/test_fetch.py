@@ -6,6 +6,7 @@ from .helpers import (
 )
 from plugins.rss import fetch as rss_fetch
 from plugins.rss import store as rss_store
+from plugins.rss import tasks as rss_tasks
 
 
 @pytest.mark.asyncio
@@ -364,10 +365,10 @@ async def test_fetch_error_sleeps_retry_delay(monkeypatch, make_bot):
     store[rss.RSS_KEY] = {url: {"error_count": 0, "next_retry": 0}}
     sleep_calls = []
 
-    async def fake_sleep(seconds):
-        sleep_calls.append(seconds)
+    async def fake_sleep_with_heartbeat(bot_arg, plugin, name, delay, **kwargs):
+        sleep_calls.append((bot_arg, plugin, name, delay, kwargs))
 
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(rss_tasks, "sleep_with_heartbeat", fake_sleep_with_heartbeat)
     monkeypatch.setattr(rss_store, "RSS_RETRY_INITIAL_DELAY", 300)
     monkeypatch.setattr(rss_store, "RSS_RETRY_BACKOFF_MULTIPLIER", 2.0)
     monkeypatch.setattr(rss_store, "MAX_BACKOFF_TIME", 3600)
@@ -385,7 +386,7 @@ async def test_fetch_error_sleeps_retry_delay(monkeypatch, make_bot):
     assert store[rss.RSS_KEY][url]["error_count"] == 1
     assert store[rss.RSS_KEY][url]["next_retry"] == 1300
     assert store[rss.RSS_KEY][url]["last_error"] == "boom"
-    assert sleep_calls == [300]
+    assert sleep_calls == [(bot, "rss", f"rss-check-{url}", 300, {})]
 
 
 @pytest.mark.asyncio

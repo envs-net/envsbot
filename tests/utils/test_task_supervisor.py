@@ -610,7 +610,8 @@ async def test_runtime_ready_gate_sets_initial_service_heartbeat():
 
     bot.runtime_ready.set()
 
-    await waiter
+    waiter_result = await waiter
+    assert waiter_result is None
     assert heartbeats == [("runtime", "service")]
 
 
