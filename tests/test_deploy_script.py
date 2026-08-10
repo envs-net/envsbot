@@ -11,7 +11,23 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[1]
+_TEST_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout when tests run from mutmut's copy."""
+    if path.name == "mutants":
+        checkout = path.parent
+        if (
+            (checkout / "pyproject.toml").is_file()
+            and (checkout / "scripts" / "deploy.py").is_file()
+            and (checkout / "scripts" / "deploy.sh").is_file()
+        ):
+            return checkout
+    return path
+
+
+ROOT = _checkout_root(_TEST_ROOT)
 DEPLOY_PATH = ROOT / "scripts" / "deploy.py"
 
 
@@ -26,6 +42,20 @@ def _load_deploy_module():
 
 
 deploy = _load_deploy_module()
+
+
+
+def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "deploy.py").write_text("# test\n", encoding="utf-8")
+    (scripts / "deploy.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    mutants = tmp_path / "mutants"
+    mutants.mkdir()
+
+    assert _checkout_root(mutants) == tmp_path
+    assert _checkout_root(tmp_path) == tmp_path
 
 
 def _current_deployment(tmp_path: Path, *, dry_run: bool = False):
