@@ -123,13 +123,13 @@ For updates, use a release tag:
 
 ```bash
 sudo ./scripts/deploy.sh update --to v1.8.0
-# or let the helper select the newest version-sorted tag after git fetch:
+# or let the helper select the newest stable vX.Y.Z tag from the remote:
 sudo ./scripts/deploy.sh update
 ```
 
 The automatic update path **never deploys `main`**. It refreshes normal remote refs
-with `--no-tags`, queries the remote release tags read-only with `git ls-remote`, and
-then fetches only the selected release tag. This deliberately avoids a bulk
+with `--no-tags`, queries remote tags read-only with `git ls-remote`, filters them to
+stable `vX.Y.Z` releases, and then fetches only the selected release tag. This deliberately avoids a bulk
 `git fetch --tags`: an unrelated stale or conflicting local historical tag must not
 block an update to a different release. If the selected tag itself conflicts with
 the remote tag, the helper refuses to overwrite it and asks the operator to verify
@@ -164,7 +164,7 @@ does not automatically start older code against a database that may already
 have been migrated.
 
 `status` keeps read-only discovery probes quiet and prints only the resolved
-deployment paths, current Git revision, latest local release tag and service
+deployment paths, current Git revision, latest stable local release tag and service
 state. `check` is also intentionally compact on success. In addition to the
 normal envsbot preflight and path/permission checks, it compares the **effective
 systemd properties currently loaded by systemd** with the unit rendered for the
@@ -346,7 +346,7 @@ sudo systemctl stop envsbot.service
 
 cd /srv/envsbot
 sudo -u envsbot git fetch --tags --prune
-LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | head -n1)"
+LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
 sudo -u envsbot git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 

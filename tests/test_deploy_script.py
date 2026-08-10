@@ -392,10 +392,10 @@ def test_status_is_quiet_and_formats_labels_unambiguously(tmp_path, monkeypatch,
     assert "\n+ " not in output
     assert "database:" in output
     assert "runtime data:" in output
-    assert "latest local tag:" in output
+    assert "latest stable tag:" in output
     assert "service state:" in output
-    output_without_latest = output.replace("latest local tag:", "")
-    assert "local tag:" not in output_without_latest
+    output_without_latest = output.replace("latest stable tag:", "")
+    assert "latest local tag:" not in output_without_latest
 
 
 def test_actual_systemd_values_normalize_effective_properties(tmp_path, monkeypatch):
@@ -691,6 +691,63 @@ def test_automatic_update_refuses_latest_release_behind_current_head(
     assert "development branch is never deployed automatically" in output
 
 
+def test_stable_release_tag_requires_exact_vx_y_z_shape():
+    accepted = ("v0.0.1", "v1.8.0", "v12.34.567")
+    rejected = (
+        "1.8.0",
+        "v1.8",
+        "v1.8.0-rc1",
+        "v1.8.0+build",
+        "release-v1.8.0",
+        "backup-20260810",
+        "test",
+    )
+
+    assert all(deploy._is_stable_release_tag(tag) for tag in accepted)
+    assert not any(deploy._is_stable_release_tag(tag) for tag in rejected)
+
+
+def test_latest_local_release_tag_ignores_prerelease_and_nonrelease_tags(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    result = subprocess.CompletedProcess(
+        [],
+        0,
+        stdout="v2.0.0-rc1\nbackup-20260810\nv1.9.0\nv1.8.1\n",
+        stderr="",
+    )
+    monkeypatch.setattr(deploy, "_git", lambda *_args, **_kwargs: result)
+
+    assert deploy._latest_tag(deployment) == "v1.9.0"
+
+
+def test_latest_remote_release_tag_ignores_prerelease_and_nonrelease_tags(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(
+        deploy,
+        "_remote_tags",
+        lambda _deployment, _remote: [
+            "v2.0.0-rc1",
+            "backup-20260810",
+            "v1.9.0",
+            "v1.8.1",
+        ],
+    )
+
+    assert deploy._latest_remote_tag(deployment, "origin") == "v1.9.0"
+
+
+def test_latest_remote_release_tag_requires_stable_release(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(
+        deploy,
+        "_remote_tags",
+        lambda _deployment, _remote: ["v2.0.0-rc1", "backup-20260810"],
+    )
+
+    with pytest.raises(deploy.DeployError, match=r"no stable Git release tags \(vX\.Y\.Z\)"):
+        deploy._latest_remote_tag(deployment, "origin")
+
+
 def test_prepare_release_target_fetches_branches_without_bulk_tags(tmp_path, monkeypatch):
     deployment = _current_deployment(tmp_path)
     git_calls = []
@@ -787,6 +844,7 @@ def _release_remote_checkout(tmp_path: Path):
     (source / "value.txt").write_text("two\n", encoding="utf-8")
     _git_cmd(source, "commit", "-am", "two")
     _git_cmd(source, "tag", "v1.8.0")
+    _git_cmd(source, "tag", "v9.0.0-rc1")
     _git_cmd(tmp_path, "clone", "--bare", str(source), str(remote))
     _git_cmd(tmp_path, "clone", str(remote), str(checkout))
 

@@ -19,9 +19,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+
+
+_STABLE_RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 
 class DeployError(RuntimeError):
@@ -164,7 +167,7 @@ Safety rules:
   * existing config, database, vCard, operator avatar and systemd unit files are kept;
   * an existing systemd unit is never replaced by this helper;
   * update refuses a dirty tracked Git worktree;
-  * normal updates install release tags only and never downgrade to an older tag;
+  * automatic updates select stable vX.Y.Z release tags only and never downgrade to an older tag;
   * explicit downgrades require --allow-downgrade plus an additional confirmation;
   * a failed update after stopping the service leaves it stopped.
 """,
@@ -187,7 +190,11 @@ Safety rules:
         help="base interpreter used to create a missing virtualenv",
     )
     parser.add_argument("--dry-run", action="store_true", help="show the plan without changing anything")
-    parser.add_argument("--to", metavar="TAG", help="tag to install with update (default: newest local/fetched tag)")
+    parser.add_argument(
+        "--to",
+        metavar="TAG",
+        help="explicit tag to install with update (default: newest stable vX.Y.Z release)",
+    )
     parser.add_argument(
         "--allow-downgrade",
         action="store_true",
@@ -791,11 +798,19 @@ def _current_revision(deployment: Deployment) -> str:
     return result.stdout.strip() or "unknown"
 
 
+def _is_stable_release_tag(tag: str) -> bool:
+    return _STABLE_RELEASE_TAG.fullmatch(tag) is not None
+
+
 def _latest_tag(deployment: Deployment) -> str:
     result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
-    tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    tags = [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if _is_stable_release_tag(line.strip())
+    ]
     if not tags:
-        raise DeployError("no Git release tags found")
+        raise DeployError("no stable Git release tags (vX.Y.Z) found")
     return tags[0]
 
 
@@ -871,9 +886,11 @@ def _remote_tags(deployment: Deployment, remote: str) -> list[str]:
 
 
 def _latest_remote_tag(deployment: Deployment, remote: str) -> str:
-    tags = _remote_tags(deployment, remote)
+    tags = [tag for tag in _remote_tags(deployment, remote) if _is_stable_release_tag(tag)]
     if not tags:
-        raise DeployError(f"no Git release tags found on remote {remote!r}")
+        raise DeployError(
+            f"no stable Git release tags (vX.Y.Z) found on remote {remote!r}"
+        )
     return tags[0]
 
 
@@ -1252,11 +1269,14 @@ def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     _print_paths(deployment, runtime=runtime)
     print("\nUpdate plan:")
     print(f"  current: {_current_revision(deployment)}")
-    print(f"  target:  {requested_tag or 'newest release tag (resolved after git fetch)'}")
+    print(f"  target:  {requested_tag or 'newest stable vX.Y.Z release (resolved after Git query)'}")
     print("  - require a clean tracked Git worktree")
     print("  - preserve config/database/vCard/operator-avatar/systemd unit files")
     print("  - ask before stopping an active service")
-    print("  - query release tags from the configured Git remote without overwriting unrelated local tags")
+    print(
+        "  - query stable vX.Y.Z release tags from the configured Git remote "
+        "without overwriting unrelated local tags"
+    )
     print("  - fetch and checkout only the selected release tag (never deploy main automatically)")
     print("  - refuse automatic downgrades; explicit older --to tags require --allow-downgrade")
     print("  - install dependencies using the matching Python constraint snapshot")
@@ -1355,7 +1375,7 @@ def status(deployment: Deployment) -> int:
     if (deployment.root / ".git").exists():
         try:
             status_rows.append(("revision", _current_revision(deployment)))
-            status_rows.append(("latest local tag", _latest_tag(deployment)))
+            status_rows.append(("latest stable tag", _latest_tag(deployment)))
         except DeployError as exc:
             status_rows.append(("Git status", f"unavailable ({exc})"))
     if shutil.which("systemctl"):

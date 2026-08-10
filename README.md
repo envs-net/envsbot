@@ -56,8 +56,8 @@ prints help and performs no action:
 
 `install`/`update` require explicit confirmation, and stopping/starting systemd
 are confirmed separately. Existing config, database, vCard, operator-managed avatar and systemd
-unit files are preserved; an existing service file is never replaced. Automatic updates install
-release tags only: they never deploy `main` and never downgrade to an older tag. An intentional
+unit files are preserved; an existing service file is never replaced. Automatic updates select
+stable `vX.Y.Z` release tags only: they never deploy `main` and never downgrade to an older tag. An intentional
 rollback requires an explicit `--to TAG --allow-downgrade` and does not downgrade the database
 schema. Release discovery queries the configured Git remote without importing every remote tag;
 only the selected release tag is fetched, so an unrelated conflicting local historical tag cannot
@@ -76,7 +76,7 @@ For production installations, use the **latest tagged release** instead of the
 `main` branch. The `main` branch is the active development branch and may contain
 changes that are not part of a stable release yet.
 
-The quickstart below automatically checks out the newest local version-sorted tag.
+The quickstart below automatically checks out the newest stable local `vX.Y.Z` tag.
 You can also replace `LATEST_TAG` with an explicit release such as `vX.Y.Z`.
 
 ```bash
@@ -86,7 +86,7 @@ sudo su - envsbot
 cd /srv/envsbot
 git clone https://git.envs.net/envs/envsbot.git .
 git fetch --tags
-LATEST_TAG="$(git tag --sort=-v:refname | head -n1)"
+LATEST_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
 git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 
@@ -128,7 +128,7 @@ sudo systemctl stop envsbot.service
 
 cd /srv/envsbot
 sudo -u envsbot git fetch --tags --prune
-LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | head -n1)"
+LATEST_TAG="$(sudo -u envsbot git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)"
 sudo -u envsbot git checkout "$LATEST_TAG"
 echo "Using EnvsBot release $LATEST_TAG"
 

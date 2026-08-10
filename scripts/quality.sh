@@ -11,6 +11,7 @@ ruff check .
 # Stricter modernisation/import/bugbear rules for the hardened core. Expand
 # this list package-by-package so the CI gate grows without a mass style rewrite.
 ruff check --select I,UP,B \
+  scripts/deploy.py \
   core_plugins/config_cmd.py \
   core_plugins/doctor.py \
   core_plugins/users/roles.py \
@@ -45,6 +46,7 @@ ruff check --select I,UP,B \
   utils/outbox.py
 
 mypy \
+  scripts/deploy.py \
   database/idlerpg.py \
   database/manager.py \
   database/locking.py \
