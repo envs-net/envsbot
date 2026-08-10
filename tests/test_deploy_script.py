@@ -282,6 +282,10 @@ def test_deployment_docs_keep_helper_and_manual_workflows():
     assert "without\na command only prints its help" in deployment_doc
     assert "existing systemd service/unit is **never overwritten**" in deployment_doc
     assert "currently loaded by systemd" in deployment_doc
+    assert "### Show or render the service unit" in deployment_doc
+    assert "envsbot systemd render | less" in deployment_doc
+    assert "systemctl cat envsbot.service" in deployment_doc
+    assert "sudo systemd-analyze verify /tmp/envsbot.service.new" in deployment_doc
     assert "envsbot systemd render" in deployment_doc
     assert "never deploys `main`" in deployment_doc
     assert "--allow-downgrade" in deployment_doc

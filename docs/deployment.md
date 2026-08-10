@@ -253,13 +253,55 @@ should move these paths before installing the strict rendered unit.
 
 The systemd unit is generated from the active installation rather than kept as
 a second static example in the repository. This keeps `ExecStart`,
-`WorkingDirectory` and writable paths aligned with non-standard installations:
+`WorkingDirectory` and writable paths aligned with non-standard installations.
+
+### Show or render the service unit
+
+Run the following from the envsbot virtualenv (or call its `bin/envsbot`
+executable directly). `systemd render` only prints the proposed unit; it does
+not modify systemd or write `/etc/systemd/system` by itself:
 
 ```bash
-. /srv/envsbot/.venv/bin/activate
-export ENVSBOT_CONFIG=/etc/envsbot/config.py
+envsbot systemd render
+```
+
+For easier review, page it or save it to a temporary file:
+
+```bash
+envsbot systemd render | less
+envsbot systemd render > /tmp/envsbot.service.new
+```
+
+If the runtime config is not already selected through the environment/service,
+set it explicitly for the render/check command:
+
+```bash
+ENVSBOT_CONFIG=/etc/envsbot/config.py envsbot systemd render
+ENVSBOT_CONFIG=/etc/envsbot/config.py envsbot systemd check
+```
+
+To show the unit that is **currently installed/loaded by systemd**, including
+drop-ins, use:
+
+```bash
+systemctl cat envsbot.service
+systemctl show envsbot.service -p FragmentPath -p DropInPaths
+```
+
+`./scripts/deploy.sh check` additionally compares the effective loaded systemd
+properties with the unit envsbot would render for the detected installation.
+
+### Create or install a new service unit
+
+For a fresh installation, render the unit first and review it before installing
+it. Existing units are deliberately not overwritten automatically:
+
+```bash
 envsbot systemd check
 envsbot systemd render > /tmp/envsbot.service.new
+
+sudo systemd-analyze verify /tmp/envsbot.service.new
+
 if sudo test -e /etc/systemd/system/envsbot.service; then
   echo "KEEP existing /etc/systemd/system/envsbot.service"
   sudo diff -u /etc/systemd/system/envsbot.service /tmp/envsbot.service.new || true
@@ -267,10 +309,15 @@ if sudo test -e /etc/systemd/system/envsbot.service; then
 else
   sudo install -m 0644 /tmp/envsbot.service.new /etc/systemd/system/envsbot.service
 fi
-sudo systemd-analyze verify /etc/systemd/system/envsbot.service
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now envsbot.service
 ```
+
+For a non-standard service name or unit location, replace
+`envsbot.service`/`/etc/systemd/system/envsbot.service` with the paths used by
+that installation. `./scripts/deploy.sh status` can help show what the helper
+has detected.
 
 `envsbot systemd check` also validates the configured log, database, backup, IdleRPG
 export and restart-notification paths. The generated unit accepts optional local

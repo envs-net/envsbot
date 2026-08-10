@@ -1155,12 +1155,15 @@ async def test_stats_command_is_primary_and_balance_alias_still_works():
 def test_logout_penalty_updates_player_state(monkeypatch):
     player = {"name": "Neo", "level": 5, "next": 1000, "alignment": "n", "stats": {}}
     monkeypatch.setattr(idlerpg_config, "LOGOUT_PENALTY", 20)
+    monkeypatch.setattr(idlerpg_config, "PENALTY_STEP", 1.14)
+    monkeypatch.setattr(idlerpg_config, "MAX_PENALTY", 0)
 
     changed = idlerpg._apply_logout_penalty(player)
 
-    assert changed == 20
-    assert player["next"] == 1020
-    assert player["penalties"]["logout"] == 20
+    # LOGOUT_PENALTY is the base value and scales with the player's level.
+    assert changed == 38
+    assert player["next"] == 1038
+    assert player["penalties"]["logout"] == 38
     assert player["pending_logout_penalty"] == {}
     assert player["stats"]["logouts"] == 1
 
