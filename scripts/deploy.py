@@ -23,7 +23,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-
 _STABLE_RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 
 

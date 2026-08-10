@@ -1,16 +1,26 @@
 #!/bin/sh
 set -eu
 
+ruff_fix_args=""
+if [ "${1:-}" = "--fix" ]; then
+  ruff_fix_args="--fix"
+  shift
+fi
+if [ "$#" -ne 0 ]; then
+  echo "usage: $0 [--fix]" >&2
+  exit 2
+fi
+
 python -m compileall -q envsbot.py bot core_plugins plugins database utils scripts
 python scripts/check_command_docs.py
 python scripts/generate_config_sample.py --check
 
 # Repository-wide correctness-critical rules.
-ruff check .
+ruff check $ruff_fix_args .
 
 # Stricter modernisation/import/bugbear rules for the hardened core. Expand
 # this list package-by-package so the CI gate grows without a mass style rewrite.
-ruff check --select I,UP,B \
+ruff check $ruff_fix_args --select I,UP,B \
   scripts/deploy.py \
   core_plugins/config_cmd.py \
   core_plugins/doctor.py \

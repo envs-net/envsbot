@@ -194,11 +194,21 @@ def test_aiohttp_security_floor_and_locks():
 def test_deploy_helper_is_in_strict_quality_gates():
     quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
 
-    strict_ruff = quality.split("ruff check --select I,UP,B", 1)[1].split("\nmypy \\", 1)[0]
+    strict_ruff = quality.split("ruff check $ruff_fix_args --select I,UP,B", 1)[1].split("\nmypy \\", 1)[0]
     mypy_block = quality.split("\nmypy \\", 1)[1].split("\n\npython_minor=", 1)[0]
 
     assert "scripts/deploy.py" in strict_ruff
     assert "scripts/deploy.py" in mypy_block
+
+
+def test_quality_fix_flag_is_forwarded_to_both_ruff_passes():
+    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
+
+    assert 'if [ "${1:-}" = "--fix" ]; then' in quality
+    assert 'ruff_fix_args="--fix"' in quality
+    assert "ruff check $ruff_fix_args ." in quality
+    assert "ruff check $ruff_fix_args --select I,UP,B" in quality
+    assert 'echo "usage: $0 [--fix]" >&2' in quality
 
 
 def test_quality_audits_exact_lock_without_no_deps_warning():
