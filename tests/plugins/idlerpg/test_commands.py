@@ -1274,8 +1274,9 @@ async def test_delold_requires_room_admin_and_valid_days():
 
 
 @pytest.mark.asyncio
-async def test_delold_previews_and_deletes_only_old_offline_players():
-    now = idlerpg._now()
+async def test_delold_previews_and_deletes_only_old_offline_players(monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: now)
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
     data = await idlerpg._get_data(bot)
