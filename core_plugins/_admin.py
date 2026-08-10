@@ -876,3 +876,9 @@ async def on_ready(bot):
         name="version-check",
     )
     log.info("[ADMIN] Version check worker started")
+
+
+async def restart_tasks(bot):
+    """Resynchronize optional admin workers after a live config reload."""
+    bot.version_check_task = None
+    await on_ready(bot)

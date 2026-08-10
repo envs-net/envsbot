@@ -550,6 +550,12 @@ def apply_runtime_config(bot: Any, before: Mapping[str, object], after: Mapping[
 async def restart_reloadable_plugin_tasks(bot: Any, before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:
     """Restart background task-owning plugins when their timing config changed."""
     affected = {
+        "_admin": {
+            "version_check_enabled",
+            "version_check_interval",
+            "version_check_url",
+            "version_check_notify_jid",
+        },
         "birthday_notify": {
             "birthday_initial_scan_delay_seconds",
             "birthday_check_interval_seconds",

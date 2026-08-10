@@ -104,11 +104,14 @@ COMMAND_SLOW_LOG_SECONDS = 2.0
 # entries unless the user explicitly asks for all/last/page.
 DEFAULT_PAGINATION = 'all'
 
-# SQLite runtime tuning. WAL can improve read/write concurrency, but keep it disabled
-# unless your backup/maintenance workflow expects WAL sidecar files.
+# SQLite connection busy timeout in milliseconds. Applied when the database connection
+# is opened.
+# Startup-only: restart envsbot after changing this value.
 DATABASE_BUSY_TIMEOUT_MS = 5000
 
-# Database wal enabled.
+# Whether SQLite WAL journal mode is enabled. Applied when the database connection is
+# opened.
+# Startup-only: restart envsbot after changing this value.
 DATABASE_WAL_ENABLED = False
 
 # Grace period for shutdown/restart DB cleanup. Keep this larger than the internal

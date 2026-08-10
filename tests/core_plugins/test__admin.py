@@ -732,6 +732,23 @@ async def test_on_ready_version_worker_branches(monkeypatch, fake_bot):
 
 
 @pytest.mark.asyncio
+async def test_restart_tasks_clears_worker_reference_before_resync(monkeypatch, fake_bot):
+    old_task = object()
+    fake_bot.version_check_task = old_task
+    observed = []
+
+    async def fake_on_ready(bot):
+        observed.append(getattr(bot, "version_check_task", "missing"))
+
+    monkeypatch.setattr(_admin, "on_ready", fake_on_ready)
+
+    await _admin.restart_tasks(fake_bot)
+
+    assert observed == [None]
+    assert fake_bot.version_check_task is None
+
+
+@pytest.mark.asyncio
 async def test_bot_shutdown_external_success_still_drains_runtime(monkeypatch, fake_bot):
     monkeypatch.setitem(_admin.config, "stop_cmd", ["service", "envsbot", "stop"])
     monkeypatch.setitem(_admin.config, "stop_cmd_timeout_seconds", 3)

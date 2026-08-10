@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 import utils.config.runtime as runtime
 
@@ -13,6 +16,62 @@ def test_message_cache_age_is_startup_only():
     )
 
     assert any("MESSAGE_CACHE_MAX_AGE_DAYS" in line for line in lines)
+
+
+def test_database_connection_pragmas_are_startup_only():
+    assert "database_busy_timeout_ms" in runtime.STARTUP_ONLY_KEYS
+    assert "database_wal_enabled" in runtime.STARTUP_ONLY_KEYS
+
+    lines = runtime.startup_change_lines(
+        {
+            "database_busy_timeout_ms": 5000,
+            "database_wal_enabled": False,
+        },
+        {
+            "database_busy_timeout_ms": 10000,
+            "database_wal_enabled": True,
+        },
+    )
+
+    assert any("DATABASE_BUSY_TIMEOUT_MS" in line for line in lines)
+    assert any("DATABASE_WAL_ENABLED" in line for line in lines)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changed_key,new_value",
+    [
+        ("version_check_enabled", True),
+        ("version_check_interval", 7200),
+        ("version_check_url", "https://example.org/releases/latest"),
+        ("version_check_notify_jid", "admin@example.org"),
+    ],
+)
+async def test_version_check_config_changes_restart_admin_worker(
+    changed_key,
+    new_value,
+):
+    restart = AsyncMock(return_value=(True, "Plugin _admin tasks restarted", 1))
+    manager = SimpleNamespace(
+        plugins={"_admin": object()},
+        restart_tasks=restart,
+    )
+    bot = SimpleNamespace(bot_plugins=manager)
+    before = {
+        "version_check_enabled": False,
+        "version_check_interval": 3600,
+        "version_check_url": "https://github.com/envs-net/envsbot/releases/latest",
+        "version_check_notify_jid": "",
+    }
+    after = dict(before)
+    after[changed_key] = new_value
+
+    result = await runtime.restart_reloadable_plugin_tasks(bot, before, after)
+
+    restart.assert_awaited_once_with("_admin")
+    assert result == [
+        "_admin: ok, 1 task(s) cancelled (Plugin _admin tasks restarted)"
+    ]
 
 
 def test_rate_limiter_from_config_uses_defaults():
