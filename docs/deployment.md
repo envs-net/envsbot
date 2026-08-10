@@ -125,6 +125,28 @@ sudo ./scripts/deploy.sh update --to v1.8.0
 sudo ./scripts/deploy.sh update
 ```
 
+The automatic update path **never deploys `main`**. After fetching tags it compares
+the selected release with the currently checked-out `HEAD` using Git ancestry:
+
+- a release newer than `HEAD` is offered as the normal update;
+- if `HEAD` already contains commits newer than the newest release tag, the helper
+  reports that no newer release is available and exits without stopping the service;
+- if `HEAD` is on a branch but already points at the exact release commit, the helper
+  can pin the checkout to that release tag;
+- a release on unrelated/diverged history is refused as a non-fast-forward deployment.
+
+An older release is never selected automatically. An intentional code rollback must
+name the older tag explicitly and opt in to downgrade handling:
+
+```bash
+sudo ./scripts/deploy.sh update --to v1.7.3 --allow-downgrade
+```
+
+This produces an additional warning and confirmation. It only permits the older
+**code** checkout; it does not downgrade the SQLite schema. If the older release is
+incompatible with the current database, validation fails and the service remains
+stopped. Restoring a matching verified database backup may therefore be required.
+
 The helper runs the same database status/dry-run/backup/migrate/check and local
 preflight steps shown in the manual update procedure below. If an update fails
 after the service was stopped, it intentionally leaves the service stopped; it

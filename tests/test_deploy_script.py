@@ -283,7 +283,11 @@ def test_deployment_docs_keep_helper_and_manual_workflows():
     assert "existing systemd service/unit is **never overwritten**" in deployment_doc
     assert "currently loaded by systemd" in deployment_doc
     assert "envsbot systemd render" in deployment_doc
+    assert "never deploys `main`" in deployment_doc
+    assert "--allow-downgrade" in deployment_doc
     assert "./scripts/deploy.sh update --dry-run" in readme
+    assert "never deploy `main`" in readme
+    assert "--allow-downgrade" in readme
     assert "## Updating" in readme
 
 
@@ -607,3 +611,217 @@ def test_read_write_path_normalization_keeps_systemd_prefix_semantics(tmp_path):
     expected_optional = f"-{optional.resolve()}"
     assert expected_plain in paths
     assert expected_optional in paths
+
+
+@pytest.mark.parametrize(
+    ("head_before_target", "target_before_head", "expected"),
+    (
+        (True, True, "same"),
+        (True, False, "upgrade"),
+        (False, True, "downgrade"),
+        (False, False, "diverged"),
+    ),
+)
+def test_target_relation_uses_git_ancestry(
+    tmp_path,
+    monkeypatch,
+    head_before_target,
+    target_before_head,
+    expected,
+):
+    deployment = _current_deployment(tmp_path)
+
+    def fake_is_ancestor(_deployment, older, newer):
+        if (older, newer) == ("HEAD", "v1.8.0"):
+            return head_before_target
+        if (older, newer) == ("v1.8.0", "HEAD"):
+            return target_before_head
+        raise AssertionError(f"unexpected ancestry comparison: {older} -> {newer}")
+
+    monkeypatch.setattr(deploy, "_git_is_ancestor", fake_is_ancestor)
+
+    relation = deploy._target_relation(deployment, "v1.8.0")
+
+    assert relation == expected
+
+
+def test_automatic_update_refuses_latest_release_behind_current_head(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    deployment = _current_deployment(tmp_path)
+    _write_source_markers(deployment)
+    (deployment.root / ".git").mkdir()
+    (deployment.venv / "bin").mkdir(parents=True)
+    deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
+    deployment.config.write_text("# config\n", encoding="utf-8")
+    git_calls = []
+
+    monkeypatch.setattr(deploy, "_require_clean_tracked_tree", lambda _deployment: None)
+    monkeypatch.setattr(deploy, "_update_plan", lambda _deployment, _tag: None)
+    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: True)
+    monkeypatch.setattr(deploy, "_latest_tag", lambda _deployment: "v1.7.3")
+    monkeypatch.setattr(deploy, "_validate_tag", lambda _deployment, _tag: None)
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.7.3-60-gabcdef")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
+    monkeypatch.setattr(
+        deploy,
+        "_git",
+        lambda _deployment, *args, **_kwargs: git_calls.append(args)
+        or subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        deploy,
+        "_protected_paths",
+        lambda _deployment: pytest.fail("no operator files should be prepared without an upgrade"),
+    )
+    monkeypatch.setattr(
+        deploy,
+        "_stop_active_service",
+        lambda *_args, **_kwargs: pytest.fail("service must not stop without an upgrade"),
+    )
+
+    result = deploy.update(deployment, None)
+    output = capsys.readouterr().out
+
+    assert result == 0
+    assert git_calls == [("fetch", "--tags", "--prune")]
+    assert "No newer release is available (latest release: v1.7.3)." in output
+    assert "contains commits newer than v1.7.3" in output
+    assert "development branch is never deployed automatically" in output
+
+
+def test_explicit_older_release_requires_allow_downgrade(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
+    monkeypatch.setattr(
+        deploy,
+        "_confirm",
+        lambda _prompt: pytest.fail("refused downgrade must not prompt for approval"),
+    )
+
+    with pytest.raises(deploy.DeployError, match="refusing downgrade"):
+        deploy._approve_update_target(
+            deployment,
+            "v1.7.3",
+            requested_tag="v1.7.3",
+            allow_downgrade=False,
+        )
+
+
+def test_explicit_downgrade_requires_additional_warning_confirmation(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    deployment = _current_deployment(tmp_path)
+    prompts = []
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
+    monkeypatch.setattr(deploy, "_confirm", lambda prompt: prompts.append(prompt) or True)
+
+    approved = deploy._approve_update_target(
+        deployment,
+        "v1.7.3",
+        requested_tag="v1.7.3",
+        allow_downgrade=True,
+    )
+    output = capsys.readouterr().out
+
+    assert approved is True
+    assert len(prompts) == 1
+    assert prompts[0].startswith("Downgrade v1.8.0 to v1.7.3?")
+    assert "explicit code downgrade" in output
+    assert "does not downgrade the database schema" in output
+
+
+def test_same_release_commit_on_branch_is_pinned_to_tag(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    prompts = []
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "same")
+    monkeypatch.setattr(deploy, "_head_is_detached", lambda _deployment: False)
+    monkeypatch.setattr(deploy, "_confirm", lambda prompt: prompts.append(prompt) or True)
+
+    approved = deploy._approve_update_target(
+        deployment,
+        "v1.8.0",
+        requested_tag=None,
+        allow_downgrade=False,
+    )
+
+    assert approved is True
+    assert prompts == ["Current HEAD already matches v1.8.0. Pin this checkout to the release tag?"]
+
+
+def test_same_release_commit_already_detached_is_noop(tmp_path, monkeypatch, capsys):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "same")
+    monkeypatch.setattr(deploy, "_head_is_detached", lambda _deployment: True)
+    monkeypatch.setattr(
+        deploy,
+        "_confirm",
+        lambda _prompt: pytest.fail("already pinned release must not prompt"),
+    )
+
+    approved = deploy._approve_update_target(
+        deployment,
+        "v1.8.0",
+        requested_tag=None,
+        allow_downgrade=False,
+    )
+    output = capsys.readouterr().out
+
+    assert approved is False
+    assert "Already at release v1.8.0; nothing to update." in output
+
+
+def test_diverged_release_history_is_refused(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "feature-abcdef")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "diverged")
+
+    with pytest.raises(deploy.DeployError, match="non-fast-forward deployment"):
+        deploy._approve_update_target(
+            deployment,
+            "v1.8.0",
+            requested_tag="v1.8.0",
+            allow_downgrade=False,
+        )
+
+
+def test_allow_downgrade_cli_requires_explicit_update_target(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        deploy.main(["update", "--allow-downgrade"])
+
+    assert exc_info.value.code == 2
+    assert "--allow-downgrade requires an explicit --to TAG" in capsys.readouterr().err
+
+
+def test_git_helper_forwards_nonchecking_mode(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    observed = {}
+
+    def fake_run(args, **kwargs):
+        observed["args"] = args
+        observed["check"] = kwargs["check"]
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(deploy, "_run", fake_run)
+
+    result = deploy._git(
+        deployment,
+        "rev-parse",
+        "--verify",
+        "missing",
+        capture=True,
+        check=False,
+        announce=False,
+    )
+
+    assert result.returncode == 1
+    assert observed["args"] == ["git", "rev-parse", "--verify", "missing"]
+    assert observed["check"] is False

@@ -56,8 +56,10 @@ prints help and performs no action:
 
 `install`/`update` require explicit confirmation, and stopping/starting systemd
 are confirmed separately. Existing config, database, vCard, operator-managed avatar and systemd
-unit files are preserved; an existing service file is never replaced. Use
-`--root`, `--venv`, `--config`, `--service`, `--user`, `--group` and `--unit`
+unit files are preserved; an existing service file is never replaced. Automatic updates install
+release tags only: they never deploy `main` and never downgrade to an older tag. An intentional
+rollback requires an explicit `--to TAG --allow-downgrade` and does not downgrade the database
+schema. Use `--root`, `--venv`, `--config`, `--service`, `--user`, `--group` and `--unit`
 for non-standard layouts. See [`docs/deployment.md`](docs/deployment.md) for the
 complete safety model and supported environment overrides.
 

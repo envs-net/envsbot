@@ -152,6 +152,7 @@ def _build_parser() -> argparse.ArgumentParser:
   ./scripts/deploy.sh install --dry-run
   sudo ./scripts/deploy.sh install --config /etc/envsbot/config.py
   sudo ./scripts/deploy.sh update --to v1.8.0
+  sudo ./scripts/deploy.sh update --to v1.7.3 --allow-downgrade
 
 Paths are discovered from the current checkout and active configuration where
 possible.  Override non-standard installations with --root, --venv, --config,
@@ -163,6 +164,8 @@ Safety rules:
   * existing config, database, vCard, operator avatar and systemd unit files are kept;
   * an existing systemd unit is never replaced by this helper;
   * update refuses a dirty tracked Git worktree;
+  * normal updates install release tags only and never downgrade to an older tag;
+  * explicit downgrades require --allow-downgrade plus an additional confirmation;
   * a failed update after stopping the service leaves it stopped.
 """,
     )
@@ -185,6 +188,11 @@ Safety rules:
     )
     parser.add_argument("--dry-run", action="store_true", help="show the plan without changing anything")
     parser.add_argument("--to", metavar="TAG", help="tag to install with update (default: newest local/fetched tag)")
+    parser.add_argument(
+        "--allow-downgrade",
+        action="store_true",
+        help="allow an explicit --to TAG older than HEAD (never used for automatic updates)",
+    )
     return parser
 
 
@@ -751,6 +759,7 @@ def _git(
     deployment: Deployment,
     *args: str,
     capture: bool = False,
+    check: bool = True,
     announce: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     return _run(
@@ -758,6 +767,7 @@ def _git(
         deployment=deployment,
         as_service_user=True,
         capture=capture,
+        check=check,
         cwd=deployment.root,
         announce=announce,
     )
@@ -802,6 +812,104 @@ def _validate_tag(deployment: Deployment, tag: str) -> None:
     )
     if result.returncode != 0:
         raise DeployError(f"release tag does not exist: {tag}")
+
+
+def _git_is_ancestor(deployment: Deployment, older: str, newer: str) -> bool:
+    result = _git(
+        deployment,
+        "merge-base",
+        "--is-ancestor",
+        older,
+        newer,
+        capture=True,
+        check=False,
+        announce=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise DeployError(f"could not compare Git revisions {older!r} and {newer!r}")
+
+
+def _target_relation(deployment: Deployment, target: str) -> str:
+    """Classify a release target relative to the currently checked-out HEAD."""
+    head_before_target = _git_is_ancestor(deployment, "HEAD", target)
+    target_before_head = _git_is_ancestor(deployment, target, "HEAD")
+    if head_before_target and target_before_head:
+        return "same"
+    if head_before_target:
+        return "upgrade"
+    if target_before_head:
+        return "downgrade"
+    return "diverged"
+
+
+def _head_is_detached(deployment: Deployment) -> bool:
+    result = _git(
+        deployment,
+        "symbolic-ref",
+        "--quiet",
+        "HEAD",
+        capture=True,
+        check=False,
+        announce=False,
+    )
+    if result.returncode == 0:
+        return False
+    if result.returncode == 1:
+        return True
+    raise DeployError("could not determine whether the Git checkout is attached to a branch")
+
+
+def _approve_update_target(
+    deployment: Deployment,
+    target: str,
+    *,
+    requested_tag: str | None,
+    allow_downgrade: bool,
+) -> bool:
+    """Return whether the selected release should be checked out."""
+    current = _current_revision(deployment)
+    relation = _target_relation(deployment, target)
+
+    if relation == "upgrade":
+        _require_confirmation(f"Update {current} to {target}?")
+        return True
+
+    if relation == "same":
+        if _head_is_detached(deployment):
+            print(f"Already at release {target}; nothing to update.")
+            return False
+        _require_confirmation(
+            f"Current HEAD already matches {target}. Pin this checkout to the release tag?"
+        )
+        return True
+
+    if relation == "downgrade":
+        if requested_tag is None:
+            print(f"No newer release is available (latest release: {target}).")
+            print(f"The current checkout {current} contains commits newer than {target}.")
+            print("Nothing to update; the development branch is never deployed automatically.")
+            return False
+        if not allow_downgrade:
+            raise DeployError(
+                f"requested release {target} is older than the current checkout {current}; "
+                "refusing downgrade (use --allow-downgrade only for an intentional rollback)"
+            )
+        print(
+            "WARNING: this is an explicit code downgrade. The helper does not downgrade the "
+            "database schema; an incompatible database will leave the service stopped."
+        )
+        _require_confirmation(
+            f"Downgrade {current} to {target}? A matching database backup may be required."
+        )
+        return True
+
+    raise DeployError(
+        f"release {target} is not on the current HEAD history; refusing a non-fast-forward "
+        "deployment. Resolve the Git history manually before updating."
+    )
 
 
 def _relative_to_root(path: Path | None, root: Path) -> bool:
@@ -1001,14 +1109,20 @@ def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     print("  - require a clean tracked Git worktree")
     print("  - preserve config/database/vCard/operator-avatar/systemd unit files")
     print("  - ask before stopping an active service")
-    print("  - fetch tags and checkout only a release tag")
+    print("  - fetch tags and checkout only a release tag (never deploy main automatically)")
+    print("  - refuse automatic downgrades; explicit older --to tags require --allow-downgrade")
     print("  - install dependencies using the matching Python constraint snapshot")
     print("  - run db status, migration dry-run, verified db backup, migrate and db check")
     print("  - run envsbot --check and envsbot systemd check")
     print("  - ask separately before starting the service")
 
 
-def update(deployment: Deployment, requested_tag: str | None) -> int:
+def update(
+    deployment: Deployment,
+    requested_tag: str | None,
+    *,
+    allow_downgrade: bool = False,
+) -> int:
     _require_source_tree(deployment)
     if not (deployment.root / ".git").exists():
         raise DeployError(f"update requires a Git checkout: {deployment.root}")
@@ -1021,17 +1135,23 @@ def update(deployment: Deployment, requested_tag: str | None) -> int:
         return 0
     _require_confirmation("Proceed with the envsbot update plan shown above?")
 
+    _git(deployment, "fetch", "--tags", "--prune")
+    target = requested_tag or _latest_tag(deployment)
+    _validate_tag(deployment, target)
+    print(f"Selected release: {target}")
+    if not _approve_update_target(
+        deployment,
+        target,
+        requested_tag=requested_tag,
+        allow_downgrade=allow_downgrade,
+    ):
+        return 0
+
     protected = _protected_paths(deployment)
     print("\nProtected operator files:")
     for label, path in protected.items():
         state = "exists" if path.exists() else "missing"
         print(f"  {label}: {path} ({state})")
-
-    _git(deployment, "fetch", "--tags", "--prune")
-    target = requested_tag or _latest_tag(deployment)
-    _validate_tag(deployment, target)
-    print(f"Selected release: {target}")
-    _require_confirmation(f"Update {_current_revision(deployment)} to {target}?")
 
     stopped = _stop_active_service(
         deployment, reason="before changing code, dependencies and database schema"
@@ -1139,6 +1259,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if options.to and options.command != "update":
         parser.error("--to is only valid with the update command")
+    if options.allow_downgrade and options.command != "update":
+        parser.error("--allow-downgrade is only valid with the update command")
+    if options.allow_downgrade and not options.to:
+        parser.error("--allow-downgrade requires an explicit --to TAG")
     deployment = _deployment(options)
     try:
         if options.command == "status":
@@ -1147,7 +1271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return check(deployment)
         if options.command == "install":
             return install(deployment)
-        return update(deployment, options.to)
+        return update(deployment, options.to, allow_downgrade=options.allow_downgrade)
     except UserCancelled as exc:
         print(f"deploy: {exc}")
         return 2
