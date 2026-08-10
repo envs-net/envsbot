@@ -59,7 +59,10 @@ are confirmed separately. Existing config, database, vCard, operator-managed ava
 unit files are preserved; an existing service file is never replaced. Automatic updates install
 release tags only: they never deploy `main` and never downgrade to an older tag. An intentional
 rollback requires an explicit `--to TAG --allow-downgrade` and does not downgrade the database
-schema. Use `--root`, `--venv`, `--config`, `--service`, `--user`, `--group` and `--unit`
+schema. Release discovery queries the configured Git remote without importing every remote tag;
+only the selected release tag is fetched, so an unrelated conflicting local historical tag cannot
+break the update. Set `ENVSBOT_DEPLOY_REMOTE` when the release remote cannot be inferred safely.
+Use `--root`, `--venv`, `--config`, `--service`, `--user`, `--group` and `--unit`
 for non-standard layouts. See [`docs/deployment.md`](docs/deployment.md) for the
 complete safety model and supported environment overrides.
 

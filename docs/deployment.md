@@ -103,7 +103,9 @@ sudo ./scripts/deploy.sh status \
 Useful environment overrides are `ENVSBOT_CONFIG`, `ENVSBOT_VENV`,
 `ENVSBOT_SERVICE`, `ENVSBOT_SERVICE_USER`, `ENVSBOT_SERVICE_GROUP`,
 `ENVSBOT_SYSTEMD_UNIT`, `ENVSBOT_DEPLOY_BASE_PYTHON` and
-`ENVSBOT_DEPLOY_PYTHON`. Command-line options take precedence.
+`ENVSBOT_DEPLOY_PYTHON`. `ENVSBOT_DEPLOY_REMOTE` can select the Git remote used
+for release discovery when a checkout has multiple remotes or no unambiguous
+upstream. Command-line options take precedence where an equivalent option exists.
 
 `install` starts from an existing envsbot source checkout and an existing service
 account; it deliberately does not create system users or clone a repository. Those
@@ -125,8 +127,16 @@ sudo ./scripts/deploy.sh update --to v1.8.0
 sudo ./scripts/deploy.sh update
 ```
 
-The automatic update path **never deploys `main`**. After fetching tags it compares
-the selected release with the currently checked-out `HEAD` using Git ancestry:
+The automatic update path **never deploys `main`**. It refreshes normal remote refs
+with `--no-tags`, queries the remote release tags read-only with `git ls-remote`, and
+then fetches only the selected release tag. This deliberately avoids a bulk
+`git fetch --tags`: an unrelated stale or conflicting local historical tag must not
+block an update to a different release. If the selected tag itself conflicts with
+the remote tag, the helper refuses to overwrite it and asks the operator to verify
+the tag manually.
+
+After selecting the release it compares that tag with the currently checked-out
+`HEAD` using Git ancestry:
 
 - a release newer than `HEAD` is offered as the normal update;
 - if `HEAD` already contains commits newer than the newest release tag, the helper

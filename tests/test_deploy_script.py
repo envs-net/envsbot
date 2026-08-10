@@ -656,21 +656,16 @@ def test_automatic_update_refuses_latest_release_behind_current_head(
     (deployment.venv / "bin").mkdir(parents=True)
     deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
     deployment.config.write_text("# config\n", encoding="utf-8")
-    git_calls = []
-
     monkeypatch.setattr(deploy, "_require_clean_tracked_tree", lambda _deployment: None)
     monkeypatch.setattr(deploy, "_update_plan", lambda _deployment, _tag: None)
     monkeypatch.setattr(deploy, "_confirm", lambda _prompt: True)
-    monkeypatch.setattr(deploy, "_latest_tag", lambda _deployment: "v1.7.3")
-    monkeypatch.setattr(deploy, "_validate_tag", lambda _deployment, _tag: None)
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.7.3-60-gabcdef")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
     monkeypatch.setattr(
         deploy,
-        "_git",
-        lambda _deployment, *args, **_kwargs: git_calls.append(args)
-        or subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        "_prepare_release_target",
+        lambda _deployment, _tag: ("origin", "v1.7.3"),
     )
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.7.3-60-gabcdef")
+    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
     monkeypatch.setattr(
         deploy,
         "_protected_paths",
@@ -686,10 +681,119 @@ def test_automatic_update_refuses_latest_release_behind_current_head(
     output = capsys.readouterr().out
 
     assert result == 0
-    assert git_calls == [("fetch", "--tags", "--prune")]
+    assert "Selected release: v1.7.3 (remote: origin)" in output
     assert "No newer release is available (latest release: v1.7.3)." in output
     assert "contains commits newer than v1.7.3" in output
     assert "development branch is never deployed automatically" in output
+
+
+def test_prepare_release_target_fetches_branches_without_bulk_tags(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    git_calls = []
+    synced = []
+    validated = []
+
+    monkeypatch.setattr(deploy, "_git_remote", lambda _deployment: "upstream")
+    monkeypatch.setattr(deploy, "_latest_remote_tag", lambda _deployment, _remote: "v1.8.0")
+    monkeypatch.setattr(
+        deploy,
+        "_sync_release_tag",
+        lambda _deployment, remote, tag: synced.append((remote, tag)),
+    )
+    monkeypatch.setattr(
+        deploy,
+        "_validate_tag",
+        lambda _deployment, tag: validated.append(tag),
+    )
+    monkeypatch.setattr(
+        deploy,
+        "_git",
+        lambda _deployment, *args, **_kwargs: git_calls.append(args)
+        or subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    )
+
+    remote, target = deploy._prepare_release_target(deployment, None)
+
+    assert (remote, target) == ("upstream", "v1.8.0")
+    assert git_calls == [("fetch", "--prune", "--no-tags", "upstream")]
+    assert synced == [("upstream", "v1.8.0")]
+    assert validated == ["v1.8.0"]
+
+
+def _git_cmd(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _release_remote_checkout(tmp_path: Path):
+    source = tmp_path / "source"
+    remote = tmp_path / "remote.git"
+    checkout = tmp_path / "checkout"
+    source.mkdir()
+    _git_cmd(source, "init", "-b", "main")
+    _git_cmd(source, "config", "user.name", "envsbot tests")
+    _git_cmd(source, "config", "user.email", "envsbot@example.invalid")
+    (source / "value.txt").write_text("one\n", encoding="utf-8")
+    _git_cmd(source, "add", "value.txt")
+    _git_cmd(source, "commit", "-m", "one")
+    first = _git_cmd(source, "rev-parse", "HEAD")
+    _git_cmd(source, "tag", "v1.0.0")
+    (source / "value.txt").write_text("two\n", encoding="utf-8")
+    _git_cmd(source, "commit", "-am", "two")
+    _git_cmd(source, "tag", "v1.8.0")
+    subprocess.run(["git", "clone", "--bare", str(source), str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "clone", str(remote), str(checkout)], check=True, capture_output=True)
+
+    user = pwd.getpwuid(os.getuid()).pw_name
+    group = grp.getgrgid(os.getgid()).gr_name
+    deployment = deploy.Deployment(
+        root=checkout,
+        venv=checkout / ".venv",
+        config=tmp_path / "config.py",
+        service="envsbot-test.service",
+        service_user=user,
+        service_group=group,
+        unit=tmp_path / "envsbot-test.service",
+        python="python3",
+    )
+    return deployment, first
+
+
+def test_release_discovery_ignores_unrelated_conflicting_local_tag(tmp_path, monkeypatch):
+    deployment, first = _release_remote_checkout(tmp_path)
+    _git_cmd(deployment.root, "tag", "-d", "v1.8.0")
+    _git_cmd(deployment.root, "tag", "-f", "v1.0.0", "HEAD")
+    conflicting_before = _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.0.0")
+    assert conflicting_before != first
+    monkeypatch.setenv("ENVSBOT_DEPLOY_REMOTE", "origin")
+
+    remote, target = deploy._prepare_release_target(deployment, None)
+
+    assert (remote, target) == ("origin", "v1.8.0")
+    assert _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.0.0") == conflicting_before
+    assert _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.8.0^{commit}") == _git_cmd(
+        deployment.root,
+        "rev-parse",
+        "origin/main",
+    )
+
+
+def test_selected_release_tag_conflict_is_refused_without_overwrite(tmp_path, monkeypatch):
+    deployment, first = _release_remote_checkout(tmp_path)
+    _git_cmd(deployment.root, "tag", "-f", "v1.8.0", first)
+    local_before = _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.8.0")
+    monkeypatch.setenv("ENVSBOT_DEPLOY_REMOTE", "origin")
+
+    with pytest.raises(deploy.DeployError, match="conflicts with remote"):
+        deploy._prepare_release_target(deployment, "v1.8.0")
+
+    assert _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.8.0") == local_before
 
 
 def test_explicit_older_release_requires_allow_downgrade(tmp_path, monkeypatch):

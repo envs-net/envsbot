@@ -799,6 +799,153 @@ def _latest_tag(deployment: Deployment) -> str:
     return tags[0]
 
 
+def _git_remote(deployment: Deployment) -> str:
+    """Return the remote used for release discovery without guessing silently."""
+    configured = os.environ.get("ENVSBOT_DEPLOY_REMOTE")
+    remotes_result = _git(deployment, "remote", capture=True, announce=False)
+    remotes = [line.strip() for line in remotes_result.stdout.splitlines() if line.strip()]
+
+    if configured:
+        if configured not in remotes:
+            raise DeployError(f"configured Git remote does not exist: {configured}")
+        return configured
+
+    branch_result = _git(
+        deployment,
+        "symbolic-ref",
+        "--quiet",
+        "--short",
+        "HEAD",
+        capture=True,
+        check=False,
+        announce=False,
+    )
+    if branch_result.returncode == 0:
+        branch = branch_result.stdout.strip()
+        remote_result = _git(
+            deployment,
+            "config",
+            "--get",
+            f"branch.{branch}.remote",
+            capture=True,
+            check=False,
+            announce=False,
+        )
+        branch_remote = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
+        if branch_remote and branch_remote != "." and branch_remote in remotes:
+            return branch_remote
+
+    if "origin" in remotes:
+        return "origin"
+    if len(remotes) == 1:
+        return remotes[0]
+    if not remotes:
+        raise DeployError("no Git remote is configured for release discovery")
+    raise DeployError(
+        "multiple Git remotes are configured and no release remote could be selected; "
+        "set ENVSBOT_DEPLOY_REMOTE explicitly"
+    )
+
+
+def _remote_tags(deployment: Deployment, remote: str) -> list[str]:
+    result = _git(
+        deployment,
+        "ls-remote",
+        "--tags",
+        "--refs",
+        "--sort=-version:refname",
+        remote,
+        capture=True,
+        announce=False,
+    )
+    prefix = "refs/tags/"
+    tags: list[str] = []
+    for line in result.stdout.splitlines():
+        fields = line.split(maxsplit=1)
+        if len(fields) != 2 or not fields[1].startswith(prefix):
+            continue
+        tag = fields[1][len(prefix) :].strip()
+        if tag:
+            tags.append(tag)
+    return tags
+
+
+def _latest_remote_tag(deployment: Deployment, remote: str) -> str:
+    tags = _remote_tags(deployment, remote)
+    if not tags:
+        raise DeployError(f"no Git release tags found on remote {remote!r}")
+    return tags[0]
+
+
+def _remote_tag_object(deployment: Deployment, remote: str, tag: str) -> str:
+    result = _git(
+        deployment,
+        "ls-remote",
+        "--tags",
+        remote,
+        f"refs/tags/{tag}",
+        capture=True,
+        check=False,
+        announce=False,
+    )
+    if result.returncode != 0:
+        raise DeployError(f"could not query release tag {tag!r} from remote {remote!r}")
+    for line in result.stdout.splitlines():
+        fields = line.split(maxsplit=1)
+        if len(fields) == 2 and fields[1] == f"refs/tags/{tag}":
+            return fields[0]
+    raise DeployError(f"release tag does not exist on remote {remote!r}: {tag}")
+
+
+def _local_tag_object(deployment: Deployment, tag: str) -> str | None:
+    result = _git(
+        deployment,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/tags/{tag}",
+        capture=True,
+        check=False,
+        announce=False,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip() or None
+    if result.returncode == 1:
+        return None
+    raise DeployError(f"could not inspect local release tag: {tag}")
+
+
+def _sync_release_tag(deployment: Deployment, remote: str, tag: str) -> None:
+    """Fetch only the selected release tag and never overwrite a conflicting tag."""
+    remote_object = _remote_tag_object(deployment, remote, tag)
+    local_object = _local_tag_object(deployment, tag)
+    if local_object is not None:
+        if local_object != remote_object:
+            raise DeployError(
+                f"local release tag {tag!r} conflicts with remote {remote!r}; refusing to overwrite it. "
+                "Verify the tag manually, then rename/delete the incorrect local tag before retrying."
+            )
+        return
+
+    _git(
+        deployment,
+        "fetch",
+        "--no-tags",
+        remote,
+        f"refs/tags/{tag}:refs/tags/{tag}",
+    )
+
+
+def _prepare_release_target(deployment: Deployment, requested_tag: str | None) -> tuple[str, str]:
+    """Refresh branches without importing every tag, then sync only the chosen release."""
+    remote = _git_remote(deployment)
+    _git(deployment, "fetch", "--prune", "--no-tags", remote)
+    target = requested_tag or _latest_remote_tag(deployment, remote)
+    _sync_release_tag(deployment, remote, target)
+    _validate_tag(deployment, target)
+    return remote, target
+
+
 def _validate_tag(deployment: Deployment, tag: str) -> None:
     result = _git(
         deployment,
@@ -1109,7 +1256,8 @@ def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     print("  - require a clean tracked Git worktree")
     print("  - preserve config/database/vCard/operator-avatar/systemd unit files")
     print("  - ask before stopping an active service")
-    print("  - fetch tags and checkout only a release tag (never deploy main automatically)")
+    print("  - query release tags from the configured Git remote without overwriting unrelated local tags")
+    print("  - fetch and checkout only the selected release tag (never deploy main automatically)")
     print("  - refuse automatic downgrades; explicit older --to tags require --allow-downgrade")
     print("  - install dependencies using the matching Python constraint snapshot")
     print("  - run db status, migration dry-run, verified db backup, migrate and db check")
@@ -1135,10 +1283,8 @@ def update(
         return 0
     _require_confirmation("Proceed with the envsbot update plan shown above?")
 
-    _git(deployment, "fetch", "--tags", "--prune")
-    target = requested_tag or _latest_tag(deployment)
-    _validate_tag(deployment, target)
-    print(f"Selected release: {target}")
+    remote, target = _prepare_release_target(deployment, requested_tag)
+    print(f"Selected release: {target} (remote: {remote})")
     if not _approve_update_target(
         deployment,
         target,
