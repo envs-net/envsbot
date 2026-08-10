@@ -251,15 +251,9 @@ should move these paths before installing the strict rendered unit.
 
 ## systemd
 
-An example service file is provided at:
-
-```text
-contrib/envsbot.service
-```
-
-The checked-in unit is an `/srv/envsbot` example. On the target host, prefer
-rendering a unit from the active installation so `ExecStart`, `WorkingDirectory`
-and writable paths cannot silently drift:
+The systemd unit is generated from the active installation rather than kept as
+a second static example in the repository. This keeps `ExecStart`,
+`WorkingDirectory` and writable paths aligned with non-standard installations:
 
 ```bash
 . /srv/envsbot/.venv/bin/activate

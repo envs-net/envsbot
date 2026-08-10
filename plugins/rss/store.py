@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 
@@ -29,18 +28,6 @@ def _normalize_template_room_jid(room: str) -> str:
 def _normalize_template_feed_url(url: str) -> str:
     """Normalize a feed URL used for RSS template storage."""
     return str(url or "").strip()
-async def _flush_user_store(bot):
-    """
-    Flush the user store when supported.
-
-    The RSS plugin depends on last_id being durable before shutdown/restart.
-    Some stores buffer writes, so set_global() alone is not always enough.
-    """
-    users = getattr(getattr(bot, "db", None), "users", None)
-    flush_all = getattr(users, "flush_all", None)
-
-    if callable(flush_all):
-        await flush_all()
 async def get_rss_store(bot):
     """Return the runtime store for RSS feed state."""
     return bot.db.users.plugin("rss")
@@ -286,15 +273,6 @@ def _record_feed_post(feed: dict, *, now: int, posted: int = 1) -> bool:
             feed[key] = value
             changed = True
     return changed
-async def _set_retry_state(bot, store, url, error_count, next_retry):
-    return await _update_feed(
-        bot,
-        store,
-        url,
-        lambda feed: _apply_retry_state(feed, error_count, next_retry),
-    )
-async def _reset_retry_state(bot, store, url):
-    return await _set_retry_state(bot, store, url, 0, 0)
 def _retry_delay(_period, error_count):
     """Return the retry delay for a failed feed fetch."""
     failure_count = max(1, int(error_count or 1))
@@ -302,11 +280,6 @@ def _retry_delay(_period, error_count):
         RSS_RETRY_BACKOFF_MULTIPLIER ** (failure_count - 1)
     )
     return min(int(delay), MAX_BACKOFF_TIME)
-async def _sleep_for_retry(_period, next_retry, now):
-    if next_retry > now:
-        await asyncio.sleep(next_retry - now)
-        return True
-    return False
 async def get_feeds(store):
     feeds = await store.get_global(RSS_KEY, default={})
     return feeds if isinstance(feeds, dict) else {}
@@ -315,7 +288,7 @@ async def save_feeds(store, feeds):
 async def _load_feed(store, url):
     feeds = await get_feeds(store)
     return feeds, feeds.get(url)
-async def _update_feed(bot, store, url, mutator):
+async def _update_feed(store, url, mutator):
     """
     Load feeds, mutate the feed at `url` in-place if it exists, then persist.
     `mutator(feed)` should return True if it made a meaningful change.
@@ -328,16 +301,15 @@ async def _update_feed(bot, store, url, mutator):
     changed = mutator(feed)
     if changed:
         await save_feeds(store, feeds)
-        # await _flush_user_store(bot)
 
     return changed
-async def _set_feed_field(bot, store, url, field, value):
+async def _set_feed_field(store, url, field, value):
     def mutator(feed):
         if feed.get(field) == value:
             return False
         feed[field] = value
         return True
 
-    return await _update_feed(bot, store, url, mutator)
-async def _update_feed_link(bot, store, url, feed_link):
-    return await _set_feed_field(bot, store, url, "link", feed_link)
+    return await _update_feed(store, url, mutator)
+async def _update_feed_link(store, url, feed_link):
+    return await _set_feed_field(store, url, "link", feed_link)

@@ -129,18 +129,13 @@ async def test_on_load_rejects_missing_feedparser(monkeypatch, make_bot):
 
 
 @pytest.mark.asyncio
-async def test_rss_task_and_flush_helpers(monkeypatch, make_bot):
+async def test_rss_task_helpers(monkeypatch, make_bot):
     bot = make_bot()
     store = bot.plugin_store
     await rss.save_feeds(store, {
         "https://example.org/feed.xml": {"period": 123, "rooms": ["room@conf"]},
         "https://example.org/default.xml": {"rooms": ["room@conf"]},
     })
-
-    await rss._flush_user_store(bot)
-    assert bot.flush_count == 1
-
-    await rss._flush_user_store(SimpleNamespace(db=SimpleNamespace(users=SimpleNamespace())))
 
     created = []
     class PendingTask:
@@ -248,20 +243,6 @@ async def test_reset_feed_retry_prunes_cancelled_supervised_task(monkeypatch, ma
     assert store[rss.RSS_KEY][url]["next_retry"] == 0
 
 
-@pytest.mark.asyncio
-async def test_reset_retry_state_updates_and_preserves_unchanged(make_bot):
-    bot = make_bot()
-    store = bot.plugin_store
-    url = "https://example.org/feed.xml"
-    await rss.save_feeds(store, {url: {"error_count": 2, "next_retry": 99}})
-
-    assert await rss._reset_retry_state(bot, store, url) is True
-    assert store[rss.RSS_KEY][url]["error_count"] == 0
-    assert store[rss.RSS_KEY][url]["next_retry"] == 0
-
-    assert await rss._reset_retry_state(bot, store, url) is False
-
-
 def test_retry_delay_uses_exponential_failure_backoff(monkeypatch):
     monkeypatch.setattr(rss_store, "RSS_RETRY_INITIAL_DELAY", 300)
     monkeypatch.setattr(rss_store, "RSS_RETRY_BACKOFF_MULTIPLIER", 2.0)
@@ -271,19 +252,6 @@ def test_retry_delay_uses_exponential_failure_backoff(monkeypatch):
     assert rss._retry_delay(1200, 2) == 600
     assert rss._retry_delay(1200, 3) == 1200
     assert rss._retry_delay(1200, 99) == 3600
-
-
-@pytest.mark.asyncio
-async def test_retry_wait_is_not_clipped_by_feed_period(monkeypatch):
-    sleep_calls = []
-
-    async def fake_sleep(seconds):
-        sleep_calls.append(seconds)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-
-    assert await rss._sleep_for_retry(1, 1300, 1000) is True
-    assert sleep_calls == [300]
 
 
 def test_format_retry_status_shows_next_retry():

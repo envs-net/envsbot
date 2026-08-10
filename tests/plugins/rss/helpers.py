@@ -53,16 +53,8 @@ def make_bot():
         def __init__(self):
             self.replies = []
             self.sent_messages = []
-            self.flush_count = 0
-
-            async def flush_all():
-                self.flush_count += 1
-
             self.db = SimpleNamespace(
-                users=SimpleNamespace(
-                    plugin=lambda name: self.plugin_store,
-                    flush_all=flush_all,
-                )
+                users=SimpleNamespace(plugin=lambda name: self.plugin_store)
             )
             self.plugin_store = DummyStore()
 

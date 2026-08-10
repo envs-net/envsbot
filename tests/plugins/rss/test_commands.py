@@ -69,7 +69,6 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
                           msg, True)
     feeds = store.get(rss.RSS_KEY, {})
     assert fake_feed_link in feeds
-    # assert bot.flush_count >= 1
 
     # Add again to test 'already in feed' and room-join path
     bot.replies.clear()
@@ -1143,16 +1142,6 @@ async def test_direct_feed_delete_cleans_personal_feed_template(make_bot):
     assert bot.plugin_store[rss.RSS_FEED_TEMPLATES_KEY] == {
         other: {url: "OTHER $title"}
     }
-
-
-@pytest.mark.asyncio
-async def test_save_last_id(monkeypatch):
-    set_field = AsyncMock(return_value=True)
-    monkeypatch.setattr(rss_commands, "_set_feed_field", set_field)
-    bot = object()
-    store = object()
-    assert await rss._save_last_id(bot, store, "https://feed.example/rss", "entry-1") is True
-    set_field.assert_awaited_once_with(bot, store, "https://feed.example/rss", "last_id", "entry-1")
 
 
 def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):

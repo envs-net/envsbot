@@ -5,27 +5,15 @@ pytest-asyncio>=1.3.0
 # ---- Packaging / release validation ----
 build>=1.2,<2.0
 
-# ---- Enforced linting, security and formatting ----
+# ---- Enforced linting and security ----
 ruff>=0.9,<1.0
 pip-audit>=2.7,<3.0
-flake8>=6.0
-black>=24.0
-isort>=5.12
 
 # ---- For type checking ----
 mypy>=1.8
 
 # ---- Coverage reporting ----
 pytest-cov>=4.0
-
-# ---- For mock support (optional, built in from pytest>=6, but explicit here) ----
-pytest-mock>=3.11
-
-# ---- Only if you use slixmpp in test fixtures (not for main code, but test bots) ----
-slixmpp>=1.8
-
-# ---- For plugin/plugin_manager module development (optional) ----
-importlib-metadata>=6.0 ; python_version<"3.8"
 
 # ---- Mutation testing ----
 mutmut>=3.0

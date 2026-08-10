@@ -157,14 +157,6 @@ def _build_rss_message_from_context(
             exc_info=True,
         )
         return _render_rss_template(DEFAULT_RSS_TEMPLATE, context)
-def _build_rss_message(feed_title, entry_title, entry_desc, entry_link):
-    context = _build_rss_template_context(
-        feed_title=feed_title,
-        entry_title=entry_title,
-        entry_desc=entry_desc,
-        entry_link=entry_link,
-    )
-    return _build_rss_message_from_context(context)
 def _format_duration(seconds: int) -> str:
     """Format a small duration for human-readable RSS status output."""
     seconds = max(0, int(seconds))

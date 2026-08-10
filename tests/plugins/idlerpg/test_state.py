@@ -37,22 +37,6 @@ def test_idlerpg_small_helper_edges(monkeypatch):
     assert idlerpg._penalty_for(50, 100) == 10
 
 
-def test_idlerpg_config_setting_preserves_explicit_zero(monkeypatch):
-    monkeypatch.setattr(idlerpg_config, "_cfg", {"event_chance": 0})
-    assert idlerpg_config._setting(
-        "event_chance",
-        "idlerpg_event_chance",
-        0.01,
-    ) == 0
-
-    monkeypatch.setattr(idlerpg_config, "_cfg", {"event_chance": None})
-    assert idlerpg_config._setting(
-        "event_chance",
-        "idlerpg_event_chance",
-        0.01,
-    ) == 0.01
-
-
 def test_playtime_formatting_helpers_handle_edges(monkeypatch):
     assert idlerpg_formatting._created_at({"created_at": "123"}) == 123
     assert idlerpg_formatting._created_at({"created_at": -5}) == 0

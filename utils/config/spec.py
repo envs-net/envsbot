@@ -360,11 +360,6 @@ def startup_only_keys() -> set[str]:
 def sensitive_keys() -> set[str]:
     return {name for name, field in CONFIG_FIELDS.items() if field.sensitive}
 
-
-def config_field(normalized_key: str) -> ConfigField | None:
-    """Return metadata for one normalized config key."""
-    return CONFIG_FIELDS.get(str(normalized_key))
-
 # Compatibility names used by older imports/tests.
 operational_defaults = config_defaults
 operational_types = optional_config_types

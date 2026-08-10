@@ -6,25 +6,6 @@ import random
 from typing import Any
 
 
-def _alignment_battle_factor(player: dict[str, Any], outcome: str | None = None) -> float:
-    """Compatibility helper for the classic alignment item-sum factor.
-
-    Original IdleRPG alignment affects battle power, not the amount of TTL won
-    or lost after the battle.  Good players get +10% item-sum power, evil
-    players get -10%, and neutral/unknown players are unchanged.
-    """
-    alignment = str(player.get("alignment") or "n")[:1].lower()
-    if alignment == "g":
-        return 1.10
-    if alignment == "e":
-        return 0.90
-    return 1.0
-
-
-def _battle_amount(player: dict[str, Any], base: int, outcome: str) -> int:
-    return max(1, _dep_leveling._penalty_for(int(player.get("level", 0)), base))
-
-
 async def _maybe_run_random_event(room: dict[str, Any], room_jid: str, messages: list[str]) -> None:
     players = [
         (str(jid), _dep_state._normalize_player(str(jid), player))

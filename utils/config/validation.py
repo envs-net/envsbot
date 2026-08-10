@@ -22,11 +22,6 @@ def _is_config_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _is_config_number(value: object) -> bool:
-    """Return True for int/float config values, but not bool values."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
 def _expected_type_name(expected_type: type | tuple[type, ...]) -> str:
     """Return a readable name for one or more accepted config types."""
     if isinstance(expected_type, tuple):

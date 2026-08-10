@@ -377,9 +377,9 @@ runtime-writable files from `/srv/envsbot`:
 /var/log/envsbot/          rotating file logs
 ```
 
-The supplied [`contrib/envsbot.service`](contrib/envsbot.service) uses
-`ProtectSystem=strict` and only grants writes to `/etc/envsbot`,
-`/var/lib/envsbot` and `/var/log/envsbot`. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and configure
+The canonical production unit is generated from the active installation with
+`envsbot systemd render`. It uses `ProtectSystem=strict` and grants writes only
+to the configured runtime paths. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and configure
 `LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `RUNTIME_DATA_DIR`,
 `BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below
 `/var/lib/envsbot`. `RUNTIME_DATA_DIR` holds writable support files such as

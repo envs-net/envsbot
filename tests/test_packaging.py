@@ -130,6 +130,48 @@ def test_operator_shell_scripts_are_executable():
         assert mode & stat.S_IXUSR, f"{relative_path} must be executable"
 
 
+def test_coverage_has_one_enforced_configuration():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    coverage_rc_exists = (ROOT / ".coveragerc").exists()
+    assert coverage_rc_exists is False
+    assert pyproject["tool"]["coverage"]["run"]["branch"] is False
+    assert pyproject["tool"]["coverage"]["report"]["fail_under"] == 85
+    pytest_addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
+    assert "--cov-fail-under=85" in pytest_addopts
+
+
+def test_obsolete_dev_tools_and_static_systemd_example_stay_removed():
+    requirements = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").lower()
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dev_dependencies = "\n".join(
+        pyproject["project"]["optional-dependencies"]["dev"]
+    ).lower()
+    obsolete_names = {
+        "black",
+        "flake8",
+        "isort",
+        "mccabe",
+        "pycodestyle",
+        "pyflakes",
+        "pytest-mock",
+        "pytokens",
+    }
+
+    for obsolete in obsolete_names | {"importlib-metadata"}:
+        assert obsolete not in requirements
+        assert obsolete not in dev_dependencies
+    assert "slixmpp" not in requirements
+    for constraint_path in (
+        ROOT / "constraints/python312.txt",
+        ROOT / "constraints/python313.txt",
+    ):
+        pins = constraint_path.read_text(encoding="utf-8").lower()
+        assert all(f"{name}==" not in pins for name in obsolete_names)
+    static_unit_exists = (ROOT / "contrib/envsbot.service").exists()
+    assert static_unit_exists is False
+
+
 def test_github_actions_use_node24_generations():
     workflow = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
 

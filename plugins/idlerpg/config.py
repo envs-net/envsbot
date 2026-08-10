@@ -8,28 +8,8 @@ from typing import Any
 
 from utils.config import config
 from utils.config.runtime import _idlerpg_values
-from utils.config.spec import IDLERPG_FIELDS
 
 log = logging.getLogger(__name__)
-
-_cfg = config.get("idlerpg", {}) if isinstance(config.get("idlerpg", {}), dict) else {}
-
-
-def _setting(key: str, legacy_key: str, default: object) -> object:
-    """Return one IdleRPG setting while preserving explicit zero values."""
-    field = IDLERPG_FIELDS.get(key)
-    fallback = field.default if field is not None else default
-    effective_legacy = field.legacy_key if field is not None else legacy_key
-    value = _cfg[key] if key in _cfg else config.get(str(effective_legacy), fallback)
-    return fallback if value is None else value
-
-
-def _derived_website_public_base_url(export_base_url: str) -> str:
-    """Derive a website root from an export URL that ends in /data."""
-    normalized = str(export_base_url or "").rstrip("/")
-    if normalized.lower().endswith("/data"):
-        return normalized[:-5]
-    return ""
 
 
 TICK_SECONDS: Any
@@ -131,7 +111,6 @@ ROOM_TASKS: dict[str, asyncio.Task] = {}
 
 __all__ = [
     "log",
-    "_cfg",
     *_RUNTIME_VALUES,
     "ROOM_TASKS",
 ]

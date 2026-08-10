@@ -154,13 +154,15 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
 
 
 def test_rss_default_and_custom_template_rendering():
-    msg = rss._build_rss_message(
-        "Feed",
-        "Entry",
-        "Distinct summary",
-        "https://example.org/a",
+    default_context = rss._build_rss_template_context(
+        feed_title="Feed",
+        entry_title="Entry",
+        entry_desc="Distinct summary",
+        entry_link="https://example.org/a",
     )
-    assert msg == "[RSS] (Feed) Entry - Distinct summary\nhttps://example.org/a"
+    assert rss._build_rss_message_from_context(default_context) == (
+        "[RSS] (Feed) Entry - Distinct summary\nhttps://example.org/a"
+    )
 
     context = rss._build_rss_template_context(
         feed_title="Feed",

@@ -504,11 +504,6 @@ def _previous_export_slugs(root: Path) -> set[str]:
     return slugs
 
 
-def _remove_root_compatibility_exports(root: Path) -> None:
-    for filename in _ROOT_COMPATIBILITY_EXPORTS:
-        _remove_export_path_safely(root / filename)
-
-
 def _public_url(*parts: str) -> str:
     if not _dep_config.EXPORT_PUBLIC_BASE_URL:
         return ""

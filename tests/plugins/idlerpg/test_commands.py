@@ -1152,29 +1152,17 @@ async def test_stats_command_is_primary_and_balance_alias_still_works():
     assert "balance" not in idlerpg._usage(bot)
 
 
-def test_battle_amount_alignment_factors_and_logout_penalty(monkeypatch):
-    monkeypatch.setattr(idlerpg_config, "PENALTY_STEP", 1.0)
-    monkeypatch.setattr(idlerpg_config, "MAX_PENALTY", 0)
-    evil = {"name": "Eve", "level": 5, "next": 1000, "alignment": "e", "stats": {}}
-    good = {"name": "Grace", "level": 5, "next": 1000, "alignment": "g", "stats": {}}
-    neutral = {"name": "Neo", "level": 5, "next": 1000, "alignment": "n", "stats": {}}
-    unknown = {"name": "Myst", "level": 5, "next": 1000, "alignment": "x", "stats": {}}
-
-    assert idlerpg._battle_amount(evil, 100, "win") == 100
-    assert idlerpg._battle_amount(good, 100, "loss") == 100
-    assert idlerpg._battle_amount(neutral, 100, "win") == 100
-    assert idlerpg._battle_amount(unknown, 100, "win") == 100
-    assert idlerpg._alignment_battle_factor(good) == 1.10
-    assert idlerpg._alignment_battle_factor(evil) == 0.90
-    assert idlerpg._alignment_battle_factor(neutral) == 1.0
-
+def test_logout_penalty_updates_player_state(monkeypatch):
+    player = {"name": "Neo", "level": 5, "next": 1000, "alignment": "n", "stats": {}}
     monkeypatch.setattr(idlerpg_config, "LOGOUT_PENALTY", 20)
-    changed = idlerpg._apply_logout_penalty(neutral)
+
+    changed = idlerpg._apply_logout_penalty(player)
+
     assert changed == 20
-    assert neutral["next"] == 1020
-    assert neutral["penalties"]["logout"] == 20
-    assert neutral["pending_logout_penalty"] == {}
-    assert neutral["stats"]["logouts"] == 1
+    assert player["next"] == 1020
+    assert player["penalties"]["logout"] == 20
+    assert player["pending_logout_penalty"] == {}
+    assert player["stats"]["logouts"] == 1
 
 
 def test_pending_logout_penalty_waits_then_applies(monkeypatch):

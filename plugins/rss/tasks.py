@@ -42,10 +42,10 @@ from .store import (
 CHECK_TASKS = {}
 
 
-async def _initialize_last_id(bot, store, url, latest_id):
+async def _initialize_last_id(store, url, latest_id):
     if not latest_id:
         return False
-    return await _set_feed_field(bot, store, url, "last_id", latest_id)
+    return await _set_feed_field(store, url, "last_id", latest_id)
 async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
     """Periodically check a feed for updates and post new items."""
     if initial_delay > 0:
@@ -99,9 +99,7 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
         if await _handle_empty_feed(bot, url, period, parsed):
             continue
 
-        feed_link = await _maybe_update_feed_link(
-            bot, store, url, parsed, feed_link
-        )
+        feed_link = await _maybe_update_feed_link(store, url, parsed, feed_link)
 
         if await _initialize_missing_last_id(bot, store, url, last_id, parsed):
             await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", period)
@@ -206,7 +204,7 @@ async def _handle_post_error(bot, store, url, period, now, exc):
             error=f"post: {exc}",
         ) or changed
 
-    await _update_feed(bot, store, url, mutator)
+    await _update_feed(store, url, mutator)
     await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", retry_delay)
 
 
@@ -232,7 +230,7 @@ async def _handle_fetch_error(bot, store, url, period, now, error_count, exc):
         ) or changed
         return changed
 
-    await _update_feed(bot, store, url, mutator)
+    await _update_feed(store, url, mutator)
     log.debug(
         "Feed %s backoff set to %s errors, retry at %s",
         url,
@@ -257,11 +255,11 @@ async def _handle_feed_recovery(bot, store, url, error_count):
 
     if error_count > 0:
         log.debug("Feed %s recovered, resetting error count", url)
-    await _update_feed(bot, store, url, mutator)
-async def _maybe_update_feed_link(bot, store, url, parsed, feed_link):
+    await _update_feed(store, url, mutator)
+async def _maybe_update_feed_link(store, url, parsed, feed_link):
     if "feed" in parsed and "link" in parsed.feed:
         feed_link = parsed.feed["link"]
-        await _update_feed_link(bot, store, url, feed_link)
+        await _update_feed_link(store, url, feed_link)
     return feed_link
 async def _cancel_feed_task(bot, url: str) -> bool:
     """Cancel the background check task for a feed URL when it exists.
@@ -296,7 +294,7 @@ async def _initialize_missing_last_id(bot, store, url, last_id, parsed):
     if not last_id:
         latest_id = _get_latest_entry_id(parsed)
         if latest_id:
-            await _initialize_last_id(bot, store, url, latest_id)
+            await _initialize_last_id(store, url, latest_id)
             log.info(
                 "[RSS] Initialized last_id for %s without posting old entries",
                 url,

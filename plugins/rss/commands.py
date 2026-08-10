@@ -52,7 +52,6 @@ from .store import (
     _normalize_room_jid,
     _normalize_subscription_room,
     _now,
-    _set_feed_field,
     get_effective_template,
     get_default_template,
     get_feed_template,
@@ -242,8 +241,6 @@ def _looks_like_room_arg(value) -> bool:
     """Best-effort test for explicit room JID arguments."""
     text = str(value or "").strip()
     return "@" in text and "://" not in text
-async def _save_last_id(bot, store, url, entry_id):
-    return await _set_feed_field(bot, store, url, "last_id", entry_id)
 def _rss_list_usage(bot=None) -> str:
     """Return the usage string for paginated RSS list output."""
     return (
@@ -1760,7 +1757,6 @@ async def _add_feed(bot, msg, url, store, room):
             }
 
             await save_feeds(store, feeds)
-            # await _flush_user_store(bot)
             await ensure_task(bot, store, url, feeds[url]["period"])
 
             log.debug("[RSS] Added new feed url=%s", url)
@@ -1782,7 +1778,6 @@ async def _add_feed(bot, msg, url, store, room):
             rooms.append(room)
             feeds[url]["rooms"] = rooms
             await save_feeds(store, feeds)
-            # await _flush_user_store(bot)
 
             log.debug("[RSS] Added room to feed url=%s", url)
             await ensure_task(
@@ -1919,7 +1914,6 @@ async def _del_feed(bot, msg, url, store, room=None, delete_target=None):
         await _delete_feed_everywhere(bot, msg, url, store, feeds)
 
     await save_feeds(store, feeds)
-    # await _flush_user_store(bot)
     return
 async def _reset_feed_retry(bot, msg, url, store):
     """Clear a feed's retry state and restart its checker immediately."""
