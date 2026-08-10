@@ -131,6 +131,25 @@ after the service was stopped, it intentionally leaves the service stopped; it
 does not automatically start older code against a database that may already
 have been migrated.
 
+`status` keeps read-only discovery probes quiet and prints only the resolved
+deployment paths, current Git revision, latest local release tag and service
+state. `check` is also intentionally compact on success. In addition to the
+normal envsbot preflight and path/permission checks, it compares the **effective
+systemd properties currently loaded by systemd** with the unit rendered for the
+active installation. This catches drift from both the main unit and drop-ins,
+including the service account, working directory, executable, config path,
+restart/watchdog policy, core hardening flags and `ReadWritePaths`.
+
+A mismatch makes `./scripts/deploy.sh check` fail and prints the current and
+expected value. For the complete underlying diagnostic output or the full
+rendered unit, run the existing commands directly:
+
+```bash
+envsbot --check
+envsbot systemd check
+envsbot systemd render
+```
+
 The manual installation and update procedures below remain supported and are
 recommended when an operator wants full command-by-command control.
 

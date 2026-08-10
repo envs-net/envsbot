@@ -13,6 +13,7 @@ import grp
 import json
 import os
 import pwd
+import re
 import shlex
 import shutil
 import subprocess
@@ -226,6 +227,7 @@ def _run(
     capture: bool = False,
     check: bool = True,
     cwd: Path | None = None,
+    announce: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     command = [str(item) for item in args]
     if as_service_user and deployment is not None:
@@ -242,7 +244,8 @@ def _run(
                 command = ["sudo", "-u", deployment.service_user, "--", *command]
             else:
                 raise DeployError("runuser/sudo is required to execute commands as the service user")
-    print(f"+ {_quote(command)}")
+    if announce:
+        print(f"+ {_quote(command)}")
     try:
         result = subprocess.run(
             command,
@@ -337,6 +340,7 @@ def _venv_version(deployment: Deployment) -> tuple[int, int]:
         [deployment.venv_python, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
         deployment=deployment,
         capture=True,
+        announce=False,
     )
     try:
         major, minor = result.stdout.strip().split(".", 1)
@@ -401,6 +405,7 @@ print(json.dumps({
         deployment=deployment,
         capture=True,
         cwd=deployment.root,
+        announce=False,
     )
     try:
         data = json.loads(result.stdout)
@@ -409,7 +414,12 @@ print(json.dumps({
     return {name: (Path(value).resolve() if value else None) for name, value in data.items()}
 
 
-def _envsbot(deployment: Deployment, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def _envsbot(
+    deployment: Deployment,
+    *args: str,
+    capture: bool = False,
+    announce: bool = True,
+) -> subprocess.CompletedProcess[str]:
     if not deployment.envsbot.is_file():
         raise DeployError(f"envsbot executable not found: {deployment.envsbot}")
     return _run(
@@ -418,21 +428,300 @@ def _envsbot(deployment: Deployment, *args: str, capture: bool = False) -> subpr
         as_service_user=True,
         capture=capture,
         cwd=deployment.root,
+        announce=announce,
     )
 
 
 def _systemctl_exists(deployment: Deployment) -> bool:
     if not shutil.which("systemctl"):
         return False
-    result = _run(["systemctl", "cat", deployment.service], check=False, capture=True)
+    result = _run(
+        ["systemctl", "cat", deployment.service], check=False, capture=True, announce=False
+    )
     return result.returncode == 0
 
 
 def _service_active(deployment: Deployment) -> bool:
     if not shutil.which("systemctl"):
         return False
-    result = _run(["systemctl", "is-active", "--quiet", deployment.service], check=False)
+    result = _run(
+        ["systemctl", "is-active", "--quiet", deployment.service], check=False, announce=False
+    )
     return result.returncode == 0
+
+
+def _unit_service_values(rendered: str) -> dict[str, list[str]]:
+    """Return assignments from the rendered [Service] section."""
+    values: dict[str, list[str]] = {}
+    section = ""
+    for raw_line in rendered.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if section != "Service" or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values.setdefault(key, []).append(value)
+    return values
+
+
+def _environment_assignment(value: str, name: str) -> str | None:
+    try:
+        fields = shlex.split(value)
+    except ValueError:
+        fields = value.split()
+    prefix = f"{name}="
+    for field in fields:
+        if field.startswith(prefix):
+            return field[len(prefix):]
+    return None
+
+
+def _exec_start_executable(value: str) -> str:
+    if "path=" in value:
+        return value.split("path=", 1)[1].split(";", 1)[0].strip()
+    try:
+        fields = shlex.split(value)
+    except ValueError:
+        fields = value.split()
+    return fields[0] if fields else ""
+
+
+def _bool_value(value: str) -> bool | None:
+    normalized = value.strip().casefold()
+    if normalized in {"1", "yes", "true", "on"}:
+        return True
+    if normalized in {"0", "no", "false", "off"}:
+        return False
+    return None
+
+
+def _duration_seconds(value: str) -> float | None:
+    """Parse the compact duration forms used by systemctl show."""
+    normalized = value.strip().casefold().replace(" ", "")
+    if not normalized or normalized in {"infinity", "infinite"}:
+        return None
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(usec|us|ms|msec|s|sec|min|h|hr)?", normalized)
+    if match is None:
+        return None
+    amount = float(match.group(1))
+    unit = match.group(2) or "s"
+    factor = {
+        "usec": 0.000001,
+        "us": 0.000001,
+        "ms": 0.001,
+        "msec": 0.001,
+        "s": 1.0,
+        "sec": 1.0,
+        "min": 60.0,
+        "h": 3600.0,
+        "hr": 3600.0,
+    }[unit]
+    return amount * factor
+
+
+def _path_set(value: str) -> set[str]:
+    try:
+        fields = shlex.split(value)
+    except ValueError:
+        fields = value.split()
+    result: set[str] = set()
+    for field in fields:
+        item = field.strip()
+        if not item:
+            continue
+        prefix = ""
+        while item.startswith(("-", "+", "!")):
+            prefix += item[0]
+            item = item[1:]
+        if item:
+            result.add(prefix + str(Path(item).expanduser().resolve()))
+    return result
+
+
+def _umask_value(value: str) -> int | None:
+    text = value.strip()
+    try:
+        return int(text, 8) if text else None
+    except ValueError:
+        return None
+
+
+def _desired_systemd_values(deployment: Deployment) -> dict[str, object]:
+    rendered = _envsbot(
+        deployment,
+        "systemd",
+        "render",
+        "--user",
+        deployment.service_user,
+        "--group",
+        deployment.service_group,
+        capture=True,
+        announce=False,
+    ).stdout
+    service = _unit_service_values(rendered)
+
+    def one(name: str) -> str:
+        values = service.get(name, [])
+        if not values:
+            raise DeployError(f"rendered systemd unit is missing {name}")
+        return values[-1]
+
+    config_value = None
+    for environment in service.get("Environment", []):
+        configured = _environment_assignment(environment, "ENVSBOT_CONFIG")
+        if configured is not None:
+            config_value = configured
+            break
+    if config_value is None:
+        raise DeployError("rendered systemd unit is missing ENVSBOT_CONFIG")
+
+    watchdog = _duration_seconds(one("WatchdogSec"))
+    if watchdog is None:
+        raise DeployError("rendered systemd WatchdogSec could not be parsed")
+
+    restart_delay = _duration_seconds(one("RestartSec"))
+    stop_timeout = _duration_seconds(one("TimeoutStopSec"))
+    if restart_delay is None or stop_timeout is None:
+        raise DeployError("rendered systemd service timeout could not be parsed")
+
+    return {
+        "Unit file": str(deployment.unit),
+        "Type": one("Type"),
+        "NotifyAccess": one("NotifyAccess"),
+        "User": one("User"),
+        "Group": one("Group"),
+        "WorkingDirectory": str(Path(one("WorkingDirectory")).resolve()),
+        "ExecStart": str(Path(_exec_start_executable(one("ExecStart"))).resolve()),
+        "ENVSBOT_CONFIG": str(Path(config_value).resolve()),
+        "Restart": one("Restart"),
+        "Restart delay": restart_delay,
+        "Watchdog": watchdog,
+        "Stop timeout": stop_timeout,
+        "UMask": _umask_value(one("UMask")),
+        "NoNewPrivileges": _bool_value(one("NoNewPrivileges")),
+        "PrivateTmp": _bool_value(one("PrivateTmp")),
+        "PrivateDevices": _bool_value(one("PrivateDevices")),
+        "ProtectSystem": one("ProtectSystem"),
+        "ProtectHome": _bool_value(one("ProtectHome")),
+        "ProtectKernelTunables": _bool_value(one("ProtectKernelTunables")),
+        "ProtectKernelModules": _bool_value(one("ProtectKernelModules")),
+        "ProtectKernelLogs": _bool_value(one("ProtectKernelLogs")),
+        "ProtectControlGroups": _bool_value(one("ProtectControlGroups")),
+        "RestrictSUIDSGID": _bool_value(one("RestrictSUIDSGID")),
+        "LockPersonality": _bool_value(one("LockPersonality")),
+        "ReadWritePaths": _path_set(one("ReadWritePaths")),
+    }
+
+
+def _resolved_path_text(value: str) -> str:
+    text = value.strip()
+    return str(Path(text).expanduser().resolve()) if text else ""
+
+
+def _actual_systemd_values(deployment: Deployment) -> dict[str, object]:
+    environment = _systemd_property(deployment.service, "Environment")
+    config_value = _environment_assignment(environment, "ENVSBOT_CONFIG")
+    fragment = _systemd_property(deployment.service, "FragmentPath")
+    working_directory = _systemd_property(deployment.service, "WorkingDirectory")
+    exec_start = _exec_start_executable(
+        _systemd_property(deployment.service, "ExecStart")
+    )
+    watchdog = _duration_seconds(_systemd_property(deployment.service, "WatchdogUSec"))
+    restart_delay = _duration_seconds(
+        _systemd_property(deployment.service, "RestartUSec")
+    )
+    stop_timeout = _duration_seconds(
+        _systemd_property(deployment.service, "TimeoutStopUSec")
+    )
+    return {
+        "Unit file": _resolved_path_text(fragment),
+        "Type": _systemd_property(deployment.service, "Type"),
+        "NotifyAccess": _systemd_property(deployment.service, "NotifyAccess"),
+        "User": _systemd_property(deployment.service, "User"),
+        "Group": _systemd_property(deployment.service, "Group"),
+        "WorkingDirectory": _resolved_path_text(working_directory),
+        "ExecStart": _resolved_path_text(exec_start),
+        "ENVSBOT_CONFIG": _resolved_path_text(config_value or ""),
+        "Restart": _systemd_property(deployment.service, "Restart"),
+        "Restart delay": restart_delay,
+        "Watchdog": watchdog,
+        "Stop timeout": stop_timeout,
+        "UMask": _umask_value(_systemd_property(deployment.service, "UMask")),
+        "NoNewPrivileges": _bool_value(
+            _systemd_property(deployment.service, "NoNewPrivileges")
+        ),
+        "PrivateTmp": _bool_value(_systemd_property(deployment.service, "PrivateTmp")),
+        "PrivateDevices": _bool_value(
+            _systemd_property(deployment.service, "PrivateDevices")
+        ),
+        "ProtectSystem": _systemd_property(deployment.service, "ProtectSystem"),
+        "ProtectHome": _bool_value(_systemd_property(deployment.service, "ProtectHome")),
+        "ProtectKernelTunables": _bool_value(
+            _systemd_property(deployment.service, "ProtectKernelTunables")
+        ),
+        "ProtectKernelModules": _bool_value(
+            _systemd_property(deployment.service, "ProtectKernelModules")
+        ),
+        "ProtectKernelLogs": _bool_value(
+            _systemd_property(deployment.service, "ProtectKernelLogs")
+        ),
+        "ProtectControlGroups": _bool_value(
+            _systemd_property(deployment.service, "ProtectControlGroups")
+        ),
+        "RestrictSUIDSGID": _bool_value(
+            _systemd_property(deployment.service, "RestrictSUIDSGID")
+        ),
+        "LockPersonality": _bool_value(
+            _systemd_property(deployment.service, "LockPersonality")
+        ),
+        "ReadWritePaths": _path_set(
+            _systemd_property(deployment.service, "ReadWritePaths")
+        ),
+    }
+
+
+def _display_systemd_value(name: str, value: object) -> str:
+    if name in {"Restart delay", "Watchdog", "Stop timeout"}:
+        return f"{value:g}s" if isinstance(value, (int, float)) else str(value)
+    if name == "UMask" and isinstance(value, int):
+        return f"{value:04o}"
+    if name == "ReadWritePaths" and isinstance(value, set):
+        return " ".join(sorted(value)) or "-"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "-"
+    return str(value)
+
+
+def _check_installed_systemd(deployment: Deployment) -> bool:
+    """Compare the desired unit with systemd's effective loaded properties."""
+    if not shutil.which("systemctl"):
+        raise DeployError("systemctl is required for installed service checks")
+    if not _systemctl_exists(deployment):
+        raise DeployError(f"installed systemd service not found: {deployment.service}")
+
+    desired = _desired_systemd_values(deployment)
+    actual = _actual_systemd_values(deployment)
+    print("Installed systemd service:")
+    all_ok = True
+    for name, expected in desired.items():
+        current = actual.get(name)
+        ok = current == expected
+        all_ok = all_ok and ok
+        current_text = _display_systemd_value(name, current)
+        if ok:
+            print(f"  OK    {name}: {current_text}")
+        else:
+            expected_text = _display_systemd_value(name, expected)
+            print(f"  FAIL  {name}: {current_text}")
+            print(f"        expected: {expected_text}")
+    return all_ok
+
 
 
 def _stop_active_service(deployment: Deployment, *, reason: str) -> bool:
@@ -458,18 +747,26 @@ def _ask_start(deployment: Deployment) -> None:
         print(f"LEAVE {deployment.service} stopped (operator choice)")
 
 
-def _git(deployment: Deployment, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def _git(
+    deployment: Deployment,
+    *args: str,
+    capture: bool = False,
+    announce: bool = True,
+) -> subprocess.CompletedProcess[str]:
     return _run(
         ["git", *args],
         deployment=deployment,
         as_service_user=True,
         capture=capture,
         cwd=deployment.root,
+        announce=announce,
     )
 
 
 def _require_clean_tracked_tree(deployment: Deployment) -> None:
-    result = _git(deployment, "status", "--porcelain", "--untracked-files=no", capture=True)
+    result = _git(
+        deployment, "status", "--porcelain", "--untracked-files=no", capture=True, announce=False
+    )
     if result.stdout.strip():
         raise DeployError(
             "tracked Git worktree is not clean; commit/stash local code changes before updating\n"
@@ -478,12 +775,14 @@ def _require_clean_tracked_tree(deployment: Deployment) -> None:
 
 
 def _current_revision(deployment: Deployment) -> str:
-    result = _git(deployment, "describe", "--tags", "--always", "--dirty", capture=True)
+    result = _git(
+        deployment, "describe", "--tags", "--always", "--dirty", capture=True, announce=False
+    )
     return result.stdout.strip() or "unknown"
 
 
 def _latest_tag(deployment: Deployment) -> str:
-    result = _git(deployment, "tag", "--sort=-v:refname", capture=True)
+    result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
     tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     if not tags:
         raise DeployError("no Git release tags found")
@@ -499,6 +798,7 @@ def _validate_tag(deployment: Deployment, tag: str) -> None:
         f"refs/tags/{tag}^{{commit}}",
         capture=True,
         check=False,
+        announce=False,
     )
     if result.returncode != 0:
         raise DeployError(f"release tag does not exist: {tag}")
@@ -559,20 +859,30 @@ def _restore_project_protected_paths(backups: dict[str, tuple[Path, Path]]) -> N
         print(f"RESTORE protected {label}: {path}")
 
 
-def _print_paths(deployment: Deployment, *, runtime: dict[str, Path | None] | None = None) -> None:
-    print("Deployment paths:")
-    print(f"  application: {deployment.root}")
-    print(f"  virtualenv:  {deployment.venv}")
-    print(f"  config:      {deployment.config}")
-    print(f"  service:     {deployment.service}")
-    print(f"  service user: {deployment.service_user}")
-    print(f"  service group: {deployment.service_group}")
-    print(f"  unit:        {deployment.unit}")
+def _print_paths(
+    deployment: Deployment,
+    *,
+    runtime: dict[str, Path | None] | None = None,
+) -> None:
+    rows: list[tuple[str, object]] = [
+        ("application", deployment.root),
+        ("virtualenv", deployment.venv),
+        ("config", deployment.config),
+        ("service", deployment.service),
+        ("service user", deployment.service_user),
+        ("service group", deployment.service_group),
+        ("unit", deployment.unit),
+    ]
     if runtime:
-        for name in ("database", "runtime_data", "vcard", "avatar"):
-            value = runtime.get(name)
-            print(f"  {name.replace('_', ' '):12}{value or '-'}")
+        rows.extend(
+            (name.replace("_", " "), runtime.get(name) or "-")
+            for name in ("database", "runtime_data", "vcard", "avatar")
+        )
 
+    width = max(len(label) for label, _value in rows)
+    print("Deployment paths:")
+    for label, value in rows:
+        print(f"  {label + ':':<{width + 1}}  {value}")
 
 def _install_plan(deployment: Deployment) -> None:
     _print_paths(deployment)
@@ -773,22 +1083,33 @@ def status(deployment: Deployment) -> int:
         except DeployError as exc:
             print(f"Runtime paths: unavailable ({exc})")
     _print_paths(deployment, runtime=runtime)
+
+    print("\nDeployment status:")
+    status_rows: list[tuple[str, str]] = []
     if (deployment.root / ".git").exists():
         try:
-            print(f"  revision:    {_current_revision(deployment)}")
-            print(f"  local tag:   {_latest_tag(deployment)}")
+            status_rows.append(("revision", _current_revision(deployment)))
+            status_rows.append(("latest local tag", _latest_tag(deployment)))
         except DeployError as exc:
-            print(f"  Git status:  unavailable ({exc})")
+            status_rows.append(("Git status", f"unavailable ({exc})"))
     if shutil.which("systemctl"):
-        print(f"  service state:{'active' if _service_active(deployment) else 'inactive/not found'}")
-    return 0
+        service_state = "active" if _service_active(deployment) else "inactive/not found"
+        status_rows.append(("service state", service_state))
 
+    if status_rows:
+        width = max(len(label) for label, _value in status_rows)
+        for label, value in status_rows:
+            print(f"  {label + ':':<{width + 1}}  {value}")
+    return 0
 
 def check(deployment: Deployment) -> int:
     _require_source_tree(deployment)
     if not deployment.envsbot.is_file():
         raise DeployError(f"envsbot executable not found: {deployment.envsbot}")
-    _envsbot(deployment, "--check")
+
+    _envsbot(deployment, "--check", capture=True, announce=False)
+    print("OK  envsbot preflight")
+
     _envsbot(
         deployment,
         "systemd",
@@ -797,9 +1118,18 @@ def check(deployment: Deployment) -> int:
         deployment.service_user,
         "--group",
         deployment.service_group,
+        capture=True,
+        announce=False,
     )
-    return 0
+    print("OK  systemd path and permission checks")
 
+    if not _check_installed_systemd(deployment):
+        raise DeployError(
+            "installed systemd service differs from the rendered envsbot service; "
+            "review the FAIL entries above"
+        )
+    print("OK  installed systemd service matches the rendered deployment")
+    return 0
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()

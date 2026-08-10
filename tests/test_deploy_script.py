@@ -251,6 +251,8 @@ def test_deployment_docs_keep_helper_and_manual_workflows():
     assert "envsbot db migrate --dry-run" in deployment_doc
     assert "without\na command only prints its help" in deployment_doc
     assert "existing systemd service/unit is **never overwritten**" in deployment_doc
+    assert "currently loaded by systemd" in deployment_doc
+    assert "envsbot systemd render" in deployment_doc
     assert "./scripts/deploy.sh update --dry-run" in readme
     assert "## Updating" in readme
 
@@ -320,3 +322,258 @@ def test_stop_and_start_are_separately_confirmed(tmp_path, monkeypatch):
     deploy._ask_start(deployment)
 
     assert commands == []
+
+
+def test_status_is_quiet_and_formats_labels_unambiguously(tmp_path, monkeypatch, capsys):
+    deployment = _current_deployment(tmp_path)
+    _write_source_markers(deployment)
+    (deployment.root / ".git").mkdir()
+    (deployment.venv / "bin").mkdir(parents=True)
+    deployment.venv_python.write_text("", encoding="utf-8")
+    deployment.config.write_text("# config\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        deploy,
+        "_runtime_paths",
+        lambda _deployment: {
+            "database": tmp_path / "bot.db",
+            "runtime_data": tmp_path / "runtime",
+            "vcard": tmp_path / "runtime" / "vcard.py",
+            "avatar": deployment.root / "utils" / "bundled" / "avatar.jpg",
+        },
+    )
+    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.7.3-58-gabcdef")
+    monkeypatch.setattr(deploy, "_latest_tag", lambda _deployment: "v1.7.3")
+    monkeypatch.setattr(deploy, "_service_active", lambda _deployment: True)
+    monkeypatch.setattr(deploy.shutil, "which", lambda name: "/bin/systemctl" if name == "systemctl" else None)
+
+    result = deploy.status(deployment)
+    output = capsys.readouterr().out
+
+    assert result == 0
+    assert "\n+ " not in output
+    assert "database:" in output
+    assert "runtime data:" in output
+    assert "latest local tag:" in output
+    assert "service state:" in output
+    output_without_latest = output.replace("latest local tag:", "")
+    assert "local tag:" not in output_without_latest
+
+
+def test_actual_systemd_values_normalize_effective_properties(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    expected_paths = {
+        str((tmp_path / "etc").resolve()),
+        str((tmp_path / "var").resolve()),
+    }
+    properties = {
+        "Environment": f"PYTHONUNBUFFERED=1 ENVSBOT_CONFIG={deployment.config}",
+        "FragmentPath": str(deployment.unit),
+        "User": deployment.service_user,
+        "Group": deployment.service_group,
+        "WorkingDirectory": str(deployment.root),
+        "ExecStart": (
+            f"{{ path={deployment.envsbot} ; argv[]={deployment.envsbot} ; "
+            "ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }}"
+        ),
+        "Type": "notify",
+        "NotifyAccess": "main",
+        "Restart": "on-failure",
+        "RestartUSec": "5s",
+        "WatchdogUSec": "1min",
+        "TimeoutStopUSec": "45s",
+        "UMask": "0077",
+        "NoNewPrivileges": "true",
+        "PrivateTmp": "yes",
+        "PrivateDevices": "yes",
+        "ProtectSystem": "strict",
+        "ProtectHome": "yes",
+        "ProtectKernelTunables": "yes",
+        "ProtectKernelModules": "yes",
+        "ProtectKernelLogs": "yes",
+        "ProtectControlGroups": "yes",
+        "RestrictSUIDSGID": "yes",
+        "LockPersonality": "yes",
+        "ReadWritePaths": f"{tmp_path / 'var'} {tmp_path / 'etc'}",
+    }
+    monkeypatch.setattr(
+        deploy,
+        "_systemd_property",
+        lambda _service, prop: properties.get(prop, ""),
+    )
+
+    values = deploy._actual_systemd_values(deployment)
+
+    expected_unit = str(deployment.unit.resolve())
+    expected_exec = str(deployment.envsbot.resolve())
+    expected_config = str(deployment.config.resolve())
+    assert values["Unit file"] == expected_unit
+    assert values["ExecStart"] == expected_exec
+    assert values["ENVSBOT_CONFIG"] == expected_config
+    assert values["Type"] == "notify"
+    assert values["NotifyAccess"] == "main"
+    assert values["Restart delay"] == 5.0
+    assert values["Watchdog"] == 60.0
+    assert values["Stop timeout"] == 45.0
+    assert values["UMask"] == 0o077
+    assert values["ProtectHome"] is True
+    assert values["PrivateTmp"] is True
+    assert values["NoNewPrivileges"] is True
+    assert values["LockPersonality"] is True
+    assert values["ReadWritePaths"] == expected_paths
+
+
+
+def test_desired_systemd_values_are_derived_from_rendered_unit(tmp_path, monkeypatch):
+    deployment = _current_deployment(tmp_path)
+    writable_a = tmp_path / "runtime"
+    writable_b = tmp_path / "logs"
+    rendered = f"""[Service]
+Type=notify
+NotifyAccess=main
+User={deployment.service_user}
+Group={deployment.service_group}
+WorkingDirectory={deployment.root}
+Environment=PYTHONUNBUFFERED=1
+Environment=ENVSBOT_CONFIG={deployment.config}
+ExecStart={deployment.envsbot}
+Restart=on-failure
+RestartSec=5
+WatchdogSec=60
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths={writable_a} {writable_b}
+"""
+
+    monkeypatch.setattr(
+        deploy,
+        "_envsbot",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, stdout=rendered, stderr=""
+        ),
+    )
+
+    values = deploy._desired_systemd_values(deployment)
+
+    assert values["Unit file"] == str(deployment.unit)
+    assert values["Type"] == "notify"
+    assert values["NotifyAccess"] == "main"
+    assert values["Watchdog"] == 60.0
+    assert values["Restart delay"] == 5.0
+    assert values["Stop timeout"] == 45.0
+    assert values["UMask"] == 0o077
+    assert values["PrivateDevices"] is True
+    assert values["ProtectSystem"] == "strict"
+    expected_writable = {
+        str(writable_a.resolve()),
+        str(writable_b.resolve()),
+    }
+    assert values["ReadWritePaths"] == expected_writable
+
+
+def test_installed_systemd_check_reports_effective_mismatch(tmp_path, monkeypatch, capsys):
+    deployment = _current_deployment(tmp_path)
+    desired = {
+        "Unit file": str(deployment.unit),
+        "User": deployment.service_user,
+        "Group": deployment.service_group,
+        "WorkingDirectory": str(deployment.root),
+        "ExecStart": str(deployment.envsbot),
+        "ENVSBOT_CONFIG": str(deployment.config),
+        "Restart": "on-failure",
+        "Watchdog": 60.0,
+        "ProtectSystem": "strict",
+        "ProtectHome": True,
+        "NoNewPrivileges": True,
+        "ReadWritePaths": {str(tmp_path.resolve())},
+    }
+    actual = dict(desired)
+    actual["Watchdog"] = 0.0
+    actual["ProtectSystem"] = "full"
+
+    monkeypatch.setattr(deploy.shutil, "which", lambda _name: "/bin/systemctl")
+    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(deploy, "_desired_systemd_values", lambda _deployment: desired)
+    monkeypatch.setattr(deploy, "_actual_systemd_values", lambda _deployment: actual)
+
+    ok = deploy._check_installed_systemd(deployment)
+    output = capsys.readouterr().out
+
+    assert ok is False
+    assert "FAIL  Watchdog: 0s" in output
+    assert "expected: 60s" in output
+    assert "FAIL  ProtectSystem: full" in output
+    assert "expected: strict" in output
+
+
+def test_deploy_check_is_compact_and_fails_on_installed_unit_drift(
+    tmp_path, monkeypatch, capsys
+):
+    deployment = _current_deployment(tmp_path)
+    _write_source_markers(deployment)
+    (deployment.venv / "bin").mkdir(parents=True)
+    deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    calls = []
+
+    def fake_envsbot(_deployment, *args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess([], 0, stdout="verbose internal output\n", stderr="")
+
+    monkeypatch.setattr(deploy, "_envsbot", fake_envsbot)
+    monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: False)
+
+    with pytest.raises(deploy.DeployError, match="differs from the rendered envsbot service"):
+        deploy.check(deployment)
+
+    output = capsys.readouterr().out
+    assert "verbose internal output" not in output
+    assert "OK  envsbot preflight" in output
+    assert "OK  systemd path and permission checks" in output
+    assert all(kwargs.get("capture") is True for _args, kwargs in calls)
+    assert all(kwargs.get("announce") is False for _args, kwargs in calls)
+
+
+def test_deploy_check_succeeds_when_effective_service_matches(
+    tmp_path, monkeypatch, capsys
+):
+    deployment = _current_deployment(tmp_path)
+    _write_source_markers(deployment)
+    (deployment.venv / "bin").mkdir(parents=True)
+    deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        deploy,
+        "_envsbot",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
+
+    result = deploy.check(deployment)
+    output = capsys.readouterr().out
+
+    assert result == 0
+    assert "OK  installed systemd service matches the rendered deployment" in output
+
+
+def test_read_write_path_normalization_keeps_systemd_prefix_semantics(tmp_path):
+    plain = tmp_path / "plain"
+    optional = tmp_path / "optional"
+
+    paths = deploy._path_set(f"{plain} -{optional}")
+
+    expected_plain = str(plain.resolve())
+    expected_optional = f"-{optional.resolve()}"
+    assert expected_plain in paths
+    assert expected_optional in paths
