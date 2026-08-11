@@ -305,8 +305,8 @@ Examples assume the default command prefix `,`.
 | `,config reload` | Reload runtime-safe configuration |
 | `,backup` / `,backup create [reason]` | Create a managed ZIP backup |
 | `,backup list [all/page/last]` | List managed backup archives |
-| `,backup show <archive|last>` | Show backup manifest details |
-| `,restore <archive|last> confirm` | Restore a managed backup after explicit confirmation |
+| `,backup show <archive\|last>` | Show backup manifest details |
+| `,restore <archive\|last> confirm` | Restore a managed backup after explicit confirmation |
 | `,audit last [limit]` | Show recent administrative audit events |
 | `,audit user <jid>` | Show audit events for one actor |
 | `,plugins list [all/page/last]` | List core and optional plugins |

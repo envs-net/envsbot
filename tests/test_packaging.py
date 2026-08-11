@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import runpy
 import stat
 import tomllib
@@ -268,3 +269,30 @@ def test_scripts_readme_documents_all_repository_helpers():
     assert "../docs/deployment.md" in readme
     assert "../docs/release-checklist.md" in readme
     assert "../constraints/README.md" in readme
+
+def test_markdown_tables_escape_pipes_inside_inline_code():
+    """Inline code still needs escaped pipes when it appears inside a table cell."""
+    markdown_files = [
+        ROOT / "README.md",
+        *(ROOT / "docs").rglob("*.md"),
+        *(ROOT / "scripts").rglob("*.md"),
+        *(ROOT / "constraints").rglob("*.md"),
+        *(ROOT / "tests").rglob("*.md"),
+    ]
+
+    broken = []
+    for path in markdown_files:
+        if not path.is_file():
+            continue
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            if not line.lstrip().startswith("|"):
+                continue
+            for code_span in re.findall(r"`([^`]*)`", line):
+                if re.search(r"(?<!\\)\|", code_span):
+                    broken.append(f"{path.relative_to(ROOT)}:{line_number}")
+
+    assert broken == []
+
