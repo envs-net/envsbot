@@ -109,6 +109,8 @@ _STATUS_SECTION_ICONS = {
     "Rooms": "🏠",
     "Loaded plugins": "📦",
     "Background tasks": "⏱️",
+    "Health": "🩺",
+    "Caches": "🧠",
 }
 
 
@@ -323,6 +325,129 @@ def _task_summary_line(bot) -> str:
     return f"Tasks: {running} running, {finished} finished"
 
 
+def _message_cache_stats(bot) -> dict:
+    """Return message-cache diagnostics without exposing cached content."""
+    cache = getattr(bot, "message_cache", None)
+    stats = getattr(cache, "stats", None)
+    if not callable(stats):
+        return {}
+    try:
+        return dict(stats() or {})
+    except Exception:
+        log.debug("[ADMIN] Could not read message-cache stats", exc_info=True)
+        return {}
+
+
+async def _outbox_runtime_state(bot) -> dict:
+    """Return the persistent-outbox runtime state without failing status."""
+    outbox = getattr(bot, "outbox", None)
+    runtime_state = getattr(outbox, "runtime_state", None)
+    if not callable(runtime_state):
+        return {}
+    try:
+        return dict(await runtime_state() or {})
+    except Exception:
+        log.debug("[ADMIN] Could not read outbox runtime state", exc_info=True)
+        return {}
+
+
+def _alert_runtime_state(bot) -> dict:
+    """Return immediate-alert state without making status depend on it."""
+    alerts = getattr(bot, "alerts", None)
+    runtime_state = getattr(alerts, "runtime_state", None)
+    if not callable(runtime_state):
+        return {}
+    try:
+        return dict(runtime_state() or {})
+    except Exception:
+        log.debug("[ADMIN] Could not read admin-alert runtime state", exc_info=True)
+        return {}
+
+
+async def _health_status_lines(bot) -> list[str]:
+    """Return compact operational health lines for the normal status view."""
+    alerts = _alert_runtime_state(bot)
+    outbox = await _outbox_runtime_state(bot)
+    cache = _message_cache_stats(bot)
+
+    active_alerts = int(alerts.get("active", 0) or 0)
+    outbox_dead = int(outbox.get("dead", 0) or 0)
+    outbox_error = str(outbox.get("last_error") or "").strip()
+    cache_degraded = bool(cache.get("degraded", False))
+
+    if active_alerts:
+        overall = f"Overall: ⚠️ {active_alerts} active alert{'s' if active_alerts != 1 else ''}"
+    elif outbox_dead or outbox_error or cache_degraded:
+        overall = "Overall: ⚠️ attention required"
+    else:
+        overall = "Overall: ✅ OK"
+
+    if outbox:
+        outbox_line = (
+            f"Outbox: {int(outbox.get('pending', 0) or 0)} pending · "
+            f"{outbox_dead} dead"
+        )
+    else:
+        outbox_line = "Outbox: unavailable"
+
+    if cache:
+        persistence = "persistent" if cache.get("persistent") else "memory-only"
+        cache_health = "degraded" if cache_degraded else "healthy"
+        cache_line = (
+            f"Message cache: {int(cache.get('messages', 0) or 0)} messages · "
+            f"{persistence} · {cache_health}"
+        )
+    else:
+        cache_line = "Message cache: unavailable"
+
+    return [overall, outbox_line, cache_line]
+
+
+def _cache_detail_lines(bot) -> list[str]:
+    """Return bounded user/runtime cache and message-cache diagnostics."""
+    lines: list[str] = []
+    users = getattr(getattr(bot, "db", None), "users", None)
+    cache_state = getattr(users, "cache_state", None)
+    if callable(cache_state):
+        try:
+            state = dict(cache_state() or {})
+        except Exception:
+            log.debug("[ADMIN] Could not read user-cache state", exc_info=True)
+            state = {}
+        if state:
+            lines.extend([
+                (
+                    f"Users: {int(state.get('users', 0) or 0)}/"
+                    f"{int(state.get('user_limit', 0) or 0)} · "
+                    f"dirty={int(state.get('dirty_users', 0) or 0)} · "
+                    f"evicted={int(state.get('evicted_users', 0) or 0)}"
+                ),
+                (
+                    f"Runtime: {int(state.get('runtime', 0) or 0)}/"
+                    f"{int(state.get('runtime_limit', 0) or 0)} · "
+                    f"dirty={int(state.get('dirty_runtime', 0) or 0)} · "
+                    f"evicted={int(state.get('evicted_runtime', 0) or 0)}"
+                ),
+            ])
+    if not lines:
+        lines.extend(["Users: unavailable", "Runtime: unavailable"])
+
+    cache = _message_cache_stats(bot)
+    if cache:
+        persistence = "persistent" if cache.get("persistent") else "memory-only"
+        health = "degraded" if cache.get("degraded") else "healthy"
+        lines.append(
+            f"Message cache: {int(cache.get('messages', 0) or 0)} messages · "
+            f"pending={int(cache.get('pending_writes', 0) or 0)} · "
+            f"retry={int(cache.get('retry_backlog', 0) or 0)} · "
+            f"dropped={int(cache.get('dropped_persistence_entries', 0) or 0)} · "
+            f"{persistence} · {health}"
+        )
+    else:
+        lines.append("Message cache: unavailable")
+    return lines
+
+
 def _plugin_status_lines(bot) -> list[str]:
     """Return plugin and command status lines."""
     manager = getattr(bot, "bot_plugins", None)
@@ -472,6 +597,20 @@ def _plugin_detail_lines(bot) -> list[str]:
     return lines
 
 
+def _timestamp_age(value: str | None) -> str:
+    """Return a compact age for an ISO timestamp used in task diagnostics."""
+    if not value:
+        return "not reported"
+    try:
+        parsed = datetime.fromisoformat(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+        return f"{human_time(max(0, age))} ago"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
 def _task_detail_lines(bot) -> list[str]:
     """Return detailed supervised task lines for full status."""
     supervisor = getattr(bot, "tasks", None)
@@ -482,9 +621,13 @@ def _task_detail_lines(bot) -> list[str]:
         return ["—"]
     lines = []
     for task in tasks:
-        extra = f" | error={task.last_error}" if task.last_error else ""
+        error = getattr(task, "last_error", None)
+        extra = f" | error={error}" if error else ""
         lines.append(
             f"{task.plugin}/{task.name} | {task.status} | "
+            f"heartbeat={_timestamp_age(getattr(task, 'heartbeat_at', None))} | "
+            f"restarts={int(getattr(task, 'restart_count', 0) or 0)} | "
+            f"circuit={getattr(task, 'circuit_state', 'closed')} | "
             f"created={task.created_at}{extra}"
         )
     return lines
@@ -507,11 +650,13 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
     lines.extend(_section("Plugins", plugin_lines))
     lines.extend(_section("Database", await _database_status_lines(bot, full=full)))
+    lines.extend(_section("Health", await _health_status_lines(bot)))
 
     if full:
         lines.extend(_section("Rooms", _room_detail_lines(room_snapshot)))
         lines.extend(_section("Loaded plugins", _plugin_detail_lines(bot)))
         lines.extend(_section("Background tasks", _task_detail_lines(bot)))
+        lines.extend(_section("Caches", _cache_detail_lines(bot)))
 
     return lines[:-1] if lines and lines[-1] == "" else lines
 
@@ -834,8 +979,8 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
     Display current bot status and statistics.
 
     Shows core runtime details, XMPP room state, loaded plugins, command
-    counts and read-only database status. Use ``full`` for detailed
-    database, room and plugin details.
+    counts, read-only database status and compact operational health. Use
+    ``full`` for detailed database, room, plugin, task and cache diagnostics.
 
     Usage:
         {prefix}bot status [full]

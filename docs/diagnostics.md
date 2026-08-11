@@ -302,9 +302,13 @@ missing room, stale or invalid backups, repeated database/IdleRPG export failure
 and excessive event-loop lag. Alerts are stateful and deduplicated: the first
 problem is marked red, optional cooldown reminders yellow and recovery green.
 
-The daily report is disabled by default. It summarizes uptime, room joins,
-plugin/task failures, open circuits, outbox state, event-loop lag, database
-maintenance, latest backup verification and aggregate 24-hour command counts.
+The daily report is disabled by default. It summarizes uptime, required
+autojoin-room health (with separately counted manual rooms), plugin/task failures,
+open circuits, anonymized active-alert categories, outbox and persistent
+message-cache state, event-loop lag, database maintenance, latest backup age and
+verification, and aggregate 24-hour command counts. Its final overall state is
+warning whenever an active alert or another current operational failure is
+present, so it cannot report a green overall state alongside an active incident.
 
 ```python
 ADMIN_REPORT_ENABLED = True

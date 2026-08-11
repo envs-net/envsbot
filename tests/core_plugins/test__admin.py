@@ -162,6 +162,8 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     assert "Rooms: 2 joined MUCs · 1 direct contact (1:1/DM)" in reply
     assert "Plugins:" in reply
     assert "Database:" in reply
+    assert "Health:" in reply
+    assert "Overall: ✅ OK" in reply
     assert "Avatar: published" in reply
     assert "Integrity: ok" in reply
 
@@ -298,6 +300,8 @@ async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fak
     assert "Rooms:" in reply
     assert "room@example.org | nick=EnvsBot | occupants=2" in reply
     assert "Loaded plugins:" in reply
+    assert "Caches:" in reply
+    assert "Users: unavailable" in reply
 
 
 @pytest.mark.asyncio
@@ -595,10 +599,53 @@ def test_detail_line_helpers(monkeypatch):
     task = types.SimpleNamespace(
         plugin="rss", name="feed", status="failed",
         created_at="2026-06-24T10:00:00", last_error="boom",
+        heartbeat_at=None, restart_count=2, circuit_state="open",
     )
     supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [task])
     assert _admin._task_detail_lines(types.SimpleNamespace(tasks=supervisor)) == [
-        "rss/feed | failed | created=2026-06-24T10:00:00 | error=boom"
+        "rss/feed | failed | heartbeat=not reported | restarts=2 | "
+        "circuit=open | created=2026-06-24T10:00:00 | error=boom"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_health_and_cache_status_helpers():
+    bot = types.SimpleNamespace(
+        alerts=types.SimpleNamespace(runtime_state=lambda: {"active": 2}),
+        outbox=types.SimpleNamespace(runtime_state=AsyncMock(return_value={
+            "pending": 3,
+            "dead": 1,
+            "last_error": None,
+        })),
+        message_cache=types.SimpleNamespace(stats=lambda: {
+            "messages": 42,
+            "pending_writes": 1,
+            "retry_backlog": 2,
+            "dropped_persistence_entries": 3,
+            "persistent": True,
+            "degraded": True,
+        }),
+        db=types.SimpleNamespace(users=types.SimpleNamespace(cache_state=lambda: {
+            "users": 12,
+            "runtime": 8,
+            "dirty_users": 1,
+            "dirty_runtime": 2,
+            "user_limit": 100,
+            "runtime_limit": 200,
+            "evicted_users": 4,
+            "evicted_runtime": 5,
+        })),
+    )
+
+    assert await _admin._health_status_lines(bot) == [
+        "Overall: ⚠️ 2 active alerts",
+        "Outbox: 3 pending · 1 dead",
+        "Message cache: 42 messages · persistent · degraded",
+    ]
+    assert _admin._cache_detail_lines(bot) == [
+        "Users: 12/100 · dirty=1 · evicted=4",
+        "Runtime: 8/200 · dirty=2 · evicted=5",
+        "Message cache: 42 messages · pending=1 · retry=2 · dropped=3 · persistent · degraded",
     ]
 
 

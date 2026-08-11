@@ -292,7 +292,7 @@ Examples assume the default command prefix `,`.
 | `,help all` | Show the full visible help output |
 | `,help <plugin>` | Show focused help for one plugin |
 | `,help ,<command>` | Show focused help for one command |
-| `,bot status [full]` / `,status [full]` | Show compact or detailed bot, runtime, XMPP, plugin and database status |
+| `,bot status [full]` / `,status [full]` | Show compact bot/runtime/XMPP/database health; `full` adds room, plugin, task and cache diagnostics |
 | `,tasks [full] [plugin <name>] [status]` | Show supervised background task status |
 | `,bot version` / `,version` | Show the running bot version and latest checked release |
 | `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
@@ -467,7 +467,7 @@ Restore is owner-only. Before changing runtime files, envsbot fully verifies the
 
 ## SQLite Maintenance
 
-Use `,bot status` for a compact safe online database status check. Use `,bot status full` for additional SQLite page details.
+Use `,bot status` for a compact safe online database and operational health check. Use `,bot status full` for additional SQLite page details plus room, plugin, supervised-task heartbeat/restart/circuit state and bounded-cache diagnostics.
 
 Do **not** run `VACUUM` from inside the live bot process. Stop the bot first and perform maintenance manually:
 

@@ -12,7 +12,7 @@ from utils.admin_reports import build_daily_admin_report
 async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
     monkeypatch.setattr(
         "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "ok")),
+        AsyncMock(return_value=("backup.zip", "verified", 3600)),
     )
     tasks = SimpleNamespace(
         summary=lambda: (3, 0, 1),
@@ -42,14 +42,29 @@ async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
             "max_lag_seconds": 0.02,
             "last_error": None,
         }),
+        alerts=SimpleNamespace(runtime_state=lambda: {
+            "active": 0,
+            "active_keys": [],
+        }),
+        message_cache=SimpleNamespace(stats=lambda: {
+            "messages": 12,
+            "pending_writes": 0,
+            "retry_backlog": 0,
+            "dropped_persistence_entries": 0,
+            "last_persistence_error": None,
+            "persistent": True,
+            "degraded": False,
+        }),
     )
 
     report = await build_daily_admin_report(bot)
 
     assert "EnvsBot daily health" in report
-    assert "rooms: 1/1 joined" in report
-    assert "backup: backup.zip (ok)" in report
+    assert "rooms: 1/1 autojoin rooms joined" in report
+    assert "backup: backup.zip · 1h 0m 0s old · verified" in report
+    assert "message cache: 12 messages, 0 pending, 0 retry, 0 dropped · persistent · healthy" in report
     assert "commands (24h): 7 use(s), 0 failed" in report
+    assert "overall: ✅ no current operational errors" in report
     assert "http://" not in report and "https://" not in report
 
 
@@ -57,7 +72,7 @@ async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
 async def test_daily_admin_report_handles_legacy_naive_local_start_time(monkeypatch):
     monkeypatch.setattr(
         "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "ok")),
+        AsyncMock(return_value=("backup.zip", "verified", 3600)),
     )
     bot = SimpleNamespace(
         connection_start_time=datetime.now() - timedelta(hours=2),
@@ -80,7 +95,7 @@ async def test_daily_admin_report_handles_legacy_naive_local_start_time(monkeypa
 async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch):
     monkeypatch.setattr(
         "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "ok")),
+        AsyncMock(return_value=("backup.zip", "verified", 3600)),
     )
     tasks = SimpleNamespace(
         summary_by_kind=lambda: {
@@ -113,6 +128,64 @@ async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch)
     ) in report
 
 
+@pytest.mark.asyncio
+async def test_daily_admin_report_surfaces_alert_causes_manual_rooms_and_attention(monkeypatch):
+    monkeypatch.setattr(
+        "utils.admin_reports._backup_state",
+        AsyncMock(return_value=("backup.zip", "verified", 7200)),
+    )
+    tasks = SimpleNamespace(
+        summary=lambda: (2, 0, 0),
+        snapshot=lambda include_done=True: [],
+    )
+    bot = SimpleNamespace(
+        connection_start_time=datetime.now(timezone.utc),
+        config={},
+        presence=SimpleNamespace(joined_rooms={"auto@conf": {}, "manual@conf": {}}),
+        tasks=tasks,
+        outbox=SimpleNamespace(runtime_state=AsyncMock(return_value={
+            "pending": 0,
+            "dead": 0,
+            "oldest_pending_age_seconds": 0,
+            "last_error": None,
+        })),
+        db=SimpleNamespace(
+            rooms=SimpleNamespace(list=AsyncMock(return_value=[
+                {"room_jid": "auto@conf", "autojoin": 1},
+                {"room_jid": "manual@conf", "autojoin": 0},
+            ])),
+            maintenance_state={},
+            command_usage=None,
+        ),
+        bot_plugins=SimpleNamespace(failed_plugins={}),
+        watchdog=None,
+        alerts=SimpleNamespace(runtime_state=lambda: {
+            "active": 3,
+            "active_keys": [
+                "backup-age",
+                "room-missing:first@conf",
+                "room-missing:second@conf",
+            ],
+        }),
+        message_cache=SimpleNamespace(stats=lambda: {
+            "messages": 4,
+            "pending_writes": 0,
+            "retry_backlog": 0,
+            "dropped_persistence_entries": 0,
+            "last_persistence_error": None,
+            "persistent": True,
+            "degraded": False,
+        }),
+    )
+
+    report = await build_daily_admin_report(bot)
+
+    assert "rooms: 1/1 autojoin rooms joined · 1 intentionally/manual" in report
+    assert "immediate alerts: 3 active — backup-age, room-missing×2" in report
+    assert "first@conf" not in report and "second@conf" not in report
+    assert "overall: ⚠️ attention required" in report
+
+
 def _fake_backups_module(monkeypatch, *, latest, result):
     module = ModuleType("utils.backups")
     module.list_backups = MagicMock(return_value=[latest])
@@ -129,10 +202,28 @@ async def test_backup_state_verifies_latest_backup(monkeypatch, tmp_path):
     latest = SimpleNamespace(path=tmp_path / "latest.zip", name="latest.zip")
     backups = _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
 
-    assert await _backup_state() == ("latest.zip", "ok")
+    assert await _backup_state() == ("latest.zip", "verified", None)
     backups.list_backups.assert_called_once_with()
     backups.verify_backup.assert_called_once_with(latest.path)
     backups.smoke_test_backup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_backup_state_reports_manifest_age(monkeypatch, tmp_path):
+    from utils.admin_reports import _backup_state
+
+    latest = SimpleNamespace(
+        path=tmp_path / "latest.zip",
+        name="latest.zip",
+        created_at=(datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+    )
+    _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
+
+    name, status, age = await _backup_state()
+
+    assert name == "latest.zip"
+    assert status == "verified"
+    assert age is not None and 7190 <= age <= 7210
 
 
 @pytest.mark.asyncio
@@ -144,7 +235,8 @@ async def test_backup_state_smoke_tests_when_requested(monkeypatch, tmp_path):
 
     assert await _backup_state(smoke_test=True) == (
         "latest.zip",
-        "ok+restore-smoke",
+        "verified+restore-smoke",
+        None,
     )
     backups.smoke_test_backup.assert_called_once_with(latest.path)
     backups.verify_backup.assert_not_called()
