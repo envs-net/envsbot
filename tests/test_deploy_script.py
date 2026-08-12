@@ -331,7 +331,8 @@ def test_operator_docs_use_safe_release_and_generated_systemd_workflows():
 
     assert "- `docs/deployment.md`" in release_checklist
     assert "./scripts/quality.sh" in release_checklist
-    assert "pytest -W error::RuntimeWarning -W error::DeprecationWarning" in release_checklist
+    assert "./scripts/test.sh --coverage" in release_checklist
+    assert "pytest -W error::RuntimeWarning -W error::DeprecationWarning" not in release_checklist
     assert "./scripts/mutmut.sh fresh" in release_checklist
     assert "./scripts/deploy.sh update --dry-run" in release_checklist
 
