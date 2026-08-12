@@ -192,14 +192,18 @@ def test_aiohttp_security_floor_and_locks():
         assert "aiohttp==3.14.3" in path.read_text(encoding="utf-8").lower()
 
 
-def test_deploy_helper_is_in_strict_quality_gates():
+def test_strict_quality_gates_cover_all_runtime_roots():
     quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
 
-    strict_ruff = quality.split("ruff check $ruff_fix_args --select I,UP,B", 1)[1].split("\nmypy \\", 1)[0]
-    mypy_block = quality.split("\nmypy \\", 1)[1].split("\n\npython_minor=", 1)[0]
-
-    assert "scripts/deploy.py" in strict_ruff
-    assert "scripts/deploy.py" in mypy_block
+    assert (
+        'runtime_targets="envsbot.py bot core_plugins plugins database utils scripts"'
+        in quality
+    )
+    assert "ruff check $ruff_fix_args --select I,UP,B $runtime_targets" in quality
+    assert "mypy $runtime_targets" in quality
+    # Directory-based targets mean new production modules are included without
+    # editing a hand-maintained file list.
+    assert "scripts/deploy.py \\" not in quality
 
 
 def test_quality_fix_flag_is_forwarded_to_both_ruff_passes():

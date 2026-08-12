@@ -31,27 +31,28 @@ import re
 from functools import partial
 from typing import Any
 
-from utils.command import command, Role
-from utils.command_metadata import room_toggle_subcommands
-from utils.config import config
 from core_plugins._core import (
-    handle_room_toggle_command,
     JOINED_ROOMS,
-    _get_enabled_rooms,
     _ensure_user_exists,
+    _get_enabled_rooms,
     _is_enabled_for_room,
+    handle_room_toggle_command,
 )
+
 # --------------------------------------------------------------------------
 # !!!Switched from core_plugins._core.get_profile to plugins.vcard.get_user_vcard
 # due to circular import!!!
 # --------------------------------------------------------------------------
 from plugins.vcard import get_user_vcard as get_profile
-
+from utils.command import Role, command
+from utils.command_metadata import room_toggle_subcommands
+from utils.config import config
 from utils.task_supervisor import (
     create_plugin_task,
     create_resilient_plugin_task,
     sleep_with_heartbeat,
 )
+
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -61,6 +62,7 @@ PLUGIN_META = {
         "Automatic birthday notifications in rooms (opt-in per room)",
     "category": "info",
     "requires": ["rooms", "_core", "vcard"],
+    "room_state": "custom",
 }
 
 # Track announcements in memory: {(room_jid, user_jid): "YYYY-MM-DD"}
@@ -167,7 +169,10 @@ def _calculate_age(birthday_str: str) -> int | None:
         return None
 
     today = _today()
-    age = today.year - birthday_data["year"]
+    birth_year = birthday_data["year"]
+    if birth_year is None:
+        return None
+    age = today.year - birth_year
 
     if (today.month, today.day) < (
         birthday_data["month"],
@@ -698,6 +703,46 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     }
 
 
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove persisted and in-memory announcement state for a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    memory_removed = 0
+    for key in tuple(ANNOUNCED_TODAY):
+        if str(key[0]).split("/", 1)[0].strip().lower() == target:
+            ANNOUNCED_TODAY.pop(key, None)
+            memory_removed += 1
+
+    persisted_removed = 0
+    users = getattr(getattr(bot, "db", None), "users", None)
+    list_users = getattr(users, "list", None)
+    if callable(list_users):
+        store = bot.db.users.plugin("birthday_notify")
+        for user in await list_users():
+            jid = user.get("jid") if isinstance(user, dict) else None
+            if not jid or jid == "__GLOBAL__":
+                continue
+            announced = await _store_get(
+                store, str(jid), "announced_dates_by_room", default={}
+            )
+            if not isinstance(announced, dict):
+                continue
+            matching = [
+                key for key in announced
+                if str(key).split("/", 1)[0].strip().lower() == target
+            ]
+            if not matching:
+                continue
+            for key in matching:
+                announced.pop(key, None)
+                persisted_removed += 1
+            await store.set(str(jid), "announced_dates_by_room", announced)
+
+    return {
+        "memory_announcements": memory_removed,
+        "persisted_announcements": persisted_removed,
+    }
+
+
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
     """Return birthday notification diagnostics."""
     state = await get_runtime_state(bot, room_jid=room_jid)
@@ -773,6 +818,7 @@ async def on_unload(bot):
                 log.debug("[BIRTHDAY] Birthday check task cancelled during unload")
 
         _BIRTHDAY_CHECK_TASK = None
+        ANNOUNCED_TODAY.clear()
 
         log.info("[BIRTHDAY] ✅ Birthday notification plugin unloaded")
 

@@ -37,6 +37,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date
 from functools import partial
+from typing import Any
 
 from core_plugins._core import (
     _ensure_user_exists,
@@ -64,6 +65,7 @@ PLUGIN_META = {
     ),
     "category": "games",
     "requires": ["rooms", "_core"],
+    "room_state": "custom",
 }
 
 DUCK = r"・゜゜・。。・゜゜\_o< QUACK!"
@@ -112,14 +114,14 @@ try:
 except (TypeError, ValueError):
     DUCK_STATE_SAVE_EVERY = int(DUCK_FIELDS["state_save_every"].default)
 
-ACTIVE_DUCKS = {}              # room_jid -> timestamp
-PENDING_DUCKS = set()          # room_jid waiting for delayed spawn
+ACTIVE_DUCKS: dict[str, float] = {}              # room_jid -> timestamp
+PENDING_DUCKS: set[str] = set()          # room_jid waiting for delayed spawn
 # room_jid -> message counter, -1 means duck scheduled
-MESSAGE_COUNTS = defaultdict(int)
+MESSAGE_COUNTS: defaultdict[str, int] = defaultdict(int)
 # room_jid -> random threshold before spawn rolls begin
-NEXT_DUCK_THRESHOLDS = {}
-SPAWN_TASKS = {}               # room_jid -> asyncio.Task
-EXPIRE_TASKS = {}              # room_jid -> asyncio.Task
+NEXT_DUCK_THRESHOLDS: dict[str, int] = {}
+SPAWN_TASKS: dict[str, asyncio.Task] = {}               # room_jid -> asyncio.Task
+EXPIRE_TASKS: dict[str, asyncio.Task] = {}              # room_jid -> asyncio.Task
 
 BEFRIEND_REACTIONS = [
     "The duck waddles happily. 🦆💕",
@@ -185,7 +187,7 @@ def _room_key(room_jid: object) -> str:
 
 def _coerce_int(value: object, default: int, minimum: int) -> int:
     try:
-        parsed = int(value)
+        parsed = int(value) if isinstance(value, (str, bytes, bytearray, int, float)) else default
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, parsed)
@@ -288,9 +290,9 @@ async def _get_room_config_overrides(bot, room_jid: str) -> dict[str, int | bool
 
     store = await get_ducks_store(bot)
     data = await store.get_global(DUCKS_ROOM_CONFIG_KEY, default={})
-    raw = {}
+    raw: object = {}
     if isinstance(data, Mapping):
-        matching = next(
+        matching: object = next(
             (value for key, value in data.items() if _room_key(key) == room),
             {},
         )
@@ -663,7 +665,7 @@ async def _get_top(bot, stat_key, limit=10):
     store = await get_ducks_store(bot)
     room_index = await store.get_global(DUCKS_INDEX_KEY, default={})
 
-    combined = {}
+    combined: dict[str, dict[str, Any]] = {}
 
     for _, room_data in room_index.items():
         for user_jid, data in room_data.items():
@@ -693,7 +695,7 @@ async def _get_user_stats(bot, target: str):
     target_lower = target.lower()
     room_index = await store.get_global(DUCKS_INDEX_KEY, default={})
 
-    totals = {
+    totals: dict[str, Any] = {
         "display_name": None,
         "befriended": 0,
         "trapped": 0,
@@ -1311,10 +1313,13 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
             task.cancel()
             summary["tasks"] += 1
 
-    for mapping in (ACTIVE_DUCKS, MESSAGE_COUNTS, NEXT_DUCK_THRESHOLDS):
-        if room_jid in mapping:
-            mapping.pop(room_jid, None)
-            summary["runtime"] += 1
+    if ACTIVE_DUCKS.pop(room_jid, None) is not None:
+        summary["runtime"] += 1
+    if room_jid in MESSAGE_COUNTS:
+        MESSAGE_COUNTS.pop(room_jid, None)
+        summary["runtime"] += 1
+    if NEXT_DUCK_THRESHOLDS.pop(room_jid, None) is not None:
+        summary["runtime"] += 1
     ROOM_CONFIG_CACHE.pop(target, None)
     if room_jid in PENDING_DUCKS:
         PENDING_DUCKS.discard(room_jid)

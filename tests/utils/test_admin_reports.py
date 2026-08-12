@@ -1,19 +1,36 @@
-import sys
 from datetime import datetime, timedelta, timezone
-from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from utils.admin_reports import build_daily_admin_report
+from utils.health import HealthCheck
+
+
+def _patch_backup_health(monkeypatch, *, name="backup.zip", status="verified", age=3600):
+    async def _fake_backup(_bot, *, verify, smoke_test=False):
+        assert verify is True
+        effective_status = "verified+restore-smoke" if smoke_test and status == "verified" else status
+        return HealthCheck(
+            "backup",
+            "ok" if effective_status.startswith("verified") else "warning",
+            "test backup",
+            {
+                "name": name,
+                "status": effective_status,
+                "age_seconds": age,
+                "path": None if name == "none" else SimpleNamespace(resolve=lambda: name),
+                "valid": effective_status.startswith("verified"),
+            },
+        )
+
+    monkeypatch.setattr("utils.health._backup_check", _fake_backup)
 
 
 @pytest.mark.asyncio
 async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
-    monkeypatch.setattr(
-        "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "verified", 3600)),
-    )
+    _patch_backup_health(monkeypatch, age=3600)
     tasks = SimpleNamespace(
         summary=lambda: (3, 0, 1),
         snapshot=lambda include_done=True: [],
@@ -70,10 +87,7 @@ async def test_daily_admin_report_contains_internal_health_only(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_daily_admin_report_handles_legacy_naive_local_start_time(monkeypatch):
-    monkeypatch.setattr(
-        "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "verified", 3600)),
-    )
+    _patch_backup_health(monkeypatch, age=3600)
     bot = SimpleNamespace(
         connection_start_time=datetime.now() - timedelta(hours=2),
         config={},
@@ -93,10 +107,7 @@ async def test_daily_admin_report_handles_legacy_naive_local_start_time(monkeypa
 
 @pytest.mark.asyncio
 async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch):
-    monkeypatch.setattr(
-        "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "verified", 3600)),
-    )
+    _patch_backup_health(monkeypatch, age=3600)
     tasks = SimpleNamespace(
         summary_by_kind=lambda: {
             "services_running": 24,
@@ -130,10 +141,7 @@ async def test_daily_admin_report_distinguishes_completed_one_shots(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_daily_admin_report_surfaces_alert_causes_manual_rooms_and_attention(monkeypatch):
-    monkeypatch.setattr(
-        "utils.admin_reports._backup_state",
-        AsyncMock(return_value=("backup.zip", "verified", 7200)),
-    )
+    _patch_backup_health(monkeypatch, age=7200)
     tasks = SimpleNamespace(
         summary=lambda: (2, 0, 0),
         snapshot=lambda include_done=True: [],
@@ -184,59 +192,3 @@ async def test_daily_admin_report_surfaces_alert_causes_manual_rooms_and_attenti
     assert "immediate alerts: 3 active — backup-age, room-missing×2" in report
     assert "first@conf" not in report and "second@conf" not in report
     assert "overall: ⚠️ attention required" in report
-
-
-def _fake_backups_module(monkeypatch, *, latest, result):
-    module = ModuleType("utils.backups")
-    module.list_backups = MagicMock(return_value=[latest])
-    module.verify_backup = MagicMock(return_value=result)
-    module.smoke_test_backup = MagicMock(return_value=result)
-    monkeypatch.setitem(sys.modules, "utils.backups", module)
-    return module
-
-
-@pytest.mark.asyncio
-async def test_backup_state_verifies_latest_backup(monkeypatch, tmp_path):
-    from utils.admin_reports import _backup_state
-
-    latest = SimpleNamespace(path=tmp_path / "latest.zip", name="latest.zip")
-    backups = _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
-
-    assert await _backup_state() == ("latest.zip", "verified", None)
-    backups.list_backups.assert_called_once_with()
-    backups.verify_backup.assert_called_once_with(latest.path)
-    backups.smoke_test_backup.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_backup_state_reports_manifest_age(monkeypatch, tmp_path):
-    from utils.admin_reports import _backup_state
-
-    latest = SimpleNamespace(
-        path=tmp_path / "latest.zip",
-        name="latest.zip",
-        created_at=(datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
-    )
-    _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
-
-    name, status, age = await _backup_state()
-
-    assert name == "latest.zip"
-    assert status == "verified"
-    assert age is not None and 7190 <= age <= 7210
-
-
-@pytest.mark.asyncio
-async def test_backup_state_smoke_tests_when_requested(monkeypatch, tmp_path):
-    from utils.admin_reports import _backup_state
-
-    latest = SimpleNamespace(path=tmp_path / "latest.zip", name="latest.zip")
-    backups = _fake_backups_module(monkeypatch, latest=latest, result={"ok": True})
-
-    assert await _backup_state(smoke_test=True) == (
-        "latest.zip",
-        "verified+restore-smoke",
-        None,
-    )
-    backups.smoke_test_backup.assert_called_once_with(latest.path)
-    backups.verify_backup.assert_not_called()

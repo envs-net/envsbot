@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .fetch import get_user_vcard
 
 _PART_NAMES = ['config', 'formatting', 'fetch', 'store', 'fields', 'timezone', 'commands']
 _PARTS = [import_module(f"{__name__}.{name}") for name in _PART_NAMES]

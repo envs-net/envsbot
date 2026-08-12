@@ -6,6 +6,7 @@ PLUGIN_META = {
     "description": "Schedule and manage reminders",
     "category": "utility",
     "requires": ["_core", "rooms"],
+    "room_state": "custom",
 }
 
 REMINDER_KEY = "REMINDER"

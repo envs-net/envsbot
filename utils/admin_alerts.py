@@ -6,10 +6,11 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from utils.admin_notify import notify_admin
+from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class AdminAlertManager:
         self._notifications = 0
         self._last_check_at = 0
         self._last_error: str | None = None
+        self._check_errors: dict[str, str] = {}
 
     @property
     def enabled(self) -> bool:
@@ -105,7 +107,7 @@ class AdminAlertManager:
             state.fingerprint = fingerprint or state.fingerprint
             if changed or now - state.last_notified_at >= cooldown:
                 state.last_notified_at = now
-                await self._notify(f"🟡 {summary}", key=key, transition="ongoing")
+                await self._notify(f"🔴 Still active: {summary}", key=key, transition="ongoing")
             return
 
         if state.active:
@@ -154,16 +156,27 @@ class AdminAlertManager:
             fingerprint="lag",
         )
 
-    async def _check_outbox(self) -> None:
-        store = getattr(getattr(self.bot, "db", None), "outbox", None)
-        runtime = getattr(self.bot, "outbox", None)
-        if store is None or runtime is None:
+    async def _snapshot_for_check(
+        self, snapshot: HealthSnapshot | None
+    ) -> HealthSnapshot:
+        if snapshot is not None:
+            return snapshot
+        return await collect_health_snapshot(
+            self.bot,
+            verify_backup=False,
+            include_alert_manager=False,
+        )
+
+    async def _check_outbox(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
+        state = snapshot.check("outbox").data
+        if not state:
             return
         config = getattr(self.bot, "config", {}) or {}
-        counts = await store.counts()
-        usage = await store.queue_usage()
-        queued = int(usage.get("queued", 0) or 0)
-        queued_bytes = int(usage.get("bytes", 0) or 0)
+        queued = int(state.get("queued", state.get("pending", 0)) or 0)
+        queued_bytes = int(state.get("bytes", 0) or 0)
         max_pending = max(1, int(config.get("outbox_max_pending", 10000) or 10000))
         max_bytes = max(1, int(config.get("outbox_max_bytes", 50 * 1024 * 1024) or 1))
         max_destination = max(
@@ -172,8 +185,8 @@ class AdminAlertManager:
         max_category = max(
             1, int(config.get("outbox_max_per_category", 5000) or 5000)
         )
-        destination_count = int(usage.get("largest_destination_count", 0) or 0)
-        category_count = int(usage.get("largest_category_count", 0) or 0)
+        destination_count = int(state.get("largest_destination_count", 0) or 0)
+        category_count = int(state.get("largest_category_count", 0) or 0)
         ratio = max(
             queued / max_pending,
             queued_bytes / max_bytes,
@@ -191,14 +204,14 @@ class AdminAlertManager:
             f"{category_count}/{max_category}",
             fingerprint=str(level),
         )
-        dead = int(counts.get("dead", 0) or 0)
+        dead = int(state.get("dead", 0) or 0)
         await self._set(
             "outbox-dead",
             dead > 0,
             f"Outbox contains {dead} dead-letter message(s)",
             fingerprint="dead" if dead else "",
         )
-        oldest = int(await store.oldest_pending_age() or 0)
+        oldest = int(state.get("oldest_pending_age_seconds", 0) or 0)
         threshold = max(
             60,
             int(config.get("admin_alert_outbox_oldest_seconds", 1800) or 1800),
@@ -210,12 +223,12 @@ class AdminAlertManager:
             fingerprint="old",
         )
 
-    async def _check_tasks(self) -> None:
-        supervisor = getattr(self.bot, "tasks", None)
-        if supervisor is None:
-            return
+    async def _check_tasks(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
         current: set[str] = set()
-        for info in supervisor.snapshot(include_done=True):
+        for info in snapshot.check("tasks").data.get("snapshot", ()):
             if str(getattr(info, "circuit_state", "closed")) != "open":
                 continue
             key = f"task-circuit:{info.plugin}:{info.name}"
@@ -234,26 +247,19 @@ class AdminAlertManager:
         for key in stale_keys:
             await self._set(key, False, "Task circuit recovered")
 
-    async def _check_rooms(self) -> None:
-        rooms = getattr(getattr(self.bot, "db", None), "rooms", None)
-        if rooms is None:
-            return
+    async def _check_rooms(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
         config = getattr(self.bot, "config", {}) or {}
         threshold = max(60, int(config.get("admin_alert_room_missing_seconds", 1800) or 1800))
-        joined_raw = getattr(getattr(self.bot, "presence", None), "joined_rooms", {}) or {}
-        joined_values = (
-            joined_raw.keys() if hasattr(joined_raw, "keys") else joined_raw
-        )
-        joined = {str(value) for value in joined_values}
+        data = snapshot.check("rooms").data
+        configured = set(str(room) for room in data.get("autojoin_rooms", ()) or ())
+        missing = set(str(room) for room in data.get("missing", ()) or ())
         now = int(time.time())
-        configured: set[str] = set()
-        for row in await rooms.list():
-            room = str(row["room_jid"])
-            if not bool(row["autojoin"]):
-                continue
-            configured.add(room)
+        for room in configured:
             key = f"room-missing:{room}"
-            if room in joined:
+            if room not in missing:
                 self._room_missing_since.pop(room, None)
                 await self._set(key, False, f"Room rejoined: {room}")
                 continue
@@ -268,51 +274,107 @@ class AdminAlertManager:
         for room in list(self._room_missing_since):
             if room not in configured:
                 self._room_missing_since.pop(room, None)
-                await self._set(f"room-missing:{room}", False, f"Room is no longer configured: {room}")
+                await self._set(
+                    f"room-missing:{room}",
+                    False,
+                    f"Room is no longer configured: {room}",
+                )
 
-    async def _check_backup(self) -> None:
-        from utils.backups import list_backups, verify_backup
+    async def _check_backup(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
+        from utils.backups import verify_backup
 
+        data = snapshot.check("backup").data
         config = getattr(self.bot, "config", {}) or {}
         max_age_hours = max(1, int(config.get("admin_alert_backup_max_age_hours", 36) or 36))
-        archives = await asyncio.to_thread(list_backups)
-        if not archives:
-            await self._set("backup-age", True, "No managed envsbot backup exists", fingerprint="missing")
+        path = data.get("path")
+        name = str(data.get("name") or "unknown")
+        age_seconds = data.get("age_seconds")
+        if path is None:
+            await self._set(
+                "backup-age",
+                True,
+                "No managed envsbot backup exists",
+                fingerprint="missing",
+            )
             await self._set("backup-invalid", False, "Backup validation recovered")
+            self._last_backup_verified = None
             return
-        newest = archives[0]
-        try:
-            modified = newest.path.stat().st_mtime
-            age_hours = max(0.0, (time.time() - modified) / 3600.0)
-        except OSError:
-            age_hours = float(max_age_hours + 1)
+
+        too_old = age_seconds is None or int(age_seconds) >= max_age_hours * 3600
+        age_hours = (
+            float(age_seconds) / 3600.0
+            if age_seconds is not None
+            else float(max_age_hours + 1)
+        )
+        interval_hours = max(
+            0, int(config.get("backup_interval_hours", 24) or 0)
+        )
+        schedule = (
+            f"scheduled every {interval_hours}h"
+            if interval_hours > 0
+            else "scheduled backups disabled"
+        )
         await self._set(
             "backup-age",
-            age_hours >= max_age_hours,
-            f"Newest backup is {age_hours:.1f}h old (limit {max_age_hours}h): {newest.name}",
-            fingerprint="old",
+            too_old,
+            (
+                f"Newest backup is {age_hours:.1f}h old "
+                f"(limit {max_age_hours}h; {schedule}): {name}"
+            ),
+            fingerprint="old" if too_old else "",
         )
-        marker = str(newest.path.resolve())
+        marker = str(path.resolve())
         if self._last_backup_verified is None or self._last_backup_verified[0] != marker:
             try:
-                await asyncio.to_thread(verify_backup, newest.path)
-                valid = True
+                result = await asyncio.to_thread(verify_backup, path)
+                valid = bool(result.get("ok"))
             except Exception:
                 valid = False
-                log.exception("[ALERTS] Backup verification failed: %s", newest.path)
+                log.exception("[ALERTS] Backup verification failed: %s", path)
             self._last_backup_verified = (marker, valid)
         valid = bool(self._last_backup_verified[1])
         await self._set(
             "backup-invalid",
             not valid,
-            f"Newest backup failed verification: {newest.name}",
-            fingerprint="invalid",
+            f"Newest backup failed verification: {name}",
+            fingerprint="invalid" if not valid else "",
         )
 
-    async def _check_database(self) -> None:
-        state = getattr(getattr(self.bot, "db", None), "maintenance_state", {}) or {}
-        failures = int(state.get("consecutive_failures", 0) or 0)
-        error = str(state.get("last_error") or "")
+    async def _check_message_cache(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
+        check = snapshot.check("message_cache")
+        state = check.data
+        if not state and check.status == "unknown":
+            return
+        degraded = bool(state.get("degraded", False)) or check.status in {"warning", "error"}
+        error = str(state.get("last_persistence_error") or check.error or "").strip()
+        dropped = int(state.get("dropped_persistence_entries", 0) or 0)
+        summary = (
+            "Message cache persistence is degraded: "
+            f"pending={int(state.get('pending_writes', 0) or 0)}, "
+            f"retry={int(state.get('retry_backlog', 0) or 0)}, dropped={dropped}"
+        )
+        if error:
+            summary += f" ({error})"
+        await self._set(
+            "message-cache",
+            degraded,
+            summary,
+            fingerprint=f"degraded:{dropped}" if degraded else "",
+        )
+
+    async def _check_database(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
+        maintenance = dict(snapshot.check("database").data.get("maintenance", {}) or {})
+        failures = int(maintenance.get("consecutive_failures", 0) or 0)
+        error = str(maintenance.get("last_error") or "")
         await self._set(
             "database-maintenance",
             failures >= 2 and bool(error),
@@ -320,14 +382,14 @@ class AdminAlertManager:
             fingerprint="failed",
         )
 
-    async def _check_idlerpg_export(self) -> None:
-        try:
-            from plugins.idlerpg.state import _public_export_runtime
-        except Exception:
+    async def _check_idlerpg_export(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
+        state = snapshot.check("idlerpg_export").data
+        if not state:
             return
-        config = getattr(self.bot, "config", {}) or {}
-        threshold = max(1, int(config.get("admin_alert_idlerpg_export_failures", 3) or 3))
-        state = _public_export_runtime()
+        threshold = int(state.get("failure_threshold", 3) or 3)
         failures = int(state.get("consecutive_failures", 0) or 0)
         error = str(state.get("last_error") or "")
         await self._set(
@@ -337,14 +399,15 @@ class AdminAlertManager:
             fingerprint="failed",
         )
 
-    async def _check_watchdog(self) -> None:
-        watchdog = getattr(self.bot, "watchdog", None)
-        state = getattr(watchdog, "state", None)
-        if state is None:
+    async def _check_watchdog(
+        self, snapshot: HealthSnapshot | None = None
+    ) -> None:
+        snapshot = await self._snapshot_for_check(snapshot)
+        state = snapshot.check("watchdog").data
+        if not state:
             return
-        config = getattr(self.bot, "config", {}) or {}
-        warning = max(0.1, float(config.get("watchdog_lag_warning_seconds", 2.0) or 2.0))
-        lag = float(getattr(state, "last_lag_seconds", 0.0) or 0.0)
+        warning = float(state.get("warning_seconds", 2.0) or 2.0)
+        lag = float(state.get("last_lag_seconds", 0.0) or 0.0)
         await self._set(
             "event-loop-lag",
             lag >= warning,
@@ -356,25 +419,52 @@ class AdminAlertManager:
             ),
         )
 
-    async def run_once(self) -> None:
-        self._last_check_at = int(time.time())
+    async def _run_health_check(
+        self,
+        name: str,
+        check,
+        snapshot: HealthSnapshot,
+        errors: dict[str, str],
+    ) -> None:
         try:
-            await self._check_outbox()
-            await self._check_tasks()
-            await self._check_rooms()
-            await self._check_backup()
-            await self._check_database()
-            await self._check_idlerpg_export()
-            await self._check_watchdog()
+            await check(snapshot)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._last_error = f"{type(exc).__name__}: {exc}"
-            log.exception("[ALERTS] Health check iteration failed")
-            raise
-        else:
-            self._checks += 1
-            self._last_error = None
+            errors[name] = f"{type(exc).__name__}: {exc}"
+            log.exception("[ALERTS] Health check failed: %s", name)
+
+    async def run_once(self) -> None:
+        self._last_check_at = int(time.time())
+        snapshot = await collect_health_snapshot(
+            self.bot,
+            verify_backup=False,
+            include_alert_manager=False,
+        )
+        errors = {
+            key: check.error
+            for key, check in snapshot.checks.items()
+            if check.status == "error" and check.error
+        }
+        checks = (
+            ("outbox", self._check_outbox),
+            ("tasks", self._check_tasks),
+            ("rooms", self._check_rooms),
+            ("backup", self._check_backup),
+            ("message_cache", self._check_message_cache),
+            ("database", self._check_database),
+            ("idlerpg_export", self._check_idlerpg_export),
+            ("watchdog", self._check_watchdog),
+        )
+        for name, check in checks:
+            await self._run_health_check(name, check, snapshot, errors)
+        self._checks += 1
+        self._check_errors = errors
+        self._last_error = (
+            "; ".join(f"{name}: {error}" for name, error in sorted(errors.items()))
+            if errors
+            else None
+        )
 
     async def _run(self) -> None:
         await wait_for_runtime_ready(
@@ -399,7 +489,8 @@ class AdminAlertManager:
             "notifications": self._notifications,
             "last_check_at": self._last_check_at,
             "last_error": self._last_error,
+            "check_errors": dict(self._check_errors),
             "active": self.active_count(),
             "active_keys": sorted(key for key, state in self._states.items() if state.active),
-            "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }

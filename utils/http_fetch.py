@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import socket
-from dataclasses import dataclass
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urljoin
 

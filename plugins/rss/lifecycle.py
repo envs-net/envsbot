@@ -7,14 +7,16 @@ from .store import (
     _normalize_room_jid,
     _normalize_template_room_jid,
     _now,
-    get_rss_store,
     get_feeds,
     get_room_templates,
+    get_rss_store,
     save_feeds,
     save_room_templates,
     unset_feed_templates_for_room,
 )
 from .tasks import CHECK_TASKS, _cancel_feed_task
+
+
 async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
     """Remove a deleted room from all RSS subscriptions."""
     target = _normalize_template_room_jid(room_jid)

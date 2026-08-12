@@ -549,3 +549,41 @@ async def test_birthday_store_getter_uses_plugin_store():
     bot.db.users.plugin.return_value = marker
     assert await birthday_notify._get_birthday_store(bot) is marker
     bot.db.users.plugin.assert_called_once_with("birthday_notify")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_memory_and_persisted_announcements():
+    store = AsyncMock()
+    bot = MagicMock()
+    bot.db.users.list = AsyncMock(
+        return_value=[
+            {"jid": "alice@example.org"},
+            {"jid": "bob@example.org"},
+            {"jid": "__GLOBAL__"},
+        ]
+    )
+    bot.db.users.plugin = MagicMock(return_value=store)
+    store.get = AsyncMock(
+        side_effect=[
+            {"Room@Conf": "2026-08-12", "other@conf": "2026-08-12"},
+            {"other@conf": "2026-08-12"},
+        ]
+    )
+    store.set = AsyncMock()
+    birthday_notify.ANNOUNCED_TODAY.update(
+        {
+            ("Room@Conf", "alice@example.org"): datetime.date(2026, 8, 12),
+            ("other@conf", "bob@example.org"): datetime.date(2026, 8, 12),
+        }
+    )
+
+    summary = await birthday_notify.cleanup_room_state(bot, "ROOM@CONF/nick")
+
+    assert summary == {"memory_announcements": 1, "persisted_announcements": 1}
+    assert ("Room@Conf", "alice@example.org") not in birthday_notify.ANNOUNCED_TODAY
+    assert ("other@conf", "bob@example.org") in birthday_notify.ANNOUNCED_TODAY
+    store.set.assert_awaited_once_with(
+        "alice@example.org",
+        "announced_dates_by_room",
+        {"other@conf": "2026-08-12"},
+    )

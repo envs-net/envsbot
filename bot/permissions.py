@@ -32,10 +32,12 @@ def role_bypasses_rate_limit(role: Role, config: Mapping[str, Any]) -> bool:
 class PermissionMixin:
     """Role resolution helpers for the bot class."""
 
+    db: Any
+
     def _parse_bare_jid(self, jid_value: object, *, label: str, fallback_to_none: bool = False) -> str | None:
         """Parse a JID and return its bare form as a string."""
         try:
-            return slixmpp.JID(jid_value).bare
+            return slixmpp.JID(str(jid_value)).bare
         except Exception as exc:
             mode = "none" if fallback_to_none else "strict"
             log.warning(

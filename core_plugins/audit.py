@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+
 from slixmpp import JID
 
 from utils.audit import audit_event

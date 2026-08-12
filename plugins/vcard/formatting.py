@@ -1,9 +1,10 @@
 """Split module for plugins/vcard.py: formatting."""
 
 import textwrap
-import urllib
+from urllib.parse import unquote
 
 from .config import log
+
 
 def _get_all_field_values_by_tag(vcard, tag):
     """
@@ -78,7 +79,7 @@ async def _format_vcard_field_for_nick(field, label, values,
     if field == "URL":
         if values and isinstance(values, list):
             for v in values:
-                lines.append(f"    • {urllib.parse.unquote(v)}")
+                lines.append(f"    • {unquote(v)}")
         else:
             _append_empty_vcard_value(lines)
         return lines
@@ -146,7 +147,7 @@ def _vcard_handle_missing_nick(bot, msg, target_nick, room, own=False):
 
 
 def _format_vcard_reply(vcard, nick, muc_jid):
-    c = {}
+    c: dict[str, object] = {}
     lines = [f"📄 vCard for {nick} ({muc_jid}):"]
 
     _append_name_info(vcard, lines, c)

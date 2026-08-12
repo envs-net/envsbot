@@ -5,9 +5,9 @@ import logging
 import re
 
 import pytz
-from utils.config import config
-from core_plugins._core import JOINED_ROOMS, _is_muc_pm, _normalize_bare_jid, parse_duration
 
+from core_plugins._core import JOINED_ROOMS, _is_muc_pm, _normalize_bare_jid, parse_duration
+from utils.config import config
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ REMINDER_DEFAULT_TIMEZONE = str(
 
 
 def _utcnow() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 def _utc_tz():
@@ -25,9 +25,9 @@ def _utc_tz():
 
 
 _FIXED_TIMEZONE_ALIASES: dict[str, datetime.tzinfo] = {
-    "Z": datetime.timezone.utc,
-    "UTC": datetime.timezone.utc,
-    "GMT": datetime.timezone.utc,
+    "Z": datetime.UTC,
+    "UTC": datetime.UTC,
+    "GMT": datetime.UTC,
     "CET": datetime.timezone(datetime.timedelta(hours=1), "CET"),
     "MEZ": datetime.timezone(datetime.timedelta(hours=1), "CET"),
     "CEST": datetime.timezone(datetime.timedelta(hours=2), "CEST"),
@@ -185,7 +185,7 @@ def _format_local_datetime(
 ) -> str:
     """Format a UTC datetime in the user's local timezone."""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.replace(tzinfo=datetime.UTC)
 
     return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
 
@@ -230,7 +230,7 @@ def _ensure_utc(
     if dt.tzinfo is None:
         dt = _localize_naive_datetime(dt, assume_tz or _utc_tz())
 
-    return dt.astimezone(datetime.timezone.utc)
+    return dt.astimezone(datetime.UTC)
 
 
 def _parse_absolute_datetime_with_timezone(
@@ -404,6 +404,6 @@ def _parse_datetime(value) -> datetime.datetime:
         dt = datetime.datetime.fromisoformat(str(value))
 
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.replace(tzinfo=datetime.UTC)
 
     return dt

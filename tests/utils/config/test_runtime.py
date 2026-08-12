@@ -86,6 +86,9 @@ def test_rate_limiter_from_config_uses_defaults():
     assert limiter.backoff_multiplier == 2.0
     assert limiter.max_block_seconds == 3600.0
     assert limiter.notify_cooldown == 10.0
+    assert limiter.max_clients == 2048
+    assert limiter.idle_ttl_seconds == 3600.0
+    assert limiter.prune_interval_seconds == 60.0
 
 
 def test_rate_limiter_from_config_uses_all_configured_values():
@@ -99,6 +102,9 @@ def test_rate_limiter_from_config_uses_all_configured_values():
         "command_rate_limit_backoff_multiplier": "3.5",
         "command_rate_limit_max_block_seconds": "7200.5",
         "command_rate_limit_notify_cooldown_seconds": "20.25",
+        "command_rate_limit_max_clients": "123",
+        "command_rate_limit_idle_ttl_seconds": "456.5",
+        "command_rate_limit_prune_interval_seconds": "7.5",
     })
 
     assert limiter.capacity == 9.0
@@ -110,6 +116,11 @@ def test_rate_limiter_from_config_uses_all_configured_values():
     assert limiter.backoff_multiplier == 3.5
     assert limiter.max_block_seconds == 7200.5
     assert limiter.notify_cooldown == 20.25
+    # The hard client-state ceiling is an internal implementation guard and
+    # must not be tunable through runtime configuration.
+    assert limiter.max_clients == 2048
+    assert limiter.idle_ttl_seconds == 456.5
+    assert limiter.prune_interval_seconds == 7.5
 
 
 def test_apply_runtime_config_replaces_limiter_when_rate_limit_changes():

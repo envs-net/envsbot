@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import datetime
 
-from utils.command import command, Role
+from core_plugins._core import get_reply_target, handle_room_toggle_command
+from utils.command import Role, command
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
-from core_plugins._core import get_reply_target, handle_room_toggle_command
 
 from . import runtime
 from .config import REMINDER_KEY

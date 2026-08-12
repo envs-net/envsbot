@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Mapping, Protocol, TypeAlias, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from utils.formatting import bool_label
 
 log = logging.getLogger(__name__)
 
-FeatureFlagValue: TypeAlias = bool | int | float | str | None
-FeatureFlagMap: TypeAlias = Mapping[str, FeatureFlagValue]
-FeatureFlagState: TypeAlias = dict[str, bool]
-StoreValue: TypeAlias = FeatureFlagMap | FeatureFlagState | None
-StoreUpdater: TypeAlias = Callable[[StoreValue], FeatureFlagState]
-RawPluginStoreConfig: TypeAlias = Mapping[str, Any]
+type FeatureFlagValue = bool | int | float | str | None
+type FeatureFlagMap = Mapping[str, FeatureFlagValue]
+type FeatureFlagState = dict[str, bool]
+type StoreValue = FeatureFlagMap | FeatureFlagState | None
+type StoreUpdater = Callable[[StoreValue], FeatureFlagState]
+type RawPluginStoreConfig = Mapping[str, Any]
 
 
 class PluginStore(Protocol):

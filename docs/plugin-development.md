@@ -139,6 +139,21 @@ core plugins.
 
 ## Lifecycle hooks
 
+Plugins that keep their own per-room state should declare it in metadata:
+
+```python
+PLUGIN_META = {
+    # ...
+    "room_state": "custom",
+}
+```
+
+`room_state="custom"` is a lifecycle contract: the module must expose
+`cleanup_room_state(bot, room_jid)` (or the legacy `on_room_delete` hook). The
+metadata validator and quality tests enforce this so a newly-added room-stateful
+plugin cannot silently leave data behind after `,rooms delete`. Shared room
+feature toggles managed by the core do not need a custom cleanup hook.
+
 The plugin manager calls optional hooks when a plugin is loaded, made ready,
 unloaded or when room state is deleted.
 

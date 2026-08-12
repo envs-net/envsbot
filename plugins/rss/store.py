@@ -238,12 +238,12 @@ def _feed_status_label(feed: dict, now: int | None = None) -> str:
     return "ok"
 def _record_feed_check(feed: dict, *, now: int, success: bool, error: str | None = None) -> bool:
     changed = False
-    for key, value in {"last_checked": now}.items():
-        if feed.get(key) != value:
-            feed[key] = value
+    for key, checked_value in {"last_checked": now}.items():
+        if feed.get(key) != checked_value:
+            feed[key] = checked_value
             changed = True
     if success:
-        updates = {
+        updates: dict[str, object] = {
             "last_success": now,
             "last_error": "",
             "last_error_at": 0,

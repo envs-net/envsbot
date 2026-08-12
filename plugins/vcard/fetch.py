@@ -2,12 +2,13 @@
 
 from slixmpp.exceptions import IqError
 
-from core_plugins import _core
 from bot.room_state import JOINED_ROOMS
+from core_plugins import _core
 from utils.config import config
 
 from .config import log
 from .formatting import _format_vcard_reply
+
 
 async def get_vcard(bot, msg, jid=None):
     """

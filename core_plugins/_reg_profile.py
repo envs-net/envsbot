@@ -30,8 +30,9 @@ import inspect
 import logging
 import os
 
-from bot.connection import session_is_ready
 from slixmpp.xmlstream import ET
+
+from bot.connection import session_is_ready
 from utils.bundled_assets import resolve_bundled_asset
 from utils.config import config
 from utils.python_source import load_python_namespace
@@ -80,7 +81,7 @@ def read_hash(path):
         return None
 
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             return f.read().strip()
     except Exception:
         return None

@@ -13,6 +13,7 @@ KNOWN_PLUGIN_META_KEYS = frozenset({
     "category",
     "requires",
     "hidden",
+    "room_state",
 })
 
 
@@ -49,8 +50,35 @@ def validate_plugin_metadata(plugin: str, meta: Any, *, core: bool = False) -> l
     if not isinstance(requires, list) or not all(isinstance(item, str) and item.strip() for item in requires):
         issues.append(PluginMetadataIssue(plugin, "error", "requires must be a list of plugin names"))
 
+    room_state = meta.get("room_state")
+    if room_state is not None and room_state not in {"custom", "shared", "none"}:
+        issues.append(
+            PluginMetadataIssue(
+                plugin,
+                "error",
+                "room_state must be one of: custom, shared, none",
+            )
+        )
+
     unknown = sorted(set(meta) - KNOWN_PLUGIN_META_KEYS)
     if unknown:
         issues.append(PluginMetadataIssue(plugin, "warning", f"unknown metadata keys: {', '.join(unknown)}"))
 
     return issues
+
+
+def validate_plugin_lifecycle(plugin: str, meta: Any, module: Any) -> list[PluginMetadataIssue]:
+    """Validate lifecycle hooks implied by declarative plugin metadata."""
+    if not isinstance(meta, dict) or meta.get("room_state") != "custom":
+        return []
+    cleanup = getattr(module, "cleanup_room_state", None)
+    legacy = getattr(module, "on_room_delete", None)
+    if callable(cleanup) or callable(legacy):
+        return []
+    return [
+        PluginMetadataIssue(
+            plugin,
+            "error",
+            "room_state='custom' requires cleanup_room_state(bot, room_jid)",
+        )
+    ]

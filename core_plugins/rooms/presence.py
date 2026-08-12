@@ -3,8 +3,8 @@
 import asyncio
 import inspect
 
-from .state import JOINED_ROOMS, _LEAVING_ROOMS, _jid_bare, log
 from .permissions import _sender_can_manage_room_settings
+from .state import _LEAVING_ROOMS, JOINED_ROOMS, _jid_bare, log
 
 
 def _looks_like_room_jid(value: object) -> bool:

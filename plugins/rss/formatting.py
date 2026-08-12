@@ -7,11 +7,11 @@ from string import Template
 
 from slixmpp import JID
 
-from utils.outbox import durable_send
-from utils.config import config
-from utils.formatting import page_size_for, parse_page_args
 from bot.room_state import JOINED_ROOMS
 from core_plugins._core import paginate_items
+from utils.config import config
+from utils.formatting import page_size_for, parse_page_args
+from utils.outbox import durable_send
 
 from .config import DEFAULT_RSS_TEMPLATE, RSS_LIST_PAGE_SIZE, RSS_TEMPLATE_MAX_LENGTH, RSS_TEMPLATE_VARIABLES
 from .fetch import (
@@ -299,7 +299,7 @@ async def _post_new_entries(bot, store, url, feed_title,
             )
             break
 
-        def mutator(feed_data):
+        def mutator(feed_data, entry_id=entry_id, posted=posted):
             changed = _set_last_id_in_feed(feed_data, entry_id)
             if posted:
                 changed = _record_feed_post(feed_data, now=_feed_now(), posted=1) or changed

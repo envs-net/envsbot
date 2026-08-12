@@ -37,8 +37,10 @@ import re
 
 import slixmpp
 
+from core_plugins._core import _get_enabled_rooms, handle_room_toggle_command
 from utils.command import (
     COMMANDS,
+    Command,
     CommandExample,
     CommandSubcommand,
     Role,
@@ -50,8 +52,6 @@ from utils.command import (
 )
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
-
-from core_plugins._core import handle_room_toggle_command, _get_enabled_rooms
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ ENVS_BOT_INTRO_LINES = (
 # Plugin name -> room feature toggle metadata.  The feature name is the value
 # accepted by `,rooms enable|disable`, while command is the optional
 # plugin-local on/off/status shortcut.
-ROOM_FEATURE_HELP = {
+ROOM_FEATURE_HELP: dict[str, dict[str, object]] = {
     "birthday_notify": {"feature": "birthday_notify", "command": "birthday_notify"},
     "dice": {"feature": "dice", "command": "dice"},
     "ducks": {"feature": "ducks", "command": "duck"},
@@ -324,9 +324,9 @@ def _available_room_features() -> list[str]:
 # COMMAND DISCOVERY / FORMATTERS
 # --------------------------------------------------
 
-def _commands_for_plugin(bot, plugin_name, user_role):
+def _commands_for_plugin(bot, plugin_name, user_role) -> list[Command]:
     """Collect visible canonical commands belonging to a plugin."""
-    commands = []
+    commands: list[Command] = []
     seen = set()
 
     tokens_list = COMMANDS.by_plugin.get(plugin_name, ())
@@ -346,8 +346,8 @@ def _commands_for_plugin(bot, plugin_name, user_role):
     return commands
 
 
-def _all_visible_commands(bot, role: Role):
-    commands = []
+def _all_visible_commands(bot, role: Role) -> list[tuple[str, Command]]:
+    commands: list[tuple[str, Command]] = []
     seen = set()
     for plugin_name in sorted(bot.bot_plugins.plugins):
         for cmd in _commands_for_plugin(bot, plugin_name, role):
@@ -484,7 +484,7 @@ def _format_plugin_command_lines(
     if subcommands:
         sections = _sectioned_subcommands(subcommands)
         has_named_sections = any(section for section, _entries in sections)
-        lines = []
+        lines: list[str] = []
         for section, entries in sections:
             if has_named_sections:
                 if lines:
@@ -635,12 +635,12 @@ def _command_query_tokens(query: str, prefix: str) -> tuple[str, ...]:
 def _commands_matching_prefix(
     tokens: tuple[str, ...],
     role: Role,
-) -> list[object]:
+) -> list[Command]:
     """Return visible commands matching a registered name or alias prefix."""
     if not tokens:
         return []
 
-    commands = []
+    commands: list[Command] = []
     seen = set()
     for registered_tokens, cmd in COMMANDS.items():
         if len(registered_tokens) < len(tokens):
@@ -1074,8 +1074,8 @@ def _category_title(category: str) -> str:
     return category.replace("_", " ").replace("-", " ").title()
 
 
-def _commands_by_category(bot, role: Role) -> dict[str, list[tuple[str, object]]]:
-    grouped: dict[str, list[tuple[str, object]]] = {}
+def _commands_by_category(bot, role: Role) -> dict[str, list[tuple[str, Command]]]:
+    grouped: dict[str, list[tuple[str, Command]]] = {}
     for plugin_name, cmd in _all_visible_commands(bot, role):
         grouped.setdefault(_category_name(cmd), []).append((plugin_name, cmd))
     for commands in grouped.values():

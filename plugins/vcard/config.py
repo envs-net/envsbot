@@ -2,7 +2,6 @@
 
 import logging
 
-
 VCARD_KEY = "VCARD"
 
 

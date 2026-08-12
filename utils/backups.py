@@ -15,7 +15,7 @@ import tempfile
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -27,13 +27,14 @@ from utils.file_security import (
     ensure_private_directory,
     ensure_private_file,
 )
-from utils.version import __version__
 from utils.runtime_paths import (
     chat_slang_additions_file,
     chat_slang_file,
     chat_slang_removals_file,
     vcard_file,
 )
+from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
+from utils.version import __version__
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ class BackupArchive:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso_now() -> str:
@@ -394,8 +395,84 @@ def _parse_archive_created_at(value: str | None) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def backup_age_seconds(
+    latest: BackupArchive, *, now: datetime | None = None
+) -> int | None:
+    """Return managed-backup age from manifest time, falling back to mtime."""
+    current = now or _now()
+    created_at = _parse_archive_created_at(latest.created_at)
+    if created_at is not None:
+        return max(0, int((current - created_at).total_seconds()))
+
+    try:
+        modified = datetime.fromtimestamp(float(latest.path.stat().st_mtime), UTC)
+    except (OSError, TypeError, ValueError):
+        return None
+    return max(0, int((current - modified).total_seconds()))
+
+
+def _periodic_backup_interval_seconds(bot: Any) -> int:
+    """Return the configured periodic managed-backup cadence in seconds."""
+    runtime_config = getattr(bot, "config", {}) or {}
+    try:
+        hours = max(0, int(runtime_config.get("backup_interval_hours", 24) or 0))
+    except (TypeError, ValueError):
+        hours = 24
+    return hours * 3600
+
+
+async def periodic_backup_worker(bot: Any) -> None:
+    """Keep managed backups fresh while a long-running bot remains online."""
+    plugin = "_runtime"
+    name = "scheduled-backup"
+    await wait_for_runtime_ready(bot, plugin=plugin, name=name)
+
+    while True:
+        interval = _periodic_backup_interval_seconds(bot)
+        if interval <= 0:
+            return
+
+        archives = await asyncio.to_thread(list_backups)
+        age_seconds = backup_age_seconds(archives[0]) if archives else None
+        delay = 0 if age_seconds is None else max(0, interval - age_seconds)
+        if delay:
+            await sleep_with_heartbeat(bot, plugin, name, delay)
+            await wait_for_runtime_ready(bot, plugin=plugin, name=name)
+
+        archive = await create_backup(bot, reason="scheduled")
+        log.info(
+            "[BACKUP] event=scheduled_backup status=created archive=%s",
+            archive.name,
+        )
+
+
+def start_periodic_backup_worker(bot: Any) -> asyncio.Task[Any] | None:
+    """Start the supervised periodic managed-backup worker when enabled."""
+    if _periodic_backup_interval_seconds(bot) <= 0:
+        return None
+
+    existing = getattr(bot, "_periodic_backup_task", None)
+    existing_done = getattr(existing, "done", None)
+    if existing is not None and callable(existing_done) and not existing_done():
+        return existing
+
+    supervisor = getattr(bot, "tasks", None)
+    create_resilient = getattr(supervisor, "create_resilient", None)
+    if callable(create_resilient):
+        task = create_resilient(
+            "_runtime",
+            lambda: periodic_backup_worker(bot),
+            name="scheduled-backup",
+            service=True,
+        )
+    else:
+        task = asyncio.create_task(periodic_backup_worker(bot), name="scheduled-backup")
+    bot._periodic_backup_task = task
+    return task
 
 
 def plan_backup_prune(

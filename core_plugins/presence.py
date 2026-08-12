@@ -20,13 +20,10 @@ Available <show> statuses for setting the status:
     dnd - 'Do Not Disturb': If you don't want to be contacted at the moment
 """
 import logging
-from utils.command import command, Role
+
+from core_plugins._core import _get_enabled_rooms, _is_muc_pm, handle_room_toggle_command
+from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from core_plugins._core import (
-    handle_room_toggle_command,
-    _is_muc_pm,
-    _get_enabled_rooms
-)
 
 log = logging.getLogger(__name__)
 

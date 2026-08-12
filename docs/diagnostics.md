@@ -41,10 +41,12 @@ Examples:
 ## In-process performance diagnostics
 
 `,doctor performance` exposes lightweight counters kept only in the running
-process. It reports event-loop lag plus average/maximum timings for SQLite lock
-waits, IdleRPG ticks/saves/exports, outbox delivery and RSS fetches. It also
-shows the slowest command names and RSS hosts. RSS measurements retain only the
-host name, not complete feed URLs.
+process. It reports event-loop lag plus rolling p50/p95/p99 timings for SQLite
+lock waits, IdleRPG ticks/saves/exports, outbox delivery and RSS fetches. The
+percentiles use only the latest 256 samples while lifetime count/average/maximum
+statistics remain available internally. It also shows the slowest command names
+and RSS hosts ranked by p95. RSS measurements retain only the host name, not
+complete feed URLs.
 
 ```text
 ,doctor performance
@@ -130,7 +132,11 @@ shared restart/circuit-breaker policy.
 
 Backups are kept by count with `BACKUP_KEEP` and optionally by age with
 `BACKUP_RETENTION_DAYS`. Set `BACKUP_RETENTION_DAYS = 0` to disable age-based
-retention.
+retention. `BACKUP_INTERVAL_HOURS` controls the supervised periodic backup
+scheduler (default: 24 hours; `0` disables it). Keep the cadence below
+`ADMIN_ALERT_BACKUP_MAX_AGE_HOURS` so the scheduler normally refreshes the
+archive before the stale-backup alert threshold. `,doctor backups` shows both
+values together.
 
 Manual inspection and restore planning should be used before destructive restores:
 
@@ -170,7 +176,10 @@ changes are written to the audit log where available.
 
 Command rate limits are configured in `config.py` through the
 `COMMAND_RATE_LIMIT_*` options. The limiter is in-memory and resets on restart.
-By default, room moderators and higher bot roles bypass the limiter.
+By default, room moderators and higher bot roles bypass the limiter. Per-client
+state is bounded and idle entries are pruned automatically; `,doctor performance`
+and `,status full` expose current client count, blocks, evictions and stale
+prunes without exposing client JIDs.
 
 Important options:
 
@@ -180,7 +189,15 @@ COMMAND_RATE_LIMIT_CAPACITY = 4
 COMMAND_RATE_LIMIT_REFILL_AMOUNT = 1
 COMMAND_RATE_LIMIT_REFILL_INTERVAL_SECONDS = 0.5
 COMMAND_RATE_LIMIT_BYPASS_ROLE = "moderator"
+COMMAND_RATE_LIMIT_IDLE_TTL_SECONDS = 3600
+COMMAND_RATE_LIMIT_PRUNE_INTERVAL_SECONDS = 60
 ```
+
+The limiter also has an internal hard safety ceiling of 2048 retained client
+states. This is intentionally not configurable: it is an implementation guard,
+not an operator tuning knob. The limiter does not pre-allocate these entries,
+and idle client state is removed after the configured TTL, so normal memory use
+follows the number of recent command senders.
 
 ## Local preflight check
 
@@ -298,9 +315,19 @@ database maintenance.
 Immediate alerts are enabled by default and delivered only over XMPP to the same
 administrative destination used by runtime notifications. They cover state
 changes such as an opened task circuit, outbox pressure/dead letters, a prolonged
-missing room, stale or invalid backups, repeated database/IdleRPG export failures
-and excessive event-loop lag. Alerts are stateful and deduplicated: the first
+missing room, stale or invalid backups, degraded persistent message-cache state,
+repeated database/IdleRPG export failures and excessive event-loop lag. Alerts
+are stateful and deduplicated: the first
 problem is marked red, optional cooldown reminders yellow and recovery green.
+
+
+`,status`, `,report`, `,doctor` and the immediate alert manager consume the
+same structured runtime-health snapshot for rooms, tasks, outbox, message cache,
+backups, database maintenance, watchdog, plugins and IdleRPG export state. Each
+check is isolated: one failed probe is reported as its own error and does not
+prevent the remaining health checks from running. Backup age is derived from the
+managed archive manifest first (filesystem mtime is only a fallback), so copying
+an old archive cannot make it appear fresh.
 
 The daily report is disabled by default. It summarizes uptime, required
 autojoin-room health (with separately counted manual rooms), plugin/task failures,

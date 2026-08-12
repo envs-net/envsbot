@@ -17,7 +17,7 @@ import os
 import platform
 import tempfile
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
 
@@ -30,6 +30,7 @@ from utils.audit import audit_event
 from utils.command import COMMANDS, Role, command
 from utils.config import config
 from utils.file_security import PRIVATE_FILE_MODE
+from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.runtime_paths import vcard_file
 from utils.task_supervisor import create_resilient_plugin_task
 from utils.updatecheck import check_for_updates_once, version_check_worker
@@ -152,7 +153,7 @@ def _bot_uptime_line() -> str:
     if not BOT_START_TIME:
         return "Uptime: unknown"
     uptime = datetime.now() - BOT_START_TIME
-    return f"Uptime: {human_time(uptime.total_seconds())}"
+    return f"Uptime: {human_time(int(uptime.total_seconds()))}"
 
 
 def _connection_line(bot) -> str:
@@ -163,7 +164,7 @@ def _connection_line(bot) -> str:
     try:
         if connection_start.tzinfo is None:
             connection_start = connection_start.astimezone()
-        uptime = datetime.now(timezone.utc) - connection_start.astimezone(timezone.utc)
+        uptime = datetime.now(UTC) - connection_start.astimezone(UTC)
         return f"Connection: {human_time(uptime.total_seconds())}"
     except Exception:
         log.debug("[ADMIN] Could not calculate connection uptime", exc_info=True)
@@ -364,37 +365,43 @@ def _alert_runtime_state(bot) -> dict:
         return {}
 
 
-async def _health_status_lines(bot) -> list[str]:
-    """Return compact operational health lines for the normal status view."""
-    alerts = _alert_runtime_state(bot)
-    outbox = await _outbox_runtime_state(bot)
-    cache = _message_cache_stats(bot)
+async def _health_status_lines(
+    bot,
+    health: HealthSnapshot | None = None,
+) -> list[str]:
+    """Return compact shared operational health for the normal status view."""
+    shared = health or await collect_health_snapshot(bot, verify_backup=False)
+    alerts = shared.check("alerts")
+    outbox = shared.check("outbox")
+    cache = shared.check("message_cache")
 
-    active_alerts = int(alerts.get("active", 0) or 0)
-    outbox_dead = int(outbox.get("dead", 0) or 0)
-    outbox_error = str(outbox.get("last_error") or "").strip()
-    cache_degraded = bool(cache.get("degraded", False))
-
+    active_alerts = int(alerts.data.get("active", 0) or 0)
     if active_alerts:
         overall = f"Overall: ⚠️ {active_alerts} active alert{'s' if active_alerts != 1 else ''}"
-    elif outbox_dead or outbox_error or cache_degraded:
-        overall = "Overall: ⚠️ attention required"
+    elif shared.needs_attention:
+        problems = [
+            key for key in shared.problem_keys
+            if key not in {"alerts"}
+        ]
+        detail = f" ({', '.join(problems[:4])})" if problems else ""
+        overall = f"Overall: ⚠️ attention required{detail}"
     else:
         overall = "Overall: ✅ OK"
 
-    if outbox:
+    if outbox.status != "unknown":
         outbox_line = (
-            f"Outbox: {int(outbox.get('pending', 0) or 0)} pending · "
-            f"{outbox_dead} dead"
+            f"Outbox: {int(outbox.data.get('pending', 0) or 0)} pending · "
+            f"{int(outbox.data.get('dead', 0) or 0)} dead"
         )
     else:
         outbox_line = "Outbox: unavailable"
 
-    if cache:
-        persistence = "persistent" if cache.get("persistent") else "memory-only"
-        cache_health = "degraded" if cache_degraded else "healthy"
+    if cache.status != "unknown":
+        state = cache.data
+        persistence = "persistent" if state.get("persistent") else "memory-only"
+        cache_health = "degraded" if cache.needs_attention else "healthy"
         cache_line = (
-            f"Message cache: {int(cache.get('messages', 0) or 0)} messages · "
+            f"Message cache: {int(state.get('messages', 0) or 0)} messages · "
             f"{persistence} · {cache_health}"
         )
     else:
@@ -403,7 +410,7 @@ async def _health_status_lines(bot) -> list[str]:
     return [overall, outbox_line, cache_line]
 
 
-def _cache_detail_lines(bot) -> list[str]:
+def _cache_detail_lines(bot, health: HealthSnapshot | None = None) -> list[str]:
     """Return bounded user/runtime cache and message-cache diagnostics."""
     lines: list[str] = []
     users = getattr(getattr(bot, "db", None), "users", None)
@@ -432,19 +439,39 @@ def _cache_detail_lines(bot) -> list[str]:
     if not lines:
         lines.extend(["Users: unavailable", "Runtime: unavailable"])
 
-    cache = _message_cache_stats(bot)
+    cache_check = health.check("message_cache") if health is not None else None
+    cache = cache_check.data if cache_check is not None else _message_cache_stats(bot)
     if cache:
         persistence = "persistent" if cache.get("persistent") else "memory-only"
-        health = "degraded" if cache.get("degraded") else "healthy"
+        cache_health = (
+            "degraded"
+            if (cache_check.needs_attention if cache_check is not None else cache.get("degraded"))
+            else "healthy"
+        )
         lines.append(
             f"Message cache: {int(cache.get('messages', 0) or 0)} messages · "
             f"pending={int(cache.get('pending_writes', 0) or 0)} · "
             f"retry={int(cache.get('retry_backlog', 0) or 0)} · "
             f"dropped={int(cache.get('dropped_persistence_entries', 0) or 0)} · "
-            f"{persistence} · {health}"
+            f"{persistence} · {cache_health}"
         )
     else:
         lines.append("Message cache: unavailable")
+
+    limiter = getattr(bot, "rate_limiter", None)
+    runtime_state = getattr(limiter, "runtime_state", None)
+    if callable(runtime_state):
+        try:
+            state = dict(runtime_state() or {})
+            lines.append(
+                f"Rate limiter: {int(state.get('clients', 0) or 0)}/"
+                f"{int(state.get('max_clients', 0) or 0)} clients · "
+                f"blocked={int(state.get('blocked_clients', 0) or 0)} · "
+                f"evicted={int(state.get('capacity_evictions', 0) or 0)} · "
+                f"pruned={int(state.get('stale_pruned', 0) or 0)}"
+            )
+        except Exception:
+            log.debug("[ADMIN] Could not read rate-limiter state", exc_info=True)
     return lines
 
 
@@ -454,7 +481,7 @@ def _plugin_status_lines(bot) -> list[str]:
     loaded_plugins = getattr(manager, "plugins", {}) or {}
 
     try:
-        available_count = len(list(manager.discover())) if manager else 0
+        available_count: int | str = len(list(manager.discover())) if manager else 0
     except Exception:
         log.debug("[ADMIN] Could not discover plugins", exc_info=True)
         available_count = "unknown"
@@ -604,9 +631,9 @@ def _timestamp_age(value: str | None) -> str:
     try:
         parsed = datetime.fromisoformat(str(value))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        age = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
-        return f"{human_time(max(0, age))} ago"
+            parsed = parsed.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
+        return f"{human_time(int(max(0, age)))} ago"
     except (TypeError, ValueError):
         return "unknown"
 
@@ -638,6 +665,7 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     set_bot_start_time(bot)
     room_snapshot = _joined_rooms_snapshot()
     stored_rooms = await _stored_rooms_snapshot(bot)
+    health = await collect_health_snapshot(bot, verify_backup=False)
 
     lines = ["🤖 EnvsBot Status", ""]
     lines.extend(_section("Core", _core_status_lines(bot)))
@@ -650,13 +678,13 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
     lines.extend(_section("Plugins", plugin_lines))
     lines.extend(_section("Database", await _database_status_lines(bot, full=full)))
-    lines.extend(_section("Health", await _health_status_lines(bot)))
+    lines.extend(_section("Health", await _health_status_lines(bot, health=health)))
 
     if full:
         lines.extend(_section("Rooms", _room_detail_lines(room_snapshot)))
         lines.extend(_section("Loaded plugins", _plugin_detail_lines(bot)))
         lines.extend(_section("Background tasks", _task_detail_lines(bot)))
-        lines.extend(_section("Caches", _cache_detail_lines(bot)))
+        lines.extend(_section("Caches", _cache_detail_lines(bot, health=health)))
 
     return lines[:-1] if lines and lines[-1] == "" else lines
 
@@ -715,7 +743,7 @@ async def _run_stop_command(stop_cmd: list[str], timeout: float) -> tuple[int, s
     )
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         process.kill()
         await process.communicate()
         raise
@@ -731,7 +759,7 @@ async def _graceful_command_shutdown(bot, *, exit_code: int) -> None:
     if disconnected is not None:
         try:
             await asyncio.wait_for(disconnected, timeout=5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("[ADMIN] Disconnect timeout during requested shutdown")
 
     shutdown_runtime = getattr(bot, "shutdown_runtime", None)
@@ -848,7 +876,7 @@ async def bot_shutdown(bot, sender, nick, args, msg, is_room):
     if stop_cmd:
         try:
             returncode, detail = await _run_stop_command(list(stop_cmd), timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             bot.reply(msg, f"🔴 Shutdown command timed out after {timeout:g}s.")
             log.error("[ADMIN] Shutdown command timed out after %.1fs", timeout)
             return

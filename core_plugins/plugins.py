@@ -8,10 +8,11 @@ All commands rely on the async PluginManager API.
 """
 
 import logging
-from utils.command import command, Role
+
+from utils.audit import audit_event
+from utils.command import Role, command
 from utils.config import config
 from utils.formatting import format_page, parse_page_args, status_icon
-from utils.audit import audit_event
 
 log = logging.getLogger(__name__)
 

@@ -2,23 +2,24 @@
 
 import time
 from xml.etree import ElementTree as ET
-from utils.command import command, Role
+
+from utils.audit import audit_event
+from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
-from utils.audit import audit_event
+from utils.permissions import configured_room_invite_admin_rooms
 from utils.xmpp_notify import (
     ensure_notification_target_joined,
     notification_message_type,
 )
-from utils.permissions import configured_room_invite_admin_rooms
 
 from .settings import set_room_control_defaults
 from .state import (
-    JOINED_ROOMS,
     _DIRECT_INVITE_NS,
     _LEAVING_ROOMS,
     _MUC_USER_NS,
+    JOINED_ROOMS,
     _jid_bare,
     _safe_get_plugin,
     _safe_plugin_value,

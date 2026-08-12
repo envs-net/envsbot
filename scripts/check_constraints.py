@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import importlib.metadata
 from collections import deque
+from collections.abc import Mapping, Set
 from pathlib import Path
+from typing import cast
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
@@ -25,7 +27,7 @@ def _iter_requirement_lines(path: Path):
 
 def _root_requirements() -> list[Requirement]:
     roots: list[Requirement] = []
-    env = default_environment()
+    env = cast(Mapping[str, str | Set[str]], default_environment())
     for path in _REQUIREMENT_FILES:
         for line in _iter_requirement_lines(path):
             requirement = Requirement(line)
@@ -52,10 +54,10 @@ def _constraint_pins(path: Path) -> dict[str, str]:
 def _marker_matches(requirement: Requirement, parent_extras: frozenset[str]) -> bool:
     if requirement.marker is None:
         return True
-    env = default_environment()
+    env = cast(Mapping[str, str | Set[str]], default_environment())
     extras = parent_extras or frozenset({""})
     for extra in extras:
-        candidate = dict(env)
+        candidate: dict[str, str | Set[str]] = dict(env)
         candidate["extra"] = extra
         if requirement.marker.evaluate(candidate):
             return True

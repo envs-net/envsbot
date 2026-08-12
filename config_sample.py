@@ -193,6 +193,12 @@ BACKUP_RETENTION_DAYS = 0
 # restarts, because a restart starts a fresh bot process.
 BACKUP_ON_START = True
 
+# Create an automatic managed backup this many hours after the newest managed backup.
+# Set to 0 to disable periodic backups. Keep this below
+# ADMIN_ALERT_BACKUP_MAX_AGE_HOURS.
+# Startup-only: restart envsbot after changing this value.
+BACKUP_INTERVAL_HOURS = 24
+
 # Restore each newly created backup into a temporary directory and run SQLite
 # integrity_check before accepting it.
 BACKUP_SMOKE_TEST_ON_CREATE = True
@@ -374,6 +380,13 @@ COMMAND_RATE_LIMIT_MAX_BLOCK_SECONDS = 3600.0
 
 # Command rate limit notify cooldown seconds.
 COMMAND_RATE_LIMIT_NOTIFY_COOLDOWN_SECONDS = 10.0
+
+# Prune inactive command rate-limit client state after this many seconds. Set 0 to
+# disable TTL pruning; the hard client limit still applies.
+COMMAND_RATE_LIMIT_IDLE_TTL_SECONDS = 3600
+
+# Minimum interval between opportunistic command rate-limit idle-prune passes.
+COMMAND_RATE_LIMIT_PRUNE_INTERVAL_SECONDS = 60
 
 # Users with this role or better bypass command rate limits. Use one of: owner,
 # superadmin, admin, moderator, trusted, user, new, none.

@@ -79,16 +79,16 @@ class _CommandHelpView(dict[str, CommandMetadata]):
     def __getitem__(self, key: str) -> CommandMetadata:
         return self._data()[key]
 
-    def get(self, key: str, default=None):  # type: ignore[override]
+    def get(self, key: str, default=None):
         return self._data().get(key, default)
 
-    def items(self):  # type: ignore[override]
+    def items(self):
         return self._data().items()
 
-    def keys(self):  # type: ignore[override]
+    def keys(self):
         return self._data().keys()
 
-    def values(self):  # type: ignore[override]
+    def values(self):
         return self._data().values()
 
     def __iter__(self):

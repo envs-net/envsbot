@@ -1,11 +1,14 @@
 """Split module for plugins/vcard.py: commands."""
 
 import datetime
+from collections.abc import Collection
+
+from bot.room_state import JOINED_ROOMS
 from core_plugins import _core
-from utils.command import command, Role
+from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
-from bot.room_state import JOINED_ROOMS
+
 from .config import VCARD_KEY, log
 from .fetch import get_info, get_vcard
 from .fields import _get_vcard_field
@@ -455,7 +458,7 @@ async def get_birthday(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, f"🎂 Birthday for {display_name}: {value}")
 
 
-def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+def _diagnostic_enabled_count(enabled_rooms: Collection[str], room_jid: str | None) -> int:
     if not room_jid:
         return len(enabled_rooms)
     target = str(room_jid).split('/', 1)[0].strip().lower()

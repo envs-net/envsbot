@@ -2,9 +2,10 @@
 
 import inspect
 
-from utils.command import command, Role
-from utils.formatting import format_page, parse_page_args
 from bot.room_state import known_room_jids
+from utils.command import Role, command
+from utils.formatting import format_page, parse_page_args
+
 from .formatting import _audit_reason, _send_user_info, _write_user_audit
 from .lookup import _parse_user_jid, _valid_plugin_names, find_users_by_nick_safe
 from .permissions import (
@@ -199,14 +200,15 @@ def _direct_user_state(bot) -> dict[str, dict]:
 
 def _room_user_state(joined_rooms) -> dict[str, dict]:
     """Return users currently visible in joined MUCs."""
-    result = {}
+    result: dict[str, dict[str, set[str]]] = {}
     for room, room_info in (joined_rooms or {}).items():
         if not isinstance(room_info, dict):
             continue
         for nick, user_info in (room_info.get("nicks", {}) or {}).items():
             if not isinstance(user_info, dict):
                 continue
-            jid = _parse_user_jid(user_info.get("jid"))
+            jid_value = user_info.get("jid")
+            jid = _parse_user_jid(str(jid_value)) if jid_value else None
             if not jid:
                 continue
             state = result.setdefault(jid, {"rooms": set(), "nicks": set()})
@@ -611,6 +613,9 @@ async def users_revoke(bot, sender, nick, args, msg, is_room):
     allowed, reason, context = await _validate_grant_change(bot, sender, args[0])
     if not allowed:
         bot.reply(msg, reason)
+        return
+    if context is None:
+        bot.reply(msg, "🔴 Could not resolve the target user.")
         return
 
     target = context["target"]

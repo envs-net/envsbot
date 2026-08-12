@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import random
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 
@@ -90,7 +90,7 @@ def _quest_participants_online(
 
 
 def _quest_day_key(now: int) -> str:
-    return datetime.fromtimestamp(max(0, int(now)), timezone.utc).date().isoformat()
+    return datetime.fromtimestamp(max(0, int(now)), UTC).date().isoformat()
 
 
 def _quest_day_count(quest: dict[str, Any], now: int) -> int:
@@ -103,8 +103,8 @@ def _quest_day_count(quest: dict[str, Any], now: int) -> int:
 
 
 def _next_utc_day(now: int) -> int:
-    current = datetime.fromtimestamp(max(0, int(now)), timezone.utc)
-    next_day = datetime.combine(current.date() + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    current = datetime.fromtimestamp(max(0, int(now)), UTC)
+    next_day = datetime.combine(current.date() + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
     return int(next_day.timestamp())
 
 

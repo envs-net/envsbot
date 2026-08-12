@@ -20,9 +20,11 @@ class MsgNS(types.SimpleNamespace):
 def reset_urlcheck_runtime_state():
     """Keep URL check tests independent when mutmut reuses the process."""
     urlcheck._url_timestamps.clear()
+    urlcheck._url_room_activity.clear()
     urlcheck.JOINED_ROOMS.clear()
     yield
     urlcheck._url_timestamps.clear()
+    urlcheck._url_room_activity.clear()
     urlcheck.JOINED_ROOMS.clear()
 
 
@@ -430,3 +432,39 @@ async def test_get_urlcheck_store_uses_exact_plugin_namespace():
 
     assert await urlcheck.get_urlcheck_store(bot) is store
     bot.db.users.plugin.assert_called_once_with("urlcheck")
+
+
+def test_url_cache_is_ttl_and_size_bounded(monkeypatch):
+    monkeypatch.setattr(urlcheck, "_CACHE_MAX_ROOMS", 2)
+    monkeypatch.setattr(urlcheck, "_CACHE_MAX_URLS_PER_ROOM", 2)
+    monkeypatch.setattr(urlcheck, "_wait_secs_url", 10)
+
+    assert urlcheck._remember_url("one@conf", "https://a", 100.0) is False
+    assert urlcheck._remember_url("one@conf", "https://b", 101.0) is False
+    assert urlcheck._remember_url("one@conf", "https://c", 102.0) is False
+    assert set(urlcheck._url_timestamps["one@conf"]) == {"https://b", "https://c"}
+    assert urlcheck._remember_url("one@conf", "https://c", 103.0) is True
+
+    urlcheck._remember_url("two@conf", "https://two", 104.0)
+    urlcheck._remember_url("three@conf", "https://three", 105.0)
+    assert len(urlcheck._url_timestamps) == 2
+    assert "one@conf" not in urlcheck._url_timestamps
+
+    urlcheck._prune_url_cache(116.0)
+    assert urlcheck._url_timestamps == {}
+
+
+@pytest.mark.asyncio
+async def test_urlcheck_cleanup_room_state_and_unload():
+    urlcheck._remember_url("room@conf", "https://one", 100.0)
+    urlcheck._remember_url("other@conf", "https://two", 100.0)
+
+    summary = await urlcheck.cleanup_room_state(None, "ROOM@CONF/nick")
+
+    assert summary == {"cached_urls": 1}
+    assert "room@conf" not in urlcheck._url_timestamps
+    assert "other@conf" in urlcheck._url_timestamps
+
+    await urlcheck.on_unload(None)
+    assert urlcheck._url_timestamps == {}
+    assert urlcheck._url_room_activity == {}

@@ -12,17 +12,20 @@ Commands:
     {prefix}weather [nick|city|zip]
 """
 
-import aiohttp
 import logging
 import urllib.parse
+
+import aiohttp
+
+from bot.room_state import JOINED_ROOMS
 from core_plugins import _core
 from plugins import vcard
-from utils.command import command, Role
+from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+
 # Intentionally exposed for tests and runtime settings.
 from utils.config import config
 from utils.http_fetch import fetch_text, passthrough_validator
-from bot.room_state import JOINED_ROOMS
 
 log = logging.getLogger(__name__)
 

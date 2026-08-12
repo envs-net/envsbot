@@ -18,75 +18,14 @@ python scripts/generate_config_sample.py --check
 # Repository-wide correctness-critical rules.
 ruff check $ruff_fix_args .
 
-# Stricter modernisation/import/bugbear rules for the hardened core. Expand
-# this list package-by-package so the CI gate grows without a mass style rewrite.
-ruff check $ruff_fix_args --select I,UP,B \
-  scripts/deploy.py \
-  core_plugins/config_cmd.py \
-  core_plugins/doctor.py \
-  core_plugins/users/roles.py \
-  database/idlerpg.py \
-  database/manager.py \
-  database/locking.py \
-  database/outbox.py \
-  database/command_usage.py \
-  database/audit.py \
-  database/users.py \
-  database/message_cache.py \
-  database/rooms.py \
-  database/migrations \
-  plugins/ducks.py \
-  plugins/idlerpg/config.py \
-  plugins/idlerpg/commands.py \
-  plugins/idlerpg/export.py \
-  plugins/idlerpg/leveling.py \
-  plugins/idlerpg/state.py \
-  plugins/idlerpg/tasks.py \
-  plugins/rss/fetch.py \
-  utils/bundled_assets.py \
-  utils/python_source.py \
-  utils/command_execution.py \
-  utils/config \
-  utils/task_supervisor.py \
-  utils/plugin_manager.py \
-  utils/performance.py \
-  utils/rate_limiter.py \
-  utils/runtime_paths.py \
-  utils/systemd_deploy.py \
-  utils/outbox.py
+# Apply modernisation/import/bugbear and type checks to every production
+# package. Passing directories keeps this gate future-proof: newly-added
+# runtime modules are checked automatically instead of depending on a curated
+# allow-list that can silently fall behind.
+runtime_targets="envsbot.py bot core_plugins plugins database utils scripts"
+ruff check $ruff_fix_args --select I,UP,B $runtime_targets
 
-mypy \
-  scripts/deploy.py \
-  database/idlerpg.py \
-  database/manager.py \
-  database/locking.py \
-  database/outbox.py \
-  database/command_usage.py \
-  database/audit.py \
-  database/users.py \
-  database/message_cache.py \
-  database/rooms.py \
-  database/migrations \
-  plugins/idlerpg/config.py \
-  plugins/idlerpg/commands.py \
-  plugins/idlerpg/export.py \
-  plugins/idlerpg/leveling.py \
-  plugins/idlerpg/state.py \
-  plugins/idlerpg/tasks.py \
-  plugins/rss/fetch.py \
-  utils/bundled_assets.py \
-  utils/python_source.py \
-  utils/command_execution.py \
-  utils/config \
-  utils/task_supervisor.py \
-  utils/plugin_manager.py \
-  utils/performance.py \
-  utils/rate_limiter.py \
-  utils/runtime_paths.py \
-  utils/backups.py \
-  utils/outbox.py \
-  utils/runtime_watchdog.py \
-  utils/admin_reports.py
+mypy $runtime_targets
 
 python_minor=$(python -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
 constraint_file="constraints/python${python_minor}.txt"

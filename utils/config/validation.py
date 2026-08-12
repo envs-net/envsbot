@@ -184,6 +184,24 @@ def _validate_avatar(cfg, errors, warnings):
             warnings.append(f"avatar: file does not exist: {avatar_path}")
 
 
+def _validate_backup_schedule(cfg, warnings):
+    """Warn when periodic backup cadence cannot satisfy the age alert."""
+    interval = cfg.get("backup_interval_hours")
+    max_age = cfg.get("admin_alert_backup_max_age_hours")
+    if (
+        _is_config_int(interval)
+        and interval > 0
+        and _is_config_int(max_age)
+        and max_age > 0
+        and interval >= max_age
+    ):
+        warnings.append(
+            "backup_interval_hours: should be lower than "
+            "admin_alert_backup_max_age_hours so scheduled backups complete "
+            "before the stale-backup alert threshold"
+        )
+
+
 def collect_config_warnings(cfg):
     """Return non-fatal config warnings."""
     warnings: list[str] = []
@@ -192,6 +210,7 @@ def collect_config_warnings(cfg):
         return warnings
 
     _validate_avatar(cfg, [], warnings)
+    _validate_backup_schedule(cfg, warnings)
     return warnings
 
 

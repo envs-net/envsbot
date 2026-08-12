@@ -21,27 +21,29 @@ Commands:
     {prefix}check <domain[:port]|https-url>
 """
 
-import pytz
 import logging
+from collections.abc import Collection
+from datetime import UTC, datetime
+
+import pytz
 import slixmpp
-from datetime import datetime
-from datetime import timezone as dt_timezone
-from utils.command import command, Role
+
+from core_plugins._core import (
+    JOINED_ROOMS,
+    _get_enabled_rooms,
+    _get_user_timezone,
+    _is_muc_pm,
+    get_jids_from_nick_index,
+    get_user_tzinfo,
+    handle_room_toggle_command,
+)
+from utils.command import Role, command
 from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.tls_certificate import (
     VALID_HTTPS_CERTIFICATE_MESSAGE,
     diagnose_https_certificate,
     parse_https_certificate_target,
-)
-from core_plugins._core import (
-    _is_muc_pm,
-    handle_room_toggle_command,
-    _get_enabled_rooms,
-    _get_user_timezone,
-    get_user_tzinfo,
-    get_jids_from_nick_index,
-    JOINED_ROOMS,
 )
 
 log = logging.getLogger(__name__)
@@ -613,7 +615,7 @@ async def _seen_format_last_seen(last_seen_utc, timezone, display_nick):
         if timezone:
             try:
                 if not dt_utc.tzinfo:
-                    dt_utc = dt_utc.replace(tzinfo=dt_timezone.utc)
+                    dt_utc = dt_utc.replace(tzinfo=UTC)
                 dt_local = dt_utc.astimezone(timezone)
                 return dt_local.strftime("%Y-%m-%d %H:%M:%S %Z")
             except Exception as e:
@@ -745,7 +747,7 @@ async def seen_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "🔴 Unexpected error in seen command.")
 
 
-def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+def _diagnostic_enabled_count(enabled_rooms: Collection[str], room_jid: str | None) -> int:
     if not room_jid:
         return len(enabled_rooms)
     target = str(room_jid).split('/', 1)[0].strip().lower()

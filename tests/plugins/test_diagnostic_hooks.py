@@ -95,10 +95,11 @@ async def test_room_toggle_diagnostic_hooks_count_enabled_rooms_and_scope(monkey
         "urlcheck": FakePluginStore({urlcheck.URLCHECK_KEY: {"Room@Conf/Nick": True, "other@conf": True}}),
     }
     bot = SimpleNamespace(db=FakeDB(stores=stores))
+    now = urlcheck.datetime.now().timestamp()
 
     monkeypatch.setattr(urlcheck, "_url_timestamps", {
-        "room@conf": {"https://a.example": 1, "https://b.example": 2},
-        "other@conf": {"https://c.example": 3},
+        "room@conf": {"https://a.example": now - 1, "https://b.example": now - 2},
+        "other@conf": {"https://c.example": now - 3},
     })
 
     assert await weather.get_runtime_state(bot) == {"enabled_rooms": 2}
@@ -108,14 +109,20 @@ async def test_room_toggle_diagnostic_hooks_count_enabled_rooms_and_scope(monkey
         f"✅ Weather for room@conf: enabled_rooms=1, timeout={weather.WEATHER_HTTP_TIMEOUT:g}s"
     ]
 
-    assert await urlcheck.get_runtime_state(bot) == {"enabled_rooms": 2, "cached_urls": 3}
+    assert await urlcheck.get_runtime_state(bot) == {
+        "enabled_rooms": 2,
+        "cached_urls": 3,
+        "cached_rooms": 2,
+    }
     assert await urlcheck.get_runtime_state(bot, room_jid="room@conf") == {
         "enabled_rooms": 1,
         "cached_urls": 2,
+        "cached_rooms": 1,
     }
     assert await urlcheck.get_runtime_state(bot, room_jid="missing@conf") == {
         "enabled_rooms": 1,
         "cached_urls": 0,
+        "cached_rooms": 0,
     }
     assert await urlcheck.doctor(bot, room_jid="room@conf") == [
         f"✅ URLCheck for room@conf: enabled_rooms=1, cached_urls=2, max_redirects={urlcheck.URLCHECK_MAX_REDIRECTS}"

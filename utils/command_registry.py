@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
 
-from utils.command import COMMANDS, Role, command_examples, command_subcommands
+from utils.command import COMMANDS, Command, Role, command_examples, command_subcommands
 
 PLUGIN_SOURCES = (("core_plugins", "core"), ("plugins", "plugins"))
 
@@ -78,10 +78,10 @@ def plugin_metadata(module: ModuleType, name: str, source: str) -> dict[str, Any
     return meta
 
 
-def decorated_commands_from_module(module: ModuleType) -> list[Any]:
+def decorated_commands_from_module(module: ModuleType) -> list[Command]:
     """Return primary decorated command objects from one module."""
     seen: set[int] = set()
-    commands: list[Any] = []
+    commands: list[Command] = []
     for _attr, obj in inspect.getmembers(module):
         if not callable(obj) or not hasattr(obj, "__commands__"):
             continue
@@ -89,13 +89,14 @@ def decorated_commands_from_module(module: ModuleType) -> list[Any]:
             if id(cmd) in seen or registered_name != getattr(cmd, "name", registered_name):
                 continue
             seen.add(id(cmd))
-            commands.append(cmd)
+            if isinstance(cmd, Command):
+                commands.append(cmd)
     return sorted(commands, key=lambda cmd: getattr(cmd, "name", ""))
 
 
-def decorated_command_records() -> list[tuple[str, dict[str, Any], Any]]:
+def decorated_command_records() -> list[tuple[str, dict[str, Any], Command]]:
     """Return command records from decorators, loading plugin modules first."""
-    result: list[tuple[str, dict[str, Any], Any]] = []
+    result: list[tuple[str, dict[str, Any], Command]] = []
     for name, module, source in discover_command_modules():
         meta = plugin_metadata(module, name, source)
         if meta.get("hidden"):

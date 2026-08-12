@@ -1302,3 +1302,17 @@ def test_create_resilient_task_delegates_to_supervisor():
         "service": True,
     }
     factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_discovered_custom_room_state_plugins_have_cleanup_hooks():
+    """Any plugin declaring custom room state must expose a cleanup lifecycle hook."""
+    pm = PluginManager(bot=FakeBot())
+    lifecycle_errors = []
+
+    for name in pm.discover():
+        for issue in await pm.metadata_issues(name):
+            if "room_state='custom' requires cleanup_room_state" in issue.message:
+                lifecycle_errors.append(issue.format())
+
+    assert lifecycle_errors == []

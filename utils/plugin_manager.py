@@ -44,7 +44,7 @@ from utils.plugin_manager_lifecycle import (
     import_module_async,
     run_hook,
 )
-from utils.plugin_metadata import validate_plugin_metadata
+from utils.plugin_metadata import validate_plugin_lifecycle, validate_plugin_metadata
 from utils.task_supervisor import wait_for_runtime_ready
 
 log = logging.getLogger(__name__)
@@ -553,8 +553,17 @@ class PluginManager:
 
             module = await self._import(self._module_path(name))
             meta = getattr(module, "PLUGIN_META", {})
-            for issue in validate_plugin_metadata(name, meta, core=self.is_core_plugin(name)):
+            metadata_issues = validate_plugin_metadata(
+                name, meta, core=self.is_core_plugin(name)
+            )
+            lifecycle_issues = validate_plugin_lifecycle(name, meta, module)
+            for issue in [*metadata_issues, *lifecycle_issues]:
                 log.warning("[PLUGIN] metadata %s", issue.format())
+            lifecycle_errors = [
+                issue for issue in lifecycle_issues if issue.severity == "error"
+            ]
+            if lifecycle_errors:
+                raise RuntimeError("; ".join(issue.message for issue in lifecycle_errors))
 
             # Load dependencies first
             for dep in meta.get("requires", []):
@@ -1217,7 +1226,10 @@ class PluginManager:
         except Exception as exc:
             from utils.plugin_metadata import PluginMetadataIssue
             return [PluginMetadataIssue(name, "error", f"cannot import metadata: {exc}")]
-        return validate_plugin_metadata(name, meta, core=self.is_core_plugin(name))
+        return [
+            *validate_plugin_metadata(name, meta, core=self.is_core_plugin(name)),
+            *validate_plugin_lifecycle(name, meta, module),
+        ]
 
     async def all_metadata_issues(self) -> builtins.list:
         """Return metadata validation issues for all discoverable plugins."""

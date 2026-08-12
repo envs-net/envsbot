@@ -8,22 +8,23 @@ Put any functions or objects here that:
   - use shared room state without importing the rooms plugin package
   - should be available before optional plugins are loaded
 """
+import datetime
 import logging
 import re
-import pytz
-import datetime
-from slixmpp import JID
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from utils.command import Role
+import pytz
+from slixmpp import JID
+
+from bot.room_state import JOINED_ROOMS
 from utils import message_cache as _message_cache
+from utils.command import Role
 from utils.room_features import (
     get_enabled_room_jids,
     get_room_feature,
     set_room_feature,
 )
-
-from bot.room_state import JOINED_ROOMS
 
 # Compatibility exports for existing plugins. New code should import these
 # XMPP reply helpers directly from utils.message_cache.
@@ -438,7 +439,7 @@ def _room_and_nick_from_muc_pm(msg):
     return str(from_jid.bare), str(from_jid.resource or "")
 
 
-def _get_muc_occupant(room_jid: str, nick: str) -> Optional[dict]:
+def _get_muc_occupant(room_jid: str, nick: str) -> dict | None:
     """Return cached occupant info from JOINED_ROOMS, if available."""
     room_data = JOINED_ROOMS.get(room_jid)
 
@@ -481,7 +482,7 @@ async def muc_pm_sender_can_manage_room(
     bot,
     msg,
     is_room: bool,
-) -> tuple[bool, str, Optional[str]]:
+) -> tuple[bool, str, str | None]:
     """Check whether the sender may manage room-scoped plugin settings.
 
     Returns:

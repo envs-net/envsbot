@@ -15,23 +15,24 @@ Usage:
     {prefix}tell <nick with spaces>: <message>
 """
 
-import datetime
-import pytz
-import logging
 import asyncio
+import datetime
+import logging
 from functools import partial
 
-from utils.command import command, Role
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from utils.config import config
+import pytz
+
 from core_plugins._core import (
-    handle_room_toggle_command,
-    get_jids_from_nick_index,
     _get_enabled_rooms,
     _is_enabled_for_room,
     _is_muc_pm,
+    get_jids_from_nick_index,
     get_user_tzinfo,
+    handle_room_toggle_command,
 )
+from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from utils.config import config
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ PLUGIN_META = {
     "Store and deliver messages for users when they join a room again.",
     "category": "utility",
     "requires": ["rooms", "_core"],
+    "room_state": "custom",
 }
 
 
@@ -173,7 +175,7 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     send_jids = await get_jids_from_nick_index(bot, sender_nick)
     send_jid = send_jids[0] if send_jids else None
 
-    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    now = datetime.datetime.now(datetime.UTC).timestamp()
     payload = {
         "room_jid": str(msg["from"].bare),
         "recv_jid": rec_jid,
@@ -248,6 +250,39 @@ async def deliver_tell_messages(bot, msg):
 
     store = bot.db.users.plugin("tell")
     await store.set(rec_jid, "tell_messages", remaining)
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Delete pending tell messages that target a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    store = await get_tell_store(bot)
+    users = getattr(getattr(bot, "db", None), "users", None)
+    list_users = getattr(users, "list", None)
+    if not callable(list_users):
+        return {"pending_messages": 0, "users": 0}
+
+    removed = 0
+    changed_users = 0
+    for user in await list_users():
+        jid = user.get("jid") if isinstance(user, dict) else None
+        if not jid or jid == "__GLOBAL__":
+            continue
+        messages = await store.get(str(jid), "tell_messages") or []
+        if not isinstance(messages, list):
+            continue
+        kept = [
+            item for item in messages
+            if not (
+                isinstance(item, dict)
+                and str(item.get("room_jid") or "").split("/", 1)[0].strip().lower() == target
+            )
+        ]
+        delta = len(messages) - len(kept)
+        if delta:
+            await store.set(str(jid), "tell_messages", kept)
+            removed += delta
+            changed_users += 1
+    return {"pending_messages": removed, "users": changed_users}
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:

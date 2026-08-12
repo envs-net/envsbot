@@ -32,22 +32,22 @@ import time
 from functools import partial
 from typing import Any
 
-from utils.command import command, Role
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from utils.audit import audit_event
-from utils.config import config
-from utils.formatting import page_size_for, parse_page_args
-from core_plugins.users import user_has_room_plugin_grant
 from core_plugins._core import (
     JOINED_ROOMS,
-    is_room_moderator_or_admin,
-    get_real_jid,
     _is_enabled_for_room,
     extract_reply_quote,
+    get_real_jid,
     get_reply_target,
     handle_room_toggle_command,
+    is_room_moderator_or_admin,
     paginate_items,
 )
+from core_plugins.users import user_has_room_plugin_grant
+from utils.audit import audit_event
+from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from utils.config import config
+from utils.formatting import page_size_for, parse_page_args
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ PLUGIN_META = {
     "description": "Pin room messages with paging, search, tags, important pins and non-reply fallback.",
     "category": "utility",
     "requires": ["rooms", "_core", "users"],
+    "room_state": "custom",
 }
 
 PIN_ENABLED_KEY = "PIN"
@@ -579,7 +580,7 @@ async def _handle_reply_pin_add(bot, msg):
             room=room,
             sender_jid=msg["from"],
             nick=_safe_get_sender_nick(msg),
-            target_text=target_text,
+            target_text=str(target_text),
             target_nick=target_nick,
             target_stanza_id=target_stanza_id,
             reply_id=reply_id,
@@ -1021,8 +1022,8 @@ async def _pin_command_tags(bot, msg, room, args):
         )
         return
 
-    tags = _normalize_pin_tags(args[2:])
-    entry["tags"] = tags
+    normalized_tags = _normalize_pin_tags(args[2:])
+    entry["tags"] = normalized_tags
     entry["updated_at"] = int(time.time())
     await _save_pin_data(bot, state)
     await audit_event(
@@ -1030,11 +1031,11 @@ async def _pin_command_tags(bot, msg, room, args):
         "pin_tags_changed",
         actor=getattr(msg.get("from"), "bare", None),
         target=room,
-        details={"pin_id": pin_id, "tags": tags},
+        details={"pin_id": pin_id, "tags": normalized_tags},
     )
     bot.reply(
         msg,
-        f"✅ Updated tags for pin #{pin_id}: {_format_pin_tags(tags) or 'none'}.",
+        f"✅ Updated tags for pin #{pin_id}: {_format_pin_tags(normalized_tags) or 'none'}.",
         mention=False,
     )
 
@@ -1229,7 +1230,7 @@ async def _pin_command_add_last(bot, sender_jid, nick, msg, room, args):
         room=room,
         sender_jid=sender_jid,
         nick=nick,
-        target_text=recent_entry.get("body"),
+        target_text=str(recent_entry.get("body") or ""),
         target_nick=recent_entry.get("nick") or "unknown",
         target_stanza_id=recent_entry.get("stanza_id"),
         reply_id=None,

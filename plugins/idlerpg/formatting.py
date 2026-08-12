@@ -1,9 +1,11 @@
 """Split module for plugins/idlerpg.py: formatting."""
 
 from __future__ import annotations
+
 import re
 import time
 from typing import Any
+
 from utils.config import config
 from utils.task_supervisor import create_plugin_task
 

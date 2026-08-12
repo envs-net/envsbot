@@ -123,13 +123,14 @@ Main responsibilities:
 
 ### `bot.lifecycle`
 
-Lifecycle code handles startup, restart notifications, startup backups and
-shutdown cleanup.
+Lifecycle code handles startup, restart notifications, startup backups, the
+supervised periodic-backup scheduler and shutdown cleanup.
 
 Main responsibilities:
 
 - ready/startup sequence
 - optional startup backup
+- supervised periodic managed-backup scheduler
 - plugin ready hooks
 - restart notification delivery
 - accepting-command shutdown gate
@@ -137,6 +138,13 @@ Main responsibilities:
 - plugin unload timeout
 - shared message-cache flush before database close
 - idempotent database flush and close
+
+Startup and shutdown are intentionally implemented as small ordered phase
+orchestrators. Each phase records a `LifecyclePhaseResult` with status and
+duration, while shutdown failures remain best-effort so one failed cleanup step
+does not prevent later persistence/database phases from running. Architecture
+tests cap the size of the two top-level orchestrators so lifecycle logic does
+not grow back into one large function.
 
 ### `bot.audit`
 
@@ -192,6 +200,19 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]: ...
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict: ...
 async def doctor(bot, room_jid: str | None = None) -> list[str]: ...
 ```
+
+## Shared runtime health
+
+`utils.health` is the single collection layer for operator-facing runtime health.
+It creates a detached `HealthSnapshot` with isolated checks for rooms, tasks,
+outbox, message-cache persistence, backups, database maintenance, watchdog,
+plugin load failures, IdleRPG public export and immediate alerts. `,status`,
+`,report`, `,doctor` and `AdminAlertManager` render or act on that same structured
+state instead of reimplementing health rules independently.
+
+The snapshot intentionally stores privacy-safe counters and identifiers needed
+for local decisions; renderers remain responsible for anonymising categories
+such as room-missing alerts before sending reports.
 
 ## State and persistence
 

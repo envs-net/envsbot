@@ -1,10 +1,10 @@
 """Split module for core_plugins/rooms.py: commands."""
 
-from utils.command import command, Role
-from utils.formatting import format_page, parse_page_args
-from utils.audit import audit_event
-from utils.room_features import format_room_feature_line, list_room_features
 from bot.room_state import direct_roster_contacts
+from utils.audit import audit_event
+from utils.command import Role, command
+from utils.formatting import format_page, parse_page_args
+from utils.room_features import format_room_feature_line, list_room_features
 
 from .defaults import _cleanup_room_plugin_state
 from .presence import (
@@ -15,15 +15,14 @@ from .presence import (
 )
 from .settings import _handle_room_feature_toggle, set_room_control_defaults
 from .state import (
-    JOINED_ROOMS,
     _LEAVING_ROOMS,
+    JOINED_ROOMS,
     _leave_runtime_room,
     _plugin_cleanup_changed,
     _room_diagnose_lines,
     _room_in_runtime_state,
     log,
 )
-
 
 _ROOM_LIST_MUC_SCOPES = {"muc", "room", "rooms"}
 _ROOM_LIST_DM_SCOPES = {"dm", "1:1", "direct", "contacts"}

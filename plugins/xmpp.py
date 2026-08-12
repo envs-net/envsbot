@@ -29,21 +29,28 @@ import asyncio
 import time
 
 import slixmpp
-from utils.command import command, Role
+
+from core_plugins._core import (
+    JOINED_ROOMS,
+    _get_enabled_rooms,
+    _is_muc_pm,
+    handle_room_toggle_command,
+)
+from utils.command import Role, command
 from utils.config import config
 from utils.http_fetch import fetch_preview, passthrough_validator
 from utils.tls_certificate import (
     VALID_XMPP_CERTIFICATE_MESSAGE as XMPP_VALID_CERTIFICATE_MESSAGE,
-    diagnose_xmpp_server_certificate,
-    make_srv_resolver as _make_srv_resolver,
-    source_domain_from_jid,
-    validate_xmpp_domain as _validate_domain,
 )
-from core_plugins._core import (
-        handle_room_toggle_command,
-        _get_enabled_rooms,
-        _is_muc_pm,
-        JOINED_ROOMS,
+from utils.tls_certificate import (
+    diagnose_xmpp_server_certificate,
+    source_domain_from_jid,
+)
+from utils.tls_certificate import (
+    make_srv_resolver as _make_srv_resolver,
+)
+from utils.tls_certificate import (
+    validate_xmpp_domain as _validate_domain,
 )
 
 XMPP_KEY = "XMPP"
@@ -959,8 +966,8 @@ async def cmd_xmpp_srv(bot, sender_jid, nick, args, msg, is_room):
         _reply_xmpp_srv_jid_notice(bot, msg, domain, args[0])
 
     try:
-        import dns.resolver
         import dns.exception
+        import dns.resolver
     except ImportError:
         _reply_xmpp_srv_dns_missing(bot, msg)
         return
@@ -1081,8 +1088,8 @@ async def _xmpp_check_disco(bot, target: str) -> tuple[str, str]:
 
 def _xmpp_check_srv(domain: str) -> tuple[str, str]:
     try:
-        import dns.resolver
         import dns.exception
+        import dns.resolver
     except ImportError:
         return "ℹ️", "SRV skipped: python-dnspython not installed"
 
@@ -1236,7 +1243,7 @@ async def cmd_xmpp_compliance(bot, sender_jid, nick, args, msg, is_room):
         else:
             bot.reply(msg, "🔴 Compliance database returned "
                            f"status {resp.status}")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         bot.reply(msg, "🔴 Compliance request timed out.")
     except Exception as e:
         bot.reply(msg, f"🔴 Error: {e}")

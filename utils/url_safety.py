@@ -12,10 +12,9 @@ import functools
 import ipaddress
 import logging
 import socket
-from dataclasses import dataclass
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from urllib.parse import ParseResult, urlparse
-
 
 ALLOWED_FETCH_SCHEMES = frozenset({"http", "https"})
 LOCALHOST_NAMES = frozenset({"localhost", "localhost.localdomain"})

@@ -19,20 +19,22 @@ Commands:
     {prefix}info on|off|status - to toggle in rooms
 """
 
-import aiohttp
 import asyncio
-import inspect
-import urllib.parse
-import html
-import logging
-import re
 import csv
+import html
+import inspect
+import logging
 import os
+import re
 import threading
+import urllib.parse
+from collections.abc import Collection
 
+import aiohttp
 from bs4 import BeautifulSoup
 
-from utils.command import command, Role
+from core_plugins._core import _get_enabled_rooms, _is_muc_pm, handle_room_toggle_command
+from utils.command import Role, command
 from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
@@ -43,11 +45,6 @@ from utils.runtime_paths import (
     chat_slang_removals_file,
 )
 from utils.tls_certificate import validate_dns_hostname
-from core_plugins._core import (
-    handle_room_toggle_command,
-    _is_muc_pm,
-    _get_enabled_rooms
-)
 
 log = logging.getLogger(__name__)
 
@@ -384,7 +381,7 @@ SLANG_REMOVALS_CSV = str(chat_slang_removals_file(config))
 
 def load_main_definitions():
     """Load all acronyms and their descriptions from main CSV only."""
-    defs = {}
+    defs: dict[str, list[str]] = {}
     if os.path.exists(SLANG_CSV):
         with open(SLANG_CSV, encoding='utf-8') as f:
             for row in csv.reader(f):
@@ -1070,7 +1067,7 @@ async def get_info_store(bot):
     return bot.db.users.plugin("information")
 
 
-def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+def _diagnostic_enabled_count(enabled_rooms: Collection[str], room_jid: str | None) -> int:
     if not room_jid:
         return len(enabled_rooms)
     target = str(room_jid).split('/', 1)[0].strip().lower()

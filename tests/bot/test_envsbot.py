@@ -736,6 +736,8 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
         "backoff_multiplier": 2.0,
         "max_block_seconds": 3600.0,
         "notify_cooldown": 10.0,
+        "idle_ttl_seconds": 3600.0,
+        "prune_interval_seconds": 60.0,
     }
     assert registered_plugins == [
         "xep_0012", "xep_0030", "xep_0045", "xep_0054",
@@ -1210,6 +1212,10 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         start=AsyncMock(side_effect=lambda: calls.append("watchdog")),
         notify_ready=MagicMock(side_effect=lambda: calls.append("systemd-ready")),
     )
+    monkeypatch.setattr(
+        "utils.backups.start_periodic_backup_worker",
+        lambda owner: calls.append("backup-scheduler"),
+    )
     bot.roster = types.SimpleNamespace(auto_subscribe=False)
 
     await envsbot.Bot.on_start(bot, object())
@@ -1231,10 +1237,20 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         "backup",
         "alerts",
         "watchdog",
+        "backup-scheduler",
         "restart",
         "systemd-ready",
     ]
     assert bot.roster.auto_subscribe is True
+    assert [phase.name for phase in bot._last_startup_phases] == [
+        "transport",
+        "storage",
+        "plugins",
+        "monitoring",
+        "readiness",
+    ]
+    assert all(phase.status == "ok" for phase in bot._last_startup_phases)
+    assert all(phase.duration_seconds >= 0 for phase in bot._last_startup_phases)
 
 
 @pytest.mark.asyncio
@@ -1263,6 +1279,11 @@ async def test_on_start_failure_closes_routing_and_requests_process_restart(monk
     assert bot._requested_exit_code == 1
     bot.disconnect.assert_called_once_with()
     bot.shutdown_runtime.assert_awaited_once_with()
+    assert [phase.name for phase in bot._last_startup_phases] == [
+        "transport",
+        "storage",
+    ]
+    assert bot._last_startup_phases[-1].status == "failed"
 
 
 def test_on_session_end_marks_transport_unavailable(bot):
@@ -1305,6 +1326,7 @@ async def test_on_start_reports_degraded_plugin_state(monkeypatch, bot, caplog):
     bot._send_restart_notification = AsyncMock()
     bot.alerts = types.SimpleNamespace(start=AsyncMock())
     bot.watchdog = types.SimpleNamespace(start=AsyncMock(), notify_ready=MagicMock())
+    monkeypatch.setattr("utils.backups.start_periodic_backup_worker", lambda owner: None)
     bot.roster = types.SimpleNamespace(auto_subscribe=False)
 
     with caplog.at_level(logging.INFO, logger="bot.lifecycle"):

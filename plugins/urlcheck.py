@@ -23,29 +23,28 @@ a room (use MUC PM):
     {prefix}urlcheck status
 
 """
-import re
+import html
 import inspect
 import logging
-import html
+import re
+from datetime import datetime
+from functools import partial
+from urllib.parse import urlparse, urlunparse
 
 import isodate
 
-from urllib.parse import urlparse, urlunparse
-from datetime import datetime
-from functools import partial
-
-from utils.command import command, Role
-from utils.command_metadata import room_toggle_subcommands
-from utils.config import config
-from utils.http_fetch import fetch_preview, fetch_json, passthrough_validator
-from utils.urlcheck_extraction import extract_urls_from_message_text
-from utils.url_safety import UnsafeFetchURL
 from bot.room_state import JOINED_ROOMS
 from core_plugins._core import (
     _get_enabled_rooms,
     _is_enabled_for_room,
     handle_room_toggle_command,
 )
+from utils.command import Role, command
+from utils.command_metadata import room_toggle_subcommands
+from utils.config import config
+from utils.http_fetch import fetch_json, fetch_preview, passthrough_validator
+from utils.url_safety import UnsafeFetchURL
+from utils.urlcheck_extraction import extract_urls_from_message_text
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +54,7 @@ PLUGIN_META = {
     "description": "URL title and YouTube info fetcher for groupchats",
     "category": "info",
     "requires": ["rooms", "_core"],
+    "room_state": "custom",
 }
 
 URLCHECK_KEY = "URLCHECK"
@@ -75,8 +75,9 @@ YOUTUBE_RE = re.compile(
 )
 # Dict of URLs which have been requested with timestamp to avoid fetching
 # the same URL multiple times in a short period
-# format: _url_timestamp[room][url] = timestamp
-_url_timestamps = {}
+# format: _url_timestamps[room][url] = timestamp
+_url_timestamps: dict[str, dict[str, float]] = {}
+_url_room_activity: dict[str, float] = {}
 # Operator-tunable fetch and suppression settings.
 URLCHECK_WAIT_SECONDS = int(config.get("urlcheck_wait_seconds", 120) or 120)
 URLCHECK_FETCH_TIMEOUT_SECONDS = float(
@@ -93,6 +94,8 @@ URLCHECK_USER_AGENT = str(
     or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
 )
 ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
+_CACHE_MAX_ROOMS = 128
+_CACHE_MAX_URLS_PER_ROOM = 128
 
 # seconds to wait until next URL output
 _wait_secs_url = URLCHECK_WAIT_SECONDS
@@ -102,21 +105,84 @@ async def get_urlcheck_store(bot):
     return bot.db.users.plugin("urlcheck")
 
 
+def _normalize_room_jid(room_jid) -> str:
+    return str(room_jid or "").split("/", 1)[0].strip().lower()
+
+
+def _drop_url_room(room_jid: str) -> int:
+    room = _normalize_room_jid(room_jid)
+    removed = len(_url_timestamps.pop(room, {}))
+    _url_room_activity.pop(room, None)
+    return removed
+
+
+def _prune_url_cache(now: float) -> int:
+    """Prune expired URLs and enforce hard room/per-room cache bounds."""
+    removed = 0
+    cutoff = now - _wait_secs_url
+    for room, urls in tuple(_url_timestamps.items()):
+        for url, timestamp in tuple(urls.items()):
+            if timestamp < cutoff:
+                urls.pop(url, None)
+                removed += 1
+        if not urls:
+            _url_timestamps.pop(room, None)
+            _url_room_activity.pop(room, None)
+            continue
+        while len(urls) > _CACHE_MAX_URLS_PER_ROOM:
+            oldest = min(urls, key=urls.__getitem__)
+            urls.pop(oldest, None)
+            removed += 1
+
+    while len(_url_timestamps) > _CACHE_MAX_ROOMS:
+        room = min(
+            _url_timestamps,
+            key=lambda item: _url_room_activity.get(
+                item, min(_url_timestamps[item].values(), default=0.0)
+            ),
+        )
+        removed += _drop_url_room(room)
+    return removed
+
+
+def _remember_url(room_jid: str, url: str, now: float) -> bool:
+    """Remember a URL; return True when it was already within the TTL."""
+    room = _normalize_room_jid(room_jid)
+    _prune_url_cache(now)
+    urls = _url_timestamps.setdefault(room, {})
+    duplicate = url in urls
+    if not duplicate and len(urls) >= _CACHE_MAX_URLS_PER_ROOM:
+        oldest = min(urls, key=urls.__getitem__)
+        urls.pop(oldest, None)
+    urls[url] = now
+    _url_room_activity[room] = now
+    _prune_url_cache(now)
+    return duplicate
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Drop all in-memory URL suppression state for a deleted room."""
+    return {"cached_urls": _drop_url_room(room_jid)}
+
+
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
-    """Return URLCheck counters for diagnostics."""
+    """Return bounded URLCheck cache counters for diagnostics."""
+    _prune_url_cache(datetime.now().timestamp())
     enabled = await _get_enabled_rooms(
         bot, URLCHECK_KEY, "urlcheck", [room_jid] if room_jid else ()
     )
     if room_jid:
-        target = str(room_jid or "").split("/", 1)[0].strip().lower()
-        room_enabled = any(str(room).split("/", 1)[0].strip().lower() == target for room in enabled)
+        target = _normalize_room_jid(room_jid)
+        room_enabled = any(_normalize_room_jid(room) == target for room in enabled)
         return {
             "enabled_rooms": int(room_enabled),
-            "cached_urls": len(_url_timestamps.get(room_jid, {})),
+            "cached_urls": len(_url_timestamps.get(target, {})),
+            "cached_rooms": int(target in _url_timestamps),
         }
     return {
         "enabled_rooms": len(enabled),
         "cached_urls": sum(len(urls) for urls in _url_timestamps.values()),
+        "cached_rooms": len(_url_timestamps),
     }
 
 
@@ -223,19 +289,9 @@ def _extract_urls_from_message_text(text):
 async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):
     now = datetime.now().timestamp()
 
-    if room not in _url_timestamps:
-        _url_timestamps[room] = {}
-
-    for u in dict(_url_timestamps[room]):
-        if _url_timestamps[room][u] < now - _wait_secs_url:
-            del _url_timestamps[room][u]
-
-    if url in _url_timestamps[room]:
-        log.info(f"[URLCHECK] 🟡 Fetching '{url}' temporary disabled")
-        _url_timestamps[room][url] = now
+    if _remember_url(str(room), url, now):
+        log.info("[URLCHECK] 🟡 Fetching %r temporary disabled", url)
         return
-
-    _url_timestamps[room][url] = now
 
     try:
         fetch_result = fetch_url_title(url, 5)
@@ -583,3 +639,9 @@ async def on_load(bot):
         "urlcheck",
         "groupchat_message",
         partial(on_groupchat_message, bot))
+
+
+async def on_unload(bot):
+    """Clear transient duplicate-suppression state on plugin unload."""
+    _url_timestamps.clear()
+    _url_room_activity.clear()

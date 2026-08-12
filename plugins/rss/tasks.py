@@ -33,13 +33,13 @@ from .store import (
     _record_feed_check,
     _retry_delay,
     _set_feed_field,
-    _update_feed_link,
     _update_feed,
+    _update_feed_link,
     get_feeds,
     log,
 )
 
-CHECK_TASKS = {}
+CHECK_TASKS: dict[str, asyncio.Task] = {}
 
 
 async def _initialize_last_id(store, url, latest_id):
@@ -138,7 +138,7 @@ async def ensure_task(bot, store, url, period, *, initial_delay=0.0):
 async def restart_all_tasks(bot):
     store = bot.db.users.plugin("rss")
     feeds = await get_feeds(store)
-    host_counts = {}
+    host_counts: dict[str, int] = {}
 
     for url, feed in feeds.items():
         period = feed.get("period", DEFAULT_POLL_INTERVAL)

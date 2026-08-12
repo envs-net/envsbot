@@ -20,16 +20,21 @@ import slixmpp
 from bot.audit import AuditMixin
 from bot.connection import (
     build_client_jid as _build_client_jid_impl,
+)
+from bot.connection import (
     connect_xmpp as _connect_xmpp_impl,
+)
+from bot.connection import (
     get_configured_resource as _get_configured_resource_impl,
 )
 from bot.dispatch import CommandDispatchMixin
 from bot.lifecycle import LifecycleMixin
 from bot.messages import MessageMixin
 from bot.permissions import PermissionMixin
-from bot.routing import MessageRoutingMixin
 from bot.room_state import room_state
+from bot.routing import MessageRoutingMixin
 from database.manager import DatabaseManager
+from utils.admin_alerts import AdminAlertManager
 from utils.bundled_assets import bundled_asset
 from utils.command import Role
 from utils.command import check_permission as _check_permission
@@ -43,14 +48,13 @@ from utils.config import (
     validate_startup_config,
 )
 from utils.message_cache import MessageCache
-from utils.runtime_paths import chat_slang_file
+from utils.outbox import PersistentOutbox
 from utils.plugin_manager import PluginManager
 from utils.presence_manager import PresenceManager
 from utils.rate_limiter import TokenBucketRateLimiter
-from utils.task_supervisor import TaskSupervisor
-from utils.outbox import PersistentOutbox
+from utils.runtime_paths import chat_slang_file
 from utils.runtime_watchdog import RuntimeWatchdog
-from utils.admin_alerts import AdminAlertManager
+from utils.task_supervisor import TaskSupervisor
 from utils.version import __version__
 
 # === set up logging ===
@@ -154,6 +158,8 @@ class Bot(
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False
         self._shutdown_clean = False
+        self._last_startup_phases = ()
+        self._last_shutdown_phases = ()
         # Unexpected disconnects should be restarted by Restart=on-failure.
         self._requested_exit_code = 1
         # Message routing stays closed until LifecycleMixin.on_start() has
@@ -170,6 +176,12 @@ class Bot(
             backoff_multiplier=float(config.get("command_rate_limit_backoff_multiplier", 2.0)),
             max_block_seconds=float(config.get("command_rate_limit_max_block_seconds", 3600.0)),
             notify_cooldown=float(config.get("command_rate_limit_notify_cooldown_seconds", 10.0)),
+            idle_ttl_seconds=float(
+                config.get("command_rate_limit_idle_ttl_seconds", 3600)
+                if config.get("command_rate_limit_idle_ttl_seconds") is not None
+                else 3600
+            ),
+            prune_interval_seconds=float(config.get("command_rate_limit_prune_interval_seconds", 60) or 60),
         )
 
         self.presence = PresenceManager(self)
@@ -245,7 +257,7 @@ async def main():
         xmpp.disconnect()
         try:
             await asyncio.wait_for(xmpp.disconnected, timeout=2.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("[XMPP] Disconnect timeout")
     finally:
         log.info("[XMPP] disconnected. Closing Database...")

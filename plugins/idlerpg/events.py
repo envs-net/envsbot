@@ -1,6 +1,7 @@
 """Split module for plugins/idlerpg.py: events."""
 
 from __future__ import annotations
+
 import math
 import random
 from typing import Any

@@ -314,7 +314,7 @@ def _render_value(value) -> str:
 
 
 def _format_dict_lines(value: dict, *, indent: str = "  ") -> list[str]:
-    lines = []
+    lines: list[str] = []
     for key in sorted(value):
         item = value[key]
         if isinstance(item, dict):
@@ -341,7 +341,7 @@ def _section_lines(
 
 def _format_config_lines(cfg: dict) -> list[str]:
     safe = _redact(cfg)
-    lines = []
+    lines: list[str] = []
     for section_title, entries in get_config_display_sections(safe):
         if lines:
             lines.append("")

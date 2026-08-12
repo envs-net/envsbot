@@ -22,7 +22,6 @@ existing envsbot XEP-0461 reply and stanza cache helpers.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -33,11 +32,11 @@ from urllib.parse import urlencode
 import aiohttp
 
 from core_plugins import _core
+from utils import message_cache
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_json, passthrough_validator
-from utils import message_cache
 from utils.room_features import get_room_feature
 from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL
 
@@ -521,7 +520,7 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
 
     try:
         request = _parse_translation_args(args)
-        text = request.text
+        text: str | None = request.text
         if not text:
             conversation = message_cache.conversation_key(
                 msg,
@@ -545,7 +544,7 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
     except TranslationUsageError as exc:
         bot.reply(msg, f"🟡️ {exc}\nUsage: {_usage()}", mention=False)
         return
-    except (asyncio.TimeoutError, aiohttp.ClientError, UnsafeFetchURL) as exc:
+    except (TimeoutError, aiohttp.ClientError, UnsafeFetchURL) as exc:
         log.warning(
             "[TRANSLATE] Translation request failed error=%s status=%s",
             type(exc).__name__,

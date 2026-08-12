@@ -150,6 +150,24 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     ))
     monkeypatch.setattr(os.path, "getsize", lambda p: 12345)
     monkeypatch.setattr(os.path, "exists", lambda p: True)
+    from utils.health import HealthCheck, HealthSnapshot
+
+    monkeypatch.setattr(
+        _admin,
+        "collect_health_snapshot",
+        AsyncMock(
+            return_value=HealthSnapshot(
+                checked_at="now",
+                checks={
+                    "alerts": HealthCheck("alerts", "ok", "no alerts", {"active": 0}),
+                    "outbox": HealthCheck("outbox", "unknown", "unavailable"),
+                    "message_cache": HealthCheck(
+                        "message_cache", "unknown", "unavailable"
+                    ),
+                },
+            )
+        ),
+    )
     await _admin.bot_status(fake_bot, Sender(), "nick", [], DummyMsg(), False)
     replies = fake_bot._replies
     assert any(isinstance(r[0], list)

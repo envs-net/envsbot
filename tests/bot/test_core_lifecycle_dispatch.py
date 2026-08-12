@@ -78,6 +78,19 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
     # Supervised cache/DB workers must drain themselves before the global
     # supervisor cancellation so queued persistence is not discarded.
     assert events == ["plugins", "cache", "tasks:10.0", "db"]
+    assert [phase.name for phase in bot._last_shutdown_phases] == [
+        "alerts",
+        "watchdog",
+        "replies",
+        "plugins",
+        "outbox",
+        "message_cache",
+        "db_workers",
+        "tasks",
+        "db",
+    ]
+    assert all(phase.duration_seconds >= 0 for phase in bot._last_shutdown_phases)
+    assert all(phase.healthy for phase in bot._last_shutdown_phases)
 
 
 @pytest.mark.asyncio
@@ -116,19 +129,27 @@ async def test_shutdown_runtime_drains_reply_tasks_before_plugins():
 
 @pytest.mark.asyncio
 async def test_shutdown_runtime_handles_skipped_and_failed_components():
+    events: list[str] = []
+
     async def unload_all():
+        events.append("plugins")
         raise RuntimeError("plugin failed")
 
     async def cancel_all(timeout):
+        events.append("tasks")
         raise RuntimeError("tasks failed")
 
     async def close():
+        events.append("db")
         raise RuntimeError("db failed")
 
     bot = DummyLifecycle(unload=unload_all, cancel_all=cancel_all, close=close)
     assert await bot.shutdown_runtime() is False
 
     assert bot.accepting_commands is False
+    assert events == ["plugins", "tasks", "db"]
+    failed = {phase.name for phase in bot._last_shutdown_phases if not phase.healthy}
+    assert failed == {"plugins", "tasks", "db"}
 
     skipped = DummyLifecycle(close=AsyncMock())
     assert await skipped.shutdown_runtime() is True
@@ -197,6 +218,16 @@ def test_database_shutdown_timeout_has_sane_lower_bound():
     assert lifecycle._database_shutdown_timeout({}) == 15.0
     assert lifecycle._database_shutdown_timeout({"database_shutdown_timeout_seconds": 1}) == 6.0
     assert lifecycle._database_shutdown_timeout({"database_shutdown_timeout_seconds": "bad"}) == 15.0
+
+
+def test_lifecycle_phase_result_health_semantics():
+    ok = lifecycle.LifecyclePhaseResult("storage", "ok", 0.01)
+    skipped = lifecycle.LifecyclePhaseResult("alerts", "skipped", 0.0)
+    degraded = lifecycle.LifecyclePhaseResult("cache", "degraded", 0.02)
+
+    assert ok.healthy is True
+    assert skipped.healthy is True
+    assert degraded.healthy is False
 
 
 @pytest.mark.asyncio

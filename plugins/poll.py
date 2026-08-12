@@ -35,15 +35,15 @@ import asyncio
 import logging
 import time
 
-from utils.command import command, Role
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from core_plugins import _core
+from core_plugins.users import user_has_room_plugin_grant
 from utils.audit import audit_event
+from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
-from core_plugins.users import user_has_room_plugin_grant
-from core_plugins import _core
-
 from utils.task_supervisor import create_plugin_task
+
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -52,6 +52,7 @@ PLUGIN_META = {
     "description": "Room polls with voting, history and auto-close",
     "category": "utility",
     "requires": ["rooms", "_core", "users"],
+    "room_state": "custom",
 }
 
 POLL_ENABLED_KEY = "POLL"
@@ -63,7 +64,7 @@ MAX_OPTION_LEN = int(config.get("poll_max_option_len", 100) or 100)
 MAX_HISTORY_PER_ROOM = int(config.get("poll_max_history_per_room", 50) or 50)
 DEFAULT_MULTI_MAX_CHOICES = max(2, int(config.get("poll_default_multi_max_choices", 3) or 3))
 
-AUTO_CLOSE_TASKS = {}  # (room_jid, poll_id) -> asyncio.Task
+AUTO_CLOSE_TASKS: dict[tuple[str, str], asyncio.Task] = {}  # (room_jid, poll_id) -> asyncio.Task
 
 
 def _command_prefix(bot=None) -> str:

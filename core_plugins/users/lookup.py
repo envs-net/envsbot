@@ -1,6 +1,7 @@
 """Split module for core_plugins/users.py: lookup."""
 
 import inspect
+
 from slixmpp import JID
 
 from .roles import GRANTABLE_PLUGINS

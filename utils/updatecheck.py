@@ -7,8 +7,7 @@ import json
 import logging
 import re
 import urllib.request
-from urllib.parse import unquote, urlsplit
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse, urlsplit
 
 from utils.config import config
 from utils.task_supervisor import sleep_with_heartbeat

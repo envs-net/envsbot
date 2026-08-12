@@ -35,6 +35,7 @@ from utils.file_security import (
     sensitive_permission_targets,
 )
 from utils.formatting import format_page, parse_page_args
+from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.performance import snapshot as performance_snapshot
 from utils.updatecheck import check_for_updates_once, parse_version_tuple
 from utils.version import display_version, normalized_version
@@ -177,7 +178,7 @@ def _migration_version(value: Any) -> str:
         return str(value)
 
 
-async def _db_lines(bot: Any) -> list[str]:
+async def _db_lines(bot: Any, health: HealthSnapshot | None = None) -> list[str]:
     db = getattr(bot, "db", None)
     conn = getattr(db, "conn", None)
     if conn is None:
@@ -231,10 +232,12 @@ async def _db_lines(bot: Any) -> list[str]:
             except Exception as exc:
                 lines.append(_line(False, "Migrations", str(exc)))
 
-    maintenance = dict(getattr(db, "maintenance_state", {}) or {})
+    shared = health or await collect_health_snapshot(bot, verify_backup=False)
+    database_check = shared.check("database")
+    maintenance = dict(database_check.data.get("maintenance", {}) or {})
     lines.append(
         _line(
-            not maintenance.get("last_error"),
+            not database_check.needs_attention,
             "Database maintenance",
             (
                 f"runs={maintenance.get('runs', 0)}, "
@@ -245,61 +248,63 @@ async def _db_lines(bot: Any) -> list[str]:
         )
     )
 
-    outbox = getattr(bot, "outbox", None)
-    runtime_state = getattr(outbox, "runtime_state", None)
-    if callable(runtime_state) and not _is_mock_object(runtime_state):
-        try:
-            state = await runtime_state()
-            healthy = int(state.get("dead", 0)) == 0 and bool(state.get("worker_running"))
-            lines.append(
-                _line(
-                    healthy,
-                    "Persistent outbox",
-                    f"pending={state.get('pending', 0)}, dead={state.get('dead', 0)}, "
-                    f"oldest={state.get('oldest_pending_age_seconds', 0)}s",
-                )
+    outbox_check = shared.check("outbox")
+    if outbox_check.status != "unknown":
+        state = outbox_check.data
+        lines.append(
+            _line(
+                not outbox_check.needs_attention,
+                "Persistent outbox",
+                f"pending={state.get('pending', 0)}, dead={state.get('dead', 0)}, "
+                f"oldest={state.get('oldest_pending_age_seconds', 0)}s",
             )
-        except Exception as exc:
-            lines.append(_line(False, "Persistent outbox", str(exc)))
+        )
+    elif outbox_check.error:
+        lines.append(_line(False, "Persistent outbox", outbox_check.error))
 
-    cache = getattr(bot, "message_cache", None)
-    stats = getattr(cache, "stats", None)
-    if callable(stats):
-        try:
-            cache_stats = stats()
-            degraded = bool(cache_stats.get("degraded"))
-            detail = (
-                f"messages={cache_stats.get('messages', 0)}, "
-                f"pending={cache_stats.get('pending_writes', 0)}, "
-                f"retry_backlog={cache_stats.get('retry_backlog', 0)}, "
-                f"failures={cache_stats.get('persistence_failures', 0)}, "
-                f"dropped={cache_stats.get('dropped_persistence_entries', 0)}"
+    cache_check = shared.check("message_cache")
+    if cache_check.status != "unknown":
+        cache_stats = cache_check.data
+        detail = (
+            f"messages={cache_stats.get('messages', 0)}, "
+            f"pending={cache_stats.get('pending_writes', 0)}, "
+            f"retry_backlog={cache_stats.get('retry_backlog', 0)}, "
+            f"failures={cache_stats.get('persistence_failures', 0)}, "
+            f"dropped={cache_stats.get('dropped_persistence_entries', 0)}"
+        )
+        lines.append(
+            _line(
+                not cache_check.needs_attention,
+                "Message cache persistence",
+                detail,
             )
-            lines.append(_line(not degraded, "Message cache persistence", detail))
-        except Exception as exc:
-            lines.append(_line(False, "Message cache persistence", str(exc)))
+        )
+    elif cache_check.error:
+        lines.append(_line(False, "Message cache persistence", cache_check.error))
     return lines
 
 
-async def _room_lines(bot: Any, *, full: bool) -> list[str]:
-    try:
-        from bot.room_state import JOINED_ROOMS
-    except Exception:
-        JOINED_ROOMS = {}
+async def _room_lines(
+    bot: Any,
+    *,
+    full: bool,
+    health: HealthSnapshot | None = None,
+) -> list[str]:
+    shared = health or await collect_health_snapshot(bot, verify_backup=False)
+    check = shared.check("rooms")
+    data = check.data
+    joined_rooms = set(str(room) for room in data.get("joined_rooms", ()) or ())
+    autojoin_rooms = set(str(room) for room in data.get("autojoin_rooms", ()) or ())
+    missing = list(str(room) for room in data.get("missing", ()) or ())
 
-    db_rooms = []
     rooms_manager = getattr(getattr(bot, "db", None), "rooms", None)
     list_rooms = getattr(rooms_manager, "list", None)
+    db_rooms = []
     if callable(list_rooms):
         try:
             db_rooms = list(await list_rooms())
         except Exception as exc:
             return [_line(False, "Rooms", f"DB list failed: {exc}")]
-
-    presence_rooms = set(getattr(getattr(bot, "presence", None), "joined_rooms", {}) or {})
-    joined_rooms = set(JOINED_ROOMS) | presence_rooms
-    autojoin_rooms = {str(row[0]) for row in db_rooms if len(row) >= 3 and bool(row[2])}
-    missing = sorted(autojoin_rooms - joined_rooms)
 
     try:
         direct_contact_line = _line(
@@ -314,12 +319,23 @@ async def _room_lines(bot: Any, *, full: bool) -> list[str]:
         _line(True, "Rooms in DB", str(len(db_rooms))),
         _line(True, "Joined rooms", str(len(joined_rooms))),
         direct_contact_line,
-        _line(not missing, "Autojoin coverage", "ok" if not missing else f"missing: {', '.join(missing)}"),
+        _line(
+            not missing and check.status != "error",
+            "Autojoin coverage",
+            "ok" if not missing else f"missing: {', '.join(sorted(missing))}",
+        ),
     ]
     if full and joined_rooms:
+        try:
+            from bot.room_state import JOINED_ROOMS
+        except Exception:
+            JOINED_ROOMS = {}
         for room in sorted(joined_rooms):
             nicks = (JOINED_ROOMS.get(room, {}) or {}).get("nicks", {}) or {}
             lines.append(_line(None, f"Room {room}", f"occupants={len(nicks)}"))
+    if autojoin_rooms and not missing:
+        # Keep the structured snapshot as the single source for coverage.
+        assert int(data.get("autojoin_total", len(autojoin_rooms))) == len(autojoin_rooms)
     return lines
 
 
@@ -372,24 +388,54 @@ def _task_summary_text(supervisor: Any) -> tuple[bool, str]:
     running, failed, finished = supervisor.summary()
     return failed == 0, f"{running} running, {failed} failed, {finished} finished"
 
-def _task_lines(bot: Any, *, full: bool) -> list[str]:
+def _task_lines(
+    bot: Any,
+    *,
+    full: bool,
+    health: HealthSnapshot | None = None,
+) -> list[str]:
     supervisor = getattr(bot, "tasks", None)
     if supervisor is None:
         return [_line(False, "Tasks", "supervisor missing")]
-    try:
-        tasks_healthy, task_summary = _task_summary_text(supervisor)
-    except Exception as exc:
-        return [_line(False, "Tasks", str(exc))]
-    snapshot_getter = getattr(supervisor, "snapshot", None)
-    snapshot = (
-        snapshot_getter(include_done=True)
-        if callable(snapshot_getter) and not _is_mock_object(snapshot_getter)
-        else []
-    )
-    open_circuits = [
-        task for task in snapshot
-        if getattr(task, "circuit_state", "closed") == "open"
-    ]
+    if health is None:
+        # Synchronous compatibility for direct helper tests; the full doctor
+        # path always passes one shared snapshot.
+        try:
+            tasks_healthy, task_summary = _task_summary_text(supervisor)
+        except Exception as exc:
+            return [_line(False, "Tasks", str(exc))]
+        snapshot_getter = getattr(supervisor, "snapshot", None)
+        task_snapshot = (
+            snapshot_getter(include_done=True)
+            if callable(snapshot_getter) and not _is_mock_object(snapshot_getter)
+            else []
+        )
+        open_circuits = [
+            task for task in task_snapshot
+            if getattr(task, "circuit_state", "closed") == "open"
+        ]
+    else:
+        check = health.check("tasks")
+        data = check.data
+        failed = int(data.get("failed", 0) or 0)
+        service_finished = int(data.get("services_finished", 0) or 0)
+        tasks_healthy = not check.needs_attention or (
+            not failed and not service_finished and not data.get("open_circuits")
+        )
+        task_summary = (
+            f"{int(data.get('services_running', 0) or 0)} services running · "
+            f"{int(data.get('one_shots_running', 0) or 0)} one-shots running · "
+            f"{int(data.get('one_shots_completed', 0) or 0)} one-shots completed · "
+            f"{failed} failed"
+        )
+        if service_finished:
+            task_summary += f" · {service_finished} services finished unexpectedly"
+        task_snapshot = list(data.get("snapshot", ()) or ())
+        open_circuits = [
+            task for task in task_snapshot
+            if getattr(task, "circuit_state", "closed") == "open"
+        ]
+
     lines = [
         _line(tasks_healthy, "Background tasks", task_summary),
         _line(
@@ -400,22 +446,41 @@ def _task_lines(bot: Any, *, full: bool) -> list[str]:
     ]
     if full:
         for task in open_circuits[:20]:
-            lines.append(_line(False, "Open circuit", f"{task.plugin}/{task.name}: {task.last_error or '-'}"))
-
-    watchdog = getattr(bot, "watchdog", None)
-    state_getter = getattr(watchdog, "runtime_state", None)
-    if callable(state_getter) and not _is_mock_object(state_getter):
-        state = state_getter()
-        healthy = not state.get("last_error") and float(state.get("last_lag_seconds", 0.0)) < float(config.get("watchdog_lag_failure_seconds", 30.0))
-        lines.append(
-            _line(
-                healthy,
-                "Runtime watchdog",
-                f"running={state.get('worker_running', False)}, "
-                f"last_lag={float(state.get('last_lag_seconds', 0.0)):.3f}s, "
-                f"max_lag={float(state.get('max_lag_seconds', 0.0)):.3f}s",
+            lines.append(
+                _line(False, "Open circuit", f"{task.plugin}/{task.name}: {task.last_error or '-'}")
             )
-        )
+
+    if health is not None:
+        watchdog_check = health.check("watchdog")
+        if watchdog_check.status != "unknown":
+            state = watchdog_check.data
+            lines.append(
+                _line(
+                    not watchdog_check.needs_attention,
+                    "Runtime watchdog",
+                    f"running={state.get('worker_running', False)}, "
+                    f"last_lag={float(state.get('last_lag_seconds', 0.0)):.3f}s, "
+                    f"max_lag={float(state.get('max_lag_seconds', 0.0)):.3f}s",
+                )
+            )
+    else:
+        watchdog = getattr(bot, "watchdog", None)
+        state_getter = getattr(watchdog, "runtime_state", None)
+        if callable(state_getter) and not _is_mock_object(state_getter):
+            state = state_getter()
+            healthy = not state.get("last_error") and float(
+                state.get("last_lag_seconds", 0.0)
+            ) < float(config.get("watchdog_lag_failure_seconds", 30.0))
+            lines.append(
+                _line(
+                    healthy,
+                    "Runtime watchdog",
+                    f"running={state.get('worker_running', False)}, "
+                    f"last_lag={float(state.get('last_lag_seconds', 0.0)):.3f}s, "
+                    f"max_lag={float(state.get('max_lag_seconds', 0.0)):.3f}s",
+                )
+            )
+
     stale = getattr(supervisor, "stale_tasks", None)
     if callable(stale):
         try:
@@ -445,10 +510,19 @@ def _backup_lines(bot: Any | None = None) -> list[str]:
     writable_target = directory if exists else directory.parent
     writable = writable_target.exists() and os.access(writable_target, os.W_OK)
     backups = list_backups(directory=directory)
+    interval_hours = max(0, int(config.get("backup_interval_hours", 24) or 0))
+    stale_hours = max(1, int(config.get("admin_alert_backup_max_age_hours", 36) or 36))
+    schedule_ok = interval_hours == 0 or interval_hours < stale_hours
+    schedule = "disabled" if interval_hours == 0 else f"every {interval_hours}h"
     lines = [
         _line(exists or writable, "Backup directory", str(directory)),
         _line(writable, "Backup writable", "yes" if writable else "no"),
         _line(True, "Backup retention", f"keep={backup_keep()}, days={backup_retention_days()}"),
+        _line(
+            schedule_ok,
+            "Backup schedule",
+            f"{schedule} · stale alert {stale_hours}h",
+        ),
         _line(
             backup_smoke_test_on_create(),
             "Backup restore smoke test",
@@ -521,8 +595,9 @@ def _performance_lines(bot: Any, *, full: bool) -> list[str]:
             _line(
                 True,
                 label,
-                f"avg {float(stats.get('avg_ms', 0.0) or 0.0):.1f}ms / "
-                f"max {float(stats.get('max_ms', 0.0) or 0.0):.1f}ms / "
+                f"p50 {float(stats.get('p50_ms', 0.0) or 0.0):.1f}ms / "
+                f"p95 {float(stats.get('p95_ms', 0.0) or 0.0):.1f}ms / "
+                f"p99 {float(stats.get('p99_ms', 0.0) or 0.0):.1f}ms / "
                 f"n={int(stats.get('count', 0) or 0)}",
             )
         )
@@ -539,12 +614,12 @@ def _performance_lines(bot: Any, *, full: bool) -> list[str]:
                 for key, stats in values.items()
                 if isinstance(stats, dict)
             ),
-            key=lambda item: float(item[1].get("max_ms", 0.0) or 0.0),
+            key=lambda item: float(item[1].get("p95_ms", 0.0) or 0.0),
             reverse=True,
         )[:limit]
         detail = "; ".join(
-            f"{key} avg {float(stats.get('avg_ms', 0.0) or 0.0):.1f}ms "
-            f"max {float(stats.get('max_ms', 0.0) or 0.0):.1f}ms"
+            f"{key} p95 {float(stats.get('p95_ms', 0.0) or 0.0):.1f}ms "
+            f"p99 {float(stats.get('p99_ms', 0.0) or 0.0):.1f}ms"
             for key, stats in ranked
         )
         if detail:
@@ -567,6 +642,24 @@ def _performance_lines(bot: Any, *, full: bool) -> list[str]:
             )
         except Exception as exc:
             lines.append(_line(False, "User caches", str(exc)))
+
+    limiter = getattr(bot, "rate_limiter", None)
+    limiter_state = getattr(limiter, "runtime_state", None)
+    if callable(limiter_state):
+        try:
+            state = limiter_state()
+            lines.append(
+                _line(
+                    True,
+                    "Rate limiter cache",
+                    f"clients={state.get('clients', 0)}/{state.get('max_clients', 0)}, "
+                    f"blocked={state.get('blocked_clients', 0)}, "
+                    f"evicted={state.get('capacity_evictions', 0)}, "
+                    f"stale_pruned={state.get('stale_pruned', 0)}",
+                )
+            )
+        except Exception as exc:
+            lines.append(_line(False, "Rate limiter cache", str(exc)))
     return lines or [_line(None, "Performance", "no runtime samples collected yet")]
 
 
@@ -991,17 +1084,19 @@ def _problem_lines(lines: list[str], *, mode: str) -> list[str]:
     return matched or ["✅ No doctor warnings found."]
 
 
-async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
+async def _section_lines(
+    bot: Any, section: str, *, full: bool, health: HealthSnapshot | None = None
+) -> list[str]:
     if section == "config":
         return _config_lines()
     if section == "database":
-        return await _db_lines(bot)
+        return await _db_lines(bot, health=health)
     if section == "rooms":
-        return await _room_lines(bot, full=full)
+        return await _room_lines(bot, full=full, health=health)
     if section == "plugins":
         return await _plugin_lines(bot, full=full)
     if section == "tasks":
-        return _task_lines(bot, full=full)
+        return _task_lines(bot, full=full, health=health)
     if section == "backups":
         return _backup_lines(bot)
     if section == "performance":
@@ -1020,6 +1115,7 @@ async def _section_lines(bot: Any, section: str, *, full: bool) -> list[str]:
 async def build_doctor_lines(bot: Any, *, full: bool = False, sections: tuple[str, ...] | None = None) -> list[str]:
     """Build the doctor output as testable lines."""
     selected = sections or _DEFAULT_SECTIONS
+    health = await collect_health_snapshot(bot, verify_backup=False)
     body: list[str] = []
     for section in selected:
         if section == "database":
@@ -1033,7 +1129,7 @@ async def build_doctor_lines(bot: Any, *, full: bool = False, sections: tuple[st
         else:
             label = section.capitalize()
         body.append(f"[{label}]")
-        body.extend(await _section_lines(bot, section, full=full))
+        body.extend(await _section_lines(bot, section, full=full, health=health))
         body.append("")
     if body and body[-1] == "":
         body.pop()

@@ -25,13 +25,14 @@ import multiprocessing
 import queue
 import re
 import shlex
+from collections.abc import Collection
 from functools import partial
 
-from utils.command import command, Role
+from core_plugins import _core
+from utils import message_cache
+from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
-from utils import message_cache
-from core_plugins import _core
 
 log = logging.getLogger(__name__)
 
@@ -107,9 +108,9 @@ def read_until_delimiter(raw_statement: str, delimiter: str,
     while True:
         try:
             sep_index = raw_statement.index(delimiter)
-        except ValueError:
+        except ValueError as exc:
             if require:
-                raise ValueError(f"Delimiter '{delimiter}' not found")
+                raise ValueError(f"Delimiter '{delimiter}' not found") from exc
 
             return raw_statement, value
 
@@ -493,7 +494,7 @@ async def process_sed_correction(
     if not last_msg and is_room:
         reply_target_id = _core.get_reply_target(msg)
 
-        if reply_target_id:
+        if reply_target_id and room:
             last_msg = get_message_by_id(bot, room, reply_target_id)
 
     if not last_msg and room:
@@ -638,6 +639,8 @@ async def on_message(bot, msg):
         room = _room_key_from_msg(bot, msg, is_room)
 
         if is_room:
+            if not room:
+                return
             if not await _core._is_enabled_for_room(
                 bot, SED_KEY, "sed", room
             ):
@@ -680,7 +683,7 @@ async def on_load(bot):
     )
 
 
-def _diagnostic_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+def _diagnostic_enabled_count(enabled_rooms: Collection[str], room_jid: str | None) -> int:
     if not room_jid:
         return len(enabled_rooms)
     target = str(room_jid).split('/', 1)[0].strip().lower()

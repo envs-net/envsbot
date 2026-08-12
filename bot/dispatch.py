@@ -19,6 +19,14 @@ log = logging.getLogger(__name__)
 class CommandDispatchMixin:
     """Message context resolution and unified command handling."""
 
+    presence: Any
+    get_user_role: Any
+    prefix: str
+    reply: Any
+    config: dict[str, Any]
+    rate_limiter: Any
+    command_executor: Any
+
     def _joined_room_jids(self) -> set[str]:
         """Return known joined room bare JIDs from runtime room state."""
         rooms: set[str] = set()
@@ -71,7 +79,7 @@ class CommandDispatchMixin:
         try:
             from bot.room_state import JOINED_ROOMS
 
-            room_data = JOINED_ROOMS.get(room, {}) or {}
+            room_data = JOINED_ROOMS.get(room, {}) or {} if room else {}
             nick_data = (room_data.get("nicks", {}) or {}).get(nick, {}) or {}
             jid = nick_data.get("jid")
             if jid:

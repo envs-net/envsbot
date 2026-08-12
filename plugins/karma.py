@@ -21,19 +21,19 @@ import re
 import time
 from functools import partial
 
-from utils.command import command, Role
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from utils.config import config
 from core_plugins._core import (
-    _is_muc_pm,
-    _get_enabled_rooms,
     JOINED_ROOMS,
-    handle_room_toggle_command,
+    _get_enabled_rooms,
     _is_enabled_for_room,
+    _is_muc_pm,
     _is_public_muc,
     get_real_jid,
+    handle_room_toggle_command,
 )
 from plugins.sed import is_sed_command
+from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from utils.config import config
 
 log = logging.getLogger(__name__)
 
@@ -43,13 +43,14 @@ PLUGIN_META = {
     "description": "Room-local karma tracking with nick++ / nick--",
     "category": "fun",
     "requires": ["rooms", "_core", "sed"],
+    "room_state": "custom",
 }
 
 KARMA_ENABLED_KEY = "KARMA"
 KARMA_SCORES_KEY = "scores"
 
 KARMA_DELAY_SECONDS = int(config.get("karma_delay_seconds", 60) or 60)
-LAST_KARMA_ACTIONS = {}  # room:actor -> {target_lower: timestamp}
+LAST_KARMA_ACTIONS: dict[str, dict[str, float]] = {}  # room:actor -> {target_lower: timestamp}
 
 OP_RE = re.compile(r"(\+\+|--)")
 
@@ -442,6 +443,38 @@ async def _handle_score_event(bot, msg, events, actor_nick, room_jid):
         _karma_reply(
             bot, msg, "⏱️ You recently gave karma to that user."
             " Try again later.")
+
+
+async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
+    """Remove persistent scores and throttle state for a deleted room."""
+    target = str(room_jid or "").split("/", 1)[0].strip().lower()
+    store = await get_karma_store(bot)
+    data = await store.get_global(KARMA_SCORES_KEY, default={})
+    if not isinstance(data, dict):
+        data = {}
+    score_rooms = [
+        key for key in data
+        if str(key).split("/", 1)[0].strip().lower() == target
+    ]
+    tracked_targets = 0
+    for key in score_rooms:
+        scores = data.pop(key, {})
+        if isinstance(scores, dict):
+            tracked_targets += len(scores)
+    if score_rooms:
+        await store.set_global(KARMA_SCORES_KEY, data)
+
+    throttle_removed = 0
+    room_prefix = f"{target}:"
+    for key in tuple(LAST_KARMA_ACTIONS):
+        if str(key).strip().lower().startswith(room_prefix):
+            LAST_KARMA_ACTIONS.pop(key, None)
+            throttle_removed += 1
+    return {
+        "score_rooms": len(score_rooms),
+        "tracked_targets": tracked_targets,
+        "throttle_entries": throttle_removed,
+    }
 
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:

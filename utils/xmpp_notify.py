@@ -90,8 +90,7 @@ def _iter_disco_identities(info: Any):
         except Exception:
             identities = getattr(candidate, "identities", None)
         if identities:
-            for identity in identities:
-                yield identity
+            yield from identities
 
 
 def _identity_is_muc(identity: Any) -> bool:
@@ -203,7 +202,8 @@ async def ensure_room_joined(bot: Any, room_jid: str, *, nick: str | None = None
         log.debug("Could not update joined room state for notification room", exc_info=True)
 
     try:
-        presence.joined_rooms[room_jid] = nick
+        if presence is not None:
+            presence.joined_rooms[room_jid] = nick
         broadcast = getattr(presence, "broadcast", None)
         if callable(broadcast):
             broadcast()

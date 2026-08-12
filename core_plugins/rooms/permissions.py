@@ -1,6 +1,7 @@
 """Split module for core_plugins/rooms.py: permissions."""
 
 import inspect
+
 from utils.command import Role
 
 from .state import JOINED_ROOMS, _jid_bare, log

@@ -6,9 +6,10 @@ including role-based permissions and plugin integration.
 """
 
 from __future__ import annotations
-from enum import IntEnum
+
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from enum import IntEnum
 
 
 class Role(IntEnum):
@@ -67,8 +68,8 @@ class CommandSubcommand:
     name: str
     usage: str
     short: str
-    aliases: Tuple[str, ...] = ()
-    examples: Tuple[CommandExample, ...] = ()
+    aliases: tuple[str, ...] = ()
+    examples: tuple[CommandExample, ...] = ()
     role: Role | None = None
     context: str = ""
     section: str = ""
@@ -125,7 +126,7 @@ def normalize_command_subcommand(value: object) -> CommandSubcommand:
     )
 
 
-def command_examples(cmd: object) -> List[CommandExample]:
+def command_examples(cmd: object) -> list[CommandExample]:
     """Return normalized examples from a command-like object."""
     values = getattr(cmd, "examples", ()) or ()
     if isinstance(values, (str, Mapping, CommandExample)):
@@ -133,7 +134,7 @@ def command_examples(cmd: object) -> List[CommandExample]:
     return [normalize_command_example(value) for value in values]
 
 
-def command_subcommands(cmd: object) -> List[CommandSubcommand]:
+def command_subcommands(cmd: object) -> list[CommandSubcommand]:
     """Return normalized structured subcommands from a command-like object."""
     values = getattr(cmd, "subcommands", ()) or ()
     if isinstance(values, (Mapping, CommandSubcommand)):
@@ -150,12 +151,12 @@ class CommandRegistry:
 
     def __init__(self):
         """Initialize the command registry with empty indices."""
-        self.index: Dict[Tuple[str, ...], Command] = {}
-        self.by_handler: Dict[object, set[tuple[str, ...]]] = {}
-        self.by_plugin: Dict[str, set[tuple[str, ...]]] = {}
-        self.by_prefix: Dict[str, set[tuple[str, ...]]] = {}
+        self.index: dict[tuple[str, ...], Command] = {}
+        self.by_handler: dict[object, set[tuple[str, ...]]] = {}
+        self.by_plugin: dict[str, set[tuple[str, ...]]] = {}
+        self.by_prefix: dict[str, set[tuple[str, ...]]] = {}
 
-    def register(self, name: str, cmd: "Command", plugin: str | None = None):
+    def register(self, name: str, cmd: Command, plugin: str | None = None):
         """
         Register a command under the given name and optional plugin.
         Raises ValueError if the command name is already registered.
@@ -183,7 +184,7 @@ class CommandRegistry:
         if handler is not None:
             self.by_handler.setdefault(handler, set()).add(tokens)
 
-    def _normalize_tokens(self, tokens: str | Iterable[str]) -> Tuple[str, ...]:
+    def _normalize_tokens(self, tokens: str | Iterable[str]) -> tuple[str, ...]:
         """Normalize command names or token iterables to registry keys."""
         if isinstance(tokens, str):
             return tuple(tokens.lower().split())
@@ -250,7 +251,7 @@ class CommandRegistry:
         """
         return self.index.get(tokens)
 
-    def debug_dump(self) -> Dict[str, dict]:
+    def debug_dump(self) -> dict[str, dict]:
         """
         Return a structured snapshot of the command registry for debugging.
         Includes handler names, required roles, and aliases for each command.
@@ -310,11 +311,11 @@ class Command:
     name: str
     handler: Callable
     role: Role = Role.NONE
-    aliases: List[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
     short: str = ""
     usage: str = ""
-    examples: List[object] = field(default_factory=list)
-    subcommands: List[object] = field(default_factory=list)
+    examples: list[object] = field(default_factory=list)
+    subcommands: list[object] = field(default_factory=list)
     category: str = ""
     context: str = "any"
     timeout_seconds: float | None = None
@@ -337,7 +338,7 @@ def _register(name: str, cmd: Command):
     registered = getattr(cmd.handler, "__commands__", None)
     if not isinstance(registered, list):
         registered = []
-        setattr(cmd.handler, "__commands__", registered)
+        vars(cmd.handler)["__commands__"] = registered
 
     entry = (name, cmd)
 
@@ -349,11 +350,11 @@ def _register(name: str, cmd: Command):
 def command(
     name: str,
     role: Role = Role.NONE,
-    aliases: Optional[List[str]] = None,
+    aliases: list[str] | None = None,
     short: str = "",
     usage: str = "",
-    examples: Optional[List[object]] = None,
-    subcommands: Optional[List[object]] = None,
+    examples: Sequence[object] | None = None,
+    subcommands: Sequence[object] | None = None,
     category: str = "",
     context: str = "any",
     timeout_seconds: float | None = None,
@@ -368,10 +369,8 @@ def command(
     """
     if aliases is None:
         aliases = []
-    if examples is None:
-        examples = []
-    if subcommands is None:
-        subcommands = []
+    example_list: list[object] = examples if isinstance(examples, list) else list(examples or ())
+    subcommand_list: list[object] = subcommands if isinstance(subcommands, list) else list(subcommands or ())
 
     def decorator(func: Callable):
         """
@@ -385,8 +384,8 @@ def command(
             aliases=aliases,
             short=short,
             usage=usage,
-            examples=examples,
-            subcommands=subcommands,
+            examples=example_list,
+            subcommands=subcommand_list,
             category=category,
             context=context,
             timeout_seconds=timeout_seconds,
@@ -397,17 +396,18 @@ def command(
         for alias in aliases:
             _register(alias, cmd)
 
-        setattr(func, "_command", name)
-        setattr(func, "_command_names", [name] + aliases)
-        setattr(func, "_required_role", role)
-        setattr(func, "_aliases", aliases)
-        setattr(func, "_command_short", short)
-        setattr(func, "_command_usage", usage)
-        setattr(func, "_command_examples", examples)
-        setattr(func, "_command_subcommands", subcommands)
-        setattr(func, "_command_category", category)
-        setattr(func, "_command_context", context)
-        setattr(func, "_command_timeout_seconds", timeout_seconds)
+        metadata = vars(func)
+        metadata["_command"] = name
+        metadata["_command_names"] = [name] + aliases
+        metadata["_required_role"] = role
+        metadata["_aliases"] = aliases
+        metadata["_command_short"] = short
+        metadata["_command_usage"] = usage
+        metadata["_command_examples"] = example_list
+        metadata["_command_subcommands"] = subcommand_list
+        metadata["_command_category"] = category
+        metadata["_command_context"] = context
+        metadata["_command_timeout_seconds"] = timeout_seconds
 
         return func
 

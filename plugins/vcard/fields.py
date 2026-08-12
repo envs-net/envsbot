@@ -12,6 +12,7 @@ from .formatting import (
     _vcard_value_is_empty,
 )
 
+
 async def _vcard_handle_room_lookup(bot, sender_jid, msg, field, label,
                                     target_nick, room, own=False):
     nick_info = _vcard_get_joined_nick_info(room, target_nick)

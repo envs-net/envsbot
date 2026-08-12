@@ -13,7 +13,6 @@ from contextlib import suppress
 from urllib.parse import urlsplit
 from xml.sax.saxutils import quoteattr
 
-
 VALID_HTTPS_CERTIFICATE_MESSAGE = "TLS certificate is valid."
 VALID_XMPP_CERTIFICATE_MESSAGE = "S2S TLS certificate is valid."
 MAX_CERTIFICATE_ENDPOINT_ADDRESSES = 4
@@ -425,7 +424,7 @@ async def _probe_https_certificate(
             timeout_seconds,
         )
         return _append_certificate_validity(message, certificate)
-    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+    except (TimeoutError, OSError, ssl.SSLError):
         return None
     finally:
         await _close_writer(writer)
@@ -450,7 +449,7 @@ async def _probe_unverified_https_certificate(
             ssl_handshake_timeout=timeout_seconds,
         )
         return _peer_certificate_from_writer(writer)
-    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+    except (TimeoutError, OSError, ssl.SSLError):
         return None
     finally:
         await _close_writer(writer)
@@ -501,7 +500,7 @@ async def diagnose_https_certificate(
                 )
                 if result:
                     return result
-    except (OSError, asyncio.TimeoutError, TypeError, ValueError):
+    except (TimeoutError, OSError, TypeError, ValueError):
         return None
     return None
 
@@ -571,7 +570,7 @@ async def _probe_unverified_xmpp_server_certificate(
             _unverified_tls_context(),
         )
         return _peer_certificate_from_writer(writer) if writer is not None else None
-    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+    except (TimeoutError, OSError, ssl.SSLError):
         return None
     finally:
         await _close_writer(writer)
@@ -620,7 +619,7 @@ async def _probe_xmpp_server_certificate(
             VALID_XMPP_CERTIFICATE_MESSAGE,
             _peer_certificate_from_writer(writer),
         )
-    except (OSError, asyncio.TimeoutError, ssl.SSLError):
+    except (TimeoutError, OSError, ssl.SSLError):
         return None
     finally:
         await _close_writer(writer)
@@ -667,6 +666,6 @@ async def diagnose_xmpp_server_certificate(
                     )
                     if result:
                         return result
-    except (OSError, asyncio.TimeoutError, TypeError, ValueError):
+    except (TimeoutError, OSError, TypeError, ValueError):
         return None
     return None

@@ -20,14 +20,31 @@ from .invites import (
     on_room_invite_message,
 )
 from .presence import on_muc_presence
-from .state import JOINED_ROOMS, _LEAVING_ROOMS, _jid_bare, _maybe_await_result, log
-
+from .state import _LEAVING_ROOMS, JOINED_ROOMS, _jid_bare, _maybe_await_result, log
 
 _ROOM_HEALTH_TASK = None
 _ROOM_HEALTH_TASK_NAME = "rooms-autojoin-health"
 _ROOM_HEALTH_CHECK_INTERVAL_SECONDS = 60.0
 _ROOM_REJOIN_BACKOFF_SECONDS = (60.0, 120.0, 240.0, 300.0)
 _REJOIN_STATE: dict[str, dict[str, object]] = {}
+
+
+def _state_int(value: object, default: int = 0) -> int:
+    if isinstance(value, (str, bytes, bytearray, int, float)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _state_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, (str, bytes, bytearray, int, float)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            pass
+    return default
 
 
 def _rejoin_backoff(failures: int) -> float:
@@ -47,7 +64,7 @@ def _record_join_failure(
 ) -> float:
     """Record one failed room join and return its retry delay."""
     current = _REJOIN_STATE.get(room_jid, {})
-    failures = int(current.get("failures", 0) or 0) + 1
+    failures = _state_int(current.get("failures", 0)) + 1
     delay = _rejoin_backoff(failures)
     timestamp = time.time() if now is None else float(now)
     _REJOIN_STATE[room_jid] = {
@@ -239,12 +256,12 @@ async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str
             presence_rooms.pop(room_jid, None)
 
         retry_state = _REJOIN_STATE.get(room_jid, {})
-        next_attempt = float(retry_state.get("next_attempt", 0) or 0)
+        next_attempt = _state_float(retry_state.get("next_attempt", 0))
         if timestamp < next_attempt:
             summary["deferred"] += 1
             continue
 
-        failures = int(retry_state.get("failures", 0) or 0)
+        failures = _state_int(retry_state.get("failures", 0))
         log.warning(
             "[ROOMS] 🟡️ Autojoin membership missing for %s; "
             "attempting rejoin as %s (previous_failures=%d)",
@@ -429,7 +446,8 @@ async def on_unload(bot):
     _ROOM_HEALTH_TASK = None
     if health_task is not None and not health_task.done():
         health_task.cancel()
-        (result,) = await asyncio.gather(health_task, return_exceptions=True)
+        results = await asyncio.gather(health_task, return_exceptions=True)
+        result: object = results[0]
         if isinstance(result, BaseException) and not isinstance(
             result,
             asyncio.CancelledError,

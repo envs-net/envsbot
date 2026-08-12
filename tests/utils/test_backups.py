@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -644,3 +645,81 @@ async def test_restore_support_files_online_when_runtime_dir_is_outside_app_tree
     ]
     assert result["manual_restore"] == []
     assert result["restart_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_periodic_backup_worker_creates_immediately_when_backup_is_overdue(monkeypatch, tmp_path):
+    archive = backups.BackupArchive(
+        path=tmp_path / "old.zip",
+        name="old.zip",
+        size=1,
+        created_at="2026-08-10T00:00:00+00:00",
+        reason="startup",
+        files=[],
+    )
+    bot = SimpleNamespace(config={"backup_interval_hours": 24})
+    monkeypatch.setattr(backups, "list_backups", lambda: [archive])
+    monkeypatch.setattr(backups, "backup_age_seconds", lambda latest: 25 * 3600)
+    monkeypatch.setattr(backups, "wait_for_runtime_ready", AsyncMock())
+    sleep = AsyncMock()
+    monkeypatch.setattr(backups, "sleep_with_heartbeat", sleep)
+    create = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(backups, "create_backup", create)
+
+    with pytest.raises(asyncio.CancelledError):
+        await backups.periodic_backup_worker(bot)
+
+    sleep.assert_not_awaited()
+    create.assert_awaited_once_with(bot, reason="scheduled")
+
+
+@pytest.mark.asyncio
+async def test_periodic_backup_worker_waits_until_fresh_backup_is_due(monkeypatch, tmp_path):
+    archive = backups.BackupArchive(
+        path=tmp_path / "fresh.zip",
+        name="fresh.zip",
+        size=1,
+        created_at="2026-08-12T00:00:00+00:00",
+        reason="startup",
+        files=[],
+    )
+    bot = SimpleNamespace(config={"backup_interval_hours": 24})
+    monkeypatch.setattr(backups, "list_backups", lambda: [archive])
+    monkeypatch.setattr(backups, "backup_age_seconds", lambda latest: 23 * 3600)
+    monkeypatch.setattr(backups, "wait_for_runtime_ready", AsyncMock())
+    sleep = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(backups, "sleep_with_heartbeat", sleep)
+    create = AsyncMock()
+    monkeypatch.setattr(backups, "create_backup", create)
+
+    with pytest.raises(asyncio.CancelledError):
+        await backups.periodic_backup_worker(bot)
+
+    sleep.assert_awaited_once_with(bot, "_runtime", "scheduled-backup", 3600)
+    create.assert_not_awaited()
+
+
+def test_periodic_backup_worker_uses_supervisor_and_is_idempotent(monkeypatch):
+    task = MagicMock()
+    task.done.return_value = False
+    supervisor = SimpleNamespace(create_resilient=MagicMock(return_value=task))
+    bot = SimpleNamespace(config={"backup_interval_hours": 24}, tasks=supervisor)
+
+    first = backups.start_periodic_backup_worker(bot)
+    second = backups.start_periodic_backup_worker(bot)
+
+    assert first is task
+    assert second is task
+    supervisor.create_resilient.assert_called_once()
+    args, kwargs = supervisor.create_resilient.call_args
+    assert args[0] == "_runtime"
+    assert callable(args[1])
+    assert kwargs == {"name": "scheduled-backup", "service": True}
+
+
+def test_periodic_backup_worker_can_be_disabled():
+    supervisor = SimpleNamespace(create_resilient=MagicMock())
+    bot = SimpleNamespace(config={"backup_interval_hours": 0}, tasks=supervisor)
+
+    assert backups.start_periodic_backup_worker(bot) is None
+    supervisor.create_resilient.assert_not_called()

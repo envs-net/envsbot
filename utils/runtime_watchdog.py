@@ -7,7 +7,7 @@ import logging
 import os
 import socket
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from utils.task_supervisor import (

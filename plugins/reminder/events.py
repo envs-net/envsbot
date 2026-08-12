@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from utils.config import config
-from utils import message_cache
 from bot.room_state import JOINED_ROOMS
 from core_plugins._core import (
     extract_reply_quote,
@@ -11,9 +9,13 @@ from core_plugins._core import (
     get_stanza_id,
     remember_stanza,
 )
+from utils import message_cache
+from utils.config import config
 
 from .config import REMINDER_REPLY_FALLBACK_NAMESPACE
 from .runtime import log
+
+
 def _body_without_reply_quote(body: str) -> str:
     """Remove a leading XEP-0461 plain-text fallback quote."""
     lines = str(body or "").splitlines()

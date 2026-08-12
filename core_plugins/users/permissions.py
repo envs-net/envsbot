@@ -1,7 +1,7 @@
 """Split module for core_plugins/users.py: permissions."""
 
-from utils.config import config
 from utils.command import Role, role_from_int
+from utils.config import config
 
 from .lookup import _maybe_await, _parse_user_jid, _plugin_name, _valid_plugin_names, find_users_by_nick_safe
 from .roles import (

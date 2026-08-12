@@ -214,3 +214,32 @@ def test_on_load_registers_event(monkeypatch):
         event_name, event_type, event_func = bp.register_event.call_args[0]
         assert event_name == "tell_notify"
         assert event_type == "groupchat_presence"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_only_matching_pending_messages():
+    store = AsyncMock()
+    bot = MagicMock()
+    bot.db.users.list = AsyncMock(
+        return_value=[{"jid": "alice@example.org"}, {"jid": "bob@example.org"}]
+    )
+    bot.db.users.plugin = MagicMock(return_value=store)
+    store.get = AsyncMock(
+        side_effect=[
+            [
+                {"room_jid": "Room@Conf", "message": "drop"},
+                {"room_jid": "other@conf", "message": "keep"},
+            ],
+            [{"room_jid": "other@conf", "message": "keep too"}],
+        ]
+    )
+    store.set = AsyncMock()
+
+    summary = await tell.cleanup_room_state(bot, "ROOM@CONF/nick")
+
+    assert summary == {"pending_messages": 1, "users": 1}
+    store.set.assert_awaited_once_with(
+        "alice@example.org",
+        "tell_messages",
+        [{"room_jid": "other@conf", "message": "keep"}],
+    )

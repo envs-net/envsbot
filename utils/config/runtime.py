@@ -31,6 +31,8 @@ _RATE_LIMIT_KEYS = {
     "command_rate_limit_backoff_multiplier",
     "command_rate_limit_max_block_seconds",
     "command_rate_limit_notify_cooldown_seconds",
+    "command_rate_limit_idle_ttl_seconds",
+    "command_rate_limit_prune_interval_seconds",
 }
 
 
@@ -397,10 +399,16 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         },
         "plugins.urlcheck": {
             "URLCHECK_WAIT_SECONDS": _to_int(cfg.get("urlcheck_wait_seconds") or 120, 120),
-            "URLCHECK_FETCH_TIMEOUT": _to_float(cfg.get("urlcheck_fetch_timeout_seconds") or cfg.get("http_timeout_seconds") or 8, 8),
+            "URLCHECK_FETCH_TIMEOUT_SECONDS": _to_float(
+                cfg.get("urlcheck_fetch_timeout_seconds")
+                or cfg.get("http_timeout_seconds")
+                or 8,
+                8,
+            ),
             "URLCHECK_MAX_REDIRECTS": max(1, _to_int(cfg.get("urlcheck_max_redirects") or 5, 5)),
             "URLCHECK_MAX_READ_BYTES": max(4096, _to_int(cfg.get("urlcheck_max_read_bytes") or 65536, 65536)),
             "URLCHECK_USER_AGENT": _to_str(cfg.get("urlcheck_user_agent") or cfg.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"),
+            "_wait_secs_url": _to_int(cfg.get("urlcheck_wait_seconds") or 120, 120),
             "ALLOW_PRIVATE_FETCH_URLS": _to_bool(cfg.get("allow_private_fetch_urls"), False),
         },
         "plugins.info": {
@@ -517,6 +525,16 @@ def _rate_limiter_from_config(cfg: Mapping[str, object]) -> TokenBucketRateLimit
         backoff_multiplier=_to_float(cfg.get("command_rate_limit_backoff_multiplier") or 2.0, 2.0),
         max_block_seconds=_to_float(cfg.get("command_rate_limit_max_block_seconds") or 3600.0, 3600.0),
         notify_cooldown=_to_float(cfg.get("command_rate_limit_notify_cooldown_seconds") or 10.0, 10.0),
+        idle_ttl_seconds=max(
+            0.0,
+            _to_float(
+                cfg.get("command_rate_limit_idle_ttl_seconds")
+                if cfg.get("command_rate_limit_idle_ttl_seconds") is not None
+                else 3600,
+                3600,
+            ),
+        ),
+        prune_interval_seconds=max(1.0, _to_float(cfg.get("command_rate_limit_prune_interval_seconds") or 60, 60)),
     )
 
 

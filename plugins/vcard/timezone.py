@@ -1,8 +1,9 @@
 """Split module for plugins/vcard.py: timezone."""
 
 import pytz
+
 from core_plugins import _core
-from utils.command import command, Role
+from utils.command import Role, command
 from utils.config import config
 
 from .config import VCARD_KEY, log

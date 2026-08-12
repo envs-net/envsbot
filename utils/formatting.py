@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from math import ceil
-from typing import Iterable, Sequence
 
 from utils.config import config
-
 
 DEFAULT_PAGINATION = config.get("default_pagination", "all")
 

@@ -21,13 +21,13 @@ def _checkout_root(path: Path) -> Path:
 
 ROOT = _checkout_root(Path(__file__).resolve().parents[1])
 
-from utils.command import Role, command_examples, command_subcommands
-from utils.config import config
+from utils.command import Command, Role, command_examples, command_subcommands
 from utils.command_registry import (
     decorated_commands_from_module,
     discover_command_modules,
     plugin_metadata,
 )
+from utils.config import config
 
 PREFIX = config.get("prefix", ",")
 PLUGIN_DOCS_DIR = ROOT / "docs" / "plugins"
@@ -91,8 +91,7 @@ def _plugin_meta(module, name, source="plugins"):
 
 def _discover_plugins():
     """Discover plugin modules through the shared command registry helpers."""
-    for name, module, source in discover_command_modules():
-        yield name, module, source
+    yield from discover_command_modules()
 
 
 def _commands_from_module(module):
@@ -609,7 +608,7 @@ def _append_subcommands(lines: list[str], cmd, data: dict) -> None:
                     )
             lines.append("")
 
-def generate_plugin_doc(name: str, meta: dict, plugin_commands: list[object]) -> str:
+def generate_plugin_doc(name: str, meta: dict, plugin_commands: list[Command]) -> str:
     """Generate one detailed plugin documentation page."""
     title = str(meta.get("name") or name)
     lines = [
@@ -761,7 +760,7 @@ def generate() -> str:
             f"| `{name}` | `{_table_cell(meta['source'])}` | `{_table_cell(meta['category'])}` | {_table_cell(meta['description'])} | [`docs/plugins/{_plugin_doc_filename(name)}`]({_plugin_doc_relpath(name)}) |"
         )
 
-    by_category: dict[str, list[tuple[str, object, dict]]] = {}
+    by_category: dict[str, list[tuple[str, Command, dict]]] = {}
     for _plugin_name, _meta, cmd, data in commands:
         by_category.setdefault(data["category"], []).append((_plugin_name, cmd, data))
 

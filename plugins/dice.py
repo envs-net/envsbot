@@ -16,16 +16,18 @@ Examples:
     {prefix}dice d6
 """
 
-import re
 import random
-from utils.command import command, Role
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
-from utils.config import config
+import re
+from collections.abc import Collection
+
 from core_plugins._core import (
+    _get_enabled_rooms,
     _is_muc_pm,
     handle_room_toggle_command,
-    _get_enabled_rooms,
 )
+from utils.command import Role, command
+from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from utils.config import config
 
 DICE_KEY = "DICE"
 PLUGIN_META = {
@@ -214,7 +216,7 @@ async def get_dice_store(bot):
     return bot.db.users.plugin("dice")
 
 
-def _room_enabled_count(enabled_rooms: set[str], room_jid: str | None) -> int:
+def _room_enabled_count(enabled_rooms: Collection[str], room_jid: str | None) -> int:
     if not room_jid:
         return len(enabled_rooms)
     target = str(room_jid).split('/', 1)[0].strip().lower()

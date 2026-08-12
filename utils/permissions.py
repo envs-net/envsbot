@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from collections.abc import Callable
 from typing import Any
-from collections.abc import Mapping
 
 from utils.command import Role, check_permission
 from utils.command_context import CommandContext

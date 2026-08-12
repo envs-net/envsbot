@@ -8,6 +8,7 @@ from .state import (
     _maybe_await_result,
     log,
 )
+
 PLUGIN_META = {
     "name": "rooms",
     "version": "0.3.4",

@@ -1,6 +1,7 @@
 """Split module for plugins/idlerpg.py: seasons."""
 
 from __future__ import annotations
+
 import time
 from typing import Any
 

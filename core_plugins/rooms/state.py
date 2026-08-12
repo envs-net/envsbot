@@ -2,14 +2,19 @@
 
 import inspect
 import logging
+
 from slixmpp import JID
+
 from bot.room_state import (
     JOINED_ROOMS,
+)
+from bot.room_state import (
     LEAVING_ROOMS as _LEAVING_ROOMS,
+)
+from bot.room_state import (
     WARNED_PLUGIN_DEFAULT_KEYS as _WARNED_ROOM_PLUGIN_DEFAULT_KEYS,
 )
 from utils.room_features import list_room_features
-
 
 log = logging.getLogger(__name__)
 

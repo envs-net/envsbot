@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 class MessageMixin:
     """Common reply and safe-send helpers for the bot."""
 
+    make_message: Any
+
     async def _safe_send_message(
         self,
         message: Any,

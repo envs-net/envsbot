@@ -23,19 +23,19 @@ from typing import Any
 
 import aiohttp
 
-from core_plugins import _core
 from bot.room_state import JOINED_ROOMS
+from core_plugins import _core
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
-from utils.http_fetch import fetch_json, passthrough_validator
 from utils.formatting import page_size_for, parse_page_args
-
+from utils.http_fetch import fetch_json, passthrough_validator
 from utils.task_supervisor import (
     create_plugin_task,
     create_resilient_plugin_task,
     sleep_with_heartbeat,
 )
+
 log = logging.getLogger(__name__)
 
 PLUGIN_META = {
@@ -44,6 +44,7 @@ PLUGIN_META = {
     "description": "XKCD comic fetcher and broadcaster with full indexing",
     "category": "fun",
     "requires": ["rooms", "_core"],
+    "room_state": "custom",
 }
 
 XKCD_KEY = "XKCD"

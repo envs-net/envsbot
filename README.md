@@ -441,7 +441,7 @@ local environment overrides from `/etc/default/envsbot`.
 
 ## Backups and Restore
 
-Managed backups are ZIP archives stored below `data/backups` by default. When `BACKUP_ON_START = True`, the bot creates one startup backup per process start; this also covers service restarts. Archives include:
+Managed backups are ZIP archives stored below `data/backups` by default. When `BACKUP_ON_START = True`, the bot creates one startup backup per process start; this also covers service restarts. In addition, `BACKUP_INTERVAL_HOURS = 24` keeps long-running instances fresh by creating a supervised managed backup whenever the newest archive reaches that age. Set the interval to `0` only if periodic backups are intentionally handled elsewhere. Archives include:
 
 * `bot.db`
 * `config.py`

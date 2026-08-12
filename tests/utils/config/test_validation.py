@@ -577,3 +577,25 @@ def test_validate_config_rejects_too_short_task_stale_threshold():
         config_mod.validate_config({"task_stale_after_seconds": 30})
 
     assert "task_stale_after_seconds" in str(exc.value)
+
+
+def test_config_warns_when_periodic_backup_cannot_beat_stale_alert_threshold():
+    warnings = config_mod.collect_config_warnings(
+        {
+            "backup_interval_hours": 36,
+            "admin_alert_backup_max_age_hours": 36,
+        }
+    )
+
+    assert any("backup_interval_hours" in warning for warning in warnings)
+
+
+def test_config_accepts_periodic_backup_cadence_below_alert_threshold():
+    warnings = config_mod.collect_config_warnings(
+        {
+            "backup_interval_hours": 24,
+            "admin_alert_backup_max_age_hours": 36,
+        }
+    )
+
+    assert not any("backup_interval_hours" in warning for warning in warnings)

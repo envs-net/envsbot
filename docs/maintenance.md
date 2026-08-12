@@ -47,7 +47,11 @@ Use the built-in backup commands for normal operational snapshots:
 
 Managed archives are written to `BACKUP_DIR`, which defaults to `data/backups`.
 When `BACKUP_ON_START = True`, envsbot creates one startup backup per process
-start; this also covers service restarts. Each archive contains `bot.db`,
+start; this also covers service restarts. `BACKUP_INTERVAL_HOURS` defaults to
+24 and runs a supervised scheduler that creates another managed backup whenever
+the newest archive reaches that age. Set it to `0` only when periodic backups
+are intentionally provided elsewhere. The default cadence stays below the
+36-hour stale-backup admin alert threshold. Each archive contains `bot.db`,
 `config.py`, `vcard.py`, `chat_slang.csv` and a `manifest.json` when those
 files exist. Restore is owner-only. Before changing runtime files, envsbot fully
 verifies the selected archive, stages the runtime files and creates a

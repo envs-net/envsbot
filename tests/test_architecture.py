@@ -488,3 +488,5 @@ def test_refactored_hot_paths_stay_split_into_small_orchestrators():
     assert _function_line_span("plugins/rss/commands.py", "rss_command") <= 90
     assert _function_line_span("database/idlerpg.py", "save_state") <= 100
     assert _function_line_span("plugins/idlerpg/state.py", "_refresh_public_export") <= 100
+    assert _function_line_span("bot/lifecycle.py", "on_start") <= 50
+    assert _function_line_span("bot/lifecycle.py", "_shutdown_runtime_once") <= 50

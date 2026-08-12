@@ -21,7 +21,7 @@ async def test_alert_state_transitions_are_deduplicated(monkeypatch):
 
     await manager._set("demo", True, "Demo changed", fingerprint="changed")
     assert send.await_count == 2
-    assert send.await_args.args[1].startswith("🟡")
+    assert send.await_args.args[1].startswith("🔴 Still active:")
 
     await manager._set("demo", False, "Demo recovered")
     assert send.await_count == 3
@@ -123,3 +123,94 @@ async def test_alert_worker_waits_for_runtime_ready():
     task.cancel()
     result = await asyncio.gather(task, return_exceptions=True)
     assert isinstance(result[0], asyncio.CancelledError)
+
+
+@pytest.mark.asyncio
+async def test_message_cache_degraded_opens_and_resolves_alert(monkeypatch):
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr("utils.admin_alerts.notify_admin", send)
+    manager = AdminAlertManager(SimpleNamespace(config={}))
+
+    from utils.health import HealthCheck, HealthSnapshot
+
+    unhealthy = HealthSnapshot(
+        checked_at="now",
+        checks={
+            "message_cache": HealthCheck(
+                "message_cache",
+                "warning",
+                "degraded",
+                {
+                    "pending_writes": 2,
+                    "retry_backlog": 1,
+                    "dropped_persistence_entries": 3,
+                    "degraded": True,
+                    "last_persistence_error": "disk busy",
+                },
+                "disk busy",
+            )
+        },
+    )
+    healthy = HealthSnapshot(
+        checked_at="later",
+        checks={
+            "message_cache": HealthCheck(
+                "message_cache",
+                "ok",
+                "healthy",
+                {"degraded": False},
+            )
+        },
+    )
+
+    await manager._check_message_cache(unhealthy)
+    assert manager._states["message-cache"].active is True
+    assert "disk busy" in manager._states["message-cache"].summary
+
+    await manager._check_message_cache(healthy)
+    assert manager._states["message-cache"].active is False
+    assert send.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_once_isolates_individual_alert_check_failures(monkeypatch):
+    from utils.health import HealthCheck, HealthSnapshot
+
+    snapshot = HealthSnapshot(
+        checked_at="now",
+        checks={
+            key: HealthCheck(key, "ok", "ok")
+            for key in (
+                "outbox",
+                "tasks",
+                "rooms",
+                "backup",
+                "message_cache",
+                "database",
+                "idlerpg_export",
+                "watchdog",
+            )
+        },
+    )
+    monkeypatch.setattr(
+        "utils.admin_alerts.collect_health_snapshot",
+        AsyncMock(return_value=snapshot),
+    )
+    manager = AdminAlertManager(SimpleNamespace(config={}))
+    manager._check_outbox = AsyncMock(side_effect=RuntimeError("outbox boom"))
+    manager._check_tasks = AsyncMock()
+    manager._check_rooms = AsyncMock()
+    manager._check_backup = AsyncMock()
+    manager._check_message_cache = AsyncMock()
+    manager._check_database = AsyncMock()
+    manager._check_idlerpg_export = AsyncMock()
+    manager._check_watchdog = AsyncMock()
+
+    await manager.run_once()
+
+    manager._check_tasks.assert_awaited_once_with(snapshot)
+    manager._check_watchdog.assert_awaited_once_with(snapshot)
+    state = manager.runtime_state()
+    assert state["checks"] == 1
+    assert state["check_errors"]["outbox"] == "RuntimeError: outbox boom"
+    assert "outbox boom" in state["last_error"]

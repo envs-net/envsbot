@@ -2,7 +2,34 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .defaults import (
+        _LOWER_TO_PYTHON_CONFIG_KEY,
+        NORMALIZED_CONFIG_KEYS,
+        PYTHON_CONFIG_KEY_MAP,
+    )
+    from .display import (
+        get_config_diff_sections,
+        get_config_display_sections,
+        load_default_config_for_diff,
+    )
+    from .errors import ConfigError, exit_on_config_error
+    from .loader import get_runtime_config_path, load_config
+    from .logging_setup import setup_logging
+    from .runtime import (
+        STARTUP_ONLY_KEYS,
+        apply_runtime_config,
+        config_change_lines,
+        restart_reloadable_plugin_tasks,
+        startup_change_lines,
+    )
+    from .validation import (
+        collect_config_warnings,
+        validate_config,
+        validate_startup_config,
+    )
 
 from .errors import ConfigError as _ConfigError
 from .errors import exit_on_config_error as _exit_on_config_error

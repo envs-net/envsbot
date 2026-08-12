@@ -12,6 +12,10 @@ log = logging.getLogger(__name__)
 class MessageRoutingMixin:
     """Route MUC and private messages into command dispatch."""
 
+    message_cache: Any
+    presence: Any
+    handle_command: Any
+
     async def _cache_incoming_message(self, msg: Any, *, is_room: bool) -> None:
         """Cache an incoming message without breaking normal routing."""
         try:

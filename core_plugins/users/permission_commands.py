@@ -1,6 +1,6 @@
 """Commands for inspecting and managing user permissions and grants."""
 
-from utils.command import command, Role
+from utils.command import Role, command
 from utils.formatting import format_page, parse_page_args
 
 from .formatting import _write_user_audit, _yes_no
@@ -19,6 +19,7 @@ from .permissions import (
     set_user_plugin_grants,
 )
 from .roles import ASSIGNABLE_ROLES, GRANTABLE_PLUGINS, _command_prefix
+
 
 @command(
     "users roles",
@@ -169,6 +170,9 @@ async def users_grant(bot, sender, nick, args, msg, is_room):
     allowed, reason, context = await _validate_grant_change(bot, sender, args[0])
     if not allowed:
         bot.reply(msg, reason)
+        return
+    if context is None:
+        bot.reply(msg, "🔴 Could not resolve the target user.")
         return
 
     target = context["target"]

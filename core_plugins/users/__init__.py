@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .permissions import user_has_room_plugin_grant
 
 _PART_NAMES = ['roles', 'tracking', 'lookup', 'permissions', 'formatting', 'commands', 'permission_commands']
 _PARTS = [import_module(f'{__name__}.{name}') for name in _PART_NAMES]

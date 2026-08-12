@@ -1,13 +1,13 @@
 """Split module for core_plugins/users.py: tracking."""
 
 import asyncio
+from datetime import UTC, datetime
 from functools import partial
-from datetime import datetime, timezone
+
 from slixmpp import JID
 
 from .lookup import _parse_user_jid
 from .roles import MAX_ROOM_NICKS, log
-
 
 _DIRECT_USERS_KEY = "_direct_users"
 _ROOM_USERS_KEY = "_room_users"
@@ -239,7 +239,8 @@ async def on_private_message(bot, msg):
         return
 
     bound_jid = getattr(bot, "boundjid", None)
-    own_jid = _parse_user_jid(getattr(bound_jid, "bare", bound_jid))
+    own_value = getattr(bound_jid, "bare", bound_jid)
+    own_jid = _parse_user_jid(str(own_value)) if own_value else None
     if own_jid and real_jid == own_jid:
         return
 
@@ -362,7 +363,7 @@ async def update_last_seen(bot, real_jid: str):
     """
     Update last_seen timestamp.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         user = await bot.db.users.get(real_jid)

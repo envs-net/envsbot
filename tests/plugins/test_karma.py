@@ -339,3 +339,32 @@ def test_canonical_nick_is_exact_case_insensitive_and_trims_fallback(monkeypatch
     assert karma._canonical_nick("room@example", "  Unknown User  ") == "Unknown User"
     assert karma._canonical_nick("room@example", "   ") == ""
     assert calls == ["room@example"] * 4
+
+
+@pytest.mark.asyncio
+async def test_cleanup_room_state_removes_scores_and_throttle(fake_bot):
+    store = fake_bot.db.users.plugin.return_value
+    store.get_global = AsyncMock(
+        return_value={
+            "Room@Conf": {"Alice": 3, "Bob": 1},
+            "other@conf": {"Carol": 4},
+        }
+    )
+    store.set_global = AsyncMock()
+    karma.LAST_KARMA_ACTIONS.clear()
+    karma.LAST_KARMA_ACTIONS.update(
+        {
+            "room@conf:alice@example.org": {"bob": 1.0},
+            "room@conf:nick:alice": {"bob": 1.0},
+            "other@conf:carol@example.org": {"alice": 1.0},
+        }
+    )
+
+    summary = await karma.cleanup_room_state(fake_bot, "ROOM@CONF/nick")
+
+    assert summary == {"score_rooms": 1, "tracked_targets": 2, "throttle_entries": 2}
+    store.set_global.assert_awaited_once_with(
+        karma.KARMA_SCORES_KEY,
+        {"other@conf": {"Carol": 4}},
+    )
+    assert list(karma.LAST_KARMA_ACTIONS) == ["other@conf:carol@example.org"]
