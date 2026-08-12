@@ -18,6 +18,12 @@ python scripts/generate_config_sample.py --check
 # Repository-wide correctness-critical rules.
 ruff check $ruff_fix_args .
 
+# Keep unused imports out of normal modules and tests so local quality
+# catches the same dead-import class that CodeQL reports. Package
+# __init__.py files are excluded because several intentionally expose
+# type-only/dynamic compatibility facades.
+ruff check $ruff_fix_args --select F401 --extend-exclude '**/__init__.py' .
+
 # Apply modernisation/import/bugbear and type checks to every production
 # package. Passing directories keeps this gate future-proof: newly-added
 # runtime modules are checked automatically instead of depending on a curated

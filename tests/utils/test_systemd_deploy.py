@@ -4,7 +4,6 @@ import grp
 import os
 import pwd
 import sys
-from pathlib import Path
 
 from utils import systemd_deploy
 

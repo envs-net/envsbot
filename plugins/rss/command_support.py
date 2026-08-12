@@ -24,8 +24,8 @@ from .formatting import (
 )
 from .store import (
     _ensure_feed_numbers,
-    _feed_article_count,
     _feed_active_rooms,
+    _feed_article_count,
     _feed_is_globally_paused,
     _feed_number,
     _feed_paused_rooms,

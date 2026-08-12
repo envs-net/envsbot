@@ -201,6 +201,11 @@ def test_strict_quality_gates_cover_all_runtime_roots():
         in quality
     )
     assert "ruff check $ruff_fix_args --select I,UP,B $runtime_targets" in quality
+    assert (
+        "ruff check $ruff_fix_args --select F401 "
+        "--extend-exclude '**/__init__.py' ."
+        in quality
+    )
     assert "mypy $runtime_targets" in quality
     # Directory-based targets mean new production modules are included without
     # editing a hand-maintained file list.
@@ -214,6 +219,7 @@ def test_quality_fix_flag_is_forwarded_to_both_ruff_passes():
     assert 'ruff_fix_args="--fix"' in quality
     assert "ruff check $ruff_fix_args ." in quality
     assert "ruff check $ruff_fix_args --select I,UP,B" in quality
+    assert "ruff check $ruff_fix_args --select F401" in quality
     assert 'echo "usage: $0 [--fix]" >&2' in quality
 
 

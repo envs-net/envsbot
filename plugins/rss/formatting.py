@@ -24,8 +24,8 @@ from .fetch import (
 )
 from .store import (
     _ensure_feed_numbers,
-    _feed_article_count,
     _feed_active_rooms,
+    _feed_article_count,
     _feed_number,
     _feed_status_label,
     _format_rss_timestamp,
