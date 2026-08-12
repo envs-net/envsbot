@@ -19,12 +19,15 @@ from .formatting import (
     _SAMPLE_TEMPLATE_CONTEXT,
     DEFAULT_RSS_TEMPLATE,
     _build_rss_message_from_context,
+    _build_rss_template_context,
     _normalize_rss_template_input,
     _rss_template_usage,
     _rss_template_variables_text,
     _validate_rss_template,
 )
 from .store import (
+    _feed_article_count,
+    _feed_number,
     _normalize_room_jid,
     get_default_template,
     get_effective_template,
@@ -139,12 +142,21 @@ async def _template_feed_for_room(
 
 def _sample_template_context_for_feed(feed, feed_url: str) -> dict[str, str]:
     """Return sample template context enriched with feed metadata."""
-    context = dict(_SAMPLE_TEMPLATE_CONTEXT)
-    if isinstance(feed, dict):
-        context["feed_title"] = str(feed.get("title") or context["feed_title"])
-        context["feed_link"] = str(feed.get("link") or context["feed_link"])
-    context["feed_url"] = str(feed_url or context["feed_url"])
-    return context
+    sample = _SAMPLE_TEMPLATE_CONTEXT
+    feed_data = feed if isinstance(feed, dict) else {}
+    article_count = _feed_article_count(feed_data)
+    return _build_rss_template_context(
+        feed_title=str(feed_data.get("title") or sample["feed_title"]),
+        entry_title=sample["title"],
+        entry_desc=sample["summary"],
+        entry_link=sample["link"],
+        feed_url=str(feed_url or sample["feed_url"]),
+        feed_link=str(feed_data.get("link") or sample["feed_link"]),
+        feed_no=_feed_number(feed_data) or sample["feed_no"],
+        article_no=article_count or sample["article_no"],
+        entry_id=sample["id"],
+        entry_date=sample["date"],
+    )
 
 def _sample_rss_template_preview(
     template: str,

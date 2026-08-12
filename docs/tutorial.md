@@ -219,6 +219,7 @@ Common maintenance commands:
 ,rss reset https://example.org/feed.rss
 ,rss retry all
 ,rss reset all
+,rss delete 12
 ,rss delete https://example.org/feed.rss room@conference.example.org
 ,rss del https://example.org/feed.rss room@conference.example.org
 ,rss remove https://example.org/feed.rss room@conference.example.org
@@ -227,7 +228,9 @@ Common maintenance commands:
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
-Global moderators can set a persistent default RSS template for all rooms. Room owners/admins can customize RSS post formatting per room and, optionally, for a specific feed in that room. The priority is feed-specific template → room template → global default → built-in default. Supported variables include `$feed_title`, `$title`, `$summary`, `$summary_line`, `$link`, `$feed_url`, `$feed_link`, `$id`, and `$date`. Use `\n` for a newline and `$$` for a literal dollar sign.
+RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output show the feed number and EnvsBot's latest local article number; `,rss delete 12` may be used instead of repeating the feed URL. A number becomes available again after the feed itself is no longer used by any room or direct subscriber.
+
+Global moderators can set a persistent default RSS template for all rooms. Room owners/admins can customize RSS post formatting per room and, optionally, for a specific feed in that room. The priority is feed-specific template → room template → global default → built-in default. Supported variables include `$feed_title`, `$title`, `$summary`, `$summary_line`, `$link`, `$feed_url`, `$feed_link`, `$feed_no`, `$article_no`, `$feed_ref`, `$feed_ref_line`, `$id`, and `$date`. Use `\n` for a newline and `$$` for a literal dollar sign.
 
 ```text
 ,rss template

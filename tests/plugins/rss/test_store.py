@@ -53,6 +53,51 @@ def test_rss_now_is_integer_timestamp(monkeypatch):
     assert rss._now() == 1234
 
 
+def test_feed_numbers_keep_existing_values_and_fill_smallest_free_slots():
+    feeds = {
+        "https://example.org/two.xml": {"feed_no": 2},
+        "https://example.org/legacy.xml": {},
+        "https://example.org/duplicate.xml": {"feed_no": 2},
+        "https://example.org/four.xml": {"feed_no": 4},
+    }
+
+    assert rss._ensure_feed_numbers(feeds) is True
+    assert feeds["https://example.org/two.xml"]["feed_no"] == 2
+    assert feeds["https://example.org/legacy.xml"]["feed_no"] == 1
+    assert feeds["https://example.org/duplicate.xml"]["feed_no"] == 3
+    assert feeds["https://example.org/four.xml"]["feed_no"] == 4
+    assert rss._ensure_feed_numbers(feeds) is False
+
+
+def test_next_feed_number_reuses_number_after_feed_record_is_removed():
+    feeds = {
+        "https://example.org/one.xml": {"feed_no": 1},
+        "https://example.org/two.xml": {"feed_no": 2},
+        "https://example.org/three.xml": {"feed_no": 3},
+    }
+
+    feeds.pop("https://example.org/two.xml")
+
+    assert rss._next_feed_number(feeds) == 2
+    assert rss._feed_url_by_number(feeds, 1) == "https://example.org/one.xml"
+    assert rss._feed_url_by_number(feeds, 2) is None
+
+
+@pytest.mark.asyncio
+async def test_get_feeds_backfills_and_persists_legacy_feed_numbers(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    store[rss.RSS_KEY] = {
+        "https://example.org/a.xml": {"rooms": ["room@conf"]},
+        "https://example.org/b.xml": {"rooms": ["room@conf"]},
+    }
+
+    feeds = await rss.get_feeds(store)
+
+    assert [feed["feed_no"] for feed in feeds.values()] == [1, 2]
+    assert store[rss.RSS_KEY] == feeds
+
+
 @pytest.mark.asyncio
 async def test_get_rss_store_uses_plugin_store(make_bot):
     marker = object()

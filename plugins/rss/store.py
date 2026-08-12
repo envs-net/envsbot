@@ -20,6 +20,75 @@ log = logging.getLogger(__name__)
 def _now() -> int:
     return int(time.time())
 
+def _feed_number(feed: dict) -> int | None:
+    """Return a valid persisted human-facing feed number."""
+    try:
+        value = int(feed.get("feed_no", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+def _next_feed_number(feeds: dict) -> int:
+    """Return the smallest currently unused positive feed number."""
+    used = {
+        number
+        for feed in feeds.values()
+        if isinstance(feed, dict)
+        for number in [_feed_number(feed)]
+        if number is not None
+    }
+    number = 1
+    while number in used:
+        number += 1
+    return number
+
+def _ensure_feed_numbers(feeds: dict) -> bool:
+    """Backfill missing/invalid/duplicate feed numbers in-place.
+
+    Existing unique positive numbers are kept stable.  Legacy feeds and any
+    accidental duplicates receive the smallest free positive number, so a
+    number becomes reusable once the corresponding feed record is removed.
+    """
+    changed = False
+    seen: set[int] = set()
+    needs_number: list[dict] = []
+
+    for feed in feeds.values():
+        if not isinstance(feed, dict):
+            continue
+        number = _feed_number(feed)
+        if number is not None and number not in seen:
+            seen.add(number)
+            continue
+        needs_number.append(feed)
+
+    for feed in needs_number:
+        replacement = 1
+        while replacement in seen:
+            replacement += 1
+        if feed.get("feed_no") != replacement:
+            feed["feed_no"] = replacement
+            changed = True
+        seen.add(replacement)
+
+    return changed
+
+def _feed_url_by_number(feeds: dict, feed_no: int) -> str | None:
+    """Resolve a persisted feed number to its subscribed URL."""
+    if feed_no <= 0:
+        return None
+    for url, feed in feeds.items():
+        if isinstance(feed, dict) and _feed_number(feed) == feed_no:
+            return str(url)
+    return None
+
+def _feed_article_count(feed: dict) -> int:
+    """Return the number of RSS entries successfully posted while tracked."""
+    try:
+        return max(0, int(feed.get("posted_count", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
 def _normalize_room_jid(room: str) -> str:
     return str(room or "").strip().lower()
 def _normalize_template_room_jid(room: str) -> str:
@@ -282,7 +351,14 @@ def _retry_delay(_period, error_count):
     return min(int(delay), MAX_BACKOFF_TIME)
 async def get_feeds(store):
     feeds = await store.get_global(RSS_KEY, default={})
-    return feeds if isinstance(feeds, dict) else {}
+    if not isinstance(feeds, dict):
+        return {}
+    if _ensure_feed_numbers(feeds):
+        # One-time/lazy compatibility migration for RSS state created before
+        # feed numbers existed.  Keeping it here also repairs malformed manual
+        # edits before commands or workers consume the state.
+        await store.set_global(RSS_KEY, feeds)
+    return feeds
 async def save_feeds(store, feeds):
     await store.set_global(RSS_KEY, feeds)
 async def _load_feed(store, url):

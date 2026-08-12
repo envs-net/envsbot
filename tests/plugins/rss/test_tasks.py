@@ -511,6 +511,7 @@ async def test_cleanup_room_state_removes_room_subscriptions(monkeypatch, make_b
     assert bot.plugin_store[rss.RSS_KEY][keep_url]["rooms"] == ["other@conf"]
     assert drop_url not in bot.plugin_store[rss.RSS_KEY]
     assert bot.plugin_store[rss.RSS_KEY][direct_url] == {
+        "feed_no": 3,
         "rooms": [],
         "users": {"alice@example.org": {"role": "trusted"}},
     }

@@ -23,8 +23,11 @@ from .formatting import (
     _normalize_direct_user_jid,
 )
 from .store import (
+    _ensure_feed_numbers,
+    _feed_article_count,
     _feed_active_rooms,
     _feed_is_globally_paused,
+    _feed_number,
     _feed_paused_rooms,
     _feed_status_label,
     _format_rss_timestamp,
@@ -134,10 +137,11 @@ def _compact_subscription_lines(
     owner: str | None = None,
 ) -> list[str]:
     """Return the compact subscription overview, optionally for one section."""
-    room_feeds: dict[str, list[tuple[str, str]]] = {}
-    mod_lines: list[str] = []
-    trusted_lines: list[str] = []
-    own_lines: list[str] = []
+    _ensure_feed_numbers(feeds)
+    room_feeds: dict[str, list[tuple[int, str, str]]] = {}
+    mod_lines: list[tuple[int, str]] = []
+    trusted_lines: list[tuple[int, str]] = []
+    own_lines: list[tuple[int, str]] = []
     room_subscription_count = 0
     owner_key = _normalize_direct_user_jid(owner) if owner else None
 
@@ -145,55 +149,68 @@ def _compact_subscription_lines(
         title = str(feed.get("title") or url)
         status = _feed_status_label(feed)
         period = feed.get("period", "?")
-        room_line = f"  • {title} | {status} | {period}s | {url}"
+        feed_no = _feed_number(feed) or 10**9
+        feed_no_text = str(_feed_number(feed) or "?")
+        article_count = _feed_article_count(feed)
+        article_text = f"article #{article_count}" if article_count else "no articles yet"
+        room_line = (
+            f"  • #{feed_no_text} · {title} | {article_text} | "
+            f"{status} | {period}s | {url}"
+        )
 
         for room in feed.get("rooms", []):
             room_name = str(room)
-            room_feeds.setdefault(room_name, []).append((title, room_line))
+            room_feeds.setdefault(room_name, []).append((feed_no, title, room_line))
             room_subscription_count += 1
 
         for jid, meta in sorted(_direct_subscriptions(feed).items()):
             role = str((meta or {}).get("role") or "trusted").lower()
-            line = f"• {title} | {status} | {period}s | {jid} | {url}"
+            line = (
+                f"• #{feed_no_text} · {title} | {article_text} | {status} | "
+                f"{period}s | {jid} | {url}"
+            )
             if owner_key and _normalize_direct_user_jid(jid) == owner_key:
-                own_lines.append(line)
+                own_lines.append((feed_no, line))
             target = (
                 mod_lines
                 if role in {"owner", "superadmin", "admin", "moderator"}
                 else trusted_lines
             )
-            target.append(line)
+            target.append((feed_no, line))
 
     room_lines: list[str] = []
     for room in sorted(room_feeds, key=str.casefold):
         room_lines.append(f"• {room}")
         room_lines.extend(
             line
-            for _title, line in sorted(
+            for _feed_no, _title, line in sorted(
                 room_feeds[room],
-                key=lambda item: (item[0].casefold(), item[1].casefold()),
+                key=lambda item: (item[0], item[1].casefold(), item[2].casefold()),
             )
         )
 
-    mod_lines.sort(key=str.casefold)
-    trusted_lines.sort(key=str.casefold)
-    own_lines.sort(key=str.casefold)
+    mod_lines.sort(key=lambda item: (item[0], item[1].casefold()))
+    trusted_lines.sort(key=lambda item: (item[0], item[1].casefold()))
+    own_lines.sort(key=lambda item: (item[0], item[1].casefold()))
+    mod_text = [line for _feed_no, line in mod_lines]
+    trusted_text = [line for _feed_no, line in trusted_lines]
+    own_text = [line for _feed_no, line in own_lines]
     sections = {
         "rooms": [
             f"Room feeds ({room_subscription_count}):",
             *(room_lines or ["• none"]),
         ],
         "mods": [
-            f"Moderator feeds ({len(mod_lines)}):",
-            *(mod_lines or ["• none"]),
+            f"Moderator feeds ({len(mod_text)}):",
+            *(mod_text or ["• none"]),
         ],
         "trusted": [
-            f"Trusted user feeds ({len(trusted_lines)}):",
-            *(trusted_lines or ["• none"]),
+            f"Trusted user feeds ({len(trusted_text)}):",
+            *(trusted_text or ["• none"]),
         ],
         "own": [
-            f"Own direct feeds ({len(own_lines)}):",
-            *(own_lines or ["• none"]),
+            f"Own direct feeds ({len(own_text)}):",
+            *(own_text or ["• none"]),
         ],
     }
     if section:
@@ -219,7 +236,17 @@ def _rss_list_usage(bot=None) -> str:
         "[own|rooms|mods|trusted|room_jid] [page|all|last]"
     )
 
-async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=""):
+async def burst_recent_entries(
+    bot,
+    feed,
+    room,
+    burst_num,
+    store=None,
+    feed_url="",
+    *,
+    feed_no: int | str = "",
+    article_start: int | None = None,
+):
     """
     Burst the last N entries of the given feed to the room.
     """
@@ -229,7 +256,7 @@ async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=
     entries = list(reversed(entries))
     last_id = None
 
-    for entry in entries:
+    for index, entry in enumerate(entries):
         entry_link = _extract_entry_link(entry)
         entry_id = _get_entry_id(entry)
 
@@ -249,6 +276,8 @@ async def burst_recent_entries(bot, feed, room, burst_num, store=None, feed_url=
             entry_link=entry_link,
             feed_url=feed_url or feed_link,
             feed_link=feed_link,
+            feed_no=feed_no,
+            article_no=(article_start + index) if article_start is not None else "",
             entry_id=entry_id,
             entry_date=_entry_date(entry),
         )
@@ -281,9 +310,16 @@ def _looks_like_feed_arg(value) -> bool:
 
 def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None = None) -> list[str]:
     """Return concise RSS health lines for all feeds."""
+    _ensure_feed_numbers(feeds)
     now = _now() if now is None else int(now)
     rows = []
-    for url, feed in sorted(feeds.items()):
+    for url, feed in sorted(
+        feeds.items(),
+        key=lambda item: (
+            _feed_number(item[1]) if isinstance(item[1], dict) else 10**9,
+            str(item[0]).casefold(),
+        ),
+    ):
         if not isinstance(feed, dict):
             continue
         error_count = int(feed.get("error_count", 0) or 0)
@@ -305,12 +341,16 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             "paused": "⏸️ paused",
             "paused for all rooms": "⏸️ paused for all rooms",
         }.get(status, status)
+        article_count = _feed_article_count(feed)
+        article_text = f"#{article_count}" if article_count else "not posted yet"
         rows.append(
             " • "
-            f"{status_display}: {feed.get('title') or url} — {url}\n"
+            f"#{_feed_number(feed) or '?'} · {status_display}: "
+            f"{feed.get('title') or url} — {url}\n"
             f"   rooms: {len(active_rooms)}/{total_rooms} active"
             f"{f' · paused: {len(paused_rooms)}' if paused_rooms else ''}; "
-            f"direct users: {direct_users}; errors: {error_count}; "
+            f"direct users: {direct_users}; article: {article_text}; "
+            f"errors: {error_count}; "
             f"last success: {_format_rss_timestamp(feed.get('last_success'))}; "
             f"last post: {_format_rss_timestamp(feed.get('last_posted'))}; "
             f"last error: {last_error}"

@@ -34,6 +34,7 @@ from .formatting import (
 )
 from .store import (
     _feed_paused_rooms,
+    _feed_url_by_number,
     _normalize_room_jid,
     _normalize_subscription_room,
     get_feeds,
@@ -203,10 +204,20 @@ async def _rss_handle_delete(bot, sender_jid, args, msg, is_room, store, room):
         bot.reply(
             msg,
             f"Usage: {_command_prefix(bot)}rss delete "
-            "<feedurl> [room|jid|all] | "
+            "<feedurl|feed_no> [room|jid|all] | "
             f"{_command_prefix(bot)}rss delete all <user_jid>",
         )
         return
+
+    feed_selector = str(args[1]).strip()
+    feed_url = feed_selector
+    if feed_selector.isdecimal():
+        feeds = await get_feeds(store)
+        resolved = _feed_url_by_number(feeds, int(feed_selector))
+        if not resolved:
+            bot.reply(msg, f"Feed #{feed_selector} not found.")
+            return
+        feed_url = resolved
 
     delete_target = args[2] if len(args) == 3 else None
     target_room = None
@@ -217,7 +228,7 @@ async def _rss_handle_delete(bot, sender_jid, args, msg, is_room, store, room):
 
     direct_target = None
     if delete_target and str(delete_target).strip().lower() != "all":
-        current_feed = (await get_feeds(store)).get(_normalize_url(args[1]), {})
+        current_feed = (await get_feeds(store)).get(_normalize_url(feed_url), {})
         candidate = _normalize_room_jid(delete_target)
         if candidate in _direct_subscriptions(current_feed):
             direct_target = candidate
@@ -227,7 +238,7 @@ async def _rss_handle_delete(bot, sender_jid, args, msg, is_room, store, room):
         if direct_target != _normalize_room_jid(sender_jid) and role > Role.ADMIN:
             bot.reply(msg, "🔴 Only owner, superadmin, or admin can remove another user's direct RSS feed.")
             return
-        await _delete_direct_feed_target(bot, msg, args[1], store, direct_target)
+        await _delete_direct_feed_target(bot, msg, feed_url, store, direct_target)
         return
     if delete_target and str(delete_target).strip().lower() == "all":
         if not await _sender_can_manage_rss_globally(bot, sender_jid):
@@ -246,22 +257,26 @@ async def _rss_handle_delete(bot, sender_jid, args, msg, is_room, store, room):
         if role > Role.TRUSTED:
             bot.reply(msg, "🔴 Direct RSS subscriptions require trusted role or higher.")
             return
-        await _delete_direct_feed(bot, msg, args[1], store, sender_jid, allow_other=False)
+        await _delete_direct_feed(bot, msg, feed_url, store, sender_jid, allow_other=False)
         return
 
     if not target_room and not delete_target and not room and msg.get("type") in ("chat", "normal"):
         role = await _sender_role(bot, sender_jid)
         if role <= Role.ADMIN:
-            await _delete_direct_feed(bot, msg, args[1], store, sender_jid, allow_other=True)
+            await _delete_direct_feed(bot, msg, feed_url, store, sender_jid, allow_other=True)
             return
 
-    await _del_feed(bot, msg, args[1], store, room, delete_target)
+    await _del_feed(bot, msg, feed_url, store, room, delete_target)
     await audit_event(
         bot,
         "rss_feed_delete_requested",
         actor=sender_jid,
         target=target_room or delete_target or room or "rss",
-        details={"url": _normalize_url(args[1]), "target": delete_target},
+        details={
+            "url": _normalize_url(feed_url),
+            "feed_selector": feed_selector,
+            "target": delete_target,
+        },
     )
     return
 
@@ -627,14 +642,18 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         ),
         help_subcommand(
             "delete",
-            "{prefix}rss delete <feed_url> [room_jid|jid|all] | "
+            "{prefix}rss delete <feed_url|feed_no> [room_jid|jid|all] | "
             "{prefix}rss delete all <user_jid>",
-            "Remove one subscription, or all direct subscriptions for a user.",
+            "Remove one subscription by URL/feed number, or all direct subscriptions for a user.",
             aliases=("del", "remove", "rm"),
             examples=[
                 help_example(
                     "{prefix}rss delete https://example.org/feed.rss",
                     "Remove the feed from the current room or your direct subscriptions.",
+                ),
+                help_example(
+                    "{prefix}rss delete 12",
+                    "Remove feed #12 from the current room or your direct subscriptions.",
                 ),
                 help_example(
                     "{prefix}rss delete all user@example.org",
@@ -741,6 +760,7 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         "{prefix}rss template set https://example.org/feed.rss 📰 $title\n$link",
         "{prefix}rss template test [$feed_title] $title",
         "{prefix}rss template unset",
+        "{prefix}rss delete 12",
         "{prefix}rss delete https://example.org/feed.rss",
         "{prefix}rss remove https://example.org/feed.rss old@conference.example.org",
     ],
@@ -756,7 +776,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
 
     Usage:
     {prefix}rss add <feedurl> [room_jid]
-    {prefix}rss delete|remove|del|rm <feedurl> [room_jid|all]
+    {prefix}rss delete|remove|del|rm <feedurl|feed_no> [room_jid|all]
     {prefix}rss delete|remove|del|rm all <user_jid>
     {prefix}rss retry|reset <feedurl>|all [room_jid]
     {prefix}rss pause|resume <feedurl> [room_jid|all]

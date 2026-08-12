@@ -26,10 +26,18 @@ RSS posts can use a global default, a destination-wide template or a feed-specif
 - `$link` - normalized link to the current entry
 - `$feed_url` - subscribed RSS/Atom URL
 - `$feed_link` - website URL advertised by the feed
+- `$feed_no` - stable human-facing feed number assigned by EnvsBot
+- `$article_no` - sequential article number assigned by EnvsBot to successfully posted entries
+- `$feed_ref` - formatted `Feed #N · Article #N · <feed_url>` reference used by the built-in template
+- `$feed_ref_line` - `$feed_ref` prefixed with a newline, or empty when no reference is available
 - `$id` - entry identifier
 - `$date` - published/updated date provided by the feed
 
 Use `$$` when a literal dollar sign is needed.
+
+Feed numbers are global to the RSS store and stay stable while the feed exists. When a feed is removed completely, its number becomes available again and the smallest free number is assigned to a newly added feed. Removing only one room or direct subscriber does not free the number while another destination still uses that feed.
+
+`$article_no` is EnvsBot's local successful-post sequence, not a publisher-provided lifetime article ID (RSS/Atom does not expose such a counter reliably). New room feeds count their initial burst and continue from there; existing/legacy feeds use the persisted posted-entry counter where available.
 
 ### Newlines and readable spacing
 
@@ -40,6 +48,8 @@ A compact multiline template:
 ```text
 ,rss template set 🌐 $feed_link\n📰 $title\n📝 $summary\n🔗 $id – 📅 $date\n\n
 ```
+
+The built-in default template appends the `$feed_ref_line` reference, so normal RSS posts show the feed number, current EnvsBot article number and subscribed feed URL without requiring a custom template. Custom templates remain unchanged unless they use one of the new variables explicitly.
 
 The stored and rendered message is equivalent to:
 
@@ -147,6 +157,8 @@ Owner, superadmin, and admin users may also remove every direct RSS subscription
 In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
 Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. Trusted users continue to see only their own direct subscriptions with `,rss list`. Any trusted user or global moderator may use `,rss list own [page|all|last]` in a normal 1:1 chat to show only their own personal subscriptions.
 
+RSS list and health output include the feed number and latest local article number. A visible number can be used instead of the URL when deleting a feed, for example `,rss delete 12`. URL-based deletion and all existing aliases remain supported.
+
 ## Fetch retries and startup behavior
 
 Feed workers retain their current cursor when an HTTP request fails, so a temporary timeout does not lose entries. The first retry uses `RSS_RETRY_INITIAL_DELAY`, followed by exponential backoff up to `RSS_MAX_BACKOFF_TIME`.
@@ -179,11 +191,12 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
     - `,rss list own` — Show only your own personal direct subscriptions.
     - `,rss list trusted` — Show trusted-user direct subscriptions permitted for your role.
 
-- `,rss delete <feed_url> [room_jid|jid|all] | ,rss delete all <user_jid>`
-  - Description: Remove one subscription, or all direct subscriptions for a user.
+- `,rss delete <feed_url|feed_no> [room_jid|jid|all] | ,rss delete all <user_jid>`
+  - Description: Remove one subscription by URL/feed number, or all direct subscriptions for a user.
   - Aliases: `,rss del`, `,rss remove`, `,rss rm`
   - Examples:
     - `,rss delete https://example.org/feed.rss` — Remove the feed from the current room or your direct subscriptions.
+    - `,rss delete 12` — Remove feed #12 from the current room or your direct subscriptions.
     - `,rss delete all user@example.org` — As an admin, remove every direct RSS subscription for one user.
 
 - `,rss retry <feed_url|all> [room_jid]`

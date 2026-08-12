@@ -23,7 +23,10 @@ from .fetch import (
     html_to_text_with_links,
 )
 from .store import (
+    _ensure_feed_numbers,
+    _feed_article_count,
     _feed_active_rooms,
+    _feed_number,
     _feed_status_label,
     _format_rss_timestamp,
     _normalize_room_jid,
@@ -44,6 +47,10 @@ _SAMPLE_TEMPLATE_CONTEXT = {
     "link": "https://example.org/article",
     "feed_url": "https://example.org/feed.xml",
     "feed_link": "https://example.org/",
+    "feed_no": "12",
+    "article_no": "34",
+    "feed_ref": "Feed #12 · Article #34 · https://example.org/feed.xml",
+    "feed_ref_line": "\nFeed #12 · Article #34 · https://example.org/feed.xml",
     "id": "https://example.org/article",
     "date": "2026-07-07 12:00",
 }
@@ -107,6 +114,8 @@ def _build_rss_template_context(
     entry_link: str,
     feed_url: str = "",
     feed_link: str = "",
+    feed_no: int | str = "",
+    article_no: int | str = "",
     entry_id: str = "",
     entry_date: str = "",
 ) -> dict[str, str]:
@@ -114,6 +123,16 @@ def _build_rss_template_context(
     include_summary = _should_include_description(entry_title, entry_desc)
     summary = entry_desc if include_summary else ""
     summary_line = f" - {entry_desc}" if include_summary else ""
+    feed_no_text = str(feed_no or "").strip()
+    article_no_text = str(article_no or "").strip()
+    reference_parts = []
+    if feed_no_text:
+        reference_parts.append(f"Feed #{feed_no_text}")
+    if article_no_text:
+        reference_parts.append(f"Article #{article_no_text}")
+    if feed_url:
+        reference_parts.append(str(feed_url))
+    feed_ref = " · ".join(reference_parts)
     return {
         "feed_title": str(feed_title or feed_url or "RSS"),
         "title": str(entry_title or "No title"),
@@ -122,6 +141,10 @@ def _build_rss_template_context(
         "link": str(entry_link or ""),
         "feed_url": str(feed_url or ""),
         "feed_link": str(feed_link or ""),
+        "feed_no": feed_no_text,
+        "article_no": article_no_text,
+        "feed_ref": feed_ref,
+        "feed_ref_line": f"\n{feed_ref}" if feed_ref else "",
         "id": str(entry_id or ""),
         "date": str(entry_date or ""),
     }
@@ -220,6 +243,8 @@ async def _post_new_entries(bot, store, url, feed_title,
             entry_link=entry_link,
             feed_url=url,
             feed_link=feed_link,
+            feed_no=_feed_number(current_feed) or "",
+            article_no=_feed_article_count(current_feed) + 1,
             entry_id=entry_id,
             entry_date=_entry_date(entry),
         )
@@ -461,8 +486,12 @@ def _format_feed_list_item(feed_url: str, data: dict, now=None) -> str:
     status = _format_retry_status(data, now=now)
     paused_rooms = data.get("paused_rooms") if isinstance(data, dict) else []
     paused_text = f"\n Paused rooms: {', '.join(paused_rooms)}" if paused_rooms else ""
+    feed_no = _feed_number(data)
+    article_count = _feed_article_count(data)
+    article_text = f"#{article_count}" if article_count else "not posted yet"
     return (
-        f"- {feed_url}\n Title: {data.get('title', feed_url)}\n"
+        f"- Feed #{feed_no or '?'} · {feed_url}\n Title: {data.get('title', feed_url)}\n"
+        f" Article: {article_text}\n"
         f" Status: {_feed_status_label(data, now=now)}\n"
         f" Period: {data.get('period', '?')}s\n"
         f" Rooms: {', '.join(data.get('rooms', []))}\n"
@@ -482,7 +511,11 @@ def _filter_feeds_for_room(feeds: dict, room: str) -> dict:
     }
 def _format_feed_list(feeds: dict, args, bot=None, now=None) -> list[str] | None:
     """Return paginated ``rss list`` output lines, or ``None`` on bad args."""
-    items = list(feeds.items())
+    _ensure_feed_numbers(feeds)
+    items = sorted(
+        feeds.items(),
+        key=lambda item: (_feed_number(item[1]) or 10**9, str(item[0]).casefold()),
+    )
     page_size = RSS_LIST_PAGE_SIZE
     parsed = _rss_list_page(args, len(items), page_size)
 

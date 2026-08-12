@@ -141,12 +141,20 @@ async def test_rss_check_loop_posts_new_entries_and_flushes_last_id(
     assert bot.sent_messages == [
         {
             "mto": room,
-            "mbody": "[RSS] (Feed) ET2 - ED2\nhttp://f.com/a2",
+            "mbody": (
+                "[RSS] (Feed) ET2 - ED2\n"
+                "http://f.com/a2\n"
+                "Feed #1 · Article #1 · http://f.com/rss"
+            ),
             "mtype": "groupchat",
         },
         {
             "mto": "alice@example.org",
-            "mbody": "[RSS] (Feed) ET2 - ED2\nhttp://f.com/a2",
+            "mbody": (
+                "[RSS] (Feed) ET2 - ED2\n"
+                "http://f.com/a2\n"
+                "Feed #1 · Article #1 · http://f.com/rss"
+            ),
             "mtype": "chat",
         },
     ]
@@ -184,6 +192,27 @@ def test_rss_default_and_custom_template_rendering():
     )
     assert context["summary"] == ""
     assert context["summary_line"] == ""
+
+    numbered = rss._build_rss_template_context(
+        feed_title="Feed",
+        entry_title="Entry",
+        entry_desc="",
+        entry_link="https://example.org/a",
+        feed_url="https://example.org/feed.xml",
+        feed_link="https://example.org/",
+        feed_no=12,
+        article_no=34,
+    )
+    assert numbered["feed_no"] == "12"
+    assert numbered["article_no"] == "34"
+    assert numbered["feed_ref"] == (
+        "Feed #12 · Article #34 · https://example.org/feed.xml"
+    )
+    assert rss._build_rss_message_from_context(numbered) == (
+        "[RSS] (Feed) Entry\n"
+        "https://example.org/a\n"
+        "Feed #12 · Article #34 · https://example.org/feed.xml"
+    )
 
 
 def test_rss_template_validation_and_input_normalization(monkeypatch):
@@ -305,6 +334,10 @@ def test_rss_template_helpers_cover_prefix_variables_and_context(monkeypatch):
         "link": "",
         "feed_url": "https://example.org/feed.xml",
         "feed_link": "",
+        "feed_no": "",
+        "article_no": "",
+        "feed_ref": "https://example.org/feed.xml",
+        "feed_ref_line": "\nhttps://example.org/feed.xml",
         "id": "",
         "date": "",
     }
@@ -601,7 +634,11 @@ async def test_post_new_entries_delivers_direct_feed_and_updates_cursor(make_bot
     assert bot.sent_messages == [
         {
             "mto": "alice@example.org",
-            "mbody": "[RSS] (Direct Feed) New entry\nhttps://example.org/new",
+            "mbody": (
+                "[RSS] (Direct Feed) New entry\n"
+                "https://example.org/new\n"
+                "Feed #1 · Article #1 · https://example.org/direct.xml"
+            ),
             "mtype": "chat",
         }
     ]
@@ -846,6 +883,8 @@ async def test_post_new_entries_falls_back_when_direct_template_lookup_fails(
     )
 
     assert bot.sent_messages[0]["mbody"] == (
-        "[RSS] (Direct Feed) New entry\nhttps://example.org/new"
+        "[RSS] (Direct Feed) New entry\n"
+        "https://example.org/new\n"
+        "Feed #1 · Article #1 · https://example.org/direct.xml"
     )
     assert store[rss.RSS_KEY][url]["last_id"] == "new-entry"

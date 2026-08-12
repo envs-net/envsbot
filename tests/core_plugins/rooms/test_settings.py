@@ -217,8 +217,8 @@ async def test_rooms_delete_cleans_room_plugin_state(fake_bot, fake_msg, monkeyp
         await rooms.rooms_delete(fake_bot, "jid", "nick", [room_jid], fake_msg, False)
 
     assert stores["rss"]["RSS"] == {
-        feed_keep: {"rooms": [other_room], "period": 42},
-        "https://example.org/other.xml": {"rooms": [other_room]},
+        feed_keep: {"feed_no": 1, "rooms": [other_room], "period": 42},
+        "https://example.org/other.xml": {"feed_no": 3, "rooms": [other_room]},
     }
     cancel_feed_task.assert_called_once_with(fake_bot, feed_drop)
 

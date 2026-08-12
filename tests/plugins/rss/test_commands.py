@@ -71,6 +71,8 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
                           msg, True)
     feeds = store.get(rss.RSS_KEY, {})
     assert fake_feed_link in feeds
+    assert feeds[fake_feed_link]["feed_no"] == 1
+    assert feeds[fake_feed_link]["posted_count"] == 1
 
     # Add again to test 'already in feed' and room-join path
     bot.replies.clear()
@@ -86,6 +88,8 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["list"], msg, True)
     assert any("Watched RSS feeds" in _reply_text(reply) for reply in bot.replies)
+    assert any("Feed #1" in _reply_text(reply) for reply in bot.replies)
+    assert any("Article: #1" in _reply_text(reply) for reply in bot.replies)
 
     # Delete (should remove the only room, triggers feed delete in dummy)
     bot.replies.clear()
@@ -118,6 +122,30 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     bot.replies.clear()
     await rss.rss_command(bot, "jid1", "nick1", ["list"], msg, True)
     assert any("No feeds configured" in _reply_text(reply) for reply in bot.replies)
+
+
+@pytest.mark.asyncio
+async def test_rss_delete_accepts_feed_number(monkeypatch, make_bot):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    url_one = "https://example.org/one.xml"
+    url_two = "https://example.org/two.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url_one: {"feed_no": 1, "rooms": [room], "period": 120},
+        url_two: {"feed_no": 2, "rooms": [room], "period": 120},
+    }
+    monkeypatch.setattr(rss_subscriptions, "_cancel_feed_task", AsyncMock())
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+
+    await rss.rss_command(bot, "admin@example.org", "admin", ["delete", "1"], msg, True)
+
+    assert url_one not in bot.plugin_store[rss.RSS_KEY]
+    assert url_two in bot.plugin_store[rss.RSS_KEY]
+    assert rss._next_feed_number(bot.plugin_store[rss.RSS_KEY]) == 1
+
+    bot.replies.clear()
+    await rss.rss_command(bot, "admin@example.org", "admin", ["delete", "99"], msg, True)
+    assert bot.replies[-1][1] == "Feed #99 not found."
 
     # Unknown subcommand
     bot.replies.clear()
@@ -838,9 +866,18 @@ def test_rss_template_scope_and_sample_helpers(make_bot):
 
     assert rss._sample_template_context_for_feed(None, url)["feed_url"] == url
     assert rss._sample_template_context_for_feed(
-        {"title": "Real Feed", "link": "https://example.org/"},
+        {
+            "title": "Real Feed",
+            "link": "https://example.org/",
+            "feed_no": 7,
+            "posted_count": 9,
+        },
         url,
     )["feed_title"] == "Real Feed"
+    assert rss._sample_template_context_for_feed(
+        {"feed_no": 7, "posted_count": 9},
+        url,
+    )["feed_ref"] == f"Feed #7 · Article #9 · {url}"
     assert rss._sample_rss_template_preview("$feed_title $feed_url", None, url) == (
         f"Example Feed {url}"
     )
@@ -1775,10 +1812,10 @@ def test_compact_subscription_lines_groups_room_feeds_by_room():
     assert lines[:6] == [
         "Room feeds (3):",
         "• a-room@conference.example.org",
-        "  • Alpha | ok | 600s | https://example.org/a.xml",
-        "  • Zulu | ok | 1200s | https://example.org/z.xml",
+        "  • #1 · Zulu | no articles yet | ok | 1200s | https://example.org/z.xml",
+        "  • #2 · Alpha | no articles yet | ok | 600s | https://example.org/a.xml",
         "• z-room@conference.example.org",
-        "  • Zulu | ok | 1200s | https://example.org/z.xml",
+        "  • #1 · Zulu | no articles yet | ok | 1200s | https://example.org/z.xml",
     ]
     assert lines.count("• a-room@conference.example.org") == 1
 
@@ -1800,9 +1837,9 @@ def test_compact_subscription_lines_keeps_direct_feed_sections():
 
     assert lines[0:2] == ["Room feeds (0):", "• none"]
     assert "Moderator feeds (1):" in lines
-    assert "• Direct | ok | 300s | mod@example.org | https://example.org/direct.xml" in lines
+    assert "• #1 · Direct | no articles yet | ok | 300s | mod@example.org | https://example.org/direct.xml" in lines
     assert "Trusted user feeds (1):" in lines
-    assert "• Direct | ok | 300s | trusted@example.org | https://example.org/direct.xml" in lines
+    assert "• #1 · Direct | no articles yet | ok | 300s | trusted@example.org | https://example.org/direct.xml" in lines
 
 
 def test_compact_subscription_lines_can_select_one_section():
@@ -1821,15 +1858,15 @@ def test_compact_subscription_lines_can_select_one_section():
     assert rss_commands._compact_subscription_lines(feeds, "rooms") == [
         "Room feeds (1):",
         "• room@conference.example.org",
-        "  • Shared | ok | 900s | https://example.org/shared.xml",
+        "  • #1 · Shared | no articles yet | ok | 900s | https://example.org/shared.xml",
     ]
     assert rss_commands._compact_subscription_lines(feeds, "mods") == [
         "Moderator feeds (1):",
-        "• Shared | ok | 900s | mod@example.org | https://example.org/shared.xml",
+        "• #1 · Shared | no articles yet | ok | 900s | mod@example.org | https://example.org/shared.xml",
     ]
     assert rss_commands._compact_subscription_lines(feeds, "trusted") == [
         "Trusted user feeds (1):",
-        "• Shared | ok | 900s | trusted@example.org | https://example.org/shared.xml",
+        "• #1 · Shared | no articles yet | ok | 900s | trusted@example.org | https://example.org/shared.xml",
     ]
     assert rss_commands._compact_subscription_lines(
         feeds,
@@ -1837,7 +1874,7 @@ def test_compact_subscription_lines_can_select_one_section():
         owner="MOD@example.org/device",
     ) == [
         "Own direct feeds (1):",
-        "• Shared | ok | 900s | mod@example.org | https://example.org/shared.xml",
+        "• #1 · Shared | no articles yet | ok | 900s | mod@example.org | https://example.org/shared.xml",
     ]
 
 
@@ -1927,7 +1964,7 @@ async def test_trusted_user_compact_rss_list_shows_only_own_feeds(make_bot):
     lines = bot.replies[-1][1]
     assert lines == [
         "Trusted user feeds (1):",
-        "• Shared | ok | 900s | alice@example.org | https://example.org/shared.xml",
+        "• #1 · Shared | no articles yet | ok | 900s | alice@example.org | https://example.org/shared.xml",
     ]
     assert all("bob@example.org" not in line for line in lines)
     assert all("mod@example.org" not in line for line in lines)
@@ -1982,7 +2019,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
     lines = bot.replies[-1][1]
     assert lines == [
         "Own direct feeds (2) - Page 1/2:",
-        "• Alice feed | ok | 300s | admin@example.org | https://example.org/alice.xml",
+        "• #1 · Alice feed | no articles yet | ok | 300s | admin@example.org | https://example.org/alice.xml",
         "",
         "Use ,rss list own 2 for the next page.",
     ]
@@ -2002,7 +2039,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
     lines = bot.replies[-1][1]
     assert lines == [
         "Own direct feeds (2) - Page 2/2:",
-        "• Second feed | ok | 600s | ADMIN@example.org | https://example.org/second.xml",
+        "• #2 · Second feed | no articles yet | ok | 600s | ADMIN@example.org | https://example.org/second.xml",
     ]
 
     await rss.rss_command(

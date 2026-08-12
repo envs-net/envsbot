@@ -4,7 +4,7 @@ from utils.config import config
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.10",
+    "version": "0.2.11",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms", "_core", "users"],
@@ -17,7 +17,7 @@ RSS_DEFAULT_TEMPLATE_KEY = "RSS_DEFAULT_TEMPLATE"
 RSS_TEMPLATES_KEY = "RSS_TEMPLATES"
 RSS_FEED_TEMPLATES_KEY = "RSS_FEED_TEMPLATES"
 
-DEFAULT_RSS_TEMPLATE = "[RSS] ($feed_title) $title$summary_line\n$link"
+DEFAULT_RSS_TEMPLATE = "[RSS] ($feed_title) $title$summary_line\n$link$feed_ref_line"
 RSS_TEMPLATE_MAX_LENGTH = max(
     1,
     int(config.get("rss_template_max_length", 1000) or 1000),
@@ -30,6 +30,10 @@ RSS_TEMPLATE_VARIABLES = frozenset({
     "link",
     "feed_url",
     "feed_link",
+    "feed_no",
+    "article_no",
+    "feed_ref",
+    "feed_ref_line",
     "id",
     "date",
 })

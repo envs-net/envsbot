@@ -21,6 +21,8 @@ from .fetch import (
 from .formatting import _normalize_direct_user_jid
 from .store import (
     _apply_retry_state,
+    _feed_number,
+    _next_feed_number,
     _normalize_room_jid,
     _normalize_subscription_room,
     _now,
@@ -40,7 +42,9 @@ async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
     if url not in feeds:
         try:
             parsed = await fetch_feed(url)
+            feed_no = _next_feed_number(feeds)
             feeds[url] = {
+                "feed_no": feed_no,
                 "title": parsed.feed.get("title", url),
                 "link": parsed.feed.get("link", url),
                 "period": config.get("rss_global_query_interval", DEFAULT_POLL_INTERVAL),
@@ -80,7 +84,8 @@ async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
     await ensure_task(bot, store, url, feeds[url]["period"])
     bot.reply(
         msg,
-        f"✅ Added direct RSS feed: {feeds[url]['title']} ({url})\n"
+        f"✅ Added direct RSS feed #{_feed_number(feeds[url]) or '?'}: "
+        f"{feeds[url]['title']} ({url})\n"
         "New entries will be delivered in this chat.",
     )
 
@@ -194,16 +199,26 @@ async def _add_feed(bot, msg, url, store, room):
             feed = await fetch_feed(url)
             title = feed.feed.get("title", url)
             feed_link = feed.feed.get("link", url)
+            feed_no = _next_feed_number(feeds)
 
             # Burst last N (default 5) items to this room
             burst_num = config.get("max_new_feed_entries", 5)
+            burst_count = len(feed.entries[:burst_num])
             last_id = await burst_recent_entries(
-                bot, feed, room, burst_num, store=store, feed_url=url
+                bot,
+                feed,
+                room,
+                burst_num,
+                store=store,
+                feed_url=url,
+                feed_no=feed_no,
+                article_start=1,
             )
 
             # After burst, remember last_id so next poll ignores
             # already-shown history.
             feeds[url] = {
+                "feed_no": feed_no,
                 "title": title,
                 "link": feed_link,
                 "period": config.get("rss_global_query_interval",
@@ -219,7 +234,7 @@ async def _add_feed(bot, msg, url, store, room):
                 "last_error": "",
                 "last_error_at": 0,
                 "last_posted": _now() if last_id else 0,
-                "posted_count": 0,
+                "posted_count": burst_count,
             }
 
             await save_feeds(store, feeds)
@@ -229,7 +244,8 @@ async def _add_feed(bot, msg, url, store, room):
             period = feeds[url]["period"]
             bot.reply(
                 msg,
-                f"✅ Added feed: {title} ({url}) every {period}s to {room}",
+                f"✅ Added feed #{feed_no}: {title} ({url}) "
+                f"every {period}s to {room}",
             )
         except Exception as e:
             _log_feed_fetch_error("Failed to add RSS feed", url, e)
@@ -258,7 +274,13 @@ async def _add_feed(bot, msg, url, store, room):
                 feed = await fetch_feed(url)
                 burst_num = config.get("max_new_feed_entries", 5)
                 await burst_recent_entries(
-                    bot, feed, room, burst_num, store=store, feed_url=url
+                    bot,
+                    feed,
+                    room,
+                    burst_num,
+                    store=store,
+                    feed_url=url,
+                    feed_no=_feed_number(feeds[url]) or "",
                 )
             except Exception as e:
                 _log_feed_fetch_error(
@@ -269,8 +291,9 @@ async def _add_feed(bot, msg, url, store, room):
 
             bot.reply(
                 msg,
-                f"✅ Added room {room} to feed: {
-                    feeds[url]['title']} ({url})",
+                f"✅ Added room {room} to feed "
+                f"#{_feed_number(feeds[url]) or '?'}: "
+                f"{feeds[url]['title']} ({url})",
             )
         else:
             bot.reply(

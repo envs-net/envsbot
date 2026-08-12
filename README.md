@@ -375,7 +375,7 @@ Optional plugins:
 * `pin` - save and manage pinned messages
 * `poll` - room polls with voting and history
 * `reminder` - timed reminders with relative, absolute and timezone-aware scheduling
-* `rss` - RSS/Atom feed watcher with optional per-room and per-feed output templates
+* `rss` - RSS/Atom feed watcher with stable feed numbers, delete-by-number and optional per-room/per-feed output templates
 * `sed` - sed-style message corrections
 * `tell` - offline messages delivered when users rejoin
 * `tools` - ping, echo, time/date, seen and timestamp helpers
