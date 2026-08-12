@@ -11,6 +11,7 @@ Run these commands from the repository root unless a script explicitly says othe
 | `deploy.sh` | Preservation-first installation and release-update entrypoint. Bare invocation only shows help. | `./scripts/deploy.sh status`, `./scripts/deploy.sh check`, `./scripts/deploy.sh update --dry-run` |
 | `deploy.py` | Python backend used by `deploy.sh`; normally do not invoke it directly. | Use `deploy.sh` instead. |
 | `quality.sh` | Runs the local release-quality gates: compilation, generated-doc/config checks, Ruff, mypy, dependency validation/audit, and related checks. | `./scripts/quality.sh`, `./scripts/quality.sh --fix` |
+| `test.sh` | Runs the warning-strict pytest suite with compact output; coverage is optional so normal developer loops stay fast without skipping tests. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed`, `./scripts/test.sh --durations 25` |
 | `mutmut.sh` | Safe wrapper around mutation testing that prevents imports from the unmutated checkout. | `./scripts/mutmut.sh fresh`, `./scripts/mutmut.sh results` |
 | `update-constraints.sh` | Reproduces or refreshes the complete Python 3.12/3.13 dependency snapshots. | `./scripts/update-constraints.sh 3.13`, `./scripts/update-constraints.sh 3.13 --refresh` |
 | `check_constraints.py` | Verifies that a constraint snapshot pins the complete installed dependency closure. | `python scripts/check_constraints.py constraints/python313.txt` |

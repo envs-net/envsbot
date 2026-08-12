@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from bot.room_state import JOINED_ROOMS
 from core_plugins._core import paginate_items
-from core_plugins.users import user_has_room_plugin_grant
 from utils.audit import audit_event
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
@@ -14,7 +12,6 @@ from .command_support import (
     _command_prefix,
     _compact_subscription_lines,
     _direct_subscriptions,
-    _looks_like_feed_arg,
     _looks_like_room_arg,
     _message_type,
     _room_for_feed_command,
@@ -24,68 +21,23 @@ from .command_support import (
     _rss_normalize_room_list,
     _sender_can_manage_rss_globally,
     _sender_can_manage_rss_room,
-    _sender_is_global_rss_manager,
     _sender_role,
     _trusted_feed_count,
-    burst_recent_entries,
 )
-from .config import (
-    DEFAULT_POLL_INTERVAL,
-    RSS_BROKEN_ERROR_THRESHOLD,
-    RSS_TRUSTED_MAX_FEEDS,
-)
-from .fetch import (
-    _extract_entry_link,
-    _format_feed_fetch_error,
-    _get_entry_id,
-    _get_latest_entry_id,
-    _log_feed_fetch_error,
-    _normalize_url,
-    _resolve_relative_url,
-    entry_get,
-    fetch_feed,
-    html_to_text_with_links,
-)
+from .config import DEFAULT_POLL_INTERVAL, RSS_TRUSTED_MAX_FEEDS
+from .fetch import _normalize_url
 from .formatting import (
-    _SAMPLE_TEMPLATE_CONTEXT,
-    DEFAULT_RSS_TEMPLATE,
-    _build_rss_message_from_context,
-    _build_rss_template_context,
-    _entry_date,
     _filter_feeds_for_room,
     _format_feed_list,
     _normalize_direct_user_jid,
-    _normalize_rss_template_input,
     _rss_list_page,
-    _rss_template_usage,
-    _rss_template_variables_text,
-    _validate_rss_template,
 )
 from .store import (
-    _apply_retry_state,
-    _feed_active_rooms,
-    _feed_is_globally_paused,
     _feed_paused_rooms,
-    _feed_status_label,
-    _format_rss_timestamp,
     _normalize_room_jid,
     _normalize_subscription_room,
-    _now,
-    get_default_template,
-    get_effective_template,
-    get_feed_template,
     get_feeds,
-    get_room_template,
-    log,
     save_feeds,
-    set_default_template,
-    set_feed_template,
-    set_room_template,
-    unset_default_template,
-    unset_feed_template,
-    unset_feed_templates_for_feed,
-    unset_feed_templates_for_room,
-    unset_room_template,
 )
 from .subscriptions import (
     _add_direct_feed,
@@ -94,24 +46,11 @@ from .subscriptions import (
     _delete_all_direct_feeds_for_user,
     _delete_direct_feed,
     _delete_direct_feed_target,
-    _delete_feed_everywhere,
-    _delete_feed_room,
     _reset_all_feed_retries,
     _reset_feed_retry,
 )
-from .tasks import (
-    _cancel_feed_task,
-    ensure_task,
-)
-from .templates import (
-    _join_template_args,
-    _rss_template_command,
-    _sample_rss_template_preview,
-    _sample_template_context_for_feed,
-    _sender_can_manage_template,
-    _split_template_scope_args,
-    _template_feed_for_room,
-)
+from .tasks import _cancel_feed_task, ensure_task
+from .templates import _rss_template_command
 
 
 async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool) -> None:

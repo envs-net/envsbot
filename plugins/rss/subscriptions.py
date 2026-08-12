@@ -10,7 +10,7 @@ from .command_support import (
     _rss_normalize_room_list,
     burst_recent_entries,
 )
-from .config import DEFAULT_POLL_INTERVAL, RSS_TRUSTED_MAX_FEEDS
+from .config import DEFAULT_POLL_INTERVAL
 from .fetch import (
     _format_feed_fetch_error,
     _get_latest_entry_id,

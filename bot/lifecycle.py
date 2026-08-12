@@ -8,7 +8,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from time import perf_counter
 from typing import Any
 

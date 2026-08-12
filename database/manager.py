@@ -6,7 +6,6 @@ import re
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 

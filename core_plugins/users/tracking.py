@@ -3,7 +3,7 @@ from utils.time_utils import utc_now
 """Split module for core_plugins/users.py: tracking."""
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
 
 from slixmpp import JID

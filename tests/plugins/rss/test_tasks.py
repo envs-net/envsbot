@@ -287,7 +287,6 @@ async def test_rss_list_shows_retry_backoff(monkeypatch, make_bot):
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
     monkeypatch.setattr(rss_tasks, "_now", lambda: 1000)
-    monkeypatch.setattr(rss_commands, "_now", lambda: 1000)
     monkeypatch.setattr(rss_formatting, "_now", lambda: 1000)
 
     await rss.rss_command(bot, "jid", "nick", ["list"], msg, True)

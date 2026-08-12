@@ -1,19 +1,39 @@
 ---
 kind: pipeline
 type: docker
+name: quality-package-3.13
+
+steps:
+- name: quality-and-package
+  image: python:3.13
+  commands:
+    - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
+    - python -m pip check
+    - python scripts/check_constraints.py constraints/python313.txt
+    - sh scripts/quality.sh
+    - python -m build
+    - python scripts/check_wheel.py
+
+trigger:
+  event:
+    - push
+    - pull_request
+    - tag
+
+---
+kind: pipeline
+type: docker
 name: pytest-3.12
 
 steps:
-- name: quality-and-test
+- name: test
   image: python:3.12
   commands:
     - python -m pip install -c constraints/python312.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
     - python scripts/check_constraints.py constraints/python312.txt
-    - sh scripts/quality.sh
-    - python -m build
-    - python scripts/check_wheel.py
-    - pytest -W error::RuntimeWarning -W error::DeprecationWarning
+    - pip-audit -r constraints/python312.txt
+    - sh scripts/test.sh
 
 trigger:
   event:
@@ -27,16 +47,13 @@ type: docker
 name: pytest-3.13
 
 steps:
-- name: quality-and-test
+- name: test
   image: python:3.13
   commands:
     - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
     - python scripts/check_constraints.py constraints/python313.txt
-    - sh scripts/quality.sh
-    - python -m build
-    - python scripts/check_wheel.py
-    - pytest -W error::RuntimeWarning -W error::DeprecationWarning
+    - sh scripts/test.sh --coverage
 
 trigger:
   event:

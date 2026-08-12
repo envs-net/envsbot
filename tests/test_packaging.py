@@ -115,7 +115,7 @@ def test_ci_invokes_quality_script_via_shell():
     drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
 
     assert "run: sh scripts/quality.sh" in github
-    assert drone.count("- sh scripts/quality.sh") == 2
+    assert drone.count("- sh scripts/quality.sh") == 1
     assert "./scripts/quality.sh" not in github
     assert "./scripts/quality.sh" not in drone
 
@@ -124,6 +124,7 @@ def test_operator_shell_scripts_are_executable():
     for relative_path in (
         "scripts/deploy.sh",
         "scripts/quality.sh",
+        "scripts/test.sh",
         "scripts/mutmut.sh",
         "scripts/update-constraints.sh",
     ):
@@ -254,7 +255,45 @@ def test_ci_installs_and_smoke_tests_built_wheel():
     drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
 
     assert "python scripts/check_wheel.py" in github
-    assert drone.count("python scripts/check_wheel.py") == 2
+    assert drone.count("python scripts/check_wheel.py") == 1
+
+
+def test_ci_runs_complete_suite_on_both_pythons_without_duplicate_coverage():
+    github = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
+    drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
+
+    # Both supported Python versions still run the complete suite. Coverage is
+    # collected once on 3.13, while 3.12 avoids that extra instrumentation.
+    assert "Full test suite (Python 3.12, no coverage overhead)" in github
+    assert "run: sh scripts/test.sh" in github
+    assert "Full test suite with coverage gate (Python 3.13)" in github
+    assert "run: sh scripts/test.sh --coverage" in github
+    drone_lines = drone.splitlines()
+    assert drone_lines.count("    - sh scripts/test.sh") == 1
+    assert drone_lines.count("    - sh scripts/test.sh --coverage") == 1
+
+    # Static quality/package work is a separate parallel job/pipeline rather
+    # than being repeated serially before each full pytest run.
+    assert "quality-package:" in github
+    assert "name: quality-package-3.13" in drone
+    assert drone.count("python scripts/check_wheel.py") == 1
+
+    # Python 3.12 still receives its dependency security audit even though the
+    # shared quality job itself runs on Python 3.13.
+    assert "pip-audit -r constraints/python312.txt" in github
+    assert "pip-audit -r constraints/python312.txt" in drone
+
+
+def test_test_helper_keeps_fast_and_release_modes_explicit():
+    helper = (ROOT / "scripts/test.sh").read_text(encoding="utf-8")
+
+    assert "-W error::RuntimeWarning" in helper
+    assert "-W error::DeprecationWarning" in helper
+    assert "--cov-fail-under=85" in helper
+    assert "--last-failed" in helper
+    assert "--durations" in helper
+    assert "-o addopts=" in helper
+    assert "--no-cov" not in helper
 
 
 def test_scripts_readme_documents_all_repository_helpers():

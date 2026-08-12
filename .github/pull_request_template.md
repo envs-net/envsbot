@@ -30,9 +30,10 @@ Describe what this pull request changes and why.
 
 ## Testing
 
-- [ ] `PYTHONPATH="$PWD" pytest`
-- [ ] `PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing`
-- [ ] `PYTHONPATH="$PWD" mutmut run`
+- [ ] `./scripts/test.sh`
+- [ ] `./scripts/test.sh --coverage`
+- [ ] `./scripts/quality.sh`
+- [ ] `./scripts/mutmut.sh run`
 - [ ] Live XMPP integration test
 - [ ] Not run, reason:
 

@@ -27,7 +27,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * Shared persistent recent-message cache for reply-aware plugins
 * Weather, translation, vCard lookup, XMPP diagnostics, reminders, polls, pins, tell messages and utility commands
 * Community/fun plugins such as IdleRPG, ducks, dice, karma, sed corrections and XKCD
-* Pytest-based test suite and Drone CI support
+* Pytest-based test suite with Drone CI and GitHub Actions support
 
 ---
 
@@ -489,13 +489,13 @@ See [`docs/maintenance.md`](docs/maintenance.md).
 
 ## Tests and CI
 
-Install development dependencies and run the test suite:
+Install development dependencies and run the complete warning-strict test suite:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
-pytest
+./scripts/test.sh
 ```
 
 Use `constraints/python312.txt` instead when the environment runs Python 3.12.
@@ -504,10 +504,16 @@ the reviewed pins with `scripts/update-constraints.sh`, or deliberately refresh
 them with `scripts/update-constraints.sh <3.12|3.13> --refresh`; see
 [`constraints/README.md`](constraints/README.md).
 
-Run without coverage when you only want a quick local check:
+`test.sh` always runs every selected test with RuntimeWarning and
+DeprecationWarning treated as failures. Its default mode skips coverage
+collection only, which makes normal developer loops faster without reducing
+test coverage. Useful modes are:
 
 ```bash
-pytest --no-cov -q
+./scripts/test.sh --coverage       # full suite + enforced 85% coverage floor
+./scripts/test.sh --last-failed    # re-run the previous failures
+./scripts/test.sh --durations 25   # run all tests and show the 25 slowest
+./scripts/test.sh tests/plugins/rss
 ```
 
 Run mutation tests with mutmut:

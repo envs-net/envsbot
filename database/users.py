@@ -3,7 +3,6 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
 
 from utils.config import config
 from utils.time_utils import utc_now

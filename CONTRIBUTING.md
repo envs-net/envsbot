@@ -38,13 +38,13 @@ mutation-testing artifacts.
 Run the offline test suite:
 
 ```bash
-PYTHONPATH="$PWD" pytest
+./scripts/test.sh
 ```
 
 Run with coverage:
 
 ```bash
-PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
+./scripts/test.sh --coverage
 ```
 
 Optional mutation testing:
@@ -81,13 +81,13 @@ A good pull request should:
 Before submitting:
 
 ```bash
-PYTHONPATH="$PWD" pytest
+./scripts/test.sh
 ```
 
 Recommended for larger changes:
 
 ```bash
-PYTHONPATH="$PWD" pytest --cov=. --cov-report=term-missing
+./scripts/test.sh --coverage
 ./scripts/mutmut.sh fresh
 ./scripts/mutmut.sh results
 ```

@@ -48,7 +48,7 @@ release checkout:
 
 ```bash
 ./scripts/quality.sh
-pytest -W error::RuntimeWarning -W error::DeprecationWarning
+./scripts/test.sh --coverage
 ```
 
 Then build and smoke-test the exact wheel that would be released:
@@ -61,8 +61,7 @@ python scripts/check_wheel.py
 
 The quality runner checks compilation, generated command/config documentation,
 Ruff, the hardened Ruff import/modernisation/Bugbear rules, mypy, the audited
-Python-version constraint snapshot and dependency advisories. The pytest
-configuration enforces the repository coverage floor.
+Python-version constraint snapshot and dependency advisories. `test.sh --coverage` runs the complete warning-strict suite and enforces the repository coverage floor.
 
 The wheel smoke test installs the built wheel into a temporary environment and
 verifies that packaged runtime defaults such as `init_chat_slang.csv` and the

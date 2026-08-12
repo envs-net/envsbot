@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from utils.admin_notify import notify_admin

@@ -8,6 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  quality-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            constraints/python313.txt
+      - run: python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
+      - run: python -m pip check
+      - run: python scripts/check_constraints.py constraints/python313.txt
+      - run: sh scripts/quality.sh
+      - run: python -m build
+      - run: python scripts/check_wheel.py
+
   test:
     strategy:
       fail-fast: false
@@ -31,7 +50,12 @@ jobs:
       - run: python -m pip install -c ${{ matrix.constraints }} -r requirements.txt -r requirements-dev.txt
       - run: python -m pip check
       - run: python scripts/check_constraints.py ${{ matrix.constraints }}
-      - run: sh scripts/quality.sh
-      - run: python -m build
-      - run: python scripts/check_wheel.py
-      - run: pytest -W error::RuntimeWarning -W error::DeprecationWarning
+      - name: Audit Python 3.12 dependency lock
+        if: matrix.python-version == '3.12'
+        run: pip-audit -r constraints/python312.txt
+      - name: Full test suite (Python 3.12, no coverage overhead)
+        if: matrix.python-version == '3.12'
+        run: sh scripts/test.sh
+      - name: Full test suite with coverage gate (Python 3.13)
+        if: matrix.python-version == '3.13'
+        run: sh scripts/test.sh --coverage
