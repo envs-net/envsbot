@@ -52,6 +52,7 @@ from utils.task_supervisor import (
     create_resilient_plugin_task,
     sleep_with_heartbeat,
 )
+from utils.time_utils import utc_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ def _today() -> datetime.date:
 
 
 def _now_ts() -> int:
-    return int(datetime.datetime.now(datetime.UTC).timestamp())
+    return int(utc_timestamp())
 
 
 def _parse_birthday(birthday_str: str) -> dict[str, int | None] | None:

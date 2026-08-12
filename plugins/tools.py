@@ -24,8 +24,8 @@ Commands:
 import logging
 from collections.abc import Collection
 from datetime import UTC, datetime
+from datetime import tzinfo as TzInfo
 
-import pytz
 import slixmpp
 
 from core_plugins._core import (
@@ -40,6 +40,12 @@ from core_plugins._core import (
 from utils.command import Role, command
 from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
+from utils.time_utils import (
+    datetime_from_timestamp,
+    timezone_from_name,
+    timezone_names,
+    utc_now,
+)
 from utils.tls_certificate import (
     VALID_HTTPS_CERTIFICATE_MESSAGE,
     diagnose_https_certificate,
@@ -298,24 +304,28 @@ async def time_command(bot, sender_jid, nick, args, msg, is_room):
         display_name = target_jid
 
     timezone = await _get_user_timezone(bot, target_jid)
+    tzinfo: TzInfo
 
     if not timezone:
         bot.reply(msg, f"🟡️ No TIMEZONE set for {display_name}. Using UTC. "
                   f"Set with {config.get('prefix', ',')}tz set"
                   " <timezone>")
-        tzinfo = pytz.UTC
+        tzinfo = UTC
         tzone = "UTC"
     else:
-        try:
-            tzinfo = pytz.timezone(timezone)
-            tzone = timezone
-        except Exception:
-            bot.reply(msg, f"🟡️ Invalid timezone '{
-                      timezone}' for {display_name}. Using UTC.")
-            tzinfo = pytz.UTC
+        resolved_tz = timezone_from_name(timezone)
+        if resolved_tz is None:
+            bot.reply(
+                msg,
+                f"🟡️ Invalid timezone '{timezone}' for {display_name}. Using UTC.",
+            )
+            tzinfo = UTC
             tzone = "UTC"
+        else:
+            tzinfo = resolved_tz
+            tzone = timezone
 
-    now = datetime.now(tzinfo)
+    now = utc_now().astimezone(tzinfo)
     formatted = now.strftime("%Y-%m-%d %H:%M:%S")
     loc_str = ""
     bot.reply(msg, f"⏰ Time for {display_name}: {formatted} {tzone}{loc_str}",
@@ -384,24 +394,28 @@ async def date_command(bot, sender_jid, nick, args, msg, is_room):
         display_name = target_jid
 
     timezone = await _get_user_timezone(bot, target_jid)
+    tzinfo: TzInfo
 
     if not timezone:
         bot.reply(msg, f"🟡️ No TIMEZONE set for {display_name}. Using UTC. "
                   f"Set with {config.get('prefix', ',')}tz set"
                   " <timezone>")
-        tzinfo = pytz.UTC
+        tzinfo = UTC
         tzone = "UTC"
     else:
-        try:
-            tzinfo = pytz.timezone(timezone)
-            tzone = timezone
-        except Exception:
-            bot.reply(msg, f"🟡️ Invalid timezone '{
-                      timezone}' for {display_name}. Using UTC.")
-            tzinfo = pytz.UTC
+        resolved_tz = timezone_from_name(timezone)
+        if resolved_tz is None:
+            bot.reply(
+                msg,
+                f"🟡️ Invalid timezone '{timezone}' for {display_name}. Using UTC.",
+            )
+            tzinfo = UTC
             tzone = "UTC"
+        else:
+            tzinfo = resolved_tz
+            tzone = timezone
 
-    now = datetime.now(tzinfo)
+    now = utc_now().astimezone(tzinfo)
     formatted = now.strftime("%Y-%m-%d")
     loc_str = ""
     bot.reply(msg,
@@ -430,7 +444,7 @@ async def utc_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(msg, "ℹ️ utc is disabled in this room.")
         return
 
-    now = datetime.now(pytz.UTC)
+    now = utc_now()
     formatted = now.strftime("%Y-%m-%d %H:%M:%S")
     bot.reply(msg, f"🌍 Current UTC time: {formatted}", ephemeral=False)
 
@@ -479,19 +493,15 @@ async def timestamp_command(bot, sender_jid, nick, args, msg, is_room):
             "nicks", {}).get(nick, {}).get("jid", str(msg["from"].bare))
         timezone = await _get_user_timezone(bot, target_jid)
 
-        if timezone:
-            try:
-                tzinfo = pytz.timezone(timezone)
-            except Exception:
-                tzinfo = pytz.UTC
-        else:
-            tzinfo = pytz.UTC
+        tzinfo: TzInfo | None = timezone_from_name(timezone) if timezone else None
+        if tzinfo is None:
+            tzinfo = UTC
 
         # Convert timestamp to datetime in user's timezone
-        dt = datetime.fromtimestamp(timestamp, tz=pytz.UTC)
+        dt = datetime_from_timestamp(timestamp)
         dt_local = dt.astimezone(tzinfo)
         formatted = dt_local.strftime("%Y-%m-%d %H:%M:%S")
-        tzone = str(tzinfo) if timezone else "UTC"
+        tzone = str(tzinfo)
 
         bot.reply(msg, f"⏰ Timestamp {timestamp} = {formatted} ({tzone})",
                   ephemeral=False)
@@ -780,7 +790,7 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         "enabled_rooms": _diagnostic_enabled_count(enabled_rooms, room_jid),
         "joined_rooms": 1 if room_jid and _joined_nick_count(room_jid) else (len(JOINED_ROOMS) if not room_jid else 0),
         "tracked_nicks": _joined_nick_count(room_jid),
-        "timezones_known": len(pytz.all_timezones),
+        "timezones_known": len(timezone_names()),
     }
 
 

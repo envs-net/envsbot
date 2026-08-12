@@ -7,7 +7,9 @@ from .helpers import (
     pytest,
     rss,
 )
+from plugins.rss import command_support as rss_support
 from plugins.rss import commands as rss_commands
+from plugins.rss import subscriptions as rss_subscriptions
 from plugins.rss import fetch as rss_fetch
 from plugins.rss import formatting as rss_formatting
 import aiohttp
@@ -18,7 +20,7 @@ async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
-    monkeypatch.setattr(rss_commands, "config", {"prefix": "!"})
+    monkeypatch.setattr(rss_support, "config", {"prefix": "!"})
 
     await rss.rss_command(bot, "jid", "nick", ["add"], msg, True)
 
@@ -59,8 +61,8 @@ async def test_rss_add_list_delete(monkeypatch, make_bot):
     async def fake_fetch_feed(url):
         return DummyFeed()
 
-    monkeypatch.setattr(rss_commands, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
@@ -243,16 +245,16 @@ async def test_rss_add_allows_joined_muc_pm(monkeypatch, make_bot):
     async def fake_fetch_feed(url):
         return DummyFeed()
 
-    monkeypatch.setitem(rss_commands.JOINED_ROOMS, room, {"nicks": {"alice": {}}})
-    monkeypatch.setattr(rss_commands, "fetch_feed", fake_fetch_feed)
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setitem(rss_support.JOINED_ROOMS, room, {"nicks": {"alice": {}}})
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     try:
         await rss.rss_command(
             bot, "jid1", "nick1", ["add", fake_feed_link], msg, False
         )
     finally:
-        rss_commands.JOINED_ROOMS.pop(room, None)
+        rss_support.JOINED_ROOMS.pop(room, None)
 
     assert fake_feed_link in bot.plugin_store.get(rss.RSS_KEY, {})
 
@@ -266,8 +268,8 @@ async def test_rss_add_failures(monkeypatch, make_bot):
     async def raise_exc(url):
         raise Exception("bad feed")
 
-    monkeypatch.setattr(rss_commands, "fetch_feed", raise_exc)
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", raise_exc)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
@@ -292,8 +294,8 @@ async def test_rss_add_expected_failures_log_without_traceback(
             message="Not Found",
         )
 
-    monkeypatch.setattr(rss_commands, "fetch_feed", raise_exc)
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", raise_exc)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
 
@@ -429,10 +431,10 @@ async def test_rss_plugin_grant_allows_explicit_room_add(monkeypatch, make_bot):
         def __contains__(self, key):
             return key == "feed"
 
-    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock(return_value=DummyFeed()))
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", AsyncMock(return_value=DummyFeed()))
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
     monkeypatch.setattr(
-        rss_commands,
+        rss_support,
         "user_has_room_plugin_grant",
         AsyncMock(return_value=True),
     )
@@ -452,7 +454,7 @@ async def test_rss_plugin_grant_allows_explicit_room_add(monkeypatch, make_bot):
 
     assert url in bot.plugin_store[rss.RSS_KEY]
     assert bot.plugin_store[rss.RSS_KEY][url]["rooms"] == [room]
-    rss_commands.user_has_room_plugin_grant.assert_awaited_once_with(
+    rss_support.user_has_room_plugin_grant.assert_awaited_once_with(
         bot, "alice@example.org", "rss", room
     )
 
@@ -463,9 +465,9 @@ async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, ma
     bot.get_user_role = AsyncMock(return_value=Role.USER)
     room = "room@conference.example.org"
     url = "https://example.org/feed.rss"
-    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", AsyncMock())
     monkeypatch.setattr(
-        rss_commands,
+        rss_support,
         "user_has_room_plugin_grant",
         AsyncMock(return_value=False),
     )
@@ -484,7 +486,7 @@ async def test_rss_plugin_grant_requires_target_room_affiliation(monkeypatch, ma
     )
 
     assert rss.RSS_KEY not in bot.plugin_store
-    rss_commands.fetch_feed.assert_not_awaited()
+    rss_subscriptions.fetch_feed.assert_not_awaited()
     assert "RSS plugin grant" in bot.replies[-1][1]
 
 
@@ -729,7 +731,7 @@ async def test_rss_delete_cleans_feed_specific_templates(monkeypatch, make_bot):
         room: {url: "ROOM $title"},
         other: {url: "OTHER $title"},
     }
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     await rss.rss_command(bot, "jid", "nick", ["delete", url], msg, True)
 
@@ -1174,7 +1176,7 @@ def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
         "not-a-dict": "ignored",
     }
 
-    monkeypatch.setattr(rss_commands, "_now", lambda: now)
+    monkeypatch.setattr(rss_support, "_now", lambda: now)
 
     summary = rss._rss_health_summary(feeds)
     assert summary == "RSS health: 3 feeds · 1 paused · 1 in backoff · 1 with errors"
@@ -1279,8 +1281,8 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
             "last_error": "boom",
         }
     }
-    monkeypatch.setattr(rss_commands, "_cancel_feed_task", AsyncMock())
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
     await rss.rss_command(bot, "jid1", "nick1", ["health"], msg, True)
@@ -1311,8 +1313,8 @@ async def test_trusted_user_can_add_and_remove_own_direct_feed(monkeypatch, make
         entries = []
 
     bot.get_user_role = trusted_role
-    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock(return_value=DummyFeed()))
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", AsyncMock(return_value=DummyFeed()))
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     await rss.rss_command(bot, "trusted@example.org", "trusted", ["add", url], msg, False)
     assert bot.plugin_store[rss.RSS_KEY][url]["users"]["trusted@example.org"]["role"] == "trusted"
@@ -1349,14 +1351,14 @@ async def test_direct_add_ignores_redundant_own_jid_or_placeholder(
         entries = []
 
     monkeypatch.setattr(
-        rss_commands,
+        rss_subscriptions,
         "fetch_feed",
         AsyncMock(return_value=DummyFeed()),
     )
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
     room_grant = AsyncMock(return_value=False)
     monkeypatch.setattr(
-        rss_commands,
+        rss_support,
         "user_has_room_plugin_grant",
         room_grant,
     )
@@ -1402,12 +1404,12 @@ async def test_add_direct_feed_initializes_cursor_from_add_snapshot(
         ]
 
     monkeypatch.setattr(
-        rss_commands,
+        rss_subscriptions,
         "fetch_feed",
         AsyncMock(return_value=DummyFeed()),
     )
     ensure_task = AsyncMock()
-    monkeypatch.setattr(rss_commands, "ensure_task", ensure_task)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", ensure_task)
 
     await rss_commands._add_direct_feed(
         bot,
@@ -1451,8 +1453,8 @@ async def test_existing_feed_direct_subscription_keeps_existing_cursor(
             "last_id": "already-seen",
         }
     }
-    monkeypatch.setattr(rss_commands, "fetch_feed", AsyncMock())
-    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", AsyncMock())
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
 
     await rss_commands._add_direct_feed(
         bot,
@@ -1465,7 +1467,7 @@ async def test_existing_feed_direct_subscription_keeps_existing_cursor(
 
     feed = bot.plugin_store[rss.RSS_KEY][url]
     assert feed["last_id"] == "already-seen"
-    rss_commands.fetch_feed.assert_not_awaited()
+    rss_subscriptions.fetch_feed.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1579,7 +1581,7 @@ async def test_admin_can_remove_all_direct_feeds_for_one_user(
     bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
     cancel_task = AsyncMock()
     audit = AsyncMock()
-    monkeypatch.setattr(rss_commands, "_cancel_feed_task", cancel_task)
+    monkeypatch.setattr(rss_subscriptions, "_cancel_feed_task", cancel_task)
     monkeypatch.setattr(rss_commands, "audit_event", audit)
     msg = {
         "from": SimpleNamespace(

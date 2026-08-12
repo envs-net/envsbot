@@ -1,10 +1,9 @@
 """Split module for plugins/vcard.py: timezone."""
 
-import pytz
-
 from core_plugins import _core
 from utils.command import Role, command
 from utils.config import config
+from utils.time_utils import is_timezone_name
 
 from .config import VCARD_KEY, log
 from .fields import _get_vcard_field
@@ -60,7 +59,7 @@ async def set_timezone(bot, sender_jid, nick, args, msg, is_room):
         return
     timezone = args[0].strip()
     try:
-        if timezone not in pytz.all_timezones:
+        if not is_timezone_name(timezone):
             raise ValueError
     except Exception:
         log.warning("[VCARD] 🔴  Invalid timezone for %s: %s", jid,

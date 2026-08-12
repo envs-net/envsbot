@@ -43,6 +43,7 @@ from utils.command import Role, command
 from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_json, fetch_preview, passthrough_validator
+from utils.time_utils import utc_timestamp
 from utils.url_safety import UnsafeFetchURL
 from utils.urlcheck_extraction import extract_urls_from_message_text
 
@@ -167,7 +168,7 @@ async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:
 
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
     """Return bounded URLCheck cache counters for diagnostics."""
-    _prune_url_cache(datetime.now().timestamp())
+    _prune_url_cache(utc_timestamp())
     enabled = await _get_enabled_rooms(
         bot, URLCHECK_KEY, "urlcheck", [room_jid] if room_jid else ()
     )
@@ -287,7 +288,7 @@ def _extract_urls_from_message_text(text):
 
 
 async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):
-    now = datetime.now().timestamp()
+    now = utc_timestamp()
 
     if _remember_url(str(room), url, now):
         log.info("[URLCHECK] 🟡 Fetching %r temporary disabled", url)

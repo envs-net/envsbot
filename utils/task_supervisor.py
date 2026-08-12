@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any, Protocol, cast
 
+from utils.time_utils import datetime_from_timestamp, utc_now
+
 log = logging.getLogger(__name__)
 
 _COMPLETED_ONE_SHOT_HISTORY_LIMIT = 50
@@ -27,7 +29,7 @@ class BotLike(Protocol):
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return utc_now().isoformat(timespec="seconds")
 
 
 def runtime_is_ready(bot: Any) -> bool:
@@ -466,11 +468,9 @@ class TaskSupervisor:
                     max_backoff,
                     initial_backoff * (2 ** max(0, consecutive - 1)),
                 )
-                next_at = datetime.now(UTC).timestamp() + delay
+                next_at = utc_now().timestamp() + delay
                 meta["circuit_state"] = "half-open"
-                meta["next_restart_at"] = datetime.fromtimestamp(
-                    next_at, UTC
-                ).isoformat(timespec="seconds")
+                meta["next_restart_at"] = datetime_from_timestamp(next_at).isoformat(timespec="seconds")
                 log.warning(
                     "[TASKS] Restarting %s/%s in %.1fs after failure %d/%d: %s",
                     plugin,
@@ -591,7 +591,7 @@ class TaskSupervisor:
         tasks keep the historical behavior because they are not required to
         implement a heartbeat contract.
         """
-        now = datetime.now(UTC)
+        now = utc_now()
         stale: list[TaskInfo] = []
         for info in self.snapshot(include_done=False):
             if info.status != "running":

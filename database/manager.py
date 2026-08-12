@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import logging
 import re
 import time
@@ -14,13 +16,18 @@ from utils.config import config
 from utils.file_security import ensure_private_file
 from utils.logging_helpers import kv
 from utils.task_supervisor import ExpectedTaskExit
+from utils.time_utils import utc_now
 
 from .audit import AuditLog
 from .command_usage import CommandUsageStore
 from .idlerpg import IdleRPGStateStore
 from .locking import AsyncRLock
 from .message_cache import MessageCacheStore
-from .migrations import available_migrations
+from .migrations import (
+    available_migrations,
+    migration_catalog_fingerprint,
+    migration_checksum,
+)
 from .outbox import OutboxStore
 from .rooms import Rooms
 from .users import UserManager
@@ -31,6 +38,10 @@ log = logging.getLogger(__name__)
 
 class DatabaseSchemaTooNewError(RuntimeError):
     """Raised when a database contains migrations unknown to this build."""
+
+
+class DatabaseMigrationChangedError(RuntimeError):
+    """Raised when an already-applied migration no longer matches this build."""
 
 
 _WRITE_PREFIX_RE = re.compile(
@@ -320,7 +331,8 @@ class DatabaseManager:
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     duration_ms INTEGER NOT NULL DEFAULT 0,
                     status TEXT NOT NULL DEFAULT 'applied',
-                    error TEXT
+                    error TEXT,
+                    checksum TEXT
                 )
                 """
             )
@@ -334,6 +346,7 @@ class DatabaseManager:
                 ("duration_ms", "INTEGER NOT NULL DEFAULT 0"),
                 ("status", "TEXT NOT NULL DEFAULT 'applied'"),
                 ("error", "TEXT"),
+                ("checksum", "TEXT"),
             ):
                 if name not in columns:
                     await conn.execute(
@@ -347,25 +360,70 @@ class DatabaseManager:
                     started_at TEXT NOT NULL,
                     duration_ms INTEGER NOT NULL,
                     status TEXT NOT NULL,
-                    error TEXT
+                    error TEXT,
+                    checksum TEXT
                 )
                 """
             )
+            history_columns = {
+                str(row["name"])
+                for row in await (
+                    await conn.execute("PRAGMA table_info(schema_migration_history)")
+                ).fetchall()
+            }
+            if "checksum" not in history_columns:
+                await conn.execute(
+                    "ALTER TABLE schema_migration_history ADD COLUMN checksum TEXT"
+                )
+
+            # v1.8.0 introduces migration checksums after earlier development
+            # builds may already have applied these migrations.  Bootstrap only
+            # empty checksum cells once; non-empty values are never rewritten.
+            known_checksums = {
+                migration.version: migration_checksum(migration)
+                for migration in available_migrations()
+            }
+            rows = await (
+                await conn.execute(
+                    "SELECT version, checksum FROM schema_migrations"
+                )
+            ).fetchall()
+            for row in rows:
+                version = str(row["version"])
+                checksum = str(row["checksum"] or "")
+                expected = known_checksums.get(version)
+                if expected and not checksum:
+                    await conn.execute(
+                        "UPDATE schema_migrations SET checksum=? WHERE version=?",
+                        (expected, version),
+                    )
 
     async def mark_migration_applied(
         self,
         version: str,
         *,
         duration_ms: int = 0,
+        checksum: str | None = None,
         commit: bool = True,
     ) -> None:
+        if checksum is None:
+            checksum = next(
+                (
+                    migration_checksum(migration)
+                    for migration in available_migrations()
+                    if migration.version == version
+                ),
+                "",
+            )
         query = """
-            INSERT INTO schema_migrations (version, duration_ms, status, error)
-            VALUES (?, ?, 'applied', NULL)
+            INSERT INTO schema_migrations (
+                version, duration_ms, status, error, checksum
+            ) VALUES (?, ?, 'applied', NULL, ?)
             ON CONFLICT(version) DO UPDATE SET
-                duration_ms=excluded.duration_ms, status='applied', error=NULL
+                duration_ms=excluded.duration_ms, status='applied', error=NULL,
+                checksum=excluded.checksum
             """
-        params = (version, max(0, int(duration_ms)))
+        params = (version, max(0, int(duration_ms)), checksum)
         if commit:
             await self.write(query, params, label="migration_mark_applied")
         else:
@@ -380,26 +438,34 @@ class DatabaseManager:
         duration_ms: int,
         status: str,
         error: str | None = None,
+        checksum: str | None = None,
     ) -> None:
         await self.write(
             """
             INSERT INTO schema_migration_history (
-                version, started_at, duration_ms, status, error
-            ) VALUES (?, ?, ?, ?, ?)
+                version, started_at, duration_ms, status, error, checksum
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (version, started_at, max(0, int(duration_ms)), status, error),
+            (
+                version,
+                started_at,
+                max(0, int(duration_ms)),
+                status,
+                error,
+                checksum,
+            ),
             label="migration_history",
         )
 
     async def list_migrations(self) -> list[aiosqlite.Row]:
         return await self.fetch_all(
-            "SELECT version, applied_at, duration_ms, status, error "
+            "SELECT version, applied_at, duration_ms, status, error, checksum "
             "FROM schema_migrations ORDER BY version"
         )
 
     async def migration_history(self, *, limit: int = 20) -> list[dict[str, Any]]:
         rows = await self.fetch_all(
-            "SELECT version, started_at, duration_ms, status, error "
+            "SELECT version, started_at, duration_ms, status, error, checksum "
             "FROM schema_migration_history ORDER BY id DESC LIMIT ?",
             (max(1, min(200, int(limit))),),
         )
@@ -413,12 +479,37 @@ class DatabaseManager:
         known = {migration.version for migration in available_migrations()}
         return sorted((await self.applied_migration_versions()) - known)
 
+    async def migration_checksum_mismatches(self) -> list[str]:
+        """Return applied known migrations whose stored checksum changed."""
+        expected = {
+            migration.version: migration_checksum(migration)
+            for migration in available_migrations()
+        }
+        rows = await self.list_migrations()
+        mismatches: list[str] = []
+        for row in rows:
+            version = str(row["version"])
+            wanted = expected.get(version)
+            if wanted is None:
+                continue
+            stored = str(row["checksum"] or "")
+            if stored and stored != wanted:
+                mismatches.append(version)
+        return sorted(mismatches)
+
     async def assert_schema_compatible(self) -> None:
         unknown = await self.unknown_migration_versions()
         if unknown:
             raise DatabaseSchemaTooNewError(
                 "Database schema is newer than this envsbot build; unknown migration(s): "
                 + ", ".join(unknown)
+            )
+        changed = await self.migration_checksum_mismatches()
+        if changed:
+            raise DatabaseMigrationChangedError(
+                "Applied migration definition changed after it was recorded: "
+                + ", ".join(changed)
+                + ". Restore the released migration source instead of editing history."
             )
 
     async def pending_migration_versions(self) -> list[str]:
@@ -429,18 +520,89 @@ class DatabaseManager:
             if migration.version not in applied
         ]
 
+    async def schema_fingerprint(self) -> str:
+        """Return a semantic fingerprint for the persistent SQLite schema."""
+        tables = await self.fetch_all(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+        signature: list[dict[str, Any]] = []
+        for row in tables:
+            table = str(row["name"])
+            quoted = table.replace('"', '""')
+            columns = [
+                tuple(item)
+                for item in await self.fetch_all(f'PRAGMA table_info("{quoted}")')
+            ]
+            foreign_keys = [
+                tuple(item)
+                for item in await self.fetch_all(
+                    f'PRAGMA foreign_key_list("{quoted}")'
+                )
+            ]
+            indexes: list[dict[str, Any]] = []
+            for index_row in await self.fetch_all(
+                f'PRAGMA index_list("{quoted}")'
+            ):
+                index_name = str(index_row["name"])
+                index_quoted = index_name.replace('"', '""')
+                indexes.append(
+                    {
+                        "name": index_name,
+                        "unique": int(index_row["unique"]),
+                        "origin": str(index_row["origin"]),
+                        "partial": int(index_row["partial"]),
+                        "columns": [
+                            tuple(item)
+                            for item in await self.fetch_all(
+                                f'PRAGMA index_info("{index_quoted}")'
+                            )
+                        ],
+                    }
+                )
+            indexes.sort(key=lambda item: str(item["name"]))
+            signature.append(
+                {
+                    "table": table,
+                    "columns": columns,
+                    "foreign_keys": foreign_keys,
+                    "indexes": indexes,
+                }
+            )
+
+        other = await self.fetch_all(
+            "SELECT type, name, tbl_name, COALESCE(sql, '') AS sql "
+            "FROM sqlite_master "
+            "WHERE type IN ('view', 'trigger') AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY type, name"
+        )
+        payload = json.dumps(
+            {
+                "tables": signature,
+                "other": [tuple(row) for row in other],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
     async def migration_status(self) -> dict[str, Any]:
         applied = sorted(await self.applied_migration_versions())
         known = [migration.version for migration in available_migrations()]
         applied_set = set(applied)
         pending = [version for version in known if version not in applied_set]
         unknown = sorted(applied_set - set(known))
+        checksum_mismatches = await self.migration_checksum_mismatches()
         history = await self.migration_history(limit=1)
         return {
             "known": known,
             "applied": applied,
             "pending": pending,
             "unknown": unknown,
+            "checksum_mismatches": checksum_mismatches,
+            "catalog_fingerprint": migration_catalog_fingerprint(),
+            "schema_fingerprint": await self.schema_fingerprint(),
             "last_run": history[0] if history else None,
         }
 
@@ -469,7 +631,7 @@ class DatabaseManager:
 
         directory = backup_dir()
         directory.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+        stamp = utc_now().strftime("%Y%m%d-%H%M%S-%f")
         prefix = "envsbot-db-pre-migration" if pre_migration else "envsbot-db-backup"
         return directory / f"{prefix}-{stamp}.sqlite3"
 
@@ -546,7 +708,7 @@ class DatabaseManager:
         completed: list[str] = []
         async with self.transaction_lock:
             for migration in pending:
-                started_at = datetime.now(UTC).isoformat(timespec="seconds")
+                started_at = utc_now().isoformat(timespec="seconds")
                 started = time.monotonic()
                 savepoint = "migration_" + re.sub(r"[^a-zA-Z0-9_]", "_", migration.version)
                 log.info(
@@ -560,6 +722,7 @@ class DatabaseManager:
                         await self.mark_migration_applied(
                             migration.version,
                             duration_ms=duration_ms,
+                            checksum=migration_checksum(migration),
                             commit=False,
                         )
                 except Exception as exc:
@@ -570,6 +733,7 @@ class DatabaseManager:
                         duration_ms=duration_ms,
                         status="failed",
                         error=f"{type(exc).__name__}: {exc}"[:1000],
+                        checksum=migration_checksum(migration),
                     )
                     log.exception(
                         "[DB] event=migration status=failed %s",
@@ -582,6 +746,7 @@ class DatabaseManager:
                         started_at=started_at,
                         duration_ms=duration_ms,
                         status="applied",
+                        checksum=migration_checksum(migration),
                     )
                     completed.append(migration.version)
                     applied.add(migration.version)

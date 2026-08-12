@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 
 from utils.config import config
+from utils.time_utils import utc_now
 
 GLOBAL_JID = "__GLOBAL__"
 
@@ -172,7 +173,7 @@ class PluginRuntimeStore:
         """
 
         # Get update time
-        now = datetime.now(UTC).isoformat()
+        now = utc_now().isoformat()
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
@@ -194,7 +195,7 @@ class PluginRuntimeStore:
         """
         Delete a key from this plugin's runtime data (cached).
         """
-        now = datetime.now(UTC).isoformat()
+        now = utc_now().isoformat()
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
@@ -213,7 +214,7 @@ class PluginRuntimeStore:
         """
         Remove all runtime data for this plugin (cached).
         """
-        now = datetime.now(UTC).isoformat()
+        now = utc_now().isoformat()
 
         if jid not in self.um._runtime_cache:
             self.um._runtime_cache[jid] = await self._load_from_db(jid)
@@ -456,7 +457,7 @@ class UserManager:
     # ------------------------------------------------------------------
 
     async def create(self, jid, nickname=None):
-        now = datetime.now(UTC).isoformat()
+        now = utc_now().isoformat()
         if jid not in self._users_cache:
             self._users_cache[jid] = {
                 "jid": jid,
@@ -517,7 +518,7 @@ class UserManager:
         )
 
     async def update_last_seen(self, jid):
-        now = datetime.now(UTC).isoformat()
+        now = utc_now().isoformat()
         await self.set(jid, "last_seen", now)
 
     async def delete(self, jid):

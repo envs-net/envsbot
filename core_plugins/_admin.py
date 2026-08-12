@@ -33,6 +33,7 @@ from utils.file_security import PRIVATE_FILE_MODE
 from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.runtime_paths import vcard_file
 from utils.task_supervisor import create_resilient_plugin_task
+from utils.time_utils import ensure_utc, utc_now
 from utils.updatecheck import check_for_updates_once, version_check_worker
 from utils.version import __version__, display_version
 
@@ -57,7 +58,7 @@ def set_bot_start_time(bot):
     """Initialize bot start time tracking."""
     global BOT_START_TIME
     if BOT_START_TIME is None:
-        BOT_START_TIME = datetime.now()
+        BOT_START_TIME = utc_now()
 
 
 def human_time(seconds: int) -> str:
@@ -152,7 +153,7 @@ def _bot_uptime_line() -> str:
     """Return bot uptime based on plugin load time."""
     if not BOT_START_TIME:
         return "Uptime: unknown"
-    uptime = datetime.now() - BOT_START_TIME
+    uptime = utc_now() - ensure_utc(BOT_START_TIME, assume_tz=None)
     return f"Uptime: {human_time(int(uptime.total_seconds()))}"
 
 
@@ -164,7 +165,7 @@ def _connection_line(bot) -> str:
     try:
         if connection_start.tzinfo is None:
             connection_start = connection_start.astimezone()
-        uptime = datetime.now(UTC) - connection_start.astimezone(UTC)
+        uptime = utc_now() - connection_start.astimezone(UTC)
         return f"Connection: {human_time(uptime.total_seconds())}"
     except Exception:
         log.debug("[ADMIN] Could not calculate connection uptime", exc_info=True)
@@ -632,7 +633,7 @@ def _timestamp_age(value: str | None) -> str:
         parsed = datetime.fromisoformat(str(value))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-        age = (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
+        age = (utc_now() - parsed.astimezone(UTC)).total_seconds()
         return f"{human_time(int(max(0, age)))} ago"
     except (TypeError, ValueError):
         return "unknown"

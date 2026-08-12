@@ -319,12 +319,14 @@ def cli(argv: list[str] | None = None) -> int:
             database_backup,
             database_check,
             database_migrate,
+            database_schema,
             database_status,
         )
 
         parser = argparse.ArgumentParser(prog="envsbot db")
         subparsers = parser.add_subparsers(dest="command", required=True)
         subparsers.add_parser("status", help="Show applied/pending schema migrations")
+        subparsers.add_parser("schema", help="Show migration and schema fingerprints")
         migrate_parser = subparsers.add_parser("migrate", help="Apply pending migrations")
         migrate_parser.add_argument("--dry-run", action="store_true", help="Only list migrations")
         subparsers.add_parser("check", help="Run integrity, FK and schema checks")
@@ -337,6 +339,8 @@ def cli(argv: list[str] | None = None) -> int:
                 return await database_status(config)
             if options.command == "migrate":
                 return await database_migrate(config, dry_run=options.dry_run)
+            if options.command == "schema":
+                return await database_schema(config)
             if options.command == "check":
                 return await database_check(config)
             return await database_backup(config, destination=options.destination)

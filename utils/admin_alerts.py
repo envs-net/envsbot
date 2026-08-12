@@ -12,6 +12,7 @@ from typing import Any
 from utils.admin_notify import notify_admin
 from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
+from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
 
@@ -492,5 +493,5 @@ class AdminAlertManager:
             "check_errors": dict(self._check_errors),
             "active": self.active_count(),
             "active_keys": sorted(key for key, state in self._states.items() if state.active),
-            "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "checked_at": utc_now().isoformat(timespec="seconds"),
         }

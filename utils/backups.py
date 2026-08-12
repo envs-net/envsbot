@@ -34,6 +34,7 @@ from utils.runtime_paths import (
     vcard_file,
 )
 from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
+from utils.time_utils import datetime_from_timestamp, utc_now
 from utils.version import __version__
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ class BackupArchive:
 
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    return utc_now()
 
 
 def _iso_now() -> str:
@@ -409,7 +410,7 @@ def backup_age_seconds(
         return max(0, int((current - created_at).total_seconds()))
 
     try:
-        modified = datetime.fromtimestamp(float(latest.path.stat().st_mtime), UTC)
+        modified = datetime_from_timestamp(float(latest.path.stat().st_mtime))
     except (OSError, TypeError, ValueError):
         return None
     return max(0, int((current - modified).total_seconds()))

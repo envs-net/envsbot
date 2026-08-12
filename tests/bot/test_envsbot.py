@@ -1737,3 +1737,15 @@ def test_copy_initial_chat_slang_uses_bundled_default(monkeypatch, tmp_path):
     envsbot.copy_initial_chat_slang()
 
     assert target.read_text(encoding="utf-8") == "hello,world\n"
+
+
+def test_cli_db_schema_dispatches_fingerprint_command(monkeypatch, capsys):
+    from utils import database_cli
+
+    async def fake_schema(_config):
+        return 0, "Schema match:      yes"
+
+    monkeypatch.setattr(database_cli, "database_schema", fake_schema)
+
+    assert envsbot.cli(["db", "schema"]) == 0
+    assert "Schema match:      yes" in capsys.readouterr().out

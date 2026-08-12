@@ -13,6 +13,43 @@ def _database_path(config: Mapping[str, Any]) -> str:
     return str(config.get("db", "bot.db"))
 
 
+async def _expected_schema_fingerprint() -> str:
+    """Build the current release schema in memory and return its fingerprint."""
+    db = DatabaseManager(":memory:")
+    try:
+        await db.connect(start_background=False)
+        return await db.schema_fingerprint()
+    finally:
+        await db.close()
+
+
+async def database_schema(config: Mapping[str, Any]) -> tuple[int, str]:
+    """Show migration-catalog and actual/expected schema fingerprints."""
+    db = DatabaseManager(_database_path(config))
+    try:
+        await db.connect(
+            run_migrations=False,
+            start_background=False,
+            enforce_schema_compatibility=False,
+        )
+        status = await db.migration_status()
+        expected = await _expected_schema_fingerprint()
+        actual = str(status["schema_fingerprint"])
+        mismatches = list(status["checksum_mismatches"])
+        ok = not status["unknown"] and not mismatches and actual == expected
+        lines = [
+            f"Migration catalog: {status['catalog_fingerprint']}",
+            f"Schema actual:     {actual}",
+            f"Schema expected:   {expected}",
+            "Schema match:      " + ("yes" if actual == expected else "NO"),
+            "Migration checksums: "
+            + ("ok" if not mismatches else "CHANGED: " + ", ".join(mismatches)),
+        ]
+        return (0 if ok else 1), "\n".join(lines)
+    finally:
+        await db.close()
+
+
 async def database_status(config: Mapping[str, Any]) -> tuple[int, str]:
     """Return migration status without applying application migrations."""
     db = DatabaseManager(_database_path(config))
@@ -29,6 +66,10 @@ async def database_status(config: Mapping[str, Any]) -> tuple[int, str]:
             f"Applied migrations: {len(status['applied'])}",
             "Pending: " + (", ".join(status["pending"]) or "none"),
             "Unknown/newer: " + (", ".join(status["unknown"]) or "none"),
+            "Changed migrations: "
+            + (", ".join(status["checksum_mismatches"]) or "none"),
+            f"Migration catalog: {status['catalog_fingerprint']}",
+            f"Schema fingerprint: {status['schema_fingerprint']}",
         ]
         last_run = status.get("last_run")
         if last_run:
@@ -37,7 +78,8 @@ async def database_status(config: Mapping[str, Any]) -> tuple[int, str]:
                 f"{last_run['version']} ({last_run['status']}, "
                 f"{last_run['duration_ms']} ms)"
             )
-        return (1 if status["unknown"] else 0), "\n".join(lines)
+        failed = bool(status["unknown"] or status["checksum_mismatches"])
+        return (1 if failed else 0), "\n".join(lines)
     finally:
         await db.close()
 
@@ -76,6 +118,8 @@ async def database_check(config: Mapping[str, Any]) -> tuple[int, str]:
         integrity = await db.integrity_check()
         fk_errors = await db.foreign_key_check()
         status = await db.migration_status()
+        expected_schema = await _expected_schema_fingerprint()
+        schema_matches = status["schema_fingerprint"] == expected_schema
         write_error: str | None = None
         try:
             await db.verify_read_write()
@@ -89,6 +133,8 @@ async def database_check(config: Mapping[str, Any]) -> tuple[int, str]:
             and not fk_errors
             and not status["pending"]
             and not status["unknown"]
+            and not status["checksum_mismatches"]
+            and schema_matches
             and write_error is None
         )
         lines = [
@@ -96,6 +142,12 @@ async def database_check(config: Mapping[str, Any]) -> tuple[int, str]:
             f"Foreign keys: {'ok' if not fk_errors else f'{len(fk_errors)} violation(s)'}",
             "Pending migrations: " + (", ".join(status["pending"]) or "none"),
             "Unknown/newer migrations: " + (", ".join(status["unknown"]) or "none"),
+            "Changed migrations: "
+            + (", ".join(status["checksum_mismatches"]) or "none"),
+            "Schema fingerprint: "
+            + ("ok" if schema_matches else "MISMATCH")
+            + f" ({status['schema_fingerprint']})",
+            "Expected schema: " + expected_schema,
             "Read/write: " + ("ok" if write_error is None else write_error),
         ]
         return (0 if ok else 1), "\n".join(lines)

@@ -490,3 +490,23 @@ def test_refactored_hot_paths_stay_split_into_small_orchestrators():
     assert _function_line_span("plugins/idlerpg/state.py", "_refresh_public_export") <= 100
     assert _function_line_span("bot/lifecycle.py", "on_start") <= 50
     assert _function_line_span("bot/lifecycle.py", "_shutdown_runtime_once") <= 50
+
+
+def test_large_command_modules_keep_refactored_boundaries():
+    """Keep v1.8 command/deployment splits from collapsing back into monoliths."""
+    assert len((ROOT / "plugins/rss/commands.py").read_text(encoding="utf-8").splitlines()) <= 1000
+    assert len((ROOT / "scripts/deploy.py").read_text(encoding="utf-8").splitlines()) <= 1400
+    assert (ROOT / "plugins/rss/command_support.py").exists()
+    assert (ROOT / "plugins/rss/subscriptions.py").exists()
+    assert (ROOT / "plugins/rss/templates.py").exists()
+    assert (ROOT / "utils/deploy_systemd_values.py").exists()
+
+
+def test_rss_split_helpers_do_not_register_commands():
+    for relative_path in (
+        "plugins/rss/command_support.py",
+        "plugins/rss/subscriptions.py",
+        "plugins/rss/templates.py",
+    ):
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "@command" not in source

@@ -1,9 +1,9 @@
 # File: tests/plugins/test_tell.py
 
 import pytest
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytz
 import plugins.tell as tell
 
 
@@ -157,9 +157,7 @@ async def test_deliver_tell_messages_single(monkeypatch):
         "timestamp": 1695000000,
     }
     monkeypatch.setattr(tell, "tell_fetch", AsyncMock(return_value=[payload]))
-    # Return pytz.timezone object!
-    monkeypatch.setattr(tell, "get_user_tzinfo", AsyncMock(
-        return_value=pytz.timezone("UTC")))
+    monkeypatch.setattr(tell, "get_user_tzinfo", AsyncMock(return_value=UTC))
     msg = {
         "from": MagicMock(bare="room@room"),
         "muc": {"nick": "Alpha"},

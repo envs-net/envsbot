@@ -4,7 +4,6 @@ from .helpers import (
     MagicMock,
     datetime,
     pytest,
-    pytz,
     reminder,
 )
 from plugins.reminder import parsing as reminder_parsing
@@ -32,23 +31,23 @@ def test_parse_absolute_datetime():
     dt, count = reminder.parse_absolute_datetime(
         ["2026-05-01", "14:30"], MY_TZ)
     assert dt is not None and count == 2
-    assert dt.astimezone(pytz.UTC).hour == 12  # 14:30+0200 == 12:30Z
+    assert dt.astimezone(datetime.UTC).hour == 12  # 14:30+0200 == 12:30Z
     dt2, count2 = reminder.parse_absolute_datetime(
         ["01.05.2026", "14:30"], MY_TZ)
     assert dt2 is not None and count2 == 2
 
     dt3, count3 = reminder.parse_absolute_datetime(
-        ["2026-07-10", "13:23", "CEST", "test"], pytz.UTC)
+        ["2026-07-10", "13:23", "CEST", "test"], datetime.UTC)
     assert dt3 is not None and count3 == 3
     assert dt3.hour == 11 and dt3.minute == 23
 
     dt4, count4 = reminder.parse_absolute_datetime(
-        ["2026-01-10", "13:23", "CET", "test"], pytz.UTC)
+        ["2026-01-10", "13:23", "CET", "test"], datetime.UTC)
     assert dt4 is not None and count4 == 3
     assert dt4.hour == 12 and dt4.minute == 23
 
     dt5, count5 = reminder.parse_absolute_datetime(
-        ["2026-01-10", "13:23", "Europe/Berlin", "test"], pytz.UTC)
+        ["2026-01-10", "13:23", "Europe/Berlin", "test"], datetime.UTC)
     assert dt5 is not None and count5 == 3
     assert dt5.hour == 12 and dt5.minute == 23
     # Invalid
@@ -62,7 +61,7 @@ async def test_parse_reminder_when_duration_and_datetime():
     sec, msg, when = reminder.parse_reminder_when(["1h", "test"], MY_TZ)
     assert sec is not None and msg == "test" and when.startswith("in ")
     # Absolute datetime, in future
-    utcnow = datetime.datetime.now(pytz.UTC)
+    utcnow = datetime.datetime.now(datetime.UTC)
     # Convert to your test's timezone
     local_now = utcnow.astimezone(MY_TZ)
     local_dt = local_now + datetime.timedelta(hours=1)
@@ -81,7 +80,7 @@ def test_parse_reminder_when_explicit_timezone(monkeypatch):
 
     sec, msg, when = reminder.parse_reminder_when(
         ["2026-07-10", "13:23", "CEST", "TEST1"],
-        pytz.UTC,
+        datetime.UTC,
     )
 
     assert sec == 4980
@@ -177,7 +176,7 @@ def test_parse_reminder_when_allows_current_minute_grace(monkeypatch):
 
     sec, msg, when = reminder.parse_reminder_when(
         ["2026-07-11", "09:30", "CEST", "Test"],
-        pytz.UTC,
+        datetime.UTC,
     )
 
     assert sec == 1
@@ -192,7 +191,7 @@ def test_explain_invalid_reminder_time_for_past_timezone(monkeypatch):
 
     detail = reminder.explain_invalid_reminder_time(
         ["2026-07-11", "09:30", "+03:00", "Test"],
-        pytz.UTC,
+        datetime.UTC,
     )
 
     assert detail is not None

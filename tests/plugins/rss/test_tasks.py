@@ -14,6 +14,7 @@ from .helpers import (
 from plugins.rss import store as rss_store
 from plugins.rss import tasks as rss_tasks
 from plugins.rss import commands as rss_commands
+from plugins.rss import subscriptions as rss_subscriptions
 from plugins.rss import formatting as rss_formatting
 from plugins.rss import lifecycle as rss_lifecycle
 
@@ -232,7 +233,7 @@ async def test_reset_feed_retry_prunes_cancelled_supervised_task(monkeypatch, ma
     async def fake_ensure_task(bot_arg, store_arg, url_arg, period_arg):
         scheduled.append((bot_arg, store_arg, url_arg, period_arg))
 
-    monkeypatch.setattr(rss_commands, "ensure_task", fake_ensure_task)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", fake_ensure_task)
 
     await rss._reset_feed_retry(bot, {}, url, store)
 
@@ -321,7 +322,7 @@ async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
     old_task = RunningTask()
     rss.CHECK_TASKS[url] = old_task
     ensure = AsyncMock()
-    monkeypatch.setattr(rss_commands, "ensure_task", ensure)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", ensure)
 
     await rss.rss_command(bot, "jid", "nick", ["retry", url], msg, False)
 
@@ -367,7 +368,7 @@ async def test_rss_reset_all_retry_states_restarts_all_tasks(monkeypatch, make_b
     old_tasks = {url: RunningTask() for url in feeds}
     rss.CHECK_TASKS.update(old_tasks)
     ensure = AsyncMock()
-    monkeypatch.setattr(rss_commands, "ensure_task", ensure)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", ensure)
 
     await rss.rss_command(bot, "jid", "nick", ["retry", "all"], msg, False)
 

@@ -3,14 +3,14 @@ import asyncio
 import datetime
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytz
+from zoneinfo import ZoneInfo
 import re
 import plugins.reminder as reminder
 import plugins.reminder.runtime as reminder_runtime
 from utils.command import Role
 
 
-MY_TZ = pytz.timezone("Europe/Berlin")  # UTC+2 DST
+MY_TZ = ZoneInfo("Europe/Berlin")  # UTC+1/+2 with DST
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +93,7 @@ __all__ = [
     "AsyncMock",
     "MagicMock",
     "patch",
-    "pytz",
+    "ZoneInfo",
     "re",
     "reminder",
     "MY_TZ",

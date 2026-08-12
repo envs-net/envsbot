@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from zoneinfo import available_timezones
 
 import slixmpp
 
 from utils.bundled_assets import resolve_bundled_asset
+from utils.time_utils import is_timezone_name
 
 from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
 from .errors import ConfigError
 from .spec import CONFIG_FIELDS, NESTED_CONFIG_FIELDS
-
-AVAILABLE_TIMEZONES = available_timezones()
 
 
 def _is_config_int(value: object) -> bool:
@@ -134,7 +132,7 @@ def _validate_timezone(cfg, errors):
         if not isinstance(timezone, str):
             continue
 
-        if timezone not in AVAILABLE_TIMEZONES:
+        if not is_timezone_name(timezone):
             errors.append(
                 f"{key}: must be a valid IANA timezone, e.g. Europe/Berlin")
 
@@ -152,7 +150,7 @@ def _validate_admin_report(cfg, errors):
             if not (0 <= hour <= 23 and 0 <= minute <= 59):
                 errors.append("admin_report_time: expected a valid 24-hour HH:MM time")
     timezone_name = cfg.get("admin_report_timezone")
-    if isinstance(timezone_name, str) and timezone_name and timezone_name not in AVAILABLE_TIMEZONES:
+    if isinstance(timezone_name, str) and timezone_name and not is_timezone_name(timezone_name):
         errors.append("admin_report_timezone: must be a valid IANA timezone")
     destination = cfg.get("admin_report_jid")
     if isinstance(destination, str) and destination.strip():

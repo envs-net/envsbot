@@ -16,11 +16,8 @@ Usage:
 """
 
 import asyncio
-import datetime
 import logging
 from functools import partial
-
-import pytz
 
 from core_plugins._core import (
     _get_enabled_rooms,
@@ -33,6 +30,7 @@ from core_plugins._core import (
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
+from utils.time_utils import datetime_from_timestamp, utc_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +173,7 @@ async def tell_cmd(bot, sender_jid, sender_nick, args, msg, is_room):
     send_jids = await get_jids_from_nick_index(bot, sender_nick)
     send_jid = send_jids[0] if send_jids else None
 
-    now = datetime.datetime.now(datetime.UTC).timestamp()
+    now = utc_timestamp()
     payload = {
         "room_jid": str(msg["from"].bare),
         "recv_jid": rec_jid,
@@ -210,9 +208,7 @@ async def deliver_tell_messages(bot, msg):
     tzinfo = await get_user_tzinfo(bot, rec_jid)
     remaining = []
     for entry in messages:
-        w = datetime.datetime.fromtimestamp(
-            entry["timestamp"], pytz.timezone("UTC")
-        ).astimezone(tzinfo)
+        w = datetime_from_timestamp(entry["timestamp"]).astimezone(tzinfo)
         timestr = w.strftime("%a, %d %b %H:%M %Z")
         await asyncio.sleep(TELL_DELIVERY_DELAY_SECONDS)
         reply_msg = {

@@ -7,6 +7,9 @@ changes explicit and ordered.
 
 from __future__ import annotations
 
+import hashlib
+import inspect
+import textwrap
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -21,6 +24,50 @@ class Migration:
     version: str
     description: str
     run: MigrationCallable
+
+    @property
+    def checksum(self) -> str:
+        """Return a stable checksum for this immutable migration definition."""
+        return migration_checksum(self)
+
+
+def migration_checksum(migration: object) -> str:
+    """Return a deterministic checksum for a migration-like object."""
+    version = str(getattr(migration, "version", ""))
+    description = str(getattr(migration, "description", ""))
+    run = getattr(migration, "run", None)
+    source = ""
+    if run is not None:
+        try:
+            source = textwrap.dedent(inspect.getsource(run)).strip()
+        except (OSError, TypeError):
+            code = getattr(run, "__code__", None)
+            if code is None:
+                function = getattr(run, "__func__", None)
+                code = getattr(function, "__code__", None)
+            if code is not None:
+                source = "|".join(
+                    (
+                        code.co_code.hex(),
+                        repr(code.co_consts),
+                        repr(code.co_names),
+                    )
+                )
+            else:
+                source = f"{type(run).__module__}.{type(run).__qualname__}"
+    payload = "\n".join((version, description, source)).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def migration_catalog_fingerprint(
+    migrations: tuple[Migration, ...] | None = None,
+) -> str:
+    """Return a deterministic fingerprint for the ordered migration catalog."""
+    selected = MIGRATIONS if migrations is None else migrations
+    payload = "\n".join(
+        f"{migration.version}:{migration_checksum(migration)}" for migration in selected
+    ).encode("ascii")
+    return hashlib.sha256(payload).hexdigest()
 
 
 async def _initial_runtime_tables(db) -> None:
@@ -122,6 +169,37 @@ async def _outbox_origin_id(db) -> None:
     )
 
 
+async def _reminders(db) -> None:
+    """Create persistent reminder storage and lookup indexes."""
+    async with db.transaction(label="migration_reminders") as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY,
+                user_jid TEXT NOT NULL,
+                room_jid TEXT,
+                message TEXT NOT NULL,
+                scheduled_at TIMESTAMP NOT NULL,
+                remind_at TIMESTAMP NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reminders_user_jid "
+            "ON reminders(user_jid)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reminders_remind_at "
+            "ON reminders(remind_at)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reminders_is_active "
+            "ON reminders(is_active)"
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "0001_initial_runtime_tables",
@@ -167,6 +245,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0009_outbox_origin_id",
         "Persist stable XEP-0359 origin IDs for durable message retries",
         _outbox_origin_id,
+    ),
+    Migration(
+        "0010_reminders",
+        "Create persistent reminder storage and indexes",
+        _reminders,
     ),
 )
 

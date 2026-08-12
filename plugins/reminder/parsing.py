@@ -4,10 +4,9 @@ import datetime
 import logging
 import re
 
-import pytz
-
 from core_plugins._core import JOINED_ROOMS, _is_muc_pm, _normalize_bare_jid, parse_duration
 from utils.config import config
+from utils.time_utils import ensure_utc, localize_wall_time, timezone_from_name, utc_now
 
 log = logging.getLogger(__name__)
 
@@ -17,11 +16,11 @@ REMINDER_DEFAULT_TIMEZONE = str(
 
 
 def _utcnow() -> datetime.datetime:
-    return datetime.datetime.now(datetime.UTC)
+    return utc_now()
 
 
 def _utc_tz():
-    return pytz.UTC
+    return datetime.UTC
 
 
 _FIXED_TIMEZONE_ALIASES: dict[str, datetime.tzinfo] = {
@@ -65,10 +64,7 @@ def _timezone_from_token(token: str) -> datetime.tzinfo | None:
             delta = -delta
         return datetime.timezone(delta, cleaned)
 
-    if cleaned in pytz.all_timezones:
-        return pytz.timezone(cleaned)
-
-    return None
+    return timezone_from_name(cleaned)
 
 
 def _reminder_default_tzinfo() -> datetime.tzinfo:
@@ -82,7 +78,7 @@ def _reminder_default_tzinfo() -> datetime.tzinfo:
         "[REMINDER] Invalid reminder_default_timezone %r; falling back to UTC",
         timezone_name,
     )
-    return pytz.timezone("UTC")
+    return datetime.UTC
 
 
 async def get_reminder_tzinfo(bot, timezone_jid: str | None) -> datetime.tzinfo:
@@ -161,22 +157,8 @@ def _localize_naive_datetime(
     dt: datetime.datetime,
     tz: datetime.tzinfo,
 ) -> datetime.datetime:
-    """Attach timezone to a naive datetime, handling pytz timezones safely."""
-    if dt.tzinfo is not None:
-        return dt
-
-    if hasattr(tz, "localize"):
-        try:
-            return tz.localize(dt, is_dst=None)
-        except pytz.NonExistentTimeError:
-            # DST spring-forward gap: prefer the daylight-saving side of the
-            # transition without assuming the gap is exactly one hour long.
-            return tz.localize(dt, is_dst=True)
-        except pytz.AmbiguousTimeError:
-            # DST fall-back duplicate hour: choose standard time.
-            return tz.localize(dt, is_dst=False)
-
-    return dt.replace(tzinfo=tz)
+    """Attach timezone to a naive wall-clock datetime safely."""
+    return localize_wall_time(dt, tz)
 
 
 def _format_local_datetime(
@@ -222,15 +204,8 @@ def _ensure_utc(
     dt: datetime.datetime,
     assume_tz: datetime.tzinfo | None = None,
 ) -> datetime.datetime:
-    """Return timezone-aware UTC datetime.
-
-    Naive datetime values are interpreted in assume_tz. If no timezone is
-    supplied, UTC is used as fallback.
-    """
-    if dt.tzinfo is None:
-        dt = _localize_naive_datetime(dt, assume_tz or _utc_tz())
-
-    return dt.astimezone(datetime.UTC)
+    """Return timezone-aware UTC datetime."""
+    return ensure_utc(dt, assume_tz=assume_tz or _utc_tz())
 
 
 def _parse_absolute_datetime_with_timezone(

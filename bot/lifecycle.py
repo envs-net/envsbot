@@ -13,6 +13,7 @@ from time import perf_counter
 from typing import Any
 
 from utils.logging_helpers import kv
+from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
 
@@ -348,7 +349,7 @@ class LifecycleMixin:
         if runtime_ready is not None:
             runtime_ready.clear()
         self.accepting_commands = False
-        self.connection_start_time = datetime.now(UTC)
+        self.connection_start_time = utc_now()
 
         results: list[LifecyclePhaseResult] = []
         self._last_startup_phases = tuple(results)

@@ -213,13 +213,32 @@ envsbot --check
 The preflight checks that the config can be loaded, `config_sample.py` stays
 compatible, plugin modules import, plugin metadata is valid, command metadata is
 complete, command documentation is generated from current metadata, known
-migrations are ordered, the backup directory is writable, runtime files are
+migrations are ordered and checksumable, the backup directory is writable, runtime files are
 available, and the SQLite database can be opened, checked and written inside a
 rolled-back transaction.
 
 A non-zero exit code means the deployment should not be restarted yet. The
 preflight intentionally does not connect to XMPP and is safe to run from CI or
 from a systemd `ExecStartPre=` style check.
+
+
+## Local database fingerprints
+
+For release/deployment diagnostics, the database CLI can verify both migration
+history and the effective SQLite schema without starting XMPP:
+
+```bash
+envsbot db status
+envsbot db schema
+envsbot db check
+```
+
+`db status` reports pending, unknown and checksum-mismatched migrations. `db
+schema` prints the ordered migration-catalog fingerprint and compares the live
+schema fingerprint with the schema produced by the current release. `db check`
+combines those checks with SQLite integrity, foreign-key and read/write probes.
+A changed checksum or schema mismatch is a deployment failure and should be
+investigated before starting the service.
 
 ## Core runtime modules
 

@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import plugins.tools as tools
 
@@ -453,13 +454,13 @@ async def test_seen_resolve_dm_context_allows_self_and_denies_others(bot, monkey
 
 @pytest.mark.asyncio
 async def test_seen_timezone_and_formatting_helpers(monkeypatch, bot):
-    monkeypatch.setattr(tools, "get_user_tzinfo", AsyncMock(return_value=tools.pytz.timezone("Europe/Berlin")))
+    monkeypatch.setattr(tools, "get_user_tzinfo", AsyncMock(return_value=ZoneInfo("Europe/Berlin")))
     tzinfo = await tools._seen_get_timezone(bot, "alice@example.org")
     assert str(tzinfo) == "Europe/Berlin"
 
     good = await tools._seen_format_last_seen(
         "2024-01-01T10:00:00+00:00",
-        tools.pytz.timezone("Europe/Berlin"),
+        ZoneInfo("Europe/Berlin"),
         "Alice",
     )
     assert "2024-01-01" in good

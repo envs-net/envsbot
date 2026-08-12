@@ -6,7 +6,7 @@ import pytest
 import aiosqlite
 from unittest.mock import AsyncMock, MagicMock
 
-from database.manager import DatabaseManager
+from database.manager import DatabaseManager, DatabaseMigrationChangedError
 
 
 async def _insert_room_then_fail(conn, room_jid: str, nick: str) -> None:
@@ -47,6 +47,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
     assert "outbox_messages" in table_names
     assert "command_usage" in table_names
     assert "schema_migrations" in table_names
+    assert "reminders" in table_names
 
     applied = await db.applied_migration_versions()
     assert applied == {
@@ -59,6 +60,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
         "0007_command_usage",
         "0008_outbox_dead_timestamp",
         "0009_outbox_origin_id",
+        "0010_reminders",
     }
     await db.close()
 
@@ -308,13 +310,22 @@ async def test_database_migration_status_and_read_write_check(tmp_path, monkeypa
 
     db = DatabaseManager(str(tmp_path / "bot.db"), flush_interval=999)
     db.applied_migration_versions = AsyncMock(return_value={"0001"})
+    db.migration_checksum_mismatches = AsyncMock(return_value=[])
+    db.schema_fingerprint = AsyncMock(return_value="schema-fingerprint")
     db.migration_history = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "database.manager.migration_catalog_fingerprint",
+        lambda: "catalog-fingerprint",
+    )
     assert await db.pending_migration_versions() == ["0002"]
     assert await db.migration_status() == {
         "known": ["0001", "0002"],
         "applied": ["0001"],
         "pending": ["0002"],
         "unknown": [],
+        "checksum_mismatches": [],
+        "catalog_fingerprint": "catalog-fingerprint",
+        "schema_fingerprint": "schema-fingerprint",
         "last_run": None,
     }
 
@@ -548,3 +559,81 @@ async def test_database_background_workers_use_runtime_supervisor(tmp_db_path):
         info.name not in {"database-flush", "database-maintenance"}
         for info in supervisor.snapshot(include_done=True)
     )
+
+
+@pytest.mark.asyncio
+async def test_migration_checksums_are_recorded_and_tampering_is_rejected(tmp_path):
+    path = tmp_path / "checksums.db"
+    db = DatabaseManager(str(path), flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        rows = await db.list_migrations()
+        assert rows
+        assert all(len(str(row["checksum"] or "")) == 64 for row in rows)
+        victim = str(rows[0]["version"])
+        await db.write(
+            "UPDATE schema_migrations SET checksum=? WHERE version=?",
+            ("0" * 64, victim),
+            label="test_migration_checksum_tamper",
+        )
+        assert await db.migration_checksum_mismatches() == [victim]
+        with pytest.raises(DatabaseMigrationChangedError, match=victim):
+            await db.assert_schema_compatible()
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_legacy_migration_checksum_is_bootstrapped_but_nonempty_is_preserved(tmp_path):
+    path = tmp_path / "legacy-checksum.db"
+    db = DatabaseManager(str(path), flush_interval=999)
+    await db.connect(start_background=False)
+    rows = await db.list_migrations()
+    empty_version = str(rows[0]["version"])
+    preserved_version = str(rows[1]["version"])
+    await db.write(
+        "UPDATE schema_migrations SET checksum=NULL WHERE version=?",
+        (empty_version,),
+        label="test_empty_checksum",
+    )
+    await db.write(
+        "UPDATE schema_migrations SET checksum=? WHERE version=?",
+        ("f" * 64, preserved_version),
+        label="test_preserved_checksum",
+    )
+    await db.close()
+
+    reopened = DatabaseManager(str(path), flush_interval=999)
+    await reopened.connect(
+        run_migrations=False,
+        start_background=False,
+        enforce_schema_compatibility=False,
+    )
+    try:
+        stored = {str(row["version"]): str(row["checksum"] or "") for row in await reopened.list_migrations()}
+        assert len(stored[empty_version]) == 64
+        assert stored[empty_version] != "f" * 64
+        assert stored[preserved_version] == "f" * 64
+        assert preserved_version in await reopened.migration_checksum_mismatches()
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_schema_fingerprint_is_stable_and_detects_schema_drift(tmp_path):
+    path = tmp_path / "schema-fingerprint.db"
+    db = DatabaseManager(str(path), flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        before = await db.schema_fingerprint()
+        assert len(before) == 64
+        assert await db.schema_fingerprint() == before
+        await db.write(
+            "CREATE TABLE envsbot_schema_drift (id INTEGER PRIMARY KEY, note TEXT)",
+            label="test_schema_drift",
+        )
+        after = await db.schema_fingerprint()
+        assert len(after) == 64
+        assert after != before
+    finally:
+        await db.close()

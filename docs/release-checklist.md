@@ -81,6 +81,21 @@ Investigate any new `no tests` results before tagging. Long-lived surviving
 mutants should be reviewed, but not every survivor is necessarily a release
 blocker.
 
+## Database fingerprint smoke test
+
+After applying the release migrations on a disposable or representative copy of
+the production database, verify that migration definitions and the resulting
+schema match the release:
+
+```bash
+envsbot db status
+envsbot db schema
+envsbot db check
+```
+
+There must be no unknown or checksum-mismatched migrations, and `db schema` must
+report `Schema match: yes`.
+
 ## Deployment smoke test
 
 On a representative systemd deployment, verify the preservation-first helper

@@ -1,3 +1,5 @@
+from utils.time_utils import utc_now
+
 """Split module for core_plugins/users.py: tracking."""
 
 import asyncio
@@ -363,7 +365,7 @@ async def update_last_seen(bot, real_jid: str):
     """
     Update last_seen timestamp.
     """
-    now = datetime.now(UTC)
+    now = utc_now()
 
     try:
         user = await bot.db.users.get(real_jid)

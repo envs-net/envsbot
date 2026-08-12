@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from utils.health import collect_health_snapshot
+from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ async def build_daily_admin_report(bot: Any) -> str:
         if started.tzinfo is None:
             started = started.astimezone()
         uptime = _duration(
-            (datetime.now(UTC) - started.astimezone(UTC)).total_seconds()
+            (utc_now() - started.astimezone(UTC)).total_seconds()
         )
     else:
         uptime = "unknown"

@@ -91,3 +91,33 @@ The optional report normally verifies the latest backup manifest and files.
 With `ADMIN_REPORT_BACKUP_SMOKE_TEST = True`, it also restores the archive into
 a temporary directory and opens the restored SQLite database. This provides a
 stronger recurring check without overwriting live files.
+
+## Database migrations and schema fingerprints
+
+Before a production upgrade, use the local database commands while the service
+is stopped to preview and verify schema changes:
+
+```bash
+envsbot db status
+envsbot db migrate --dry-run
+envsbot db backup
+envsbot db migrate
+envsbot db schema
+envsbot db check
+```
+
+`envsbot db status` reports pending/unknown migrations plus the migration
+catalog and live-schema fingerprints. `envsbot db schema` additionally compares
+the live database with the schema produced by the current release and should
+report `Schema match: yes` after a successful migration.
+
+Applied migrations store a SHA-256 checksum. EnvsBot refuses normal startup when
+an already-applied migration has been changed in the running source tree or when
+the database contains a migration version unknown to that build. Existing
+pre-v1.8 development databases with empty checksum fields are bootstrapped once
+from the known migration catalog; a non-empty mismatch is never overwritten.
+
+The schema fingerprint covers envsbot-managed tables, columns, foreign keys,
+indexes, views and triggers, but not row contents. An unexpected fingerprint
+mismatch should therefore be investigated before starting the service rather
+than repaired by manually editing the migration metadata.

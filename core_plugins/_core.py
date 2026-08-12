@@ -14,7 +14,6 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import pytz
 from slixmpp import JID
 
 from bot.room_state import JOINED_ROOMS
@@ -25,6 +24,7 @@ from utils.room_features import (
     get_room_feature,
     set_room_feature,
 )
+from utils.time_utils import is_timezone_name, timezone_or_utc
 
 # Compatibility exports for existing plugins. New code should import these
 # XMPP reply helpers directly from utils.message_cache.
@@ -179,28 +179,28 @@ async def get_user_tzinfo(bot, timezone_jid: str) -> datetime.tzinfo:
     """
     tzname = await _get_user_timezone(bot, timezone_jid)
     try:
-        return pytz.timezone(tzname)
+        return timezone_or_utc(tzname)
     except Exception:
         log.warning(
             "[CORE] Invalid timezone for %s: %s; falling back to UTC",
             timezone_jid,
             tzname,
         )
-        return pytz.timezone("UTC")
+        return datetime.UTC
 
 
 # Get IANA timezone name from the user's vCard TIMEZONE field as a string
 async def _get_user_timezone(bot, timezone_jid: str | None) -> str:
     """Return the user's vCard TIMEZONE or UTC as fallback."""
     if not timezone_jid:
-        return str(pytz.timezone("UTC"))
+        return "UTC"
 
     try:
         store = bot.db.users.plugin("vcard")
         timezone_name = await store.get(str(timezone_jid), "TIMEZONE")
 
-        if timezone_name and timezone_name in pytz.all_timezones:
-            return str(pytz.timezone(timezone_name))
+        if timezone_name and is_timezone_name(str(timezone_name)):
+            return str(timezone_name)
 
         if timezone_name:
             log.warning(
@@ -218,7 +218,7 @@ async def _get_user_timezone(bot, timezone_jid: str | None) -> str:
             exc,
         )
 
-    return str(pytz.timezone("UTC"))
+    return "UTC"
 
 
 # ------------------------------------------------------------------------

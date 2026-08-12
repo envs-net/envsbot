@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from database.manager import DatabaseManager
-from database.migrations import available_migrations
+from database.migrations import (
+    available_migrations,
+    migration_catalog_fingerprint,
+    migration_checksum,
+)
 from utils.bundled_assets import resolve_bundled_asset
 from utils.config import (
     ConfigError,
@@ -52,12 +56,16 @@ async def _check_database(config: Mapping[str, Any]) -> tuple[bool, str]:
         migration_status = await db.migration_status()
         pending = migration_status.get("pending", [])
         unknown = migration_status.get("unknown", [])
+        changed = migration_status.get("checksum_mismatches", [])
         await db.verify_read_write()
         suffix_parts = []
         if pending:
             suffix_parts.append(f"pending_migrations={','.join(pending)}")
         if unknown:
             suffix_parts.append(f"unknown_migrations={','.join(unknown)}")
+            ok = False
+        if changed:
+            suffix_parts.append(f"changed_migrations={','.join(changed)}")
             ok = False
         suffix = f", {', '.join(suffix_parts)}" if suffix_parts else ""
         return ok, f"database: integrity={','.join(map(str, integrity or [])) or 'unknown'}{suffix}"
@@ -205,13 +213,17 @@ def _check_config_path() -> tuple[bool, str]:
 
 
 def _check_migration_catalog() -> tuple[bool, str]:
-    migrations = available_migrations()
+    migrations = tuple(available_migrations())
     versions = [migration.version for migration in migrations]
     if len(versions) != len(set(versions)):
         return False, "migrations: duplicate version identifiers"
     if versions != sorted(versions):
         return False, "migrations: versions are not sorted"
-    return True, f"migrations: {len(versions)} known"
+    checksums = [migration_checksum(migration) for migration in migrations]
+    if any(len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value) for value in checksums):
+        return False, "migrations: invalid checksum"
+    fingerprint = migration_catalog_fingerprint(migrations)
+    return True, f"migrations: {len(versions)} known, catalog={fingerprint[:12]}"
 
 
 async def collect_preflight_checks(config: Mapping[str, Any]) -> list[tuple[bool, str]]:

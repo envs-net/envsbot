@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from utils.admin_notify import admin_notify_target, notify_admin
 from utils.admin_reports import build_daily_admin_report
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.task_supervisor import create_resilient_plugin_task, sleep_with_heartbeat
+from utils.time_utils import timezone_or_utc, utc_now
 
 PLUGIN_META = {
     "name": "reports",
@@ -26,10 +26,7 @@ def _timezone(bot):
     value = str((getattr(bot, "config", {}) or {}).get("admin_report_timezone") or "").strip()
     if not value:
         value = str((getattr(bot, "config", {}) or {}).get("timezone") or "UTC")
-    try:
-        return ZoneInfo(value)
-    except ZoneInfoNotFoundError:
-        return ZoneInfo("UTC")
+    return timezone_or_utc(value)
 
 
 def _report_time(bot) -> tuple[int, int]:
@@ -45,7 +42,7 @@ def _report_time(bot) -> tuple[int, int]:
 
 def _next_report_at(bot, *, now: datetime | None = None) -> datetime:
     tz = _timezone(bot)
-    local_now = now.astimezone(tz) if now is not None else datetime.now(tz)
+    local_now = now.astimezone(tz) if now is not None else utc_now().astimezone(tz)
     hour, minute = _report_time(bot)
     target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if target <= local_now:
@@ -55,7 +52,7 @@ def _next_report_at(bot, *, now: datetime | None = None) -> datetime:
 
 async def send_report(bot, *, manual: bool = False) -> bool:
     report = await build_daily_admin_report(bot)
-    day = datetime.now(_timezone(bot)).strftime("%Y-%m-%d")
+    day = utc_now().astimezone(_timezone(bot)).strftime("%Y-%m-%d")
     return await notify_admin(
         bot,
         report,
@@ -70,7 +67,7 @@ async def _report_loop(bot) -> None:
         if supervisor is not None:
             supervisor.heartbeat("reports", "daily-admin-report")
         target = _next_report_at(bot)
-        delay = max(1.0, (target - datetime.now(target.tzinfo)).total_seconds())
+        delay = max(1.0, (target - utc_now().astimezone(target.tzinfo)).total_seconds())
         await sleep_with_heartbeat(bot, "reports", "daily-admin-report", delay)
         config = getattr(bot, "config", {}) or {}
         mode = str(config.get("admin_report_mode", "daily") or "daily").strip().lower()

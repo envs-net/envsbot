@@ -24,7 +24,6 @@ dependencies = [
     "feedparser>=6.0.8,<7",
     "isodate>=0.6,<1",
     "psutil>=5.9,<8",
-    "pytz>=2023.3",
     "slixmpp>=1.8,<2",
 ]
 

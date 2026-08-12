@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from utils.backups import backup_age_seconds
+from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
 
@@ -431,6 +432,6 @@ async def collect_health_snapshot(
     for key, collector in collectors:
         checks[key] = await _safe_collect(key, collector)
     return HealthSnapshot(
-        checked_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        checked_at=utc_now().isoformat(timespec="seconds"),
         checks=checks,
     )

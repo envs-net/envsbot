@@ -1,6 +1,7 @@
 import pytest
 import asyncio
-import pytz
+from datetime import UTC
+from zoneinfo import ZoneInfo
 from collections import deque
 from types import SimpleNamespace
 from uuid import uuid4
@@ -187,10 +188,11 @@ async def test_get_user_tzinfo(fake_bot, monkeypatch):
     async def _get_user_timezone2(b, j): return "Invalid/Timezone"
     monkeypatch.setattr(_core, "_get_user_timezone", _get_user_timezone1)
     tz = await _core.get_user_tzinfo(fake_bot, "somejid")
-    assert isinstance(tz, pytz.tzinfo.BaseTzInfo)
+    assert isinstance(tz, ZoneInfo)
+    assert tz.key == "Europe/Berlin"
     monkeypatch.setattr(_core, "_get_user_timezone", _get_user_timezone2)
     tz = await _core.get_user_tzinfo(fake_bot, "otherjid")
-    assert tz.zone == "UTC"
+    assert tz is UTC
 
 
 @pytest.mark.asyncio

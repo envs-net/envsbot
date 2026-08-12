@@ -39,13 +39,11 @@ async def test_send_report_builds_and_sends_daily_deduped_report(monkeypatch):
     monkeypatch.setattr(reports, "build_daily_admin_report", build)
     monkeypatch.setattr(reports, "notify_admin", notify)
 
-    class FixedDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            value = datetime(2026, 8, 9, 10, 0, tzinfo=ZoneInfo("UTC"))
-            return value.astimezone(tz) if tz is not None else value
-
-    monkeypatch.setattr(reports, "datetime", FixedDateTime)
+    monkeypatch.setattr(
+        reports,
+        "utc_now",
+        lambda: datetime(2026, 8, 9, 10, 0, tzinfo=ZoneInfo("UTC")),
+    )
     bot = SimpleNamespace(config={"admin_report_timezone": "UTC"})
 
     assert await reports.send_report(bot) is True

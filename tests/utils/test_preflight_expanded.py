@@ -139,7 +139,9 @@ def test_check_config_path_success_and_missing(tmp_path, monkeypatch):
 
 def test_check_migration_catalog_success_duplicate_and_unsorted(monkeypatch):
     monkeypatch.setattr(preflight, "available_migrations", lambda: [FakeMigration("0001"), FakeMigration("0002")])
-    assert preflight._check_migration_catalog() == (True, "migrations: 2 known")
+    ok, message = preflight._check_migration_catalog()
+    assert ok is True
+    assert message.startswith("migrations: 2 known, catalog=")
 
     monkeypatch.setattr(preflight, "available_migrations", lambda: [FakeMigration("0001"), FakeMigration("0001")])
     assert preflight._check_migration_catalog() == (False, "migrations: duplicate version identifiers")
@@ -165,7 +167,7 @@ async def test_check_database_success_pending_and_failure(monkeypatch, tmp_path)
             return ["ok"]
 
         async def migration_status(self):
-            return {"pending": [], "unknown": []}
+            return {"pending": [], "unknown": [], "checksum_mismatches": []}
 
         async def verify_read_write(self):
             self.verified = True
