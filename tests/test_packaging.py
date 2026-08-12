@@ -6,7 +6,6 @@ import stat
 import tomllib
 from pathlib import Path
 
-
 _TEST_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -221,6 +220,24 @@ def test_quality_fix_flag_is_forwarded_to_both_ruff_passes():
     assert "ruff check $ruff_fix_args --select I,UP,B" in quality
     assert "ruff check $ruff_fix_args --select F401" in quality
     assert 'echo "usage: $0 [--fix]" >&2' in quality
+
+
+def test_quality_output_labels_every_gate():
+    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
+
+    expected_labels = (
+        "[1/8] Python compilation",
+        "[2/8] Command documentation",
+        "[3/8] Generated configuration sample",
+        "[4/8] Ruff: repository checks",
+        "[5/8] Ruff: unused imports (F401)",
+        "[6/8] Ruff: imports, modernization, and Bugbear (I,UP,B)",
+        "[7/8] mypy: production source tree",
+        "[8/8] Dependency audit (pip-audit)",
+    )
+    for label in expected_labels:
+        assert label in quality
+    assert "Quality checks passed (8/8)." in quality
 
 
 def test_quality_audits_exact_lock_without_no_deps_warning():

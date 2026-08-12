@@ -33,6 +33,7 @@ from .formatting import (
     _rss_list_page,
 )
 from .store import (
+    _feed_article_count,
     _feed_paused_rooms,
     _feed_url_by_number,
     _normalize_room_jid,
@@ -240,6 +241,29 @@ async def _rss_handle_delete(bot, sender_jid, args, msg, is_room, store, room):
             return
         await _delete_direct_feed_target(bot, msg, feed_url, store, direct_target)
         return
+
+    # A bare delete in a normal 1:1 chat is always scoped to the sender's
+    # direct subscription, regardless of whether the sender also has global
+    # RSS management rights. Global deletion must be explicit via ``all``.
+    if (
+        not delete_target
+        and not room
+        and _message_type(msg) in ("chat", "normal")
+    ):
+        role = await _sender_role(bot, sender_jid)
+        if role > Role.TRUSTED:
+            bot.reply(msg, "🔴 Direct RSS subscriptions require trusted role or higher.")
+            return
+        await _delete_direct_feed(
+            bot,
+            msg,
+            feed_url,
+            store,
+            sender_jid,
+            allow_other=False,
+        )
+        return
+
     if delete_target and str(delete_target).strip().lower() == "all":
         if not await _sender_can_manage_rss_globally(bot, sender_jid):
             bot.reply(msg, "🔴 Only global moderators can delete RSS feeds everywhere.")
@@ -253,18 +277,8 @@ async def _rss_handle_delete(bot, sender_jid, args, msg, is_room, store, room):
             )
             return
     elif not await _sender_can_manage_rss_globally(bot, sender_jid):
-        role = await _sender_role(bot, sender_jid)
-        if role > Role.TRUSTED:
-            bot.reply(msg, "🔴 Direct RSS subscriptions require trusted role or higher.")
-            return
-        await _delete_direct_feed(bot, msg, feed_url, store, sender_jid, allow_other=False)
+        bot.reply(msg, "🔴 Only global moderators can delete RSS feeds without a direct or room scope.")
         return
-
-    if not target_room and not delete_target and not room and msg.get("type") in ("chat", "normal"):
-        role = await _sender_role(bot, sender_jid)
-        if role <= Role.ADMIN:
-            await _delete_direct_feed(bot, msg, feed_url, store, sender_jid, allow_other=True)
-            return
 
     await _del_feed(bot, msg, feed_url, store, room, delete_target)
     await audit_event(
@@ -492,6 +506,15 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
                 "own",
                 owner=owner,
             )[1:]
+            own_article_total = sum(
+                _feed_article_count(feed)
+                for feed in feeds.values()
+                if isinstance(feed, dict)
+                and any(
+                    _normalize_direct_user_jid(jid) == owner
+                    for jid in _direct_subscriptions(feed)
+                )
+            )
             if own_lines == ["• none"]:
                 bot.reply(msg, "No direct RSS feeds configured for you.")
                 return
@@ -503,7 +526,10 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
             page, show_all, page_size = parsed
             if show_all:
                 page_items = own_lines
-                lines = [f"Own direct feeds ({len(own_lines)}) - all:"]
+                lines = [
+                    f"Own direct feeds ({len(own_lines)} feeds, "
+                    f"{own_article_total} articles) - all:"
+                ]
             else:
                 page_items, page, total_pages, total = paginate_items(
                     own_lines,
@@ -511,7 +537,8 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
                     page_size,
                 )
                 lines = [
-                    f"Own direct feeds ({total}) - Page "
+                    f"Own direct feeds ({total} feeds, "
+                    f"{own_article_total} articles) - Page "
                     f"{page}/{total_pages}:"
                 ]
             lines.extend(page_items)
