@@ -219,7 +219,12 @@ Common maintenance commands:
 ,rss reset https://example.org/feed.rss
 ,rss retry all
 ,rss reset all
+
 ,rss delete 12
+,rss delete 12 user@example.org
+,rss delete all user@example.org
+,rss delete 12 all
+
 ,rss delete https://example.org/feed.rss room@conference.example.org
 ,rss del https://example.org/feed.rss room@conference.example.org
 ,rss remove https://example.org/feed.rss room@conference.example.org
@@ -228,7 +233,17 @@ Common maintenance commands:
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
-RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output show the feed number and EnvsBot's latest local article number; `,rss delete 12` may be used instead of repeating the feed URL. A number becomes available again after the feed itself is no longer used by any room or direct subscriber.
+RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output show the feed number and EnvsBot's latest local article number, so a feed number may be used instead of repeating the feed URL.
+
+Deletion is scoped deliberately:
+
+- In a normal 1:1 chat, `,rss delete 12` removes only your own direct subscription to feed #12.
+- In a room or MUC PM, `,rss delete 12` removes only that room's subscription.
+- Owner, superadmin, and admin users can remove one other user's direct subscription with `,rss delete 12 user@example.org`.
+- Owner, superadmin, and admin users can remove all direct subscriptions belonging to one user with `,rss delete all user@example.org`.
+- A global RSS manager can remove feed #12 from every room and every direct subscriber only with the explicit global form `,rss delete 12 all`.
+
+Deleting one room or direct subscription does not affect other destinations using the same feed. A feed number becomes available again only after the feed itself is no longer used anywhere.
 
 Global moderators can set a persistent default RSS template for all rooms. Room owners/admins can customize RSS post formatting per room and, optionally, for a specific feed in that room. The priority is feed-specific template → room template → global default → built-in default. Supported variables include `$feed_title`, `$title`, `$summary`, `$summary_line`, `$link`, `$feed_url`, `$feed_link`, `$feed_no`, `$article_no`, `$feed_ref`, `$feed_ref_line`, `$id`, and `$date`. Use `\n` for a newline and `$$` for a literal dollar sign.
 

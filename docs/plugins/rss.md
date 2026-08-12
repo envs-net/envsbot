@@ -142,22 +142,41 @@ The direct-chat destination is implicit. Use `,rss add <feed-url>` without appen
 
 Use `,rss template set ...` in the same direct chat to customize all personal deliveries, or include a subscribed feed URL for a feed-specific personal template.
 
-Trusted users may remove only their own subscriptions. Owner, superadmin, and admin users may remove a trusted user's subscription explicitly:
+Feed deletion is deliberately scoped. A bare delete never removes the same feed from unrelated destinations:
 
 ```text
-,rss remove <feed-url> <user-jid>
+,rss delete 12
 ```
 
-Owner, superadmin, and admin users may also remove every direct RSS subscription for one user in a normal 1:1 chat:
+In a normal 1:1 chat, this removes only the sender's own direct subscription to feed #12. In a room or MUC PM, it removes only that room's subscription. Other rooms and direct subscribers using the same feed are left untouched.
+
+Owner, superadmin, and admin users may remove one specific direct subscription for another user by adding that user's bare JID:
 
 ```text
-,rss remove all <user-jid>
+,rss delete 12 user@example.org
+,rss delete https://example.org/feed.rss user@example.org
 ```
+
+These forms remove only that user's direct subscription; room subscriptions to the same feed remain active.
+
+Owner, superadmin, and admin users may also remove every direct RSS subscription belonging to one user in a normal 1:1 chat:
+
+```text
+,rss delete all user@example.org
+```
+
+To remove one feed globally from every room and every direct subscriber, a global RSS manager must request the global scope explicitly:
+
+```text
+,rss delete 12 all
+```
+
+Only this explicit `all` target removes the feed everywhere. Once no room or direct subscriber uses the feed anymore, its feed number becomes free and may be assigned to a newly added feed.
 
 In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
 Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. Trusted users continue to see only their own direct subscriptions with `,rss list`. Any trusted user or global moderator may use `,rss list own [page|all|last]` in a normal 1:1 chat to show only their own personal subscriptions.
 
-RSS list and health output include the feed number and latest local article number. A visible number can be used instead of the URL when deleting a feed, for example `,rss delete 12`. URL-based deletion and all existing aliases remain supported.
+RSS list and health output include the feed number and latest local article number. A visible number can be used instead of the URL in all single-feed delete forms. URL-based deletion and the aliases `,rss del`, `,rss remove`, and `,rss rm` remain supported.
 
 ## Fetch retries and startup behavior
 
@@ -192,12 +211,13 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
     - `,rss list trusted` — Show trusted-user direct subscriptions permitted for your role.
 
 - `,rss delete <feed_url|feed_no> [room_jid|jid|all] | ,rss delete all <user_jid>`
-  - Description: Remove one subscription by URL/feed number, or all direct subscriptions for a user.
+  - Description: Remove one scoped subscription by URL/feed number, or explicitly remove a feed everywhere.
   - Aliases: `,rss del`, `,rss remove`, `,rss rm`
   - Examples:
-    - `,rss delete https://example.org/feed.rss` — Remove the feed from the current room or your direct subscriptions.
-    - `,rss delete 12` — Remove feed #12 from the current room or your direct subscriptions.
-    - `,rss delete all user@example.org` — As an admin, remove every direct RSS subscription for one user.
+    - `,rss delete 12` — In 1:1 remove only your own direct subscription; in a room remove only that room subscription.
+    - `,rss delete 12 user@example.org` — As owner, superadmin, or admin, remove only this user's direct subscription to feed #12.
+    - `,rss delete all user@example.org` — As owner, superadmin, or admin, remove every direct RSS subscription for one user.
+    - `,rss delete 12 all` — As a global RSS manager, remove feed #12 everywhere: all rooms and all direct subscriptions.
 
 - `,rss retry <feed_url|all> [room_jid]`
   - Description: Clear retry/backoff state and schedule another feed attempt.

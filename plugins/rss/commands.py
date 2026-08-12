@@ -644,20 +644,24 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
             "delete",
             "{prefix}rss delete <feed_url|feed_no> [room_jid|jid|all] | "
             "{prefix}rss delete all <user_jid>",
-            "Remove one subscription by URL/feed number, or all direct subscriptions for a user.",
+            "Remove one scoped subscription by URL/feed number, or explicitly remove a feed everywhere.",
             aliases=("del", "remove", "rm"),
             examples=[
                 help_example(
-                    "{prefix}rss delete https://example.org/feed.rss",
-                    "Remove the feed from the current room or your direct subscriptions.",
+                    "{prefix}rss delete 12",
+                    "In 1:1 remove only your own direct subscription; in a room remove only that room subscription.",
                 ),
                 help_example(
-                    "{prefix}rss delete 12",
-                    "Remove feed #12 from the current room or your direct subscriptions.",
+                    "{prefix}rss delete 12 user@example.org",
+                    "As owner, superadmin, or admin, remove only this user's direct subscription to feed #12.",
                 ),
                 help_example(
                     "{prefix}rss delete all user@example.org",
-                    "As an admin, remove every direct RSS subscription for one user.",
+                    "As owner, superadmin, or admin, remove every direct RSS subscription for one user.",
+                ),
+                help_example(
+                    "{prefix}rss delete 12 all",
+                    "As a global RSS manager, remove feed #12 everywhere: all rooms and all direct subscriptions.",
                 ),
             ],
         ),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .formatting import _filter_feeds_for_room
 from .store import (
+    _feed_article_count,
     _normalize_room_jid,
     _normalize_template_room_jid,
     _now,
@@ -79,6 +80,11 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         room_feeds = _filter_feeds_for_room(feeds, room_target)
         return {
             "feeds": len(room_feeds),
+            "articles": sum(
+                _feed_article_count(feed)
+                for feed in room_feeds.values()
+                if isinstance(feed, dict)
+            ),
             "active_tasks": sum(
                 1
                 for url in room_feeds
@@ -92,6 +98,11 @@ async def get_runtime_state(bot, room_jid: str | None = None) -> dict[str, int]:
         }
     return {
         "feeds": len(feeds),
+        "articles": sum(
+            _feed_article_count(feed)
+            for feed in feeds.values()
+            if isinstance(feed, dict)
+        ),
         "active_tasks": sum(1 for task in CHECK_TASKS.values() if not task.done()),
         "retry_backoff": retrying,
     }
@@ -100,7 +111,7 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     state = await get_runtime_state(bot, room_jid=room_jid)
     scope = f" for {room_jid}" if room_jid else ""
     lines = [
-        f"✅ RSS{scope}: feeds={state.get('feeds', 0)}, active_tasks={state.get('active_tasks', 0)}, retry_backoff={state.get('retry_backoff', 0)}"
+        f"✅ RSS{scope}: feeds={state.get('feeds', 0)}, articles={state.get('articles', 0)}, active_tasks={state.get('active_tasks', 0)}, retry_backoff={state.get('retry_backoff', 0)}"
     ]
     if int(state.get('retry_backoff', 0) or 0) > 0:
         lines.append("🟡️ RSS: one or more feeds are currently in retry/backoff")

@@ -42,13 +42,18 @@ def test_generated_rss_docs_include_direct_and_filtered_list_guidance():
     assert "The bot recognizes the 1:1 destination automatically" in rss_doc
     assert "never stored as part of the template" in rss_doc
     assert "placeholder text such as `MEINE_JID` is ignored" in rss_doc
-    assert ",rss remove all <user-jid>" in rss_doc
+    assert "Aliases: `,rss del`, `,rss remove`, `,rss rm`" in rss_doc
     assert "## Fetch retries and startup behavior" in rss_doc
     assert "RSS_STARTUP_STAGGER_SECONDS" in rss_doc
     assert "RSS_FETCH_TIMEOUT_SECONDS" in rss_doc
     assert "DIRECT $title" not in rss_doc
     assert "- `,rss add https://example.org/feed.rss`" in rss_doc
+    assert "`,rss delete 12 user@example.org`" in rss_doc
     assert "`,rss delete all user@example.org`" in rss_doc
+    assert "`,rss delete 12 all`" in rss_doc
+    assert "A bare delete never removes the same feed from unrelated destinations" in rss_doc
+    assert "These forms remove only that user's direct subscription" in rss_doc
+    assert "Only this explicit `all` target removes the feed everywhere" in rss_doc
 
 
 def test_generated_idlerpg_docs_group_player_and_admin_commands():

@@ -539,11 +539,13 @@ async def test_rss_runtime_state_global_and_room(monkeypatch, make_bot):
 
     assert await rss.get_runtime_state(bot, "room@conf") == {
         "feeds": 2,
+        "articles": 0,
         "active_tasks": 1,
         "retry_backoff": 1,
     }
     assert await rss.get_runtime_state(bot) == {
         "feeds": 3,
+        "articles": 0,
         "active_tasks": 1,
         "retry_backoff": 1,
     }

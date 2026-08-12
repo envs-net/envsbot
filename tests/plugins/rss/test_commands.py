@@ -172,7 +172,7 @@ async def test_rss_add_rejects_plain_private_chat(monkeypatch, make_bot):
 
 
 @pytest.mark.asyncio
-async def test_rss_delete_from_private_chat_removes_stale_feed(make_bot):
+async def test_rss_delete_all_from_private_chat_removes_stale_feed(make_bot):
     bot = make_bot()
     url = "https://git.envs.net/dan/envsbot.rss"
     room = "envs@conference.envs.net"
@@ -189,7 +189,7 @@ async def test_rss_delete_from_private_chat_removes_stale_feed(make_bot):
         "type": "chat",
     }
 
-    await rss.rss_command(bot, "jid1", "nick1", ["delete", url], msg, False)
+    await rss.rss_command(bot, "jid1", "nick1", ["delete", url, "all"], msg, False)
 
     assert bot.plugin_store[rss.RSS_KEY] == {}
     assert bot.replies[-1][1] == f"🗑 Deleted feed: {url} ({room})"
@@ -2018,7 +2018,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
 
     lines = bot.replies[-1][1]
     assert lines == [
-        "Own direct feeds (2) - Page 1/2:",
+        "Own direct feeds (2 feeds, 0 articles) - Page 1/2:",
         "• #1 · Alice feed | no articles yet | ok | 300s | admin@example.org | https://example.org/alice.xml",
         "",
         "Use ,rss list own 2 for the next page.",
@@ -2038,7 +2038,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
 
     lines = bot.replies[-1][1]
     assert lines == [
-        "Own direct feeds (2) - Page 2/2:",
+        "Own direct feeds (2 feeds, 0 articles) - Page 2/2:",
         "• #2 · Second feed | no articles yet | ok | 600s | ADMIN@example.org | https://example.org/second.xml",
     ]
 
@@ -2052,10 +2052,168 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
     )
 
     lines = bot.replies[-1][1]
-    assert lines[0] == "Own direct feeds (2) - all:"
+    assert lines[0] == "Own direct feeds (2 feeds, 0 articles) - all:"
     assert len(lines) == 3
     assert all("other-admin@example.org" not in line for line in lines)
     assert all("trusted@example.org" not in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_rss_list_own_reports_total_articles_across_all_own_feeds(monkeypatch, make_bot):
+    bot = make_bot()
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/one.xml": {
+            "feed_no": 4,
+            "title": "One",
+            "period": 300,
+            "posted_count": 12,
+            "rooms": ["room@conference.example.org"],
+            "users": {"admin@example.org": {"role": "admin"}},
+        },
+        "https://example.org/two.xml": {
+            "feed_no": 9,
+            "title": "Two",
+            "period": 600,
+            "posted_count": 23,
+            "rooms": [],
+            "users": {"ADMIN@example.org": {"role": "admin"}},
+        },
+        "https://example.org/not-mine.xml": {
+            "feed_no": 10,
+            "title": "Other",
+            "period": 600,
+            "posted_count": 1000,
+            "rooms": [],
+            "users": {"other@example.org": {"role": "trusted"}},
+        },
+    }
+    bot.get_user_role = AsyncMock(return_value=Role.ADMIN)
+    msg = {
+        "from": SimpleNamespace(bare="admin@example.org", resource="desktop"),
+        "type": "chat",
+    }
+    monkeypatch.setattr(
+        rss_commands,
+        "config",
+        {"prefix": ",", "rss_list_page_size": 1},
+    )
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["list", "own", "1"],
+        msg,
+        False,
+    )
+
+    lines = bot.replies[-1][1]
+    assert lines[0] == "Own direct feeds (2 feeds, 35 articles) - Page 1/2:"
+
+
+@pytest.mark.asyncio
+async def test_bare_private_delete_by_number_only_removes_own_direct_subscription(make_bot):
+    bot = make_bot()
+    url = "https://example.org/shared.xml"
+    room = "room@conference.example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 9,
+            "title": "Shared",
+            "period": 300,
+            "posted_count": 42,
+            "rooms": [room],
+            "users": {"moderator@example.org": {"role": "moderator"}},
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="moderator@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "moderator@example.org",
+        "moderator",
+        ["delete", "9"],
+        msg,
+        False,
+    )
+
+    feed = bot.plugin_store[rss.RSS_KEY][url]
+    assert feed["feed_no"] == 9
+    assert feed["posted_count"] == 42
+    assert feed["rooms"] == [room]
+    assert feed.get("users") == {}
+    assert bot.replies[-1][1] == (
+        "🗑 Removed direct RSS subscription for moderator@example.org: " + url
+    )
+
+
+@pytest.mark.asyncio
+async def test_bare_room_delete_by_number_keeps_direct_subscription(make_bot):
+    bot = make_bot()
+    url = "https://example.org/shared-room.xml"
+    room = "room@conference.example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 9,
+            "title": "Shared room",
+            "period": 300,
+            "posted_count": 42,
+            "rooms": [room],
+            "users": {"trusted@example.org": {"role": "trusted"}},
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare=room, resource="moderator"),
+        "type": "groupchat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "moderator@example.org",
+        "moderator",
+        ["delete", "9"],
+        msg,
+        True,
+    )
+
+    feed = bot.plugin_store[rss.RSS_KEY][url]
+    assert feed["feed_no"] == 9
+    assert feed["posted_count"] == 42
+    assert feed["rooms"] == []
+    assert feed["users"] == {"trusted@example.org": {"role": "trusted"}}
+
+
+@pytest.mark.asyncio
+async def test_explicit_all_delete_by_number_removes_shared_feed_everywhere(make_bot):
+    bot = make_bot()
+    url = "https://example.org/shared.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 9,
+            "title": "Shared",
+            "period": 300,
+            "rooms": ["room@conference.example.org"],
+            "users": {"moderator@example.org": {"role": "moderator"}},
+        }
+    }
+    msg = {
+        "from": SimpleNamespace(bare="moderator@example.org", resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        "moderator@example.org",
+        "moderator",
+        ["delete", "9", "all"],
+        msg,
+        False,
+    )
+
+    assert bot.plugin_store[rss.RSS_KEY] == {}
 
 
 @pytest.mark.asyncio

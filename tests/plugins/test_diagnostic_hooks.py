@@ -346,9 +346,9 @@ async def test_ducks_runtime_state_and_doctor_reports_runtime_maps(monkeypatch):
 @pytest.mark.asyncio
 async def test_rss_runtime_state_and_doctor_reports_backoff(monkeypatch):
     feeds = {
-        "https://one.example/feed": {"rooms": ["room@conf"], "next_retry": 200},
-        "https://two.example/feed": {"rooms": ["room@conf", "other@conf"], "next_retry": 0},
-        "https://three.example/feed": {"rooms": ["other@conf"], "next_retry": 300},
+        "https://one.example/feed": {"rooms": ["room@conf"], "next_retry": 200, "posted_count": 5},
+        "https://two.example/feed": {"rooms": ["room@conf", "other@conf"], "next_retry": 0, "posted_count": 7},
+        "https://three.example/feed": {"rooms": ["other@conf"], "next_retry": 300, "posted_count": 11},
         "https://bad.example/feed": "not-a-dict",
     }
     store = FakePluginStore({rss_store.RSS_KEY: feeds})
@@ -362,16 +362,18 @@ async def test_rss_runtime_state_and_doctor_reports_backoff(monkeypatch):
 
     assert await rss_lifecycle.get_runtime_state(bot) == {
         "feeds": 4,
+        "articles": 23,
         "active_tasks": 2,
         "retry_backoff": 2,
     }
     assert await rss_lifecycle.get_runtime_state(bot, room_jid="room@conf") == {
         "feeds": 2,
+        "articles": 12,
         "active_tasks": 1,
         "retry_backoff": 1,
     }
     assert await rss_lifecycle.doctor(bot, room_jid="room@conf") == [
-        "✅ RSS for room@conf: feeds=2, active_tasks=1, retry_backoff=1",
+        "✅ RSS for room@conf: feeds=2, articles=12, active_tasks=1, retry_backoff=1",
         "🟡️ RSS: one or more feeds are currently in retry/backoff",
     ]
 
