@@ -266,9 +266,9 @@ class LifecycleMixin:
         if callable(watchdog_start):
             await watchdog_start()
 
-        from utils.backups import start_periodic_backup_worker
+        import utils.backups as backups_mod
 
-        start_periodic_backup_worker(self)
+        backups_mod.start_periodic_backup_worker(self)
 
     async def _startup_publish_ready(self) -> None:
         """Publish final readiness only after restart notification ordering is safe."""
