@@ -13,7 +13,6 @@ from .helpers import (
 )
 from plugins.rss import store as rss_store
 from plugins.rss import tasks as rss_tasks
-from plugins.rss import commands as rss_commands
 from plugins.rss import subscriptions as rss_subscriptions
 from plugins.rss import formatting as rss_formatting
 from plugins.rss import lifecycle as rss_lifecycle
