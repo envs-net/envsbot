@@ -532,8 +532,9 @@ def _desired_systemd_values(deployment: Deployment) -> dict[str, object]:
         raise DeployError("rendered systemd WatchdogSec could not be parsed")
 
     restart_delay = _duration_seconds(one("RestartSec"))
+    start_timeout = _duration_seconds(one("TimeoutStartSec"))
     stop_timeout = _duration_seconds(one("TimeoutStopSec"))
-    if restart_delay is None or stop_timeout is None:
+    if restart_delay is None or start_timeout is None or stop_timeout is None:
         raise DeployError("rendered systemd service timeout could not be parsed")
 
     return {
@@ -548,6 +549,7 @@ def _desired_systemd_values(deployment: Deployment) -> dict[str, object]:
         "Restart": one("Restart"),
         "Restart delay": restart_delay,
         "Watchdog": watchdog,
+        "Start timeout": start_timeout,
         "Stop timeout": stop_timeout,
         "UMask": _umask_value(one("UMask")),
         "NoNewPrivileges": _bool_value(one("NoNewPrivileges")),
@@ -579,6 +581,9 @@ def _actual_systemd_values(deployment: Deployment) -> dict[str, object]:
     restart_delay = _duration_seconds(
         _systemd_property(deployment.service, "RestartUSec")
     )
+    start_timeout = _duration_seconds(
+        _systemd_property(deployment.service, "TimeoutStartUSec")
+    )
     stop_timeout = _duration_seconds(
         _systemd_property(deployment.service, "TimeoutStopUSec")
     )
@@ -594,6 +599,7 @@ def _actual_systemd_values(deployment: Deployment) -> dict[str, object]:
         "Restart": _systemd_property(deployment.service, "Restart"),
         "Restart delay": restart_delay,
         "Watchdog": watchdog,
+        "Start timeout": start_timeout,
         "Stop timeout": stop_timeout,
         "UMask": _umask_value(_systemd_property(deployment.service, "UMask")),
         "NoNewPrivileges": _bool_value(

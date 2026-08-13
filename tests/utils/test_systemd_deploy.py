@@ -56,6 +56,8 @@ def test_render_systemd_unit_uses_runtime_paths(monkeypatch, tmp_path):
     ) in unit
     assert f"ReadWritePaths={project} " not in unit
     assert "WatchdogSec=60" in unit
+    assert "TimeoutStartSec=300" in unit
+    assert "TimeoutStopSec=120" in unit
     assert "ProtectSystem=strict" in unit
 
 

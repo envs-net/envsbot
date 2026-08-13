@@ -434,17 +434,24 @@ using a newer schema.
 
 ## Watchdog-enabled systemd unit
 
-The supplied unit uses `Type=notify`, `NotifyAccess=main` and `WatchdogSec=60`.
-EnvsBot sends `READY=1` after startup and watchdog heartbeats while the event
-loop remains responsive. This detects a hung process that `Restart=on-failure`
-alone cannot recover.
+The generated recommended unit uses `Type=notify`, `NotifyAccess=main` and
+`WatchdogSec=60`. EnvsBot sends `READY=1` after startup and watchdog heartbeats
+while the event loop remains responsive. This detects a hung process that
+`Restart=on-failure` alone cannot recover.
+
+The unit also sets `TimeoutStartSec=300` so complete startup, including room
+autojoin, has a predictable five-minute budget instead of depending on the
+system-wide systemd default. `TimeoutStopSec=120` gives the ordered shutdown
+enough time to drain plugins, the persistent outbox, message cache, supervised
+tasks and SQLite before systemd resorts to a forced stop.
 
 After replacing an older unit, reload systemd before restarting:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart envsbot.service
-sudo systemctl show envsbot.service -p Type -p WatchdogUSec
+sudo systemctl show envsbot.service -p Type -p WatchdogUSec \
+  -p TimeoutStartUSec -p TimeoutStopUSec
 ```
 
 To disable watchdog handling completely, remove or override `WatchdogSec` in

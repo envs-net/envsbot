@@ -461,7 +461,8 @@ def test_actual_systemd_values_normalize_effective_properties(tmp_path, monkeypa
         "Restart": "on-failure",
         "RestartUSec": "5s",
         "WatchdogUSec": "1min",
-        "TimeoutStopUSec": "45s",
+        "TimeoutStartUSec": "5min",
+        "TimeoutStopUSec": "2min",
         "UMask": "0077",
         "NoNewPrivileges": "true",
         "PrivateTmp": "yes",
@@ -494,7 +495,8 @@ def test_actual_systemd_values_normalize_effective_properties(tmp_path, monkeypa
     assert values["NotifyAccess"] == "main"
     assert values["Restart delay"] == 5.0
     assert values["Watchdog"] == 60.0
-    assert values["Stop timeout"] == 45.0
+    assert values["Start timeout"] == 300.0
+    assert values["Stop timeout"] == 120.0
     assert values["UMask"] == 0o077
     assert values["ProtectHome"] is True
     assert values["PrivateTmp"] is True
@@ -520,7 +522,8 @@ ExecStart={deployment.envsbot}
 Restart=on-failure
 RestartSec=5
 WatchdogSec=60
-TimeoutStopSec=45
+TimeoutStartSec=300
+TimeoutStopSec=120
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
@@ -551,7 +554,8 @@ ReadWritePaths={writable_a} {writable_b}
     assert values["NotifyAccess"] == "main"
     assert values["Watchdog"] == 60.0
     assert values["Restart delay"] == 5.0
-    assert values["Stop timeout"] == 45.0
+    assert values["Start timeout"] == 300.0
+    assert values["Stop timeout"] == 120.0
     assert values["UMask"] == 0o077
     assert values["PrivateDevices"] is True
     assert values["ProtectSystem"] == "strict"
