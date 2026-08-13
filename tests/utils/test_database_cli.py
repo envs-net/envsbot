@@ -1,7 +1,13 @@
 import pytest
 
 from database.manager import DatabaseManager
-from utils.database_cli import database_check, database_schema, database_status
+from utils import database_cli as database_cli_module
+from utils.database_cli import (
+    database_check,
+    database_migrate,
+    database_schema,
+    database_status,
+)
 
 
 @pytest.mark.asyncio
@@ -61,3 +67,98 @@ async def test_database_status_reports_changed_migration_checksum(tmp_path):
     assert f"Changed migrations: {version}" in output
     assert "Migration catalog:" in output
     assert "Schema fingerprint:" in output
+
+
+class _FakeMigrationDatabase:
+    instances = []
+    versions = ["0009_outbox_origin_id", "0010_reminders"]
+    run_error = None
+
+    def __init__(self, path):
+        self.path = path
+        self.connect_kwargs = None
+        self.dry_run = None
+        self.closed = False
+        type(self).instances.append(self)
+
+    async def connect(self, **kwargs):
+        self.connect_kwargs = kwargs
+
+    async def run_migrations(self, *, dry_run):
+        self.dry_run = dry_run
+        if type(self).run_error is not None:
+            raise type(self).run_error
+        return list(type(self).versions)
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def fake_migration_database(monkeypatch):
+    _FakeMigrationDatabase.instances = []
+    _FakeMigrationDatabase.versions = ["0009_outbox_origin_id", "0010_reminders"]
+    _FakeMigrationDatabase.run_error = None
+    monkeypatch.setattr(database_cli_module, "DatabaseManager", _FakeMigrationDatabase)
+    return _FakeMigrationDatabase
+
+
+@pytest.mark.asyncio
+async def test_database_migrate_applies_pending_migrations_by_default(
+    fake_migration_database,
+):
+    code, output = await database_migrate({"db": "/tmp/envsbot-test.db"})
+
+    assert code == 0
+    assert output == "Applied 2 migration(s): 0009_outbox_origin_id, 0010_reminders"
+    assert len(fake_migration_database.instances) == 1
+    db = fake_migration_database.instances[0]
+    assert db.path == "/tmp/envsbot-test.db"
+    assert db.connect_kwargs == {
+        "run_migrations": False,
+        "start_background": False,
+        "enforce_schema_compatibility": True,
+    }
+    assert db.dry_run is False
+    assert db.closed is True
+
+
+@pytest.mark.asyncio
+async def test_database_migrate_dry_run_previews_pending_migrations(
+    fake_migration_database,
+):
+    code, output = await database_migrate({"db": "preview.db"}, dry_run=True)
+
+    assert code == 0
+    assert output == "Would apply 2 migration(s): 0009_outbox_origin_id, 0010_reminders"
+    db = fake_migration_database.instances[0]
+    assert db.dry_run is True
+    assert db.closed is True
+
+
+@pytest.mark.asyncio
+async def test_database_migrate_reports_when_schema_is_current(fake_migration_database):
+    fake_migration_database.versions = []
+
+    code, output = await database_migrate({})
+
+    assert code == 0
+    assert output == "Database schema is already up to date."
+    db = fake_migration_database.instances[0]
+    assert db.path == "bot.db"
+    assert db.dry_run is False
+    assert db.closed is True
+
+
+@pytest.mark.asyncio
+async def test_database_migrate_closes_database_when_migration_fails(
+    fake_migration_database,
+):
+    fake_migration_database.run_error = RuntimeError("migration failed")
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        await database_migrate({"db": "broken.db"})
+
+    db = fake_migration_database.instances[0]
+    assert db.dry_run is False
+    assert db.closed is True
