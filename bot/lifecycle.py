@@ -46,20 +46,13 @@ def _restart_notification_paths(config_obj: Any) -> list[str]:
     existing config.py.
     """
     getter = getattr(config_obj, "get", None)
-    if callable(getter):
-        configured = getter("restart_notification_file", _DEFAULT_RESTART_NOTIFICATION_FILE)
-    else:
-        configured = _DEFAULT_RESTART_NOTIFICATION_FILE
-    candidates = [
+    configured = getter("restart_notification_file") if callable(getter) else None
+    candidates = (
         str(configured or _DEFAULT_RESTART_NOTIFICATION_FILE),
         _DEFAULT_RESTART_NOTIFICATION_FILE,
         _LEGACY_RESTART_NOTIFICATION_FILE,
-    ]
-    result: list[str] = []
-    for path in candidates:
-        if path and path not in result:
-            result.append(path)
-    return result
+    )
+    return list(dict.fromkeys(candidates))
 
 
 def _read_restart_notification(restart_files: list[str]) -> dict[str, Any] | None:
