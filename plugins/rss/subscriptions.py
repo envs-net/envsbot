@@ -21,6 +21,7 @@ from .fetch import (
 from .formatting import _normalize_direct_user_jid
 from .store import (
     _apply_retry_state,
+    _feed_article_count,
     _feed_number,
     _next_feed_number,
     _normalize_room_jid,
@@ -281,6 +282,8 @@ async def _add_feed(bot, msg, url, store, room):
                     store=store,
                     feed_url=url,
                     feed_no=_feed_number(feeds[url]) or "",
+                    article_end=_feed_article_count(feeds[url]) or None,
+                    through_entry_id=str(feeds[url].get("last_id") or ""),
                 )
             except Exception as e:
                 _log_feed_fetch_error(

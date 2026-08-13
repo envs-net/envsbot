@@ -16,6 +16,86 @@ import aiohttp
 
 
 @pytest.mark.asyncio
+async def test_add_existing_feed_replays_persisted_article_numbers(
+    monkeypatch, make_bot,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/shared.xml"
+    old_room = "old@conference.example.org"
+    new_room = "new@conference.example.org"
+    store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 5,
+            "title": "Shared feed",
+            "link": "https://example.org/",
+            "period": 300,
+            "rooms": [old_room],
+            "last_id": "https://example.org/known-3",
+            "posted_count": 12,
+        }
+    }
+
+    class DummyFeed:
+        feed = {"title": "Shared feed", "link": "https://example.org/"}
+        entries = [
+            SimpleNamespace(
+                title="Unseen",
+                link="https://example.org/unseen",
+                description="",
+            ),
+            SimpleNamespace(
+                title="Known 3",
+                link="https://example.org/known-3",
+                description="",
+            ),
+            SimpleNamespace(
+                title="Known 2",
+                link="https://example.org/known-2",
+                description="",
+            ),
+            SimpleNamespace(
+                title="Known 1",
+                link="https://example.org/known-1",
+                description="",
+            ),
+        ]
+
+    async def fake_fetch_feed(_url):
+        return DummyFeed()
+
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", fake_fetch_feed)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
+    monkeypatch.setattr(
+        rss_subscriptions,
+        "config",
+        {"max_new_feed_entries": 3},
+    )
+
+    msg = {"from": SimpleNamespace(bare=new_room), "type": "groupchat"}
+    await rss_subscriptions._add_feed(bot, msg, url, store, new_room)
+
+    burst_texts = [
+        _reply_text(reply)
+        for reply in bot.replies
+        if "Article #" in _reply_text(reply)
+    ]
+    assert len(burst_texts) == 3
+    assert "Article #10" in burst_texts[0]
+    assert "known-1" in burst_texts[0]
+    assert "Article #11" in burst_texts[1]
+    assert "known-2" in burst_texts[1]
+    assert "Article #12" in burst_texts[2]
+    assert "known-3" in burst_texts[2]
+    assert all("unseen" not in text for text in burst_texts)
+
+    saved = store[rss.RSS_KEY][url]
+    assert saved["posted_count"] == 12
+    assert saved["last_id"] == "https://example.org/known-3"
+    assert saved["rooms"] == [old_room, new_room]
+
+
+@pytest.mark.asyncio
 async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}

@@ -246,14 +246,40 @@ async def burst_recent_entries(
     *,
     feed_no: int | str = "",
     article_start: int | None = None,
+    article_end: int | None = None,
+    through_entry_id: str = "",
 ):
-    """
-    Burst the last N entries of the given feed to the room.
+    """Burst recent entries to a room, optionally ending at a known cursor.
+
+    ``through_entry_id`` is used when an already tracked feed is added to a
+    second room.  The replay then starts at the newest entry the worker has
+    already processed instead of accidentally including entries published
+    after the stored cursor.  ``article_end`` lets that replay reuse the
+    persisted article sequence rather than inventing new article numbers.
     """
     title = feed.feed.get("title", "")
     feed_link = feed.feed.get("link", "")
-    entries = feed.entries[:burst_num]
-    entries = list(reversed(entries))
+    source_entries = list(feed.entries)
+    article_end_value = article_end
+
+    if through_entry_id:
+        anchor_index = next(
+            (
+                index
+                for index, entry in enumerate(source_entries)
+                if _get_entry_id(entry) == through_entry_id
+            ),
+            None,
+        )
+        if anchor_index is not None:
+            source_entries = source_entries[anchor_index:]
+        else:
+            # Without the persisted cursor in the current feed snapshot, the
+            # old article numbers cannot be assigned reliably.  Preserve the
+            # historical burst behaviour, but do not display a false number.
+            article_end_value = None
+
+    entries = list(reversed(source_entries[:burst_num]))
     last_id = None
 
     for index, entry in enumerate(entries):
@@ -269,6 +295,15 @@ async def burst_recent_entries(
         entry_link = _resolve_relative_url(feed_link, entry_link)
         entry_link = _normalize_url(entry_link)
 
+        if article_start is not None:
+            article_no: int | str = article_start + index
+        elif article_end_value is not None:
+            article_no = article_end_value - (len(entries) - 1 - index)
+            if article_no <= 0:
+                article_no = ""
+        else:
+            article_no = ""
+
         context = _build_rss_template_context(
             feed_title=title,
             entry_title=entry_title,
@@ -277,7 +312,7 @@ async def burst_recent_entries(
             feed_url=feed_url or feed_link,
             feed_link=feed_link,
             feed_no=feed_no,
-            article_no=(article_start + index) if article_start is not None else "",
+            article_no=article_no,
             entry_id=entry_id,
             entry_date=_entry_date(entry),
         )
