@@ -28,8 +28,8 @@ from .formatting import (
 from .store import (
     _feed_article_count,
     _feed_number,
-    _resolve_feed_selector,
     _normalize_room_jid,
+    _resolve_feed_selector,
     get_default_template,
     get_effective_template,
     get_feed_template,

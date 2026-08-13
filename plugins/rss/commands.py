@@ -36,9 +36,9 @@ from .store import (
     _feed_article_count,
     _feed_paused_rooms,
     _feed_url_by_number,
-    _resolve_feed_selector,
     _normalize_room_jid,
     _normalize_subscription_room,
+    _resolve_feed_selector,
     get_feeds,
     save_feeds,
 )
