@@ -82,6 +82,15 @@ def _feed_url_by_number(feeds: dict, feed_no: int) -> str | None:
             return str(url)
     return None
 
+def _resolve_feed_selector(feeds: dict, selector) -> str | None:
+    """Resolve a feed URL or persisted feed number to its URL."""
+    value = str(selector or "").strip()
+    if not value:
+        return None
+    if value.isdecimal():
+        return _feed_url_by_number(feeds, int(value))
+    return value
+
 def _feed_article_count(feed: dict) -> int:
     """Return the number of RSS entries successfully posted while tracked."""
     try:

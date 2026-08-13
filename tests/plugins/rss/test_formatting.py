@@ -299,11 +299,11 @@ def test_rss_template_helpers_cover_prefix_variables_and_context(monkeypatch):
     usage = rss._rss_template_usage(SimpleNamespace(prefix="."))
     assert usage.startswith("Usage: RSS templates (personal 1:1 chat)")
     assert ".rss template set <template>" in usage
-    assert ".rss template set <feedurl> <template>" in usage
+    assert ".rss template set <feedurl|feed_no> <template>" in usage
     assert "Room or MUC PM" in usage
     assert "Private admin chat for a room" in usage
     assert "Global default" in usage
-    assert "before or after feedurl" in usage
+    assert "before or after feedurl/feed_no" in usage
     assert "Use \\n for line breaks" in usage
 
     variables = rss._rss_template_variables_text()

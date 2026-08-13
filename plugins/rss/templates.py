@@ -28,6 +28,7 @@ from .formatting import (
 from .store import (
     _feed_article_count,
     _feed_number,
+    _resolve_feed_selector,
     _normalize_room_jid,
     get_default_template,
     get_effective_template,
@@ -78,8 +79,13 @@ def _split_template_scope_args(
     )
 
     feed_url = None
-    if rest and _looks_like_feed_arg(rest[0]):
-        feed_url = _normalize_url(rest.pop(0))
+    if rest and (
+        _looks_like_feed_arg(rest[0])
+        or str(rest[0]).strip().isdecimal()
+    ):
+        feed_url = str(rest.pop(0)).strip()
+        if _looks_like_feed_arg(feed_url):
+            feed_url = _normalize_url(feed_url)
 
     if rest and str(rest[0]).strip().lower() == "direct":
         direct_requested = True
@@ -443,6 +449,13 @@ async def _rss_template_command(bot, sender_jid, msg, is_room, args, store):
     room_key = room or ""
     feed = None
     if feed_url:
+        feeds = await get_feeds(store)
+        feed_selector = feed_url
+        resolved_feed = _resolve_feed_selector(feeds, feed_selector)
+        if resolved_feed is None:
+            bot.reply(msg, f"🔴 Feed #{feed_selector} not found.")
+            return
+        feed_url = _normalize_url(resolved_feed)
         feed = await _template_feed_for_room(
             store,
             room_key,

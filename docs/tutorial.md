@@ -215,8 +215,10 @@ Common maintenance commands:
 
 ```text
 ,rss list all
-,rss retry https://example.org/feed.rss
-,rss reset https://example.org/feed.rss
+,rss retry 12
+,rss reset 12
+,rss pause 12
+,rss resume 12
 ,rss retry all
 ,rss reset all
 
@@ -234,8 +236,10 @@ Common maintenance commands:
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
 RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output
-show the feed number and EnvsBot's latest local article number, so a feed number
-may be used instead of repeating the feed URL. `,rss list own` additionally shows
+show the feed number and EnvsBot's latest local article number. For commands that
+target an already configured feed, the feed number may be used instead of repeating
+the feed URL (`delete`, `retry`/`reset`, `pause`/`resume`, and feed-specific
+`template` operations). `add` still requires a URL. `,rss list own` additionally shows
 the total local article count across all of your direct feeds, even when the list
 is paginated. RSS doctor/runtime state reports the same aggregate concept for
 its scope. These numbers are EnvsBot's successfully posted-entry counters, not
@@ -264,14 +268,14 @@ Global moderators can set a persistent default RSS template for all rooms. Room 
 ,rss template show default
 ,rss template unset default
 ,rss template set 📰 $feed_title: $title\n$link
-,rss template set https://example.org/feed.rss 📰 $title\n$link
+,rss template set 12 📰 $title\n$link
 ,rss template test [$feed_title] $title
-,rss template test https://example.org/feed.rss
+,rss template test 12
 ,rss template unset
-,rss template unset https://example.org/feed.rss
+,rss template unset 12
 ```
 
-In a normal 1:1 chat, these commands automatically manage the sender’s personal RSS templates. The optional word `direct` may be placed before or after a feed URL, but it is not required and is never stored as part of the template.
+In a normal 1:1 chat, these commands automatically manage the sender’s personal RSS templates. The optional word `direct` may be placed before or after a feed URL/feed number, but it is not required and is never stored as part of the template.
 
 Pin entries use the same destructive aliases:
 
@@ -413,8 +417,8 @@ Show retry state and reset when needed:
 
 ```text
 ,rss list all
-,rss retry https://example.org/feed.rss
-,rss reset https://example.org/feed.rss
+,rss retry 12
+,rss reset 12
 ,rss retry all
 ```
 

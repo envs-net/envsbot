@@ -37,6 +37,8 @@ Use `$$` when a literal dollar sign is needed.
 
 Feed numbers are global to the RSS store and stay stable while the feed exists. When a feed is removed completely, its number becomes available again and the smallest free number is assigned to a newly added feed. Removing only one room or direct subscriber does not free the number while another destination still uses that feed.
 
+Commands that target an already configured feed accept either its URL or its feed number: `delete`, `retry`/`reset`, `pause`/`resume`, and feed-specific `template` operations. `add` still requires the feed URL because the feed may not exist yet.
+
 `$article_no` is EnvsBot's local successful-post sequence, not a publisher-provided lifetime article ID (RSS/Atom does not expose such a counter reliably). New room feeds count their initial burst and continue from there; existing/legacy feeds use the persisted posted-entry counter where available.
 
 When a feed is already tracked for another destination, adding it to a new room replays only entries up through the feed's persisted cursor and reuses the stored article numbers. That replay does not invent new article numbers or increment the global posted-entry counter; a newer entry that has not yet been processed remains for the normal poll.
@@ -110,22 +112,22 @@ This personal template is independent of room templates and applies only to feed
 
 ### Feed-specific templates
 
-Inside a subscribed room, place the feed URL before the template:
+Inside a subscribed room, place the feed URL or feed number before the template:
 
 ```text
 ,rss template set https://example.org/feed.xml 📰 $title\n$link\n\n
-,rss template show https://example.org/feed.xml
-,rss template test https://example.org/feed.xml
+,rss template show 12
+,rss template test 12
 ,rss template unset https://example.org/feed.xml
 ```
 
-From a normal private chat, pass both the room JID and feed URL to manage a room feed:
+From a normal private chat, pass the room JID plus the feed URL or feed number to manage a room feed:
 
 ```text
 ,rss template set room@conference.example.org https://example.org/feed.xml 📰 $title\n$link\n\n
 ```
 
-For a personal direct subscription, omit the room JID and place the subscribed feed URL before the template:
+For a personal direct subscription, omit the room JID and place the subscribed feed URL or feed number before the template:
 
 ```text
 ,rss template set https://example.org/feed.xml 📰 $title\n$link\n\n
@@ -134,7 +136,7 @@ For a personal direct subscription, omit the room JID and place the subscribed f
 ,rss template unset https://example.org/feed.xml
 ```
 
-The equivalent explicit forms `template set direct ...` and `template set <feed-url> direct ...` are also accepted. The `direct` marker selects the personal scope and is never stored as part of the template.
+The equivalent explicit forms `template set direct ...` and `template set <feed-url|feed_no> direct ...` are also accepted. The `direct` marker selects the personal scope and is never stored as part of the template.
 
 ## Direct subscriptions
 
@@ -142,7 +144,7 @@ Trusted users and higher may subscribe to feeds in a direct chat. Trusted users 
 
 The direct-chat destination is implicit. Use `,rss add <feed-url>` without appending your own JID. A redundant own-JID argument or placeholder text such as `MEINE_JID` is ignored so the subscription still belongs to the current 1:1 chat. An explicit, different room JID continues to select that room.
 
-Use `,rss template set ...` in the same direct chat to customize all personal deliveries, or include a subscribed feed URL for a feed-specific personal template.
+Use `,rss template set ...` in the same direct chat to customize all personal deliveries, or include a subscribed feed URL/feed number for a feed-specific personal template.
 
 Feed deletion is deliberately scoped. A bare delete never removes the same feed from unrelated destinations:
 
@@ -221,24 +223,24 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
     - `,rss delete all user@example.org` — As owner, superadmin, or admin, remove every direct RSS subscription for one user.
     - `,rss delete 12 all` — As a global RSS manager, remove feed #12 everywhere: all rooms and all direct subscriptions.
 
-- `,rss retry <feed_url|all> [room_jid]`
+- `,rss retry <feed_url|feed_no|all> [room_jid]`
   - Description: Clear retry/backoff state and schedule another feed attempt.
   - Aliases: `,rss reset`
   - Role: `moderator`
   - Examples:
-    - `,rss retry https://example.org/feed.rss room@conference.example.org` — Retry one room feed immediately.
+    - `,rss retry 12 room@conference.example.org` — Retry feed #12 for one room immediately.
 
-- `,rss pause <feed_url> [room_jid|all]`
+- `,rss pause <feed_url|feed_no> [room_jid|all]`
   - Description: Pause feed delivery without deleting the subscription.
   - Role: `moderator`
   - Examples:
-    - `,rss pause https://example.org/feed.rss` — Pause the feed for the current room.
+    - `,rss pause 12` — Pause feed #12 for the current room.
 
-- `,rss resume <feed_url> [room_jid|all]`
+- `,rss resume <feed_url|feed_no> [room_jid|all]`
   - Description: Resume a paused RSS subscription.
   - Role: `moderator`
   - Examples:
-    - `,rss resume https://example.org/feed.rss` — Resume delivery for the current room.
+    - `,rss resume 12` — Resume feed #12 for the current room.
 
 - `,rss health [room_jid] [page|all|last]`
   - Description: Show feed status, retries, errors and last successful delivery.
@@ -252,7 +254,7 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
   - Examples:
     - `,rss broken` — Show only broken feeds visible in the current context.
 
-- `,rss template [show|set|unset|test] [default|direct|room_jid] [feed_url] [template]`
+- `,rss template [show|set|unset|test] [default|direct|room_jid] [feed_url|feed_no] [template]`
   - Description: Show, test or configure global, room and personal RSS templates.
   - Examples:
     - `,rss template` — Show the effective template for the current destination.

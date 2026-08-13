@@ -301,6 +301,7 @@ async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
     url = "https://example.org/feed.xml"
     bot.plugin_store[rss.RSS_KEY] = {
         url: {
+            "feed_no": 4,
             "title": "Feed",
             "period": 42,
             "rooms": ["room@conference.example.org"],
@@ -322,7 +323,7 @@ async def test_rss_reset_retry_state_restarts_task(monkeypatch, make_bot):
     ensure = AsyncMock()
     monkeypatch.setattr(rss_subscriptions, "ensure_task", ensure)
 
-    await rss.rss_command(bot, "jid", "nick", ["retry", url], msg, False)
+    await rss.rss_command(bot, "jid", "nick", ["retry", "4"], msg, False)
 
     feed = bot.plugin_store[rss.RSS_KEY][url]
     assert feed["error_count"] == 0
@@ -412,7 +413,7 @@ async def test_rss_reset_retry_state_usage_and_missing_feed(make_bot):
     msg = {"from": SimpleNamespace(bare="admin@example.org"), "type": "chat"}
 
     await rss.rss_command(bot, "jid", "nick", ["reset"], msg, False)
-    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl>|all [room_jid]"
+    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl|feed_no>|all [room_jid]"
 
     await rss.rss_command(
         bot,
@@ -423,6 +424,9 @@ async def test_rss_reset_retry_state_usage_and_missing_feed(make_bot):
         False,
     )
     assert bot.replies[-1][1] == "Feed not found."
+
+    await rss.rss_command(bot, "jid", "nick", ["reset", "99"], msg, False)
+    assert bot.replies[-1][1] == "Feed #99 not found."
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,7 @@ from .store import (
     _feed_article_count,
     _feed_paused_rooms,
     _feed_url_by_number,
+    _resolve_feed_selector,
     _normalize_room_jid,
     _normalize_subscription_room,
     get_feeds,
@@ -299,7 +300,7 @@ async def _rss_handle_retry(bot, sender_jid, args, msg, is_room, store, room):
     if len(args) not in (2, 3):
         bot.reply(
             msg,
-            f"Usage: {_command_prefix(bot)}rss {sub} <feedurl>|all [room_jid]",
+            f"Usage: {_command_prefix(bot)}rss {sub} <feedurl|feed_no>|all [room_jid]",
         )
         return
 
@@ -308,7 +309,7 @@ async def _rss_handle_retry(bot, sender_jid, args, msg, is_room, store, room):
         if len(args) != 2:
             bot.reply(
                 msg,
-                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl>|all [room_jid]",
+                f"Usage: {_command_prefix(bot)}rss {sub} <feedurl|feed_no>|all [room_jid]",
             )
             return
         if not await _sender_can_manage_rss_globally(bot, sender_jid):
@@ -322,6 +323,14 @@ async def _rss_handle_retry(bot, sender_jid, args, msg, is_room, store, room):
             target="all",
         )
         return
+
+    feed_selector = retry_target
+    feeds = await get_feeds(store)
+    resolved_feed = _resolve_feed_selector(feeds, feed_selector)
+    if resolved_feed is None:
+        bot.reply(msg, f"Feed #{feed_selector} not found.")
+        return
+    retry_target = resolved_feed
 
     target_room = _room_for_feed_command(
         msg,
@@ -350,7 +359,10 @@ async def _rss_handle_retry(bot, sender_jid, args, msg, is_room, store, room):
         "rss_retry_reset",
         actor=sender_jid,
         target=target_room or "rss",
-        details={"url": _normalize_url(retry_target)},
+        details={
+            "url": _normalize_url(retry_target),
+            "feed_selector": feed_selector,
+        },
     )
     return
 
@@ -359,9 +371,16 @@ async def _rss_handle_pause(bot, sender_jid, args, msg, is_room, store, room):
     if len(args) not in (2, 3):
         bot.reply(
             msg,
-            f"Usage: {_command_prefix(bot)}rss {sub} <feedurl> [room_jid|all]",
+            f"Usage: {_command_prefix(bot)}rss {sub} <feedurl|feed_no> [room_jid|all]",
         )
         return
+    feed_selector = str(args[1]).strip()
+    feeds = await get_feeds(store)
+    feed_url = _resolve_feed_selector(feeds, feed_selector)
+    if feed_url is None:
+        bot.reply(msg, f"Feed #{feed_selector} not found.")
+        return
+
     target = args[2] if len(args) == 3 else None
     if target and str(target).strip().lower() == "all":
         if not await _sender_can_manage_rss_globally(bot, sender_jid):
@@ -383,7 +402,7 @@ async def _rss_handle_pause(bot, sender_jid, args, msg, is_room, store, room):
         bot,
         msg,
         store,
-        args[1],
+        feed_url,
         room,
         target,
         paused=(sub == "pause"),
@@ -393,7 +412,10 @@ async def _rss_handle_pause(bot, sender_jid, args, msg, is_room, store, room):
         f"rss_feed_{sub}",
         actor=sender_jid,
         target=target or room or "rss",
-        details={"url": _normalize_url(args[1])},
+        details={
+            "url": _normalize_url(feed_url),
+            "feed_selector": feed_selector,
+        },
     )
     return
 
@@ -694,37 +716,37 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         ),
         help_subcommand(
             "retry",
-            "{prefix}rss retry <feed_url|all> [room_jid]",
+            "{prefix}rss retry <feed_url|feed_no|all> [room_jid]",
             "Clear retry/backoff state and schedule another feed attempt.",
             aliases=("reset",),
             examples=[
                 help_example(
-                    "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
-                    "Retry one room feed immediately.",
+                    "{prefix}rss retry 12 room@conference.example.org",
+                    "Retry feed #12 for one room immediately.",
                 ),
             ],
             role=Role.MODERATOR,
         ),
         help_subcommand(
             "pause",
-            "{prefix}rss pause <feed_url> [room_jid|all]",
+            "{prefix}rss pause <feed_url|feed_no> [room_jid|all]",
             "Pause feed delivery without deleting the subscription.",
             examples=[
                 help_example(
-                    "{prefix}rss pause https://example.org/feed.rss",
-                    "Pause the feed for the current room.",
+                    "{prefix}rss pause 12",
+                    "Pause feed #12 for the current room.",
                 ),
             ],
             role=Role.MODERATOR,
         ),
         help_subcommand(
             "resume",
-            "{prefix}rss resume <feed_url> [room_jid|all]",
+            "{prefix}rss resume <feed_url|feed_no> [room_jid|all]",
             "Resume a paused RSS subscription.",
             examples=[
                 help_example(
-                    "{prefix}rss resume https://example.org/feed.rss",
-                    "Resume delivery for the current room.",
+                    "{prefix}rss resume 12",
+                    "Resume feed #12 for the current room.",
                 ),
             ],
             role=Role.MODERATOR,
@@ -755,7 +777,7 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         ),
         help_subcommand(
             "template",
-            "{prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feed_url] [template]",
+            "{prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feed_url|feed_no] [template]",
             "Show, test or configure global, room and personal RSS templates.",
             examples=[
                 help_example(
@@ -781,8 +803,8 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         "{prefix}rss retry all",
         "{prefix}rss health",
         "{prefix}rss broken",
-        "{prefix}rss pause https://example.org/feed.rss",
-        "{prefix}rss resume https://example.org/feed.rss",
+        "{prefix}rss pause 12",
+        "{prefix}rss resume 12",
         "{prefix}rss reset all",
         "{prefix}rss retry https://example.org/feed.rss room@conference.example.org",
         "{prefix}rss template",
@@ -809,11 +831,11 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss add <feedurl> [room_jid]
     {prefix}rss delete|remove|del|rm <feedurl|feed_no> [room_jid|all]
     {prefix}rss delete|remove|del|rm all <user_jid>
-    {prefix}rss retry|reset <feedurl>|all [room_jid]
-    {prefix}rss pause|resume <feedurl> [room_jid|all]
+    {prefix}rss retry|reset <feedurl|feed_no>|all [room_jid]
+    {prefix}rss pause|resume <feedurl|feed_no> [room_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [own|rooms|mods|trusted|room_jid] [page|all|last]
-    {prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feedurl] [template]
+    {prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feedurl|feed_no] [template]
     Direct chat: omit room_jid to manage your personal template.
     Room/MUC PM: omit room_jid to manage the current room template.
     """

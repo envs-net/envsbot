@@ -214,6 +214,9 @@ async def test_rss_delete_accepts_feed_number(monkeypatch, make_bot):
         url_one: {"feed_no": 1, "rooms": [room], "period": 120},
         url_two: {"feed_no": 2, "rooms": [room], "period": 120},
     }
+    assert rss._resolve_feed_selector(bot.plugin_store[rss.RSS_KEY], "2") == url_two
+    assert rss._resolve_feed_selector(bot.plugin_store[rss.RSS_KEY], url_one) == url_one
+    assert rss._resolve_feed_selector(bot.plugin_store[rss.RSS_KEY], "99") is None
     monkeypatch.setattr(rss_subscriptions, "_cancel_feed_task", AsyncMock())
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
@@ -521,7 +524,7 @@ async def test_rss_reset_all_rejects_extra_room_argument(make_bot):
         False,
     )
 
-    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl>|all [room_jid]"
+    assert bot.replies[-1][1] == "Usage: ,rss reset <feedurl|feed_no>|all [room_jid]"
 
 
 @pytest.mark.asyncio
@@ -728,6 +731,7 @@ async def test_rss_feed_template_show_set_test_unset(make_bot):
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
     bot.plugin_store[rss.RSS_KEY] = {
         url: {
+            "feed_no": 9,
             "title": "Feed Title",
             "link": "https://example.org/",
             "rooms": [room],
@@ -742,7 +746,7 @@ async def test_rss_feed_template_show_set_test_unset(make_bot):
         bot,
         "jid",
         "nick",
-        ["template", "show", url],
+        ["template", "show", "9"],
         msg,
         True,
     )
@@ -753,7 +757,7 @@ async def test_rss_feed_template_show_set_test_unset(make_bot):
         bot,
         "jid",
         "nick",
-        ["template", "set", url, "FEED", "$feed_title:", "$title"],
+        ["template", "set", "9", "FEED", "$feed_title:", "$title"],
         msg,
         True,
     )
@@ -767,7 +771,7 @@ async def test_rss_feed_template_show_set_test_unset(make_bot):
         bot,
         "jid",
         "nick",
-        ["template", "show", url],
+        ["template", "show", "9"],
         msg,
         True,
     )
@@ -778,7 +782,7 @@ async def test_rss_feed_template_show_set_test_unset(make_bot):
         bot,
         "jid",
         "nick",
-        ["template", "test", url],
+        ["template", "test", "9"],
         msg,
         True,
     )
@@ -789,7 +793,7 @@ async def test_rss_feed_template_show_set_test_unset(make_bot):
         bot,
         "jid",
         "nick",
-        ["template", "unset", url],
+        ["template", "unset", "9"],
         msg,
         True,
     )
@@ -818,6 +822,16 @@ async def test_rss_feed_template_requires_subscribed_feed(make_bot):
 
     assert "Feed is not configured for room@conference.example.org" in bot.replies[-1][1]
     assert rss.RSS_FEED_TEMPLATES_KEY not in bot.plugin_store
+
+    await rss.rss_command(
+        bot,
+        "jid",
+        "nick",
+        ["template", "show", "99"],
+        msg,
+        True,
+    )
+    assert bot.replies[-1][1] == "🔴 Feed #99 not found."
 
 
 @pytest.mark.asyncio
@@ -911,6 +925,11 @@ def test_rss_template_scope_and_sample_helpers(make_bot):
     assert rss._split_template_scope_args(public_msg, True, [url, "$title"]) == (
         room,
         url,
+        ["$title"],
+    )
+    assert rss._split_template_scope_args(public_msg, True, ["7", "$title"]) == (
+        room,
+        "7",
         ["$title"],
     )
     assert rss._split_template_scope_args(private_msg, False, [room, url, "$title"]) == (
@@ -1323,6 +1342,7 @@ async def test_rss_pause_resume_state_room_and_global(monkeypatch, make_bot):
     url = "https://example.org/feed.xml"
     store[rss.RSS_KEY] = {
         url: {
+            "feed_no": 7,
             "title": "Feed",
             "period": 300,
             "rooms": [room, room.upper(), "other@conference.example.org"],
@@ -1389,6 +1409,7 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
     url = "https://example.org/feed.xml"
     bot.plugin_store[rss.RSS_KEY] = {
         url: {
+            "feed_no": 7,
             "title": "Feed",
             "period": 300,
             "rooms": [room],
@@ -1398,8 +1419,8 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
             "last_error": "boom",
         }
     }
-    monkeypatch.setattr(rss_subscriptions, "_cancel_feed_task", AsyncMock())
-    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
     msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
 
     await rss.rss_command(bot, "jid1", "nick1", ["health"], msg, True)
@@ -1409,11 +1430,15 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
     await rss.rss_command(bot, "jid1", "nick1", ["broken"], msg, True)
     assert "Feed" in _reply_text(bot.replies[-1])
 
-    await rss.rss_command(bot, "jid1", "nick1", ["pause", url], msg, True)
+    await rss.rss_command(bot, "jid1", "nick1", ["pause", "7"], msg, True)
     assert bot.plugin_store[rss.RSS_KEY][url]["paused_rooms"] == [room]
+    assert url in _reply_text(bot.replies[-1])
 
     await rss.rss_command(bot, "jid1", "nick1", ["resume", url], msg, True)
     assert bot.plugin_store[rss.RSS_KEY][url]["paused_rooms"] == []
+
+    await rss.rss_command(bot, "jid1", "nick1", ["pause", "99"], msg, True)
+    assert _reply_text(bot.replies[-1]) == "Feed #99 not found."
 
 
 @pytest.mark.asyncio
