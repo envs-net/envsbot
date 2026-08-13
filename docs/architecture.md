@@ -259,11 +259,13 @@ Plugins should only query the shared cache instead of registering their own
 message-history stores.
 
 `MESSAGE_CACHE_SIZE` is the maximum number of retained entries **per
-conversation**. The same limit applies to every plugin. Reads are served from
-RAM, while writes are batched into the SQLite `message_cache` table. The cache
-is loaded before plugins start and flushed before the database closes, so reply
-lookups keep working after a normal restart. Reducing the configured size also
-prunes older persisted rows on the next start.
+conversation**. `MESSAGE_CACHE_MAX_AGE_DAYS` additionally removes messages older
+than the configured age (`30` days by default; `0` disables age pruning). The
+same limits apply to every plugin. Reads are served from RAM, while writes are
+batched into the SQLite `message_cache` table. The cache is loaded before
+plugins start and flushed before the database closes, so reply lookups keep
+working after a normal restart. Reducing the configured size also prunes older
+persisted rows on the next start.
 
 Conversation keys deliberately keep scopes separate:
 
@@ -280,8 +282,23 @@ entry = bot.message_cache.get_last(conversation, predicate=filter_entry)
 ```
 
 Message bodies are persisted as plain text in the bot database and are included
-in normal database backups. Operators should choose `MESSAGE_CACHE_SIZE` with
-that retention and privacy implication in mind.
+in normal database backups. Operators should choose `MESSAGE_CACHE_SIZE` and
+`MESSAGE_CACHE_MAX_AGE_DAYS` with that retention and privacy implication in mind.
+
+## Bounded user/runtime caches
+
+The user database layer keeps separate bounded caches for normalized user rows
+and per-user runtime JSON. `USER_CACHE_MAX_ENTRIES` and
+`USER_RUNTIME_CACHE_MAX_ENTRIES` cap clean entries; `USER_CACHE_TTL_SECONDS`
+removes clean idle entries and `USER_CACHE_PRUNE_INTERVAL_SECONDS` controls how
+often pruning may run. Dirty entries are retained until persistence succeeds,
+and the global plugin-runtime record is deliberately outside the per-user
+runtime cap. `,doctor performance` and `,status full` expose cache size, limits
+and evictions.
+
+The users plugin separately limits historical room nick aliases through
+`USERS["max_room_nicks"]` (default: 5 per user and room), preventing the
+identity-tracking metadata from growing without bound.
 
 ## Diagnostics and preflight
 

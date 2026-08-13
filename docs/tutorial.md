@@ -233,7 +233,18 @@ Common maintenance commands:
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
-RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output show the feed number and EnvsBot's latest local article number, so a feed number may be used instead of repeating the feed URL.
+RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output
+show the feed number and EnvsBot's latest local article number, so a feed number
+may be used instead of repeating the feed URL. `,rss list own` additionally shows
+the total local article count across all of your direct feeds, even when the list
+is paginated. RSS doctor/runtime state reports the same aggregate concept for
+its scope. These numbers are EnvsBot's successfully posted-entry counters, not
+publisher lifetime totals.
+
+When an already tracked feed is added to another room, its initial replay keeps
+the persisted article numbering and stops at the feed's stored cursor. A newer
+entry that has not yet been processed is left for the regular poll, so adding a
+second destination does not create duplicate/new article numbers.
 
 Deletion is scoped deliberately:
 

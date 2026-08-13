@@ -51,9 +51,12 @@ start; this also covers service restarts. `BACKUP_INTERVAL_HOURS` defaults to
 24 and runs a supervised scheduler that creates another managed backup whenever
 the newest archive reaches that age. Set it to `0` only when periodic backups
 are intentionally provided elsewhere. The default cadence stays below the
-36-hour stale-backup admin alert threshold. Each archive contains `bot.db`,
-`config.py`, `vcard.py`, `chat_slang.csv` and a `manifest.json` when those
-files exist. Restore is owner-only. Before changing runtime files, envsbot fully
+36-hour stale-backup admin alert threshold. Keep `BACKUP_INTERVAL_HOURS` lower
+than `ADMIN_ALERT_BACKUP_MAX_AGE_HOURS` so a scheduled backup is normally
+created before that alert threshold. Each archive contains `bot.db`, `config.py`,
+`vcard.py`, `chat_slang.csv`, `slang_additions.csv`, `slang_removals.csv` and a
+`manifest.json` when those files exist. Restore is owner-only. Before changing
+runtime files, envsbot fully
 verifies the selected archive, stages the runtime files and creates a
 checksum-verified safety backup. It then stops command handling, plugins,
 supervised workers, the persistent outbox, message cache and database before
@@ -61,7 +64,11 @@ replacing `bot.db`, the active config and writable support files below
 `RUNTIME_DATA_DIR`. Legacy support files inside the read-only source tree remain
 available in the archive for offline/manual restore. The old Python process is
 never resumed against restored state: envsbot exits with restart code `75` and
-the generated recommended `Restart=on-failure` systemd service starts a fresh process. After shutdown, envsbot snapshots the exact closed runtime files before publishing restored state. If a file replacement fails, it rolls back from that quiesced snapshot; the verified safety backup remains available as an additional recovery point. A fresh restart is still required.
+the generated recommended `Restart=on-failure` systemd service starts a fresh
+process. After shutdown, envsbot snapshots the exact closed runtime files before
+publishing restored state. If a file replacement fails, it rolls back from that
+quiesced snapshot; the verified safety backup remains available as an additional
+recovery point. A fresh restart is still required.
 
 Backup archives contain secrets such as the bot password and optional API keys.
 Keep them private and include them in your normal server backup policy.
@@ -77,11 +84,27 @@ snapshots from accumulating forever while preserving recent rollback points.
 ## Automatic online maintenance
 
 The running bot performs lightweight online maintenance at
-`DB_MAINTENANCE_INTERVAL_SECONDS`:
+`DATABASE_MAINTENANCE_INTERVAL_SECONDS` (default: 21600 seconds / 6 hours):
 
 - `PRAGMA optimize`
-- a passive WAL checkpoint
+- a passive WAL checkpoint when WAL mode is enabled
 - pruning old aggregate command-usage rows
+
+Important SQLite runtime settings are:
+
+```python
+DATABASE_BUSY_TIMEOUT_MS = 5000
+DATABASE_WAL_ENABLED = False
+DATABASE_SHUTDOWN_TIMEOUT_SECONDS = 15.0
+DATABASE_MAINTENANCE_INTERVAL_SECONDS = 21600
+DATABASE_BACKUP_BEFORE_MIGRATE = True
+```
+
+`DATABASE_BUSY_TIMEOUT_MS` is applied when the SQLite connection opens. WAL mode
+is optional and disabled by default. `DATABASE_SHUTDOWN_TIMEOUT_SECONDS` gives
+shutdown/restart cleanup enough time to flush and close the shared connection.
+When `DATABASE_BACKUP_BEFORE_MIGRATE` is enabled, pending schema migrations are
+preceded by a consistent SQLite safety snapshot.
 
 The task never runs `VACUUM`; planned offline `VACUUM` remains the administrator
 procedure described above. Results and the last error are visible through

@@ -170,8 +170,9 @@ sudo journalctl -u envsbot.service -f
 ```
 
 Before updating, keep a copy of the active config, the configured `DB_FILE` and
-mutable support files such as `vcard.py`/`chat_slang.csv`, or create a managed bot
-backup with `,backup`. Hardened installations normally keep these below
+mutable support files such as `vcard.py`, `chat_slang.csv` and the slang review
+queues, or create a managed bot backup with `,backup`. Hardened installations
+normally keep these below
 `/etc/envsbot` and `RUNTIME_DATA_DIR` rather than inside the application checkout.
 After updating, check `config_sample.py` for new options and compare your live
 config with `,config diff`.
@@ -408,7 +409,8 @@ to the configured runtime paths. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and
 `LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `RUNTIME_DATA_DIR`,
 `BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below
 `/var/lib/envsbot`. `RUNTIME_DATA_DIR` holds writable support files such as
-`vcard.py`, `chat_slang.csv` and profile hash markers. Runtime `config.py` and
+`vcard.py`, `chat_slang.csv`, slang review queues and profile hash markers. Runtime
+`config.py` and
 `vcard.py` are read without writing adjacent Python bytecode caches. Logging is
 written both to the configured rotating file and stderr; under systemd the
 stderr copy is available through `journalctl` (and may also reach syslog when
@@ -448,6 +450,8 @@ Managed backups are ZIP archives stored below `data/backups` by default. When `B
 * `config.py`
 * `vcard.py`
 * `chat_slang.csv`
+* `slang_additions.csv`
+* `slang_removals.csv`
 * `manifest.json`
 
 For hardened installations, set `RUNTIME_DATA_DIR = "/var/lib/envsbot"`.

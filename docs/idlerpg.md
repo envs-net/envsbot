@@ -205,6 +205,8 @@ IDLERPG = {
     "boss_min_level": 10,
     "boss_reward_percent": 12,
     "boss_loss_percent": 4,
+    "boss_power_min_factor": 0.75,
+    "boss_power_max_factor": 1.25,
     "manual_duel_max_distance": 10,
     "manual_duel_cooldown_seconds": 3600,
 }
@@ -217,9 +219,11 @@ opponent's level can increase the final battle percentage. Critical strikes,
 godsends and calamities use a random percentage within their configured range.
 
 Boss events require at least `boss_min_players` online players at or above
-`boss_min_level`. If the party defeats the boss, each participant receives a
-TTL reduction and can unlock the `Boss Slayer` / `Raid Veteran` achievements.
-If the party fails, each participant receives a small configured setback.
+`boss_min_level`. Boss power is drawn between `boss_power_min_factor` and
+`boss_power_max_factor` times the selected party's power (0.75-1.25 by default).
+If the party defeats the boss, each participant receives a TTL reduction and can
+unlock the `Boss Slayer` / `Raid Veteran` achievements. If the party fails, each
+participant receives a small configured setback.
 
 Unique items use predefined envs.net-themed names and are exported in each
 player profile under `unique_items`. Every equipment slot, including gloves and
@@ -272,8 +276,9 @@ time requirement is 10 hours, matching classic IdleRPG. Quest completion removes
 
 The bot supports both classic quest types:
 
-- **Grid quests**: four questers automatically walk toward route points on the
-  world map. If they do not finish before the configured deadline, only the
+- **Grid quests**: four questers automatically walk toward a route containing
+  `quest_grid_min_points` to `quest_grid_max_points` waypoints (2-3 by default)
+  on the world map. If they do not finish before the configured deadline, only the
   assigned questers receive a p15 quest penalty.
 - **Time quests**: four questers must remain online and avoid message or logout
   penalties until a random 12-24h timer ends. Such a penalty against any
@@ -282,6 +287,9 @@ The bot supports both classic quest types:
   clock without failing the time quest. Logout grace applies, so short XMPP
   reconnects do not immediately destroy it.
 
+Automatic quest starts are additionally capped by `quest_max_per_day` per UTC
+day (default: 2; `0` means unlimited).
+
 Relevant settings:
 
 ```python
@@ -289,8 +297,11 @@ IDLERPG = {
     "quest_min_level": 40,
     "quest_min_online_seconds": 36000,
     "quest_interval": 21600,
+    "quest_max_per_day": 2,
     "quest_grid_enabled": True,
     "quest_grid_weight": 0.5,
+    "quest_grid_min_points": 2,
+    "quest_grid_max_points": 3,
     "quest_min_duration": 43200,
     "quest_max_duration": 86400,
     "quest_time_enabled": True,
@@ -369,6 +380,30 @@ receiving godsends or suffering calamities.
 A player can select one unlocked achievement as their public title. The title is
 shown in profile/status output and in exported public JSON data.
 
+`level_reward_min_level` (default: 50) controls the minimum level for
+level-gated reward badges. With `season_achievement_gates_enabled = True`,
+long-term achievements are also gated by season age so a fresh season cannot
+immediately award milestones intended to represent sustained play.
+
+### Login, ranking and room-topic announcements
+
+```python
+IDLERPG = {
+    "announce_login": True,
+    "announce_top_interval": 21600,
+    "announce_top_limit": 5,
+    "update_room_topic": False,
+    "topic_update_interval": 14400,
+    "topic_custom_text": "",
+}
+```
+
+`announce_login` controls player-login announcements. Automatic top-player
+announcements use the configured interval and limit; setting
+`announce_top_interval` to `0` disables them. Room-topic updates are opt-in;
+when enabled, `topic_update_interval` limits their frequency and
+`topic_custom_text` can prepend operator-defined text.
+
 ## Persistence and live export
 
 IdleRPG state is persisted in normalized SQLite tables for rooms, players,
@@ -398,6 +433,9 @@ For an envs.net-style installation in `/srv/envsbot/envsbot`, that means:
 /srv/envsbot/envsbot/data/idlerpg/hall_of_fame.json
 /srv/envsbot/envsbot/data/idlerpg/events.json
 /srv/envsbot/envsbot/data/idlerpg/season_events.json
+/srv/envsbot/envsbot/data/idlerpg/achievements.json
+/srv/envsbot/envsbot/data/idlerpg/artifacts.json
+/srv/envsbot/envsbot/data/idlerpg/generation.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/room.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/leaderboard.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/players.json
@@ -405,6 +443,9 @@ For an envs.net-style installation in `/srv/envsbot/envsbot`, that means:
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/hall_of_fame.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/events.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/season_events.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/achievements.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/artifacts.json
+/srv/envsbot/envsbot/data/idlerpg/<room-slug>/generation.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/season-events/000001.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/season-events/000002.json
 /srv/envsbot/envsbot/data/idlerpg/<room-slug>/profiles/<character>.json
@@ -415,11 +456,22 @@ room-specific directories are useful when IdleRPG is enabled in multiple rooms.
 
 Public exports are intentionally privacy-reduced: they contain character names,
 classes, public game state, events and map positions, but no raw JIDs and no
-internal admin-only state. JSON files are written atomically to avoid half-written
-files being read by the website. Snapshot creation happens before the export is
-queued; JSON serialization and filesystem work then run in a worker thread so a
-large export cannot block XMPP message processing. Concurrent automatic exports
-are coalesced by an export lock.
+internal admin-only state. Snapshot creation happens before the export is queued;
+JSON serialization and filesystem work then run in a worker thread so a large
+export cannot block XMPP message processing. Concurrent automatic exports are
+coalesced by an export lock.
+
+The exporter performs content-aware delta writes: unchanged JSON files are not
+rewritten, while changed files are atomically replaced and stale generated files
+are removed. `generation.json` is published only after the generation's files are
+in place and contains SHA-256 hashes for the committed snapshot. Readers that
+understand the `envsbot-generation-v1` manifest can verify every file and retry
+if an export changes mid-read instead of combining old and new generations. The
+bundled PHP example does this (up to five attempts, 20 ms apart) and falls back
+to a temporary unavailable response rather than rendering a mixed snapshot.
+Legacy readers can continue to consume the individual atomically written JSON
+files. Existing export trees are bootstrapped with generation manifests on the
+first compatible export.
 For `idlerpg@conference.envs.net`, the room slug is usually:
 
 ```text
@@ -698,6 +750,8 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | `unique_items_enabled` | `True` | Enables rare named unique items. |
 | `unique_item_min_level` | `25` | Minimum character level before unique items may appear. |
 | `unique_item_chance` | `0.025` | Chance that a level-up item roll becomes a unique item or a strictly stronger tier upgrade. Unique artifacts cover all equipment slots and may grant small bonuses such as battle power, godsend rewards, reduced penalties or stronger quest rewards. |
+| `boss_power_min_factor` | `0.75` | Minimum multiplier applied to the selected party power when generating a boss. |
+| `boss_power_max_factor` | `1.25` | Maximum multiplier applied to the selected party power when generating a boss. |
 
 The event weights are relative. Raising `battle_event_weight`, for example,
 makes battle events more likely compared to item and alignment events.
@@ -712,6 +766,14 @@ makes battle events more likely compared to item and alignment events.
 | `export_event_limit` | `50` | Maximum number of recent public events exported to `events.json`. |
 | `export_full_season_events` | `False` | Export the complete active-season history through a small `season_events.json` manifest plus append-friendly `season-events/*.json` chunks. When disabled, only the limited `events.json` feed is published and stale full-season files/chunks are removed. |
 | `export_season_event_chunk_size` | `1000` | Maximum events per full-season export chunk. Changing it causes the next automatic export to rebuild the active-season chunk set safely. |
+| `level_reward_min_level` | `50` | Minimum level for level-gated reward badges. |
+| `season_achievement_gates_enabled` | `True` | Gate long-term achievements by season age so they represent sustained play in the current season. |
+| `announce_login` | `True` | Announce player logins in the game room. |
+| `announce_top_interval` | `21600` | Interval in seconds between automatic top-player announcements. |
+| `announce_top_limit` | `5` | Number of players included in automatic top-player announcements. |
+| `update_room_topic` | `False` | Allow IdleRPG to update the MUC subject/topic. |
+| `topic_update_interval` | `14400` | Minimum seconds between IdleRPG room-topic updates. |
+| `topic_custom_text` | `""` | Optional custom prefix for IdleRPG room topics. |
 
 Achievements are awarded automatically for long idling, level milestones,
 battles, quests, unique items, godsends, calamities and item collection.
@@ -726,8 +788,11 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 | `quest_min_level` | `40` | Minimum level for players to be selected for quests. |
 | `quest_min_online_seconds` | `36000` | Minimum continuous online time before a player can be selected for a quest. The default is 10 hours, matching classic IdleRPG behaviour. |
 | `quest_interval` | `21600` | Minimum time in seconds between quest start attempts. The default is 6 hours. |
+| `quest_max_per_day` | `2` | Maximum automatically started quests per UTC day. Set to `0` for no daily cap. |
 | `quest_grid_enabled` | `True` | Enable grid-based route quests. |
 | `quest_grid_weight` | `0.5` | Relative selection weight for grid quests when both quest types are enabled. |
+| `quest_grid_min_points` | `2` | Minimum number of route waypoints for a grid quest. |
+| `quest_grid_max_points` | `3` | Maximum number of route waypoints for a grid quest. |
 | `quest_min_duration` | `43200` | Minimum grid quest deadline in seconds. The default is 12 hours. |
 | `quest_max_duration` | `86400` | Maximum grid quest deadline in seconds. The default is 24 hours. If the route is not completed before the deadline, online players receive a p15 quest penalty. |
 | `quest_time_enabled` | `True` | Enable time-based idle endurance quests. |
@@ -744,7 +809,12 @@ These options are documented in the sections above: `export_enabled`,
 `quest_time_enabled`, `quest_time_weight`, `quest_time_min_duration`, `quest_time_max_duration`,
 `season_enabled`, `season_duration_days`,
 `season_reset_on_rollover`, `season_hof_size`, `event_log_limit`,
-`event_retention_days`, and `export_event_limit`.
+`event_retention_days`, `export_event_limit`, `export_full_season_events`,
+`export_season_event_chunk_size`, `quest_max_per_day`, `quest_grid_min_points`,
+`quest_grid_max_points`, `boss_power_min_factor`, `boss_power_max_factor`,
+`announce_login`, `announce_top_interval`, `announce_top_limit`,
+`update_room_topic`, `topic_update_interval`, `topic_custom_text`,
+`level_reward_min_level`, and `season_achievement_gates_enabled`.
 
 ## Room concept
 

@@ -74,9 +74,9 @@ TIMEZONE = 'Europe/Berlin'
 # Startup-only: restart envsbot after changing this value.
 DB_FILE = 'data/bot.db'
 
-# Directory for mutable support files such as vcard.py, chat_slang.csv and profile
-# hash markers. None keeps the historical application-root location for compatibility.
-# Hardened systemd installs should set /var/lib/envsbot.
+# Directory for mutable support files such as vcard.py, chat_slang.csv, slang review
+# queues and profile hash markers. None keeps the historical application-root location
+# for compatibility. Hardened systemd installs should set /var/lib/envsbot.
 # Startup-only: restart envsbot after changing this value.
 RUNTIME_DATA_DIR = None
 
@@ -147,8 +147,9 @@ WATCHDOG_LAG_WARNING_SECONDS = 2.0
 # Startup-only: restart envsbot after changing this value.
 WATCHDOG_LAG_FAILURE_SECONDS = 30.0
 
-# Automatic restart/backoff for protected long-running plugin workers. After this many
-# consecutive failures the circuit opens and an admin is notified.
+# Automatic restart/backoff for protected long-running plugin workers. This many
+# automatic restarts are allowed in one failure streak; if the restarted worker fails
+# again, the circuit opens and an admin is notified.
 # Startup-only: restart envsbot after changing this value.
 TASK_RESTART_MAX_ATTEMPTS = 5
 
@@ -179,7 +180,8 @@ DATABASE_MIGRATION_BACKUP_KEEP = 5
 DATABASE_MIGRATION_BACKUP_RETENTION_DAYS = 90
 
 # Managed ZIP backups are written here. The default is ignored by git. Archives
-# include bot.db, config.py, vcard.py and chat_slang.csv when present.
+# include bot.db, config.py, vcard.py, chat_slang.csv, slang_additions.csv and
+# slang_removals.csv when present.
 BACKUP_DIR = 'data/backups'
 
 # Keep this many managed backup archives after creating a new one.
@@ -194,8 +196,9 @@ BACKUP_RETENTION_DAYS = 0
 BACKUP_ON_START = True
 
 # Create an automatic managed backup this many hours after the newest managed backup.
-# Set to 0 to disable periodic backups. Keep this below
-# ADMIN_ALERT_BACKUP_MAX_AGE_HOURS.
+# Set to 0 to disable periodic backups. This value should be lower than
+# ADMIN_ALERT_BACKUP_MAX_AGE_HOURS so a scheduled backup is created before the stale-
+# backup alert threshold.
 # Startup-only: restart envsbot after changing this value.
 BACKUP_INTERVAL_HOURS = 24
 
@@ -277,7 +280,7 @@ ADMIN_ALERT_OUTBOX_OLDEST_SECONDS = 1800
 # Admin alert room missing seconds.
 ADMIN_ALERT_ROOM_MISSING_SECONDS = 1800
 
-# Admin alert backup max age hours.
+# Alert when the newest managed backup is older than this many hours.
 ADMIN_ALERT_BACKUP_MAX_AGE_HOURS = 36
 
 # Admin alert idlerpg export failures.

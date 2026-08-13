@@ -126,7 +126,12 @@ its tasks through `restart_tasks(bot)` or `on_ready(bot)`.
 Plugins with long-running loops should use `utils.task_supervisor.create_resilient_plugin_task()`
 instead of `asyncio.create_task()` so tasks appear as services in `,tasks`, are
 cancelled on plugin unload and recover from unexpected worker failures with the
-shared restart/circuit-breaker policy.
+shared restart/circuit-breaker policy. The shared retry policy starts at
+`TASK_RESTART_INITIAL_SECONDS` and grows exponentially up to
+`TASK_RESTART_MAX_SECONDS`. A failure streak is allowed up to
+`TASK_RESTART_MAX_ATTEMPTS` automatic restarts; if the restarted worker fails
+again, the circuit opens. A run lasting at least `TASK_RESTART_RESET_SECONDS`
+before its next failure resets that streak.
 
 ## Backup retention
 
@@ -198,6 +203,27 @@ states. This is intentionally not configurable: it is an implementation guard,
 not an operator tuning knob. The limiter does not pre-allocate these entries,
 and idle client state is removed after the configured TTL, so normal memory use
 follows the number of recent command senders.
+
+## Bounded user/runtime caches
+
+User rows and per-user runtime JSON use bounded read-through caches so a bot that
+sees many JIDs over time does not retain them all indefinitely. Only clean cache
+entries are eligible for LRU/TTL eviction; dirty entries are preserved until
+they have been flushed. The global plugin runtime blob is not subject to the
+per-user runtime limit.
+
+```python
+USER_CACHE_MAX_ENTRIES = 5000
+USER_RUNTIME_CACHE_MAX_ENTRIES = 5000
+USER_CACHE_TTL_SECONDS = 86400
+USER_CACHE_PRUNE_INTERVAL_SECONDS = 300
+```
+
+`USER_CACHE_TTL_SECONDS = 0` disables TTL-based eviction while the entry-count
+limits still apply. `,doctor performance` and `,status full` expose current
+user/runtime cache sizes, limits and eviction counters without listing cached
+JIDs. User tracking also bounds remembered room nick history with
+`USERS["max_room_nicks"]` (default: 5 nicks per user and room).
 
 ## Local preflight check
 
@@ -289,10 +315,14 @@ possible. The queue resumes after reconnects and process restarts.
 ```
 
 `dead` deliberately omits message bodies. `status` also reports configured count
-and byte limits plus the largest destination/category backlog. `doctor database`
-reports pending and dead counts, the oldest pending age and whether the worker is
-running. Durable stanzas also keep one stable XEP-0359 `origin-id` across every
-retry. This does not turn XMPP into a strict exactly-once transport, but it lets
+and byte limits plus the largest destination/category backlog. The main queue
+guardrails are `OUTBOX_MAX_PENDING`, `OUTBOX_MAX_BYTES`,
+`OUTBOX_MAX_PER_DESTINATION` and `OUTBOX_MAX_PER_CATEGORY`; delivery uses
+`OUTBOX_BATCH_SIZE`, `OUTBOX_POLL_SECONDS`, the retry/backoff settings and
+`OUTBOX_INFLIGHT_TIMEOUT_SECONDS`. `doctor database` reports pending and dead
+counts, the oldest pending age and whether the worker is running. Durable stanzas
+also keep one stable XEP-0359 `origin-id` across every retry. This does not turn
+XMPP into a strict exactly-once transport, but it lets
 servers/clients recognize a replay if the bot dies after transport acceptance
 and before the outbox row can be marked sent. Dead letters are retained for
 `OUTBOX_DEAD_RETENTION_DAYS` and pruned automatically; setting the retention to
@@ -312,8 +342,11 @@ notification. Inspect and reset it with:
 ```
 
 The runtime watchdog reports current and maximum event-loop lag in `doctor
-tasks`. With the generated recommended systemd unit it also feeds `WatchdogSec`; a process
-that is alive but no longer scheduling the event loop is restarted by systemd.
+tasks`. `WATCHDOG_INTERVAL_SECONDS` controls the check cadence,
+`WATCHDOG_LAG_WARNING_SECONDS` marks degraded event-loop responsiveness and
+`WATCHDOG_LAG_FAILURE_SECONDS` marks a failure. With the generated recommended
+systemd unit the watchdog also feeds `WatchdogSec`; a process that is alive but
+no longer scheduling the event loop is restarted by systemd.
 
 ## Command usage statistics
 

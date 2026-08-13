@@ -9,12 +9,19 @@
  * Recommended layout:
  *
  *   public/idlerpg/index.php
+ *   public/idlerpg/data/index.json
+ *   public/idlerpg/data/generation.json
  *   public/idlerpg/data/<room-slug>/room.json
  *   public/idlerpg/data/<room-slug>/leaderboard.json
  *   public/idlerpg/data/<room-slug>/players.json
  *   public/idlerpg/data/<room-slug>/map.json
  *   public/idlerpg/data/<room-slug>/events.json
+ *   public/idlerpg/data/<room-slug>/season_events.json
  *   public/idlerpg/data/<room-slug>/hall_of_fame.json
+ *   public/idlerpg/data/<room-slug>/achievements.json
+ *   public/idlerpg/data/<room-slug>/artifacts.json
+ *   public/idlerpg/data/<room-slug>/profiles/*.json
+ *   public/idlerpg/data/<room-slug>/generation.json
  *
  * Optional environment variables:
  *

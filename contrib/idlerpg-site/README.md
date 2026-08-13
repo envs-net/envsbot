@@ -19,6 +19,7 @@ bot.
 ```text
 public/idlerpg/index.php
 public/idlerpg/data/index.json
+public/idlerpg/data/generation.json
 public/idlerpg/data/<room-slug>/room.json
 public/idlerpg/data/<room-slug>/leaderboard.json
 public/idlerpg/data/<room-slug>/players.json
@@ -31,6 +32,7 @@ public/idlerpg/data/<room-slug>/hall_of_fame.json
 public/idlerpg/data/<room-slug>/achievements.json
 public/idlerpg/data/<room-slug>/artifacts.json
 public/idlerpg/data/<room-slug>/profiles/*.json
+public/idlerpg/data/<room-slug>/generation.json
 ```
 
 The website primarily uses the room-specific exports. `room.json` provides the
@@ -45,6 +47,14 @@ append-only `season-events/NNNNNN.json` chunks. The example site loads those
 chunks transparently and remains compatible with the older monolithic
 `season_events.json` format. If no full-season export exists it falls back to
 the limited `events.json` feed.
+
+`generation.json` is the v1.8 snapshot commit record. It contains the generation
+ID and SHA-256 hashes of the exported files. The bundled PHP page verifies those
+hashes and rechecks the generation ID before rendering; if an export changes
+mid-read it retries up to five times instead of mixing files from different
+generations. Deployments upgrading an existing export tree remain compatible:
+legacy data without a generation manifest is read normally until EnvsBot
+publishes the first manifest.
 
 Example plugin config:
 

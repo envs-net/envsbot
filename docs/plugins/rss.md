@@ -39,6 +39,8 @@ Feed numbers are global to the RSS store and stay stable while the feed exists. 
 
 `$article_no` is EnvsBot's local successful-post sequence, not a publisher-provided lifetime article ID (RSS/Atom does not expose such a counter reliably). New room feeds count their initial burst and continue from there; existing/legacy feeds use the persisted posted-entry counter where available.
 
+When a feed is already tracked for another destination, adding it to a new room replays only entries up through the feed's persisted cursor and reuses the stored article numbers. That replay does not invent new article numbers or increment the global posted-entry counter; a newer entry that has not yet been processed remains for the normal poll.
+
 ### Newlines and readable spacing
 
 The command is normally entered on one line. Write `\n` in the command to store a real line break. Two trailing `\n` sequences leave one blank separator line after an RSS post. More than two trailing line breaks are capped at two to avoid excessive gaps.
@@ -176,7 +178,7 @@ Only this explicit `all` target removes the feed everywhere. Once no room or dir
 In direct chat, global moderators see compact sections for room, moderator, and trusted-user feeds while retaining title, status, interval, destination, and URL.
 Global moderators may select a single section with `,rss list rooms`, `,rss list mods`, or `,rss list trusted`. Trusted users continue to see only their own direct subscriptions with `,rss list`. Any trusted user or global moderator may use `,rss list own [page|all|last]` in a normal 1:1 chat to show only their own personal subscriptions.
 
-RSS list and health output include the feed number and latest local article number. A visible number can be used instead of the URL in all single-feed delete forms. URL-based deletion and the aliases `,rss del`, `,rss remove`, and `,rss rm` remain supported.
+RSS list and health output include the feed number and latest local article number. `,rss list own` also reports the total local article count across all of the sender's direct feeds, independent of the displayed page, and RSS doctor/runtime state reports the aggregate local article count for its scope. These totals sum EnvsBot's persisted successful-post counters; they are not publisher lifetime totals. A visible feed number can be used instead of the URL in all single-feed delete forms. URL-based deletion and the aliases `,rss del`, `,rss remove`, and `,rss rm` remain supported.
 
 ## Fetch retries and startup behavior
 
