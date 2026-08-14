@@ -272,19 +272,28 @@ async def _add_feed(bot, msg, url, store, room):
 
             # Burst most recent N entries to this newly added room.
             try:
-                feed = await fetch_feed(url)
-                burst_num = config.get("max_new_feed_entries", 5)
-                await burst_recent_entries(
-                    bot,
-                    feed,
-                    room,
-                    burst_num,
-                    store=store,
-                    feed_url=url,
-                    feed_no=_feed_number(feeds[url]) or "",
-                    article_end=_feed_article_count(feeds[url]) or None,
-                    through_entry_id=str(feeds[url].get("last_id") or ""),
-                )
+                cursor = str(feeds[url].get("last_id") or "")
+                if cursor:
+                    feed = await fetch_feed(url)
+                    burst_num = config.get("max_new_feed_entries", 5)
+                    await burst_recent_entries(
+                        bot,
+                        feed,
+                        room,
+                        burst_num,
+                        store=store,
+                        feed_url=url,
+                        feed_no=_feed_number(feeds[url]) or "",
+                        article_end=_feed_article_count(feeds[url]) or None,
+                        through_entry_id=cursor,
+                    )
+                else:
+                    log.warning(
+                        "[RSS] Skipping historical burst for %s in %s: "
+                        "existing feed has no persisted cursor",
+                        url,
+                        room,
+                    )
             except Exception as e:
                 _log_feed_fetch_error(
                     "Failed to fetch or parse feed during burst to new room",

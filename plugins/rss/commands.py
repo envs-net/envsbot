@@ -77,8 +77,9 @@ async def _rss_set_pause_state(
     scope = str(target or "").strip()
     changed = False
     if scope.lower() == "all":
-        feed["paused"] = paused
-        changed = True
+        if bool(feed.get("paused", False)) != paused:
+            feed["paused"] = paused
+            changed = True
         label = "globally"
     elif direct_user:
         direct_key = _normalize_direct_user_jid(direct_user)

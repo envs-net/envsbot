@@ -41,7 +41,7 @@ Commands that target an already configured feed accept either its URL or its fee
 
 `$article_no` is EnvsBot's local successful-post sequence, not a publisher-provided lifetime article ID (RSS/Atom does not expose such a counter reliably). New room feeds count their initial burst and continue from there; existing/legacy feeds use the persisted posted-entry counter where available.
 
-When a feed is already tracked for another destination, adding it to a new room replays only entries up through the feed's persisted cursor and reuses the stored article numbers. That replay does not invent new article numbers or increment the global posted-entry counter; a newer entry that has not yet been processed remains for the normal poll.
+When a feed is already tracked for another destination, adding it to a new room replays only entries up through the feed's persisted cursor and reuses the stored article numbers. That replay does not invent new article numbers or increment the global posted-entry counter; a newer entry that has not yet been processed remains for the normal poll. If the persisted cursor is missing or has already fallen out of the publisher's current feed snapshot, the historical replay is skipped rather than risking an early or duplicate delivery.
 
 ### Newlines and readable spacing
 

@@ -96,6 +96,96 @@ async def test_add_existing_feed_replays_persisted_article_numbers(
 
 
 @pytest.mark.asyncio
+async def test_add_existing_feed_skips_burst_when_persisted_cursor_is_missing(
+    monkeypatch, make_bot, caplog,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/shared.xml"
+    old_room = "old@conference.example.org"
+    new_room = "new@conference.example.org"
+    store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 5,
+            "title": "Shared feed",
+            "link": "https://example.org/",
+            "period": 300,
+            "rooms": [old_room],
+            "last_id": "https://example.org/no-longer-in-feed",
+            "posted_count": 12,
+        }
+    }
+
+    class DummyFeed:
+        feed = {"title": "Shared feed", "link": "https://example.org/"}
+        entries = [
+            SimpleNamespace(
+                title="Unseen",
+                link="https://example.org/unseen",
+                description="",
+            ),
+            SimpleNamespace(
+                title="Also unseen",
+                link="https://example.org/also-unseen",
+                description="",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        rss_subscriptions,
+        "fetch_feed",
+        AsyncMock(return_value=DummyFeed()),
+    )
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
+
+    msg = {"from": SimpleNamespace(bare=new_room), "type": "groupchat"}
+    with caplog.at_level(logging.WARNING):
+        await rss_subscriptions._add_feed(bot, msg, url, store, new_room)
+
+    texts = [_reply_text(reply) for reply in bot.replies]
+    assert all("unseen" not in text.casefold() for text in texts)
+    assert "persisted cursor" in caplog.text
+    assert store[rss.RSS_KEY][url]["posted_count"] == 12
+    assert store[rss.RSS_KEY][url]["last_id"] == (
+        "https://example.org/no-longer-in-feed"
+    )
+    assert store[rss.RSS_KEY][url]["rooms"] == [old_room, new_room]
+
+
+@pytest.mark.asyncio
+async def test_add_existing_feed_without_cursor_skips_historical_fetch_and_burst(
+    monkeypatch, make_bot, caplog,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/shared.xml"
+    old_room = "old@conference.example.org"
+    new_room = "new@conference.example.org"
+    store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 5,
+            "title": "Shared feed",
+            "link": "https://example.org/",
+            "period": 300,
+            "rooms": [old_room],
+            "last_id": "",
+            "posted_count": 0,
+        }
+    }
+    fetch_feed = AsyncMock()
+    monkeypatch.setattr(rss_subscriptions, "fetch_feed", fetch_feed)
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
+
+    msg = {"from": SimpleNamespace(bare=new_room), "type": "groupchat"}
+    with caplog.at_level(logging.WARNING):
+        await rss_subscriptions._add_feed(bot, msg, url, store, new_room)
+
+    fetch_feed.assert_not_awaited()
+    assert "no persisted cursor" in caplog.text
+    assert store[rss.RSS_KEY][url]["rooms"] == [old_room, new_room]
+
+
+@pytest.mark.asyncio
 async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}
@@ -1374,6 +1464,13 @@ async def test_rss_pause_resume_state_room_and_global(monkeypatch, make_bot):
     await rss._rss_set_pause_state(bot, msg, store, url, room, "all", paused=True)
     assert feed["paused"] is True
     assert "globally" in _reply_text(bot.replies[-1])
+    rss_commands._cancel_feed_task.reset_mock()
+    rss_commands.ensure_task.reset_mock()
+
+    await rss._rss_set_pause_state(bot, msg, store, url, room, "all", paused=True)
+    assert "already paused globally" in _reply_text(bot.replies[-1])
+    rss_commands._cancel_feed_task.assert_not_awaited()
+    rss_commands.ensure_task.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2049,6 +2146,7 @@ def test_compact_subscription_lines_groups_room_feeds_by_room():
             "title": "Zulu",
             "period": 1200,
             "rooms": ["z-room@conference.example.org", "a-room@conference.example.org"],
+            "paused_rooms": ["A-ROOM@conference.example.org"],
         },
         "https://example.org/a.xml": {
             "title": "Alpha",
@@ -2062,7 +2160,7 @@ def test_compact_subscription_lines_groups_room_feeds_by_room():
     assert lines[:6] == [
         "Room feeds (3):",
         "• a-room@conference.example.org",
-        "  • #1 · Zulu | no articles yet | ok | 1200s | https://example.org/z.xml",
+        "  • #1 · Zulu | no articles yet | paused | 1200s | https://example.org/z.xml",
         "  • #2 · Alpha | no articles yet | ok | 600s | https://example.org/a.xml",
         "• z-room@conference.example.org",
         "  • #1 · Zulu | no articles yet | ok | 1200s | https://example.org/z.xml",

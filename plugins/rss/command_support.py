@@ -149,18 +149,24 @@ def _compact_subscription_lines(
     for url, feed in feeds.items():
         title = str(feed.get("title") or url)
         status = _feed_status_label(feed)
+        paused_rooms = _feed_paused_rooms(feed)
         period = feed.get("period", "?")
         feed_no = _feed_number(feed) or 10**9
         feed_no_text = str(_feed_number(feed) or "?")
         article_count = _feed_article_count(feed)
         article_text = f"article #{article_count}" if article_count else "no articles yet"
-        room_line = (
-            f"  • #{feed_no_text} · {title} | {article_text} | "
-            f"{status} | {period}s | {url}"
-        )
 
         for room in feed.get("rooms", []):
             room_name = str(room)
+            room_status = (
+                "paused"
+                if _normalize_subscription_room(room_name) in paused_rooms
+                else status
+            )
+            room_line = (
+                f"  • #{feed_no_text} · {title} | {article_text} | "
+                f"{room_status} | {period}s | {url}"
+            )
             room_feeds.setdefault(room_name, []).append((feed_no, title, room_line))
             room_subscription_count += 1
 
@@ -278,10 +284,18 @@ async def burst_recent_entries(
         if anchor_index is not None:
             source_entries = source_entries[anchor_index:]
         else:
-            # Without the persisted cursor in the current feed snapshot, the
-            # old article numbers cannot be assigned reliably.  Preserve the
-            # historical burst behaviour, but do not display a false number.
-            article_end_value = None
+            # A missing persisted cursor means the current snapshot cannot
+            # distinguish already-processed history from newer unseen items.
+            # Replaying it could therefore post an unseen entry early and then
+            # post it again during the next normal poll.  Prefer no history
+            # burst over a duplicate or incorrectly numbered delivery.
+            log.warning(
+                "[RSS] Skipping historical burst for %s: persisted cursor %s "
+                "is not present in the current feed snapshot",
+                feed_url or feed_link,
+                through_entry_id,
+            )
+            return None
 
     entries = list(reversed(source_entries[:burst_num]))
     last_id = None

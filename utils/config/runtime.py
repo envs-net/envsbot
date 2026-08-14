@@ -326,6 +326,11 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
     refreshed: list[str] = []
     idlerpg_values = _idlerpg_values(cfg)
     rss_values = _rss_values(cfg)
+    rss_config_values = {
+        key: value
+        for key, value in rss_values.items()
+        if key != "SIMILARITY_THRESHOLD"
+    }
     reminder_values = {
         "REMINDER_ENABLED": _to_bool(cfg.get("reminder_enabled"), True),
         "REMINDER_DEFAULT_TIMEZONE": _to_str(
@@ -353,7 +358,7 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             for key in ("COUNT_COMMAND_MESSAGES", "MESSAGE_PENALTY")
         },
         "plugins.rss": rss_values,
-        "plugins.rss.config": rss_values,
+        "plugins.rss.config": rss_config_values,
         "plugins.rss.tasks": {
             key: rss_values[key]
             for key in (
@@ -364,8 +369,10 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         },
         "plugins.rss.commands": {
             "DEFAULT_POLL_INTERVAL": rss_values["DEFAULT_POLL_INTERVAL"],
-            "RSS_BROKEN_ERROR_THRESHOLD": rss_values["RSS_BROKEN_ERROR_THRESHOLD"],
             "RSS_TRUSTED_MAX_FEEDS": rss_values["RSS_TRUSTED_MAX_FEEDS"],
+        },
+        "plugins.rss.command_support": {
+            "RSS_BROKEN_ERROR_THRESHOLD": rss_values["RSS_BROKEN_ERROR_THRESHOLD"],
         },
         "plugins.rss.store": {
             key: rss_values[key]

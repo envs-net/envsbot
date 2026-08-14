@@ -256,7 +256,10 @@ publisher lifetime totals.
 When an already tracked feed is added to another room, its initial replay keeps
 the persisted article numbering and stops at the feed's stored cursor. A newer
 entry that has not yet been processed is left for the regular poll, so adding a
-second destination does not create duplicate/new article numbers.
+second destination does not create duplicate/new article numbers. If that
+stored cursor is missing or has already fallen out of the publisher's current
+feed snapshot, EnvsBot skips the historical replay instead of risking an early
+or duplicate delivery.
 
 Deletion is scoped deliberately:
 

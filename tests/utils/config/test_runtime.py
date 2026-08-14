@@ -336,7 +336,10 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
     monkeypatch,
 ):
     from plugins import rss
+    from plugins.rss import command_support as rss_command_support
     from plugins.rss import commands as rss_commands
+    from plugins.rss import config as rss_config
+    from plugins.rss import fetch as rss_fetch
     from plugins.rss import formatting as rss_formatting
     from plugins.rss import tasks as rss_tasks
 
@@ -358,7 +361,8 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
 
     monkeypatch.setattr(rss, "RSS_TRUSTED_MAX_FEEDS", 10)
     monkeypatch.setattr(rss_commands, "RSS_TRUSTED_MAX_FEEDS", 10)
-    monkeypatch.setattr(rss_commands, "RSS_BROKEN_ERROR_THRESHOLD", 3)
+    monkeypatch.setattr(rss_command_support, "RSS_BROKEN_ERROR_THRESHOLD", 3)
+    monkeypatch.setattr(rss_fetch, "SIMILARITY_THRESHOLD", 0.8)
     monkeypatch.setattr(rss_formatting, "RSS_LIST_PAGE_SIZE", 10)
     monkeypatch.setattr(rss_formatting, "RSS_TEMPLATE_MAX_LENGTH", 1000)
     monkeypatch.setattr(rss_tasks, "RSS_STARTUP_STAGGER_SECONDS", 2.0)
@@ -367,16 +371,21 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
         "rss_trusted_max_feeds": 0,
         "rss_list_page_size": 25,
         "rss_broken_error_threshold": 7,
+        "rss_similarity_threshold": 0.72,
         "rss_template_max_length": 1500,
         "rss_startup_stagger_seconds": 0,
     })
 
     assert rss.RSS_TRUSTED_MAX_FEEDS == 0
     assert rss_commands.RSS_TRUSTED_MAX_FEEDS == 0
-    assert rss_commands.RSS_BROKEN_ERROR_THRESHOLD == 7
+    assert not hasattr(rss_commands, "RSS_BROKEN_ERROR_THRESHOLD")
+    assert rss_command_support.RSS_BROKEN_ERROR_THRESHOLD == 7
+    assert rss_fetch.SIMILARITY_THRESHOLD == 0.72
+    assert not hasattr(rss_config, "SIMILARITY_THRESHOLD")
     assert rss_formatting.RSS_LIST_PAGE_SIZE == 25
     assert rss_formatting.RSS_TEMPLATE_MAX_LENGTH == 1500
     assert rss_tasks.RSS_STARTUP_STAGGER_SECONDS == 0.0
+    assert any("plugins.rss.command_support" in line for line in refreshed)
     assert any("plugins.rss.commands" in line for line in refreshed)
     assert any("plugins.rss.formatting" in line for line in refreshed)
 
