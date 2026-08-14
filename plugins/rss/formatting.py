@@ -24,6 +24,7 @@ from .fetch import (
 )
 from .store import (
     _ensure_feed_numbers,
+    _feed_active_direct_users,
     _feed_active_rooms,
     _feed_article_count,
     _feed_number,
@@ -265,11 +266,7 @@ async def _post_new_entries(bot, store, url, feed_title,
             bot, store, active_rooms, url, context
         )
         posted = room_delivered > 0
-        direct_users = sorted(
-            current_feed.get("users", {})
-            if isinstance(current_feed.get("users"), dict)
-            else {}
-        )
+        direct_users = sorted(_feed_active_direct_users(current_feed))
         direct_delivered = 0
         direct_attempted = 0
         for direct_user in direct_users:

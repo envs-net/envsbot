@@ -1323,7 +1323,7 @@ def test_rss_health_helpers_show_paused_backoff_errors(monkeypatch):
     assert "⏸️ paused: Paused" in joined
     assert "🟡 backoff: Backoff" in joined
     assert "rooms: 1/2 active · paused: 1" in joined
-    assert "direct users: 1" in joined
+    assert "direct users: 1/1 active" in joined
     assert "last post: " + rss._format_rss_timestamp(now - 30) in joined
     assert "last error: " + ("x" * 117) + "..." in joined
 
@@ -1388,7 +1388,7 @@ async def test_rss_pause_state_not_found_and_unsubscribed_room(make_bot):
     assert _reply_text(bot.replies[-1]) == "Feed not found."
 
     await rss._rss_set_pause_state(bot, msg, store, url, None, None, paused=True)
-    assert "needs a room context" in _reply_text(bot.replies[-1])
+    assert "needs a subscription context" in _reply_text(bot.replies[-1])
 
     await rss._rss_set_pause_state(
         bot,
@@ -1439,6 +1439,150 @@ async def test_rss_command_health_broken_pause_resume(monkeypatch, make_bot):
 
     await rss.rss_command(bot, "jid1", "nick1", ["pause", "99"], msg, True)
     assert _reply_text(bot.replies[-1]) == "Feed #99 not found."
+
+
+@pytest.mark.asyncio
+async def test_rss_pause_resume_own_direct_feed_in_private_chat(
+    monkeypatch,
+    make_bot,
+):
+    bot = make_bot()
+    user = "trusted@example.org"
+    url = "https://example.org/direct.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 25,
+            "title": "Direct feed",
+            "period": 300,
+            "rooms": [],
+            "users": {
+                user: {
+                    "owner": user,
+                    "role": "trusted",
+                    "paused": False,
+                }
+            },
+            "paused": False,
+            "paused_rooms": [],
+        }
+    }
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+    monkeypatch.setattr(rss_commands, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    msg = {
+        "from": SimpleNamespace(bare=user, resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(bot, user, "trusted", ["pause", "25"], msg, False)
+
+    direct = bot.plugin_store[rss.RSS_KEY][url]["users"][user]
+    assert direct["paused"] is True
+    assert "Paused RSS feed for trusted@example.org (direct)" in _reply_text(
+        bot.replies[-1]
+    )
+    assert rss._feed_status_label(bot.plugin_store[rss.RSS_KEY][url]) == (
+        "paused for all destinations"
+    )
+    assert rss._rss_health_summary(bot.plugin_store[rss.RSS_KEY]) == (
+        "RSS health: 1 feeds · 1 paused · 0 in backoff · 0 with errors"
+    )
+    own_lines = rss_support._compact_subscription_lines(
+        bot.plugin_store[rss.RSS_KEY],
+        "own",
+        owner=user,
+    )
+    assert any("| paused |" in line for line in own_lines)
+
+    await rss.rss_command(
+        bot,
+        user,
+        "trusted",
+        ["resume", "25", user],
+        msg,
+        False,
+    )
+
+    assert direct["paused"] is False
+    assert "Resumed RSS feed for trusted@example.org (direct)" in _reply_text(
+        bot.replies[-1]
+    )
+    assert rss._feed_status_label(bot.plugin_store[rss.RSS_KEY][url]) == "ok"
+    assert rss._rss_health_summary(bot.plugin_store[rss.RSS_KEY]) == (
+        "RSS health: 1 feeds · 0 paused · 0 in backoff · 0 with errors"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_pause_direct_feed_rejects_unsubscribed_private_sender(make_bot):
+    bot = make_bot()
+    user = "trusted@example.org"
+    url = "https://example.org/direct.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 25,
+            "title": "Direct feed",
+            "period": 300,
+            "rooms": [],
+            "users": {"other@example.org": {"role": "trusted"}},
+        }
+    }
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+    msg = {
+        "from": SimpleNamespace(bare=user, resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(bot, user, "trusted", ["pause", "25"], msg, False)
+
+    assert _reply_text(bot.replies[-1]) == "ℹ️ You are not subscribed to this feed."
+
+
+@pytest.mark.asyncio
+async def test_admin_can_pause_another_direct_subscription(monkeypatch, make_bot):
+    bot = make_bot()
+    admin = "admin@example.org"
+    user = "trusted@example.org"
+    url = "https://example.org/direct.xml"
+    bot.plugin_store[rss.RSS_KEY] = {
+        url: {
+            "feed_no": 25,
+            "title": "Direct feed",
+            "period": 300,
+            "rooms": [],
+            "users": {user: {"role": "trusted"}},
+        }
+    }
+
+    async def admin_role(_jid, room=None):
+        return Role.ADMIN
+
+    bot.get_user_role = admin_role
+    monkeypatch.setattr(rss_commands, "_cancel_feed_task", AsyncMock())
+    monkeypatch.setattr(rss_commands, "ensure_task", AsyncMock())
+    msg = {
+        "from": SimpleNamespace(bare=admin, resource="desktop"),
+        "type": "chat",
+    }
+
+    await rss.rss_command(
+        bot,
+        admin,
+        "admin",
+        ["pause", "25", user],
+        msg,
+        False,
+    )
+
+    assert bot.plugin_store[rss.RSS_KEY][url]["users"][user]["paused"] is True
 
 
 @pytest.mark.asyncio

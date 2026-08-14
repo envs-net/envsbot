@@ -230,17 +230,16 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
   - Examples:
     - `,rss retry 12 room@conference.example.org` — Retry feed #12 for one room immediately.
 
-- `,rss pause <feed_url|feed_no> [room_jid|all]`
-  - Description: Pause feed delivery without deleting the subscription.
-  - Role: `moderator`
+- `,rss pause <feed_url|feed_no> [room_jid|user_jid|all]`
+  - Description: Pause one room/direct subscription or the feed globally without deleting it.
   - Examples:
-    - `,rss pause 12` — Pause feed #12 for the current room.
+    - `,rss pause 12` — Pause feed #12 for the current room, or your own direct subscription in 1:1.
+    - `,rss pause 12 user@example.org` — As owner, superadmin, or admin, pause one user's direct subscription.
 
-- `,rss resume <feed_url|feed_no> [room_jid|all]`
-  - Description: Resume a paused RSS subscription.
-  - Role: `moderator`
+- `,rss resume <feed_url|feed_no> [room_jid|user_jid|all]`
+  - Description: Resume one paused room/direct subscription or the globally paused feed.
   - Examples:
-    - `,rss resume 12` — Resume feed #12 for the current room.
+    - `,rss resume 12` — Resume feed #12 for the current room, or your own direct subscription in 1:1.
 
 - `,rss health [room_jid] [page|all|last]`
   - Description: Show feed status, retries, errors and last successful delivery.

@@ -272,6 +272,22 @@ def _feed_paused_rooms(feed: dict) -> set[str]:
         for room in rooms
         if _normalize_subscription_room(room)
     }
+
+def _direct_subscription_is_paused(meta) -> bool:
+    """Return whether one persisted direct-user subscription is paused."""
+    return bool(meta.get("paused", False)) if isinstance(meta, dict) else False
+
+def _feed_active_direct_users(feed: dict) -> list[str]:
+    """Return direct subscribers that are currently active for this feed."""
+    users = feed.get("users") if isinstance(feed, dict) else None
+    if not isinstance(users, dict):
+        return []
+    return [
+        str(jid)
+        for jid, meta in users.items()
+        if str(jid).strip() and not _direct_subscription_is_paused(meta)
+    ]
+
 def _feed_active_rooms(feed: dict) -> list[str]:
     """Return subscribed rooms that are not paused for this feed."""
     rooms = feed.get("rooms")
@@ -301,8 +317,7 @@ def _format_rss_timestamp(ts) -> str:
 def _feed_status_label(feed: dict, now: int | None = None) -> str:
     if _feed_is_globally_paused(feed):
         return "paused"
-    users = feed.get("users") if isinstance(feed, dict) else None
-    if not _feed_active_rooms(feed) and not (isinstance(users, dict) and users):
+    if not _feed_active_rooms(feed) and not _feed_active_direct_users(feed):
         return "paused for all destinations"
     try:
         next_retry = int(feed.get("next_retry", 0) or 0)

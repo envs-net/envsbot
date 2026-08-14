@@ -23,7 +23,9 @@ from .formatting import (
     _normalize_direct_user_jid,
 )
 from .store import (
+    _direct_subscription_is_paused,
     _ensure_feed_numbers,
+    _feed_active_direct_users,
     _feed_active_rooms,
     _feed_article_count,
     _feed_is_globally_paused,
@@ -165,8 +167,11 @@ def _compact_subscription_lines(
 
         for jid, meta in sorted(_direct_subscriptions(feed).items()):
             role = str((meta or {}).get("role") or "trusted").lower()
+            direct_status = (
+                "paused" if _direct_subscription_is_paused(meta) else status
+            )
             line = (
-                f"• #{feed_no_text} · {title} | {article_text} | {status} | "
+                f"• #{feed_no_text} · {title} | {article_text} | {direct_status} | "
                 f"{period}s | {jid} | {url}"
             )
             if owner_key and _normalize_direct_user_jid(jid) == owner_key:
@@ -359,12 +364,22 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             continue
         error_count = int(feed.get("error_count", 0) or 0)
         status = _feed_status_label(feed, now=now)
-        broken = error_count >= RSS_BROKEN_ERROR_THRESHOLD or status in {"backoff", "paused", "paused for all rooms"}
+        broken = error_count >= RSS_BROKEN_ERROR_THRESHOLD or status in {
+            "backoff",
+            "paused",
+            "paused for all destinations",
+        }
         if broken_only and not broken:
             continue
         active_rooms = _feed_active_rooms(feed)
         total_rooms = len(feed.get("rooms", []) if isinstance(feed.get("rooms"), list) else [])
-        direct_users = len(_direct_subscriptions(feed))
+        direct_users = _direct_subscriptions(feed)
+        active_direct_users = _feed_active_direct_users(feed)
+        paused_direct_users = sum(
+            1
+            for meta in direct_users.values()
+            if _direct_subscription_is_paused(meta)
+        )
         paused_rooms = sorted(_feed_paused_rooms(feed))
         last_error = str(feed.get("last_error") or "none")
         if len(last_error) > 120:
@@ -374,7 +389,7 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             "degraded": "🟡 degraded",
             "backoff": "🟡 backoff",
             "paused": "⏸️ paused",
-            "paused for all rooms": "⏸️ paused for all rooms",
+            "paused for all destinations": "⏸️ paused for all destinations",
         }.get(status, status)
         article_count = _feed_article_count(feed)
         article_text = f"#{article_count}" if article_count else "not posted yet"
@@ -384,7 +399,9 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
             f"{feed.get('title') or url} — {url}\n"
             f"   rooms: {len(active_rooms)}/{total_rooms} active"
             f"{f' · paused: {len(paused_rooms)}' if paused_rooms else ''}; "
-            f"direct users: {direct_users}; article: {article_text}; "
+            f"direct users: {len(active_direct_users)}/{len(direct_users)} active"
+            f"{f' · paused: {paused_direct_users}' if paused_direct_users else ''}; "
+            f"article: {article_text}; "
             f"errors: {error_count}; "
             f"last success: {_format_rss_timestamp(feed.get('last_success'))}; "
             f"last post: {_format_rss_timestamp(feed.get('last_posted'))}; "
@@ -394,7 +411,12 @@ def _rss_health_lines(feeds: dict, *, broken_only: bool = False, now: int | None
 
 def _rss_health_summary(feeds: dict) -> str:
     total = sum(1 for feed in feeds.values() if isinstance(feed, dict))
-    paused = sum(1 for feed in feeds.values() if isinstance(feed, dict) and _feed_is_globally_paused(feed))
+    paused = sum(
+        1
+        for feed in feeds.values()
+        if isinstance(feed, dict)
+        and _feed_status_label(feed) in {"paused", "paused for all destinations"}
+    )
     backoff = sum(
         1 for feed in feeds.values()
         if isinstance(feed, dict) and int(feed.get("next_retry") or 0) > _now()

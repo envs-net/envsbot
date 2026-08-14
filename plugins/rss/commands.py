@@ -56,7 +56,17 @@ from .tasks import _cancel_feed_task, ensure_task
 from .templates import _rss_template_command
 
 
-async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool) -> None:
+async def _rss_set_pause_state(
+    bot,
+    msg,
+    store,
+    url,
+    room,
+    target,
+    paused: bool,
+    *,
+    direct_user: str | None = None,
+) -> None:
     url = _normalize_url(url)
     feeds = await get_feeds(store)
     feed = feeds.get(url)
@@ -70,10 +80,37 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
         feed["paused"] = paused
         changed = True
         label = "globally"
+    elif direct_user:
+        direct_key = _normalize_direct_user_jid(direct_user)
+        users = _direct_subscriptions(feed)
+        stored_key = next(
+            (
+                jid
+                for jid in users
+                if _normalize_direct_user_jid(jid) == direct_key
+            ),
+            None,
+        )
+        if not direct_key or stored_key is None:
+            bot.reply(msg, f"ℹ️ {direct_user} is not subscribed to this feed.")
+            return
+        meta = users.get(stored_key)
+        if not isinstance(meta, dict):
+            meta = {}
+            users[stored_key] = meta
+        if bool(meta.get("paused", False)) != paused:
+            meta["paused"] = paused
+            feed["users"] = users
+            changed = True
+        label = f"for {direct_key} (direct)"
     else:
         target_room = _normalize_room_jid(scope) if scope else room
         if not target_room:
-            bot.reply(msg, "🔴 RSS pause/resume needs a room context, room JID, or 'all'.")
+            bot.reply(
+                msg,
+                "🔴 RSS pause/resume needs a subscription context, "
+                "room/user JID, or 'all'.",
+            )
             return
         rooms = _rss_normalize_room_list(feed)
         room_key = _normalize_subscription_room(target_room)
@@ -93,7 +130,7 @@ async def _rss_set_pause_state(bot, msg, store, url, room, target, paused: bool)
     if changed:
         await save_feeds(store, feeds)
         await _cancel_feed_task(bot, url)
-        if not paused or not feed.get("paused"):
+        if not feed.get("paused"):
             await ensure_task(bot, store, url, feed.get("period", DEFAULT_POLL_INTERVAL))
 
     action = "Paused" if paused else "Resumed"
@@ -371,7 +408,8 @@ async def _rss_handle_pause(bot, sender_jid, args, msg, is_room, store, room):
     if len(args) not in (2, 3):
         bot.reply(
             msg,
-            f"Usage: {_command_prefix(bot)}rss {sub} <feedurl|feed_no> [room_jid|all]",
+            f"Usage: {_command_prefix(bot)}rss {sub} <feedurl|feed_no> "
+            "[room_jid|user_jid|all]",
         )
         return
     feed_selector = str(args[1]).strip()
@@ -380,16 +418,64 @@ async def _rss_handle_pause(bot, sender_jid, args, msg, is_room, store, room):
     if feed_url is None:
         bot.reply(msg, f"Feed #{feed_selector} not found.")
         return
+    feed_url = _normalize_url(feed_url)
+    feed = feeds.get(feed_url)
+    if not isinstance(feed, dict):
+        bot.reply(msg, "Feed not found.")
+        return
 
     target = args[2] if len(args) == 3 else None
+    direct_target = None
+    direct_chat = not room and _message_type(msg) in ("chat", "normal")
+    if not (target and str(target).strip().lower() == "all"):
+        candidate = target
+        if candidate is None and direct_chat:
+            candidate = sender_jid
+        candidate_key = (
+            _normalize_direct_user_jid(candidate) if candidate else None
+        )
+        if candidate_key:
+            direct_target = next(
+                (
+                    jid
+                    for jid in _direct_subscriptions(feed)
+                    if _normalize_direct_user_jid(jid) == candidate_key
+                ),
+                None,
+            )
+
     if target and str(target).strip().lower() == "all":
         if not await _sender_can_manage_rss_globally(bot, sender_jid):
             bot.reply(msg, "🔴 Only global moderators can pause/resume RSS feeds globally.")
             return
+    elif direct_target:
+        role = await _sender_role(bot, sender_jid)
+        sender_key = _normalize_direct_user_jid(sender_jid)
+        direct_key = _normalize_direct_user_jid(direct_target)
+        if direct_key != sender_key and role > Role.ADMIN:
+            bot.reply(
+                msg,
+                "🔴 Only owner, superadmin, or admin can pause/resume "
+                "another user's direct RSS feed.",
+            )
+            return
+        if direct_key == sender_key and role > Role.TRUSTED:
+            bot.reply(
+                msg,
+                "🔴 Direct RSS subscriptions require trusted role or higher.",
+            )
+            return
+    elif direct_chat and target is None:
+        bot.reply(msg, "ℹ️ You are not subscribed to this feed.")
+        return
     else:
         target_room = _room_for_feed_command(msg, is_room, explicit_room=target)
         if not target_room:
-            bot.reply(msg, "🔴 RSS pause/resume needs a room context or explicit room JID.")
+            bot.reply(
+                msg,
+                "🔴 RSS pause/resume needs a subscription context or explicit "
+                "room/user JID.",
+            )
             return
         if not await _sender_can_manage_rss_room(bot, sender_jid, target_room):
             bot.reply(
@@ -406,12 +492,13 @@ async def _rss_handle_pause(bot, sender_jid, args, msg, is_room, store, room):
         room,
         target,
         paused=(sub == "pause"),
+        direct_user=direct_target,
     )
     await audit_event(
         bot,
         f"rss_feed_{sub}",
         actor=sender_jid,
-        target=target or room or "rss",
+        target=direct_target or target or room or "rss",
         details={
             "url": _normalize_url(feed_url),
             "feed_selector": feed_selector,
@@ -729,27 +816,29 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         ),
         help_subcommand(
             "pause",
-            "{prefix}rss pause <feed_url|feed_no> [room_jid|all]",
-            "Pause feed delivery without deleting the subscription.",
+            "{prefix}rss pause <feed_url|feed_no> [room_jid|user_jid|all]",
+            "Pause one room/direct subscription or the feed globally without deleting it.",
             examples=[
                 help_example(
                     "{prefix}rss pause 12",
-                    "Pause feed #12 for the current room.",
+                    "Pause feed #12 for the current room, or your own direct subscription in 1:1.",
+                ),
+                help_example(
+                    "{prefix}rss pause 12 user@example.org",
+                    "As owner, superadmin, or admin, pause one user's direct subscription.",
                 ),
             ],
-            role=Role.MODERATOR,
         ),
         help_subcommand(
             "resume",
-            "{prefix}rss resume <feed_url|feed_no> [room_jid|all]",
-            "Resume a paused RSS subscription.",
+            "{prefix}rss resume <feed_url|feed_no> [room_jid|user_jid|all]",
+            "Resume one paused room/direct subscription or the globally paused feed.",
             examples=[
                 help_example(
                     "{prefix}rss resume 12",
-                    "Resume feed #12 for the current room.",
+                    "Resume feed #12 for the current room, or your own direct subscription in 1:1.",
                 ),
             ],
-            role=Role.MODERATOR,
         ),
         help_subcommand(
             "health",
@@ -829,10 +918,10 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
 
     Usage:
     {prefix}rss add <feedurl> [room_jid]
-    {prefix}rss delete|remove|del|rm <feedurl|feed_no> [room_jid|all]
+    {prefix}rss delete|remove|del|rm <feedurl|feed_no> [room_jid|user_jid|all]
     {prefix}rss delete|remove|del|rm all <user_jid>
     {prefix}rss retry|reset <feedurl|feed_no>|all [room_jid]
-    {prefix}rss pause|resume <feedurl|feed_no> [room_jid|all]
+    {prefix}rss pause|resume <feedurl|feed_no> [room_jid|user_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [own|rooms|mods|trusted|room_jid] [page|all|last]
     {prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feedurl|feed_no] [template]

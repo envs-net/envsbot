@@ -703,6 +703,43 @@ async def test_post_new_entries_uses_personal_direct_templates(make_bot):
 
 
 @pytest.mark.asyncio
+async def test_post_new_entries_skips_paused_direct_subscribers(make_bot):
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/direct.xml"
+    feed = {
+        "title": "Direct Feed",
+        "link": "https://example.org/",
+        "rooms": [],
+        "users": {
+            "alice@example.org": {"role": "trusted", "paused": True},
+            "bob@example.org": {"role": "trusted", "paused": False},
+        },
+        "last_id": "old-entry",
+        "posted_count": 0,
+    }
+    store[rss.RSS_KEY] = {url: feed}
+
+    await rss._post_new_entries(
+        bot,
+        store,
+        url,
+        feed["title"],
+        feed["link"],
+        [],
+        [(Entry(title="New entry", link="https://example.org/new"), "new-entry")],
+        feed=feed,
+    )
+
+    assert len(bot.sent_messages) == 1
+    assert bot.sent_messages[0]["mto"] == "bob@example.org"
+    assert bot.sent_messages[0]["mtype"] == "chat"
+    assert "New entry" in bot.sent_messages[0]["mbody"]
+    assert store[rss.RSS_KEY][url]["last_id"] == "new-entry"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_post_new_entries_retains_cursor_when_direct_delivery_fails(
     make_bot,
 ):

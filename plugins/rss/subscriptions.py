@@ -79,7 +79,7 @@ async def _add_direct_feed(bot, msg, url, store, owner: str, role: Role):
     if key in users:
         bot.reply(msg, f"ℹ️ Feed already added for you: {url}")
         return
-    users[key] = {"owner": key, "role": str(role)}
+    users[key] = {"owner": key, "role": str(role), "paused": False}
     feeds[url]["users"] = users
     await save_feeds(store, feeds)
     await ensure_task(bot, store, url, feeds[url]["period"])

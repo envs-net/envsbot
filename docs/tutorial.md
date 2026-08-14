@@ -235,6 +235,14 @@ Common maintenance commands:
 
 `retry all` and `reset all` are global operations and require a global moderator/admin role.
 
+Pause/resume follows the subscription context. In a room or MUC PM, a bare
+`,rss pause 12` pauses only that room. In a normal 1:1 chat, the same command
+pauses only your own direct subscription, and `,rss resume 12` enables it again.
+Owner, superadmin, and admin users may explicitly target another direct
+subscriber with `,rss pause 12 user@example.org` / `,rss resume 12 user@example.org`.
+The explicit `all` target remains the global feed pause and requires a global
+RSS manager.
+
 RSS feeds receive stable human-facing numbers. `,rss list` and RSS health output
 show the feed number and EnvsBot's latest local article number. For commands that
 target an already configured feed, the feed number may be used instead of repeating
