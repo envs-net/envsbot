@@ -676,8 +676,7 @@ def test_detail_line_helpers(monkeypatch):
     )
     supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [task])
     assert _admin._task_status_lines(types.SimpleNamespace(tasks=supervisor)) == [
-        "Summary: ✅ 0 services running · 0 one-shots running · "
-        "ℹ️ 0 one-shots completed · 🔴 1 failed",
+        "Summary: ✅ 0 services running · 0 one-shots running · ℹ️ 0 one-shots completed · 🔴 1 failed",
         "• rss/feed — 🔴 failed | kind=service | circuit=open | error=boom",
     ]
 
