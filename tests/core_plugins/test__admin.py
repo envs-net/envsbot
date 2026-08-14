@@ -320,7 +320,16 @@ async def test_bot_status_full_omits_healthy_rooms_and_includes_plugin_details(m
     assert "room@example.org | nick=EnvsBot | occupants=2" not in reply
     assert "Loaded plugins:" in reply
     assert "Caches:" in reply
+    assert "Background tasks:" in reply
+    assert "Tasks: unavailable" not in reply
     assert "Users: unavailable" in reply
+    assert reply_lines.index("⏱️ Background tasks:") > reply_lines.index("🧠 Caches:")
+    section_headers = [
+        index
+        for index, line in enumerate(reply_lines)
+        if line.endswith(":") and not line.startswith(("├─", "└─"))
+    ]
+    assert reply_lines.index("⏱️ Background tasks:") == max(section_headers)
 
 
 @pytest.mark.asyncio
@@ -644,18 +653,32 @@ def test_detail_line_helpers(monkeypatch):
     assert "bar 1.0 | category=unknown" in lines[0]
     assert "foo 2.0 | category=fun" in lines[1]
 
-    assert _admin._task_detail_lines(types.SimpleNamespace(tasks=None)) == ["unavailable"]
+    assert _admin._task_status_lines(types.SimpleNamespace(tasks=None)) == [
+        "Task supervisor is not available."
+    ]
     empty_supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [])
-    assert _admin._task_detail_lines(types.SimpleNamespace(tasks=empty_supervisor)) == ["—"]
+    assert _admin._task_status_lines(types.SimpleNamespace(tasks=empty_supervisor)) == [
+        "No supervised tasks found."
+    ]
     task = types.SimpleNamespace(
-        plugin="rss", name="feed", status="failed",
-        created_at="2026-06-24T10:00:00", last_error="boom",
-        heartbeat_at=None, restart_count=2, circuit_state="open",
+        plugin="rss",
+        name="feed",
+        status="failed",
+        kind="service",
+        created_at="2026-06-24T10:00:00",
+        done_at="2026-06-24T10:01:00",
+        cancelled=False,
+        last_error="boom",
+        heartbeat_at=None,
+        restart_count=2,
+        circuit_state="open",
+        next_restart_at=None,
     )
     supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [task])
-    assert _admin._task_detail_lines(types.SimpleNamespace(tasks=supervisor)) == [
-        "rss/feed | failed | heartbeat=not reported | restarts=2 | "
-        "circuit=open | created=2026-06-24T10:00:00 | error=boom"
+    assert _admin._task_status_lines(types.SimpleNamespace(tasks=supervisor)) == [
+        "Summary: ✅ 0 services running · 0 one-shots running · "
+        "ℹ️ 0 one-shots completed · 🔴 1 failed",
+        "• rss/feed — 🔴 failed | kind=service | circuit=open | error=boom",
     ]
 
 

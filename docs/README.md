@@ -28,7 +28,7 @@ Operational notes:
 - Operator-tunable plugin limits, timeouts, default pagination and reminder timezone defaults are documented directly in `config_sample.py`.
 - `MESSAGE_CACHE_SIZE` controls the shared recent-message history retained per room or private conversation. Message bodies are stored in SQLite and restored after restart.
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
-- `,status` includes compact alert/outbox/message-cache health; `,status full` additionally includes supervised task heartbeat/restart/circuit state, bounded user/runtime/message-cache diagnostics, and only MUCs with detected join/routing problems (maximum 10; use `,rooms list all` for the complete MUC inventory).
+- `,status` includes compact alert/outbox/message-cache health; `,status full` additionally includes bounded user/runtime/message-cache diagnostics, only MUCs with detected join/routing problems (maximum 10; use `,rooms list all` for the complete MUC inventory), and the same compact supervised-task inventory as `,tasks all`. The task section is last because it is usually the longest; use `,tasks full all` for per-task detail.
 - `,tasks` shows supervised background tasks without the rest of the status output.
 - `,doctor` runs a compact operator health check; `,doctor performance` shows in-process latency counters and `,doctor full` includes them in the detailed sweep.
 - `,plugin state <plugin> [room_jid]` shows plugin-provided runtime counters.

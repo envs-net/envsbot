@@ -5,7 +5,8 @@ from __future__ import annotations
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
-from utils.formatting import PageRequest, format_page, parse_page_args, status_icon
+from utils.formatting import PageRequest, format_page, parse_page_args
+from utils.task_display import render_task_lines
 from utils.task_supervisor import TaskInfo
 
 PLUGIN_META = {
@@ -15,12 +16,6 @@ PLUGIN_META = {
     "category": "core",
 }
 
-_STATUS_ORDER = {
-    "running": 0,
-    "failed": 1,
-    "cancelled": 2,
-    "done": 3,
-}
 _STATUS_ALIASES = {
     "run": "running",
     "running": "running",
@@ -37,86 +32,6 @@ _STATUS_ALIASES = {
 
 def _prefix() -> str:
     return str(config.get("prefix", ",") or ",")
-
-
-def _task_sort_key(task: TaskInfo) -> tuple[int, str, str]:
-    """Return a stable display sort key for task entries."""
-    return (_STATUS_ORDER.get(task.status, 99), task.plugin, task.name)
-
-
-def _summary_line(tasks: list[TaskInfo]) -> str:
-    """Return a lifecycle-aware task summary."""
-    services_running = sum(
-        1 for task in tasks if task.kind == "service" and task.status == "running"
-    )
-    one_shots_running = sum(
-        1 for task in tasks if task.kind != "service" and task.status == "running"
-    )
-    one_shots_completed = sum(
-        1 for task in tasks if task.kind != "service" and task.status == "done"
-    )
-    failed = sum(1 for task in tasks if task.status == "failed")
-    cancelled = sum(1 for task in tasks if task.status == "cancelled")
-    service_finished = sum(
-        1 for task in tasks if task.kind == "service" and task.status == "done"
-    )
-    parts = [
-        f"{status_icon('running')} {services_running} services running",
-        f"{one_shots_running} one-shots running",
-        f"{status_icon('done')} {one_shots_completed} one-shots completed",
-        f"{status_icon('failed')} {failed} failed",
-    ]
-    if service_finished:
-        parts.append(f"⚠️ {service_finished} services finished")
-    if cancelled:
-        parts.append(f"{cancelled} cancelled")
-    return "Summary: " + " · ".join(parts)
-
-
-def _compact_task_line(task: TaskInfo) -> str:
-    """Return one compact task line."""
-    heartbeat = f" | heartbeat={task.heartbeat_at}" if task.heartbeat_at and task.status == "running" else ""
-    circuit = ""
-    if task.circuit_state != "closed":
-        circuit = f" | circuit={task.circuit_state}"
-    if task.next_restart_at:
-        circuit += f" | restart_at={task.next_restart_at}"
-    extra = f" | error={task.last_error}" if task.last_error else ""
-    kind = f" | kind={task.kind}"
-    return f"• {task.plugin}/{task.name} — {status_icon(task.status)} {task.status}{kind}{heartbeat}{circuit}{extra}"
-
-
-def _full_task_lines(task: TaskInfo) -> list[str]:
-    """Return detailed lines for one task."""
-    lines = [
-        f"• {task.plugin}/{task.name}",
-        f"  status = {task.status}",
-        f"  kind = {task.kind}",
-        f"  created_at = {task.created_at}",
-        f"  done_at = {task.done_at or '-'}",
-        f"  cancelled = {task.cancelled}",
-        f"  heartbeat_at = {task.heartbeat_at or '-'}",
-        f"  restart_count = {task.restart_count}",
-        f"  circuit_state = {task.circuit_state}",
-        f"  next_restart_at = {task.next_restart_at or '-'}",
-    ]
-    if task.last_error:
-        lines.append(f"  last_error = {task.last_error}")
-    return lines
-
-
-def _render_tasks(tasks: list[TaskInfo], *, full: bool) -> list[str]:
-    """Format task entries for command output."""
-    if not tasks:
-        return ["No supervised tasks found."]
-
-    lines: list[str] = [_summary_line(tasks), ""]
-    for task in sorted(tasks, key=_task_sort_key):
-        if full:
-            lines.extend(_full_task_lines(task))
-        else:
-            lines.append(_compact_task_line(task))
-    return lines
 
 
 def _filter_tasks(tasks: list[TaskInfo], *, plugin: str | None, status: str | None) -> list[TaskInfo]:
@@ -225,7 +140,7 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
     if status:
         title_parts.append(f"status={status}")
 
-    lines = _render_tasks(filtered, full=full)
+    lines = render_task_lines(filtered, full=full)
     page_size = 20 if full else 12
     reply = format_page(
         " — ".join(title_parts),
@@ -296,7 +211,7 @@ async def tasks_stale_command(bot, sender, nick, args, msg, is_room):
         max_age = 3600.0
     stale = stale_getter(max_age_seconds=max_age)
     page_request = parse_page_args(args or [])
-    lines = _render_tasks(list(stale), full=False)
+    lines = render_task_lines(list(stale), full=False)
     reply = format_page(
         f"🧵 Stale background tasks (> {int(max_age)}s)",
         lines,

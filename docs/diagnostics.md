@@ -77,6 +77,11 @@ entries; if more exist, the output points to `,rooms list all`. Plugin-specific
 checks such as RSS retry/backoff remain in the plugin/doctor diagnostics rather
 than running a full per-room plugin sweep as part of every status request.
 
+The `Background tasks` section is intentionally the final section of
+`,status full`, because the task inventory is commonly the longest part of the
+reply. It uses the same compact task rendering and ordering as `,tasks all`.
+For the expanded per-task fields, use `,tasks full all`.
+
 ## Room invite onboarding
 
 When the bot receives a direct or mediated MUC invite, it stores the invite as a pending item and notifies the configured admin target. After accepting an invite, the reply includes a small onboarding checklist:

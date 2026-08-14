@@ -32,6 +32,7 @@ from utils.config import config
 from utils.file_security import PRIVATE_FILE_MODE
 from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.runtime_paths import vcard_file
+from utils.task_display import render_task_lines
 from utils.task_supervisor import create_resilient_plugin_task
 from utils.time_utils import ensure_utc, utc_now
 from utils.updatecheck import check_for_updates_once, version_check_worker
@@ -478,7 +479,7 @@ def _cache_detail_lines(bot, health: HealthSnapshot | None = None) -> list[str]:
     return lines
 
 
-def _plugin_status_lines(bot) -> list[str]:
+def _plugin_status_lines(bot, *, include_task_summary: bool = True) -> list[str]:
     """Return plugin and command status lines."""
     manager = getattr(bot, "bot_plugins", None)
     loaded_plugins = getattr(manager, "plugins", {}) or {}
@@ -490,11 +491,13 @@ def _plugin_status_lines(bot) -> list[str]:
         available_count = "unknown"
 
     command_count, alias_count = _command_counts()
-    return [
+    lines = [
         f"Loaded: {len(loaded_plugins)}/{available_count}",
         f"Commands: {command_count} (+{alias_count} aliases)",
-        _task_summary_line(bot),
     ]
+    if include_task_summary:
+        lines.append(_task_summary_line(bot))
+    return lines
 
 
 async def _database_status_lines(bot, *, full: bool = False) -> list[str]:
@@ -685,26 +688,13 @@ def _timestamp_age(value: str | None) -> str:
         return "unknown"
 
 
-def _task_detail_lines(bot) -> list[str]:
-    """Return detailed supervised task lines for full status."""
+def _task_status_lines(bot) -> list[str]:
+    """Return the same compact supervised-task inventory as ``tasks all``."""
     supervisor = getattr(bot, "tasks", None)
     if supervisor is None:
-        return ["unavailable"]
+        return ["Task supervisor is not available."]
     tasks = supervisor.snapshot(include_done=True)
-    if not tasks:
-        return ["—"]
-    lines = []
-    for task in tasks:
-        error = getattr(task, "last_error", None)
-        extra = f" | error={error}" if error else ""
-        lines.append(
-            f"{task.plugin}/{task.name} | {task.status} | "
-            f"heartbeat={_timestamp_age(getattr(task, 'heartbeat_at', None))} | "
-            f"restarts={int(getattr(task, 'restart_count', 0) or 0)} | "
-            f"circuit={getattr(task, 'circuit_state', 'closed')} | "
-            f"created={task.created_at}{extra}"
-        )
-    return lines
+    return [line for line in render_task_lines(tasks, full=False) if line]
 
 
 async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
@@ -721,7 +711,7 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
         _section("XMPP", _xmpp_status_lines(bot, room_snapshot, stored_rooms))
     )
 
-    plugin_lines = _plugin_status_lines(bot)
+    plugin_lines = _plugin_status_lines(bot, include_task_summary=not full)
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
     lines.extend(_section("Plugins", plugin_lines))
     lines.extend(_section("Database", await _database_status_lines(bot, full=full)))
@@ -732,8 +722,8 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
         if room_problems:
             lines.extend(_section("Room issues", room_problems))
         lines.extend(_section("Loaded plugins", _plugin_detail_lines(bot)))
-        lines.extend(_section("Background tasks", _task_detail_lines(bot)))
         lines.extend(_section("Caches", _cache_detail_lines(bot, health=health)))
+        lines.extend(_section("Background tasks", _task_status_lines(bot)))
 
     return lines[:-1] if lines and lines[-1] == "" else lines
 
