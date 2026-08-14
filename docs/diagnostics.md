@@ -71,6 +71,12 @@ disagree; a normal joined room does not need a separate presence line.
 ,rooms diagnose lounge@conference.example.org
 ```
 
+`,status full` follows the same signal-over-noise rule: it does not enumerate
+healthy MUCs. It shows only detected join/routing problems, capped at 10 room
+entries; if more exist, the output points to `,rooms list all`. Plugin-specific
+checks such as RSS retry/backoff remain in the plugin/doctor diagnostics rather
+than running a full per-room plugin sweep as part of every status request.
+
 ## Room invite onboarding
 
 When the bot receives a direct or mediated MUC invite, it stores the invite as a pending item and notifies the configured admin target. After accepting an invite, the reply includes a small onboarding checklist:

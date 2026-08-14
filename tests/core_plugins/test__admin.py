@@ -296,7 +296,7 @@ async def test_bot_status_handles_exception(monkeypatch, fake_bot):
 
 
 @pytest.mark.asyncio
-async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fake_bot):
+async def test_bot_status_full_omits_healthy_rooms_and_includes_plugin_details(monkeypatch, fake_bot):
     _admin.BOT_START_TIME = datetime.now() - timedelta(minutes=5)
     fake_bot.last_version_check_result = "1.4.0"
     _admin.JOINED_ROOMS.clear()
@@ -306,6 +306,7 @@ async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fak
         "affiliation": "member",
         "nicks": {"alice": {}, "bob": {}},
     }
+    fake_bot.presence.joined_rooms = {"room@example.org": "EnvsBot"}
     await _admin.bot_status(fake_bot, Sender(), "nick", ["full"], DummyMsg(), False)
     reply_lines = fake_bot._replies[-1][0]
     reply = "\n".join(reply_lines)
@@ -315,8 +316,8 @@ async def test_bot_status_full_includes_room_and_plugin_details(monkeypatch, fak
     assert "Page count: 1" in reply
     assert "Page size: 1" in reply
     assert "Freelist pages: 1" in reply
-    assert "Rooms:" in reply
-    assert "room@example.org | nick=EnvsBot | occupants=2" in reply
+    assert "Room issues:" not in reply
+    assert "room@example.org | nick=EnvsBot | occupants=2" not in reply
     assert "Loaded plugins:" in reply
     assert "Caches:" in reply
     assert "Users: unavailable" in reply
@@ -595,13 +596,45 @@ def test_command_plugin_and_task_status_helpers(monkeypatch):
 
 
 def test_detail_line_helpers(monkeypatch):
-    assert _admin._room_detail_lines(()) == ["—"]
-    room_lines = _admin._room_detail_lines((
-        ("z@example.org", {"nick": "bot", "role": "moderator", "affiliation": "member", "nicks": {"a": {}}}),
-        ("a@example.org", {}),
-    ))
-    assert room_lines[0].startswith("a@example.org | nick=unknown | occupants=0")
-    assert room_lines[1].startswith("z@example.org | nick=bot | occupants=1")
+    from utils.health import HealthCheck, HealthSnapshot
+
+    healthy = HealthSnapshot(
+        checked_at="now",
+        checks={"rooms": HealthCheck("rooms", "ok", "ok", {"missing": ()})},
+    )
+    bot = types.SimpleNamespace(
+        prefix=",",
+        presence=types.SimpleNamespace(joined_rooms={"z@example.org": "bot"}),
+    )
+    room_snapshot = (("z@example.org", {"nick": "bot"}),)
+    assert _admin._room_problem_lines(bot, room_snapshot, healthy) == []
+
+    warning = HealthSnapshot(
+        checked_at="now",
+        checks={
+            "rooms": HealthCheck(
+                "rooms",
+                "warning",
+                "missing",
+                {"missing": ("missing@example.org",)},
+            )
+        },
+    )
+    bot.presence.joined_rooms = {
+        "presence-only@example.org": "bot",
+        "nick-mismatch@example.org": "other",
+    }
+    problem_snapshot = (
+        ("core-only@example.org", {"nick": "bot"}),
+        ("nick-mismatch@example.org", {"nick": "bot"}),
+    )
+    room_lines = _admin._room_problem_lines(bot, problem_snapshot, warning)
+    assert room_lines == [
+        "⚠️ core-only@example.org | presence routing state is missing",
+        "⚠️ missing@example.org | autojoin room is not joined",
+        "⚠️ nick-mismatch@example.org | presence nick differs from runtime nick (other != bot)",
+        "⚠️ presence-only@example.org | core room state is missing",
+    ]
 
     assert _admin._plugin_detail_lines(types.SimpleNamespace(bot_plugins=None)) == ["—"]
 
@@ -624,6 +657,32 @@ def test_detail_line_helpers(monkeypatch):
         "rss/feed | failed | heartbeat=not reported | restarts=2 | "
         "circuit=open | created=2026-06-24T10:00:00 | error=boom"
     ]
+
+
+def test_room_problem_lines_are_limited_and_point_to_rooms_list_all():
+    from utils.health import HealthCheck, HealthSnapshot
+
+    missing = tuple(f"room{i:02d}@example.org" for i in range(12))
+    health = HealthSnapshot(
+        checked_at="now",
+        checks={
+            "rooms": HealthCheck(
+                "rooms",
+                "warning",
+                "missing",
+                {"missing": missing},
+            )
+        },
+    )
+    bot = types.SimpleNamespace(
+        prefix=",",
+        presence=types.SimpleNamespace(joined_rooms={}),
+    )
+    lines = _admin._room_problem_lines(bot, (), health)
+
+    assert len(lines) == 11
+    assert sum(line.startswith("⚠️ room") for line in lines) == 10
+    assert lines[-1] == "… 2 more room problems; see ,rooms list all"
 
 
 @pytest.mark.asyncio

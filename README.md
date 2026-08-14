@@ -472,7 +472,7 @@ Restore is owner-only. Before changing runtime files, envsbot fully verifies the
 
 ## SQLite Maintenance
 
-Use `,bot status` for a compact safe online database and operational health check. Use `,bot status full` for additional SQLite page details plus room, plugin, supervised-task heartbeat/restart/circuit state and bounded-cache diagnostics.
+Use `,bot status` for a compact safe online database and operational health check. Use `,bot status full` for additional SQLite page details, detected room problems, plugin details, supervised-task heartbeat/restart/circuit state and bounded-cache diagnostics. Healthy rooms are not enumerated there; use `,rooms list all` for the complete MUC inventory.
 
 Do **not** run `VACUUM` from inside the live bot process. Stop the bot first and perform maintenance manually:
 

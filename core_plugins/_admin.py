@@ -50,6 +50,8 @@ PLUGIN_META = {
 # Track bot start time
 BOT_START_TIME = None
 
+_STATUS_ROOM_PROBLEM_LIMIT = 10
+
 
 # ------------------------------------------------
 # Small formatting helpers
@@ -108,7 +110,7 @@ _STATUS_SECTION_ICONS = {
     "XMPP": "💬",
     "Plugins": "🧩",
     "Database": "🗄️",
-    "Rooms": "🏠",
+    "Room issues": "🏠",
     "Loaded plugins": "📦",
     "Background tasks": "⏱️",
     "Health": "🩺",
@@ -586,20 +588,64 @@ async def _room_feature_override_line(bot, room_snapshot) -> str:
         return "Room feature overrides: unknown"
 
 
-def _room_detail_lines(room_snapshot) -> list[str]:
-    """Return detailed room lines for full status."""
-    if not room_snapshot:
-        return ["—"]
+def _room_problem_lines(
+    bot,
+    room_snapshot: tuple[tuple[str, dict], ...],
+    health: HealthSnapshot,
+) -> list[str]:
+    """Return a bounded list of room-state problems for full status.
 
-    lines = []
-    for room, room_data in sorted(room_snapshot, key=lambda item: item[0]):
-        nick = room_data.get("nick") or "unknown"
-        role = room_data.get("role") or "unknown"
-        affiliation = room_data.get("affiliation") or "unknown"
-        occupants = _room_occupant_count(room_data)
+    Healthy rooms are deliberately omitted.  ``rooms list all`` owns the full
+    inventory; status only surfaces room state that may need operator action.
+    """
+    problems: dict[str, list[str]] = {}
+
+    def add_problem(room: str, detail: str) -> None:
+        room = str(room)
+        if not room:
+            return
+        details = problems.setdefault(room, [])
+        if detail not in details:
+            details.append(detail)
+
+    room_check = health.check("rooms")
+    for room in room_check.data.get("missing", ()) or ():
+        add_problem(str(room), "autojoin room is not joined")
+
+    core_rooms = {str(room): data for room, data in room_snapshot}
+    presence_raw = getattr(getattr(bot, "presence", None), "joined_rooms", {}) or {}
+    if hasattr(presence_raw, "items"):
+        presence_rooms = {str(room): nick for room, nick in presence_raw.items()}
+    else:
+        presence_rooms = {str(room): None for room in presence_raw}
+
+    for room in sorted(set(core_rooms) - set(presence_rooms), key=str.casefold):
+        add_problem(room, "presence routing state is missing")
+    for room in sorted(set(presence_rooms) - set(core_rooms), key=str.casefold):
+        add_problem(room, "core room state is missing")
+    for room in sorted(set(core_rooms) & set(presence_rooms), key=str.casefold):
+        runtime_nick = str(core_rooms[room].get("nick") or "")
+        presence_nick = str(presence_rooms[room] or "")
+        if runtime_nick and presence_nick and runtime_nick != presence_nick:
+            add_problem(
+                room,
+                f"presence nick differs from runtime nick ({presence_nick} != {runtime_nick})",
+            )
+
+    if not problems:
+        return []
+
+    rooms = sorted(problems, key=str.casefold)
+    lines = [
+        f"⚠️ {room} | {'; '.join(problems[room])}"
+        for room in rooms[:_STATUS_ROOM_PROBLEM_LIMIT]
+    ]
+    hidden = len(rooms) - _STATUS_ROOM_PROBLEM_LIMIT
+    if hidden > 0:
+        prefix = getattr(bot, "prefix", None) or _safe_config_value("prefix", ",")
         lines.append(
-            f"{room} | nick={nick} | occupants={occupants} | "
-            f"affiliation={affiliation} | role={role}"
+            f"… {hidden} more room problem{'s' if hidden != 1 else ''}; "
+            f"see {prefix}rooms list all"
         )
     return lines
 
@@ -682,7 +728,9 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     lines.extend(_section("Health", await _health_status_lines(bot, health=health)))
 
     if full:
-        lines.extend(_section("Rooms", _room_detail_lines(room_snapshot)))
+        room_problems = _room_problem_lines(bot, room_snapshot, health)
+        if room_problems:
+            lines.extend(_section("Room issues", room_problems))
         lines.extend(_section("Loaded plugins", _plugin_detail_lines(bot)))
         lines.extend(_section("Background tasks", _task_detail_lines(bot)))
         lines.extend(_section("Caches", _cache_detail_lines(bot, health=health)))
@@ -1009,7 +1057,8 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
 
     Shows core runtime details, XMPP room state, loaded plugins, command
     counts, read-only database status and compact operational health. Use
-    ``full`` for detailed database, room, plugin, task and cache diagnostics.
+    ``full`` for detailed database, problematic-room, plugin, task and cache
+    diagnostics. Healthy room inventory belongs to ``rooms list all``.
 
     Usage:
         {prefix}bot status [full]

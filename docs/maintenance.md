@@ -31,7 +31,7 @@ For a quick online status check from the bot, use:
 ,bot status
 ```
 
-Use `,bot status full` for additional SQLite page details plus room/plugin details, supervised-task heartbeat/restart/circuit state and bounded-cache diagnostics.
+Use `,bot status full` for additional SQLite page details, detected room problems, plugin details, supervised-task heartbeat/restart/circuit state and bounded-cache diagnostics. Healthy rooms are not enumerated there; use `,rooms list all` for the complete MUC inventory.
 
 
 ## Managed ZIP backups
