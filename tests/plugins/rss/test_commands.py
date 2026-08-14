@@ -1712,6 +1712,7 @@ async def test_add_direct_feed_initializes_cursor_from_add_snapshot(
         "trusted@example.org": {
             "owner": "trusted@example.org",
             "role": "trusted",
+            "paused": False,
         }
     }
     ensure_task.assert_awaited_once_with(

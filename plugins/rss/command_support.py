@@ -28,7 +28,6 @@ from .store import (
     _feed_active_direct_users,
     _feed_active_rooms,
     _feed_article_count,
-    _feed_is_globally_paused,
     _feed_number,
     _feed_paused_rooms,
     _feed_status_label,
