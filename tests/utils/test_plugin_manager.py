@@ -801,7 +801,7 @@ async def test_shutdown_quiesce_rejects_lifecycle_waiter_queued_before_shutdown(
     assert result["status"] == "cancelled"
     assert first.cancelled()
     with pytest.raises(RuntimeError, match="shutting down"):
-        await queued
+        await asyncio.gather(queued)
     assert "B" in pm.plugins
 
 
