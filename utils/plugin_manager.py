@@ -116,7 +116,14 @@ def _serialized_lifecycle(method):
 
     @wraps(method)
     async def wrapper(self, *args, **kwargs):
-        async with self._lifecycle_operation():
+        # ``unload_all`` is the one lifecycle entry point that must remain
+        # available after shutdown has quiesced normal plugin operations. Its
+        # nested ``unload()`` calls are re-entrant in the same task.
+        allow_shutdown = method.__name__ == "unload_all"
+        async with self._lifecycle_operation(
+            operation=method.__name__,
+            allow_shutdown=allow_shutdown,
+        ):
             return await method(self, *args, **kwargs)
 
     return wrapper
@@ -206,16 +213,27 @@ class PluginManager:
         self._lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._lifecycle_owner = None
+        self._lifecycle_owner_operation: str | None = None
+        self._lifecycle_owner_started_at: float | None = None
         self._lifecycle_depth = 0
+        self._shutdown_requested = False
 
     @asynccontextmanager
-    async def _lifecycle_operation(self):
+    async def _lifecycle_operation(
+        self,
+        *,
+        operation: str = "lifecycle",
+        allow_shutdown: bool = False,
+    ):
         """Hold the manager-wide lifecycle lock with same-task reentrancy.
 
         ``load()`` recursively loads dependencies and reload operations call
         ``unload()``/``load()`` internally. A plain ``asyncio.Lock`` around
         each public method would deadlock those nested calls, so ownership is
         tracked per asyncio task while unrelated commands remain serialized.
+
+        Once shutdown starts, new lifecycle mutations are rejected so an
+        already-queued reload cannot overtake the shutdown ``unload_all()``.
         """
         task = asyncio.current_task()
         if task is not None and self._lifecycle_owner is task:
@@ -226,14 +244,99 @@ class PluginManager:
                 self._lifecycle_depth -= 1
             return
 
+        if self._shutdown_requested and not allow_shutdown:
+            raise RuntimeError("Plugin manager is shutting down")
+
         async with self._lifecycle_lock:
+            # A caller can have queued on the lock just before shutdown set the
+            # flag. Re-check after acquisition so it cannot start afterwards.
+            if self._shutdown_requested and not allow_shutdown:
+                raise RuntimeError("Plugin manager is shutting down")
+
+            loop = asyncio.get_running_loop()
             self._lifecycle_owner = task
+            self._lifecycle_owner_operation = operation
+            self._lifecycle_owner_started_at = loop.time()
             self._lifecycle_depth = 1
             try:
                 yield
             finally:
                 self._lifecycle_depth = 0
                 self._lifecycle_owner = None
+                self._lifecycle_owner_operation = None
+                self._lifecycle_owner_started_at = None
+
+    async def quiesce_for_shutdown(
+        self,
+        *,
+        grace_timeout: float = 1.0,
+        cancel_timeout: float = 2.0,
+    ) -> dict[str, object]:
+        """Stop lifecycle mutations and pre-empt an operation blocking shutdown.
+
+        Normal plugin lifecycle commands are given a short grace period to
+        finish. If the current owner still holds the lifecycle lock afterwards,
+        it is cancelled and given a second short period to unwind its async
+        context. This prevents graceful process shutdown from spending the full
+        plugin-cleanup timeout merely waiting for a concurrent reload/config
+        operation to release the manager lock.
+        """
+        self._shutdown_requested = True
+        owner = self._lifecycle_owner
+        current = asyncio.current_task()
+        operation = self._lifecycle_owner_operation or "unknown"
+        started_at = self._lifecycle_owner_started_at
+        loop = asyncio.get_running_loop()
+        age_seconds = (
+            max(0.0, loop.time() - started_at)
+            if started_at is not None
+            else 0.0
+        )
+
+        if owner is None or owner.done():
+            return {"status": "idle"}
+        if owner is current:
+            return {
+                "status": "current",
+                "operation": operation,
+                "age_ms": round(age_seconds * 1000, 1),
+            }
+
+        grace = max(0.0, float(grace_timeout))
+        if grace > 0:
+            done, _pending = await asyncio.wait({owner}, timeout=grace)
+            if done:
+                return {
+                    "status": "completed",
+                    "operation": operation,
+                    "age_ms": round(age_seconds * 1000, 1),
+                }
+
+        log.warning(
+            "[PLUGIN] shutdown cancelling active lifecycle operation: "
+            "%s (age=%.1fs)",
+            operation,
+            age_seconds,
+        )
+        owner.cancel()
+        cancel_wait = max(0.0, float(cancel_timeout))
+        done, _pending = await asyncio.wait({owner}, timeout=cancel_wait)
+        if done:
+            return {
+                "status": "cancelled",
+                "operation": operation,
+                "age_ms": round(age_seconds * 1000, 1),
+            }
+
+        log.error(
+            "[PLUGIN] lifecycle operation ignored shutdown cancellation: %s",
+            operation,
+        )
+        return {
+            "status": "stuck",
+            "operation": operation,
+            "age_ms": round(age_seconds * 1000, 1),
+        }
 
     # --------------------------------------------------
     # DEPENDENCY ANALYSIS

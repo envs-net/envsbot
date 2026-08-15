@@ -456,16 +456,44 @@ class LifecycleMixin:
         return "ok", {"completed": completed, "cancelled": cancelled}
 
     async def _shutdown_plugins(self) -> tuple[str, dict[str, object]]:
-        unload = getattr(self.bot_plugins, "unload_all", None)
+        manager = self.bot_plugins
+        unload = getattr(manager, "unload_all", None)
         if not callable(unload):
             return "skipped", {}
+
+        details: dict[str, object] = {}
+        quiesce = getattr(manager, "quiesce_for_shutdown", None)
+        if callable(quiesce):
+            quiesce_result = await asyncio.wait_for(
+                quiesce(grace_timeout=1.0, cancel_timeout=2.0),
+                timeout=4.0,
+            )
+            if isinstance(quiesce_result, dict):
+                quiesce_status = str(quiesce_result.get("status", "unknown"))
+                if quiesce_status not in {"idle", "completed"}:
+                    details["lifecycle"] = quiesce_status
+                operation = quiesce_result.get("operation")
+                if operation:
+                    details["operation"] = operation
+                age_ms = quiesce_result.get("age_ms")
+                if age_ms is not None:
+                    details["operation_age_ms"] = age_ms
+                if quiesce_status == "stuck":
+                    return "partial", {
+                        **details,
+                        "detail": (
+                            "active plugin lifecycle operation ignored "
+                            "shutdown cancellation; plugin unload skipped"
+                        ),
+                    }
+
         result = unload()
         if asyncio.iscoroutine(result):
             result = await asyncio.wait_for(result, timeout=30.0)
         if isinstance(result, tuple) and result and result[0] is False:
             detail = result[1] if len(result) > 1 else "plugin cleanup incomplete"
-            return "partial", {"detail": detail}
-        return "ok", {}
+            return "partial", {**details, "detail": detail}
+        return "ok", details
 
     async def _shutdown_outbox(self) -> tuple[str, dict[str, object]]:
         outbox = getattr(self, "outbox", None)

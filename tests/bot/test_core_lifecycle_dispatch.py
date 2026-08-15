@@ -128,6 +128,70 @@ async def test_shutdown_runtime_drains_reply_tasks_before_plugins():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_runtime_quiesces_plugin_lifecycle_before_unload():
+    events: list[str] = []
+
+    async def quiesce_for_shutdown(*, grace_timeout, cancel_timeout):
+        events.append(f"quiesce:{grace_timeout}:{cancel_timeout}")
+        return {
+            "status": "cancelled",
+            "operation": "reload",
+            "age_ms": 1200.0,
+        }
+
+    async def unload_all():
+        events.append("plugins")
+        return True, "all unloaded"
+
+    async def close():
+        events.append("db")
+
+    bot = DummyLifecycle(close=close)
+    bot.bot_plugins = SimpleNamespace(
+        quiesce_for_shutdown=quiesce_for_shutdown,
+        unload_all=unload_all,
+    )
+
+    assert await bot.shutdown_runtime() is True
+
+    assert events == ["quiesce:1.0:2.0", "plugins", "db"]
+    plugin_phase = next(
+        phase for phase in bot._last_shutdown_phases if phase.name == "plugins"
+    )
+    assert plugin_phase.details == {
+        "lifecycle": "cancelled",
+        "operation": "reload",
+        "operation_age_ms": 1200.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_shutdown_runtime_skips_plugin_unload_when_lifecycle_is_stuck():
+    unload_all = AsyncMock()
+
+    async def quiesce_for_shutdown(*, grace_timeout, cancel_timeout):
+        assert grace_timeout == 1.0
+        assert cancel_timeout == 2.0
+        return {"status": "stuck", "operation": "reload", "age_ms": 5000.0}
+
+    bot = DummyLifecycle(close=AsyncMock())
+    bot.bot_plugins = SimpleNamespace(
+        quiesce_for_shutdown=quiesce_for_shutdown,
+        unload_all=unload_all,
+    )
+
+    assert await bot.shutdown_runtime() is False
+
+    unload_all.assert_not_awaited()
+    plugin_phase = next(
+        phase for phase in bot._last_shutdown_phases if phase.name == "plugins"
+    )
+    assert plugin_phase.status == "partial"
+    assert plugin_phase.details["lifecycle"] == "stuck"
+    assert plugin_phase.details["operation"] == "reload"
+
+
+@pytest.mark.asyncio
 async def test_shutdown_runtime_handles_skipped_and_failed_components():
     events: list[str] = []
 

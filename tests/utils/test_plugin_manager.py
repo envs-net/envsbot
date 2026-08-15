@@ -719,6 +719,93 @@ async def test_unload_refuses_to_detach_plugin_with_stubborn_task(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_shutdown_quiesce_cancels_active_lifecycle_operation(monkeypatch):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    pm.plugins = {"A": make_fake_plugin(meta={"name": "A"})}
+    pm.meta = {"A": {"name": "A", "requires": []}}
+    entered = asyncio.Event()
+    block = asyncio.Event()
+
+    async def unload(name, force=False, *, allow_core=False):
+        entered.set()
+        await block.wait()
+        pm.plugins.pop(name, None)
+        pm.meta.pop(name, None)
+        return True, f"Plugin {name} unloaded"
+
+    monkeypatch.setattr(pm, "unload", unload)
+
+    reload_task = asyncio.create_task(pm.reload("A"), name="test-plugin-reload")
+    await entered.wait()
+
+    result = await pm.quiesce_for_shutdown(
+        grace_timeout=0.0,
+        cancel_timeout=1.0,
+    )
+
+    assert result["status"] == "cancelled"
+    assert result["operation"] == "reload"
+    assert reload_task.cancelled()
+    assert pm._lifecycle_lock.locked() is False
+
+    with pytest.raises(RuntimeError, match="shutting down"):
+        await pm.reload("A")
+
+    block.set()
+    success, _message = await pm.unload_all()
+    assert success is True
+    assert pm.plugins == {}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_quiesce_rejects_lifecycle_waiter_queued_before_shutdown(
+    monkeypatch,
+):
+    pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
+    pm.plugins = {
+        "A": make_fake_plugin(meta={"name": "A"}),
+        "B": make_fake_plugin(meta={"name": "B"}),
+    }
+    pm.meta = {
+        "A": {"name": "A", "requires": []},
+        "B": {"name": "B", "requires": []},
+    }
+    entered = asyncio.Event()
+    block = asyncio.Event()
+
+    async def unload(name, force=False, *, allow_core=False):
+        if name == "A":
+            entered.set()
+            await block.wait()
+        pm.plugins.pop(name, None)
+        pm.meta.pop(name, None)
+        return True, f"Plugin {name} unloaded"
+
+    async def load(name, _stack=None):
+        pm.plugins[name] = make_fake_plugin(meta={"name": name})
+        pm.meta[name] = {"name": name, "requires": []}
+
+    monkeypatch.setattr(pm, "unload", unload)
+    monkeypatch.setattr(pm, "load", load)
+
+    first = asyncio.create_task(pm.reload("A"))
+    await entered.wait()
+    queued = asyncio.create_task(pm.reload("B"))
+    await asyncio.sleep(0)
+
+    result = await pm.quiesce_for_shutdown(
+        grace_timeout=0.0,
+        cancel_timeout=1.0,
+    )
+
+    assert result["status"] == "cancelled"
+    assert first.cancelled()
+    with pytest.raises(RuntimeError, match="shutting down"):
+        await queued
+    assert "B" in pm.plugins
+
+
+@pytest.mark.asyncio
 async def test_reload_operations_are_serialized(monkeypatch):
     pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
     pm.plugins = {
