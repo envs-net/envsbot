@@ -439,11 +439,15 @@ The generated recommended unit uses `Type=notify`, `NotifyAccess=main` and
 while the event loop remains responsive. This detects a hung process that
 `Restart=on-failure` alone cannot recover.
 
-The unit also sets `TimeoutStartSec=300` so complete startup, including room
-autojoin, has a predictable five-minute budget instead of depending on the
-system-wide systemd default. `TimeoutStopSec=120` gives the ordered shutdown
-enough time to drain plugins, the persistent outbox, message cache, supervised
-tasks and SQLite before systemd resorts to a forced stop.
+The unit also sets `TimeoutStartSec=300` so complete startup has a predictable
+five-minute budget instead of depending on the system-wide systemd default.
+MUC autojoin attempts are independently bounded and started concurrently, so
+one unavailable room cannot hold plugin loading until the service startup
+timeout. Failed autojoin rooms enter the normal 60/120/240/300-second repair
+backoff while the rest of the bot can finish starting. `TimeoutStopSec=120`
+gives the ordered shutdown enough time to drain plugins, the persistent outbox,
+message cache, supervised tasks and SQLite before systemd resorts to a forced
+stop.
 
 After replacing an older unit, reload systemd before restarting:
 

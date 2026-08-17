@@ -21,6 +21,7 @@ from .state import (
     _MUC_USER_NS,
     JOINED_ROOMS,
     _jid_bare,
+    _join_muc_with_timeout,
     _safe_get_plugin,
     _safe_plugin_value,
     log,
@@ -498,12 +499,7 @@ async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
     """Join a room and store it with autojoin enabled."""
     _LEAVING_ROOMS.discard(room_jid)
     muc = bot.plugin["xep_0045"]
-    await muc.join_muc(
-        room_jid,
-        room_nick,
-        pshow=bot.presence.status["show"],
-        pstatus=bot.presence.status["status"],
-    )
+    await _join_muc_with_timeout(bot, muc, room_jid, room_nick)
 
     db_room = await bot.db.rooms.get(room_jid)
     if db_room:

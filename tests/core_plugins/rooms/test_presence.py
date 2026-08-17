@@ -1,5 +1,7 @@
 import asyncio
 
+import core_plugins.rooms.state as rooms_state
+
 from .helpers import (
     AsyncMock,
     BOT_JID,
@@ -379,6 +381,41 @@ def test_room_rejoin_backoff_uses_fixed_retry_schedule(
     expected_delay,
 ):
     assert rooms_lifecycle._rejoin_backoff(failures) == expected_delay
+
+
+@pytest.mark.asyncio
+async def test_autojoin_unavailable_room_does_not_block_other_rooms(
+    fake_bot,
+    monkeypatch,
+):
+    unavailable = "down@conference.example.org"
+    healthy = "ok@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[
+            (unavailable, "BotNick", True, "online"),
+            (healthy, "BotNick", True, "online"),
+        ]
+    )
+    never = asyncio.Event()
+
+    async def join_muc(room_jid, nick, **kwargs):
+        if room_jid == unavailable:
+            await never.wait()
+
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock(side_effect=join_muc)
+    monkeypatch.setattr(rooms_state, "_ROOM_JOIN_TIMEOUT_SECONDS", 0.01)
+
+    await rooms.autojoin_rooms(fake_bot)
+
+    assert healthy in rooms.JOINED_ROOMS
+    assert healthy in fake_bot.presence.joined_rooms
+    assert unavailable not in rooms.JOINED_ROOMS
+    assert unavailable not in fake_bot.presence.joined_rooms
+    assert rooms_lifecycle._REJOIN_STATE[unavailable]["failures"] == 1
+    fake_bot.plugin["xep_0045"].leave_muc.assert_called_once_with(
+        unavailable,
+        "BotNick",
+    )
 
 
 @pytest.mark.asyncio

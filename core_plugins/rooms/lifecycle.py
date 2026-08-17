@@ -20,7 +20,14 @@ from .invites import (
     on_room_invite_message,
 )
 from .presence import on_muc_presence
-from .state import _LEAVING_ROOMS, JOINED_ROOMS, _jid_bare, _maybe_await_result, log
+from .state import (
+    _LEAVING_ROOMS,
+    JOINED_ROOMS,
+    _jid_bare,
+    _join_muc_with_timeout,
+    _maybe_await_result,
+    log,
+)
 
 _ROOM_HEALTH_TASK = None
 _ROOM_HEALTH_TASK_NAME = "rooms-autojoin-health"
@@ -122,12 +129,7 @@ async def _join_room(
 ) -> None:
     """Join one room and update all runtime mirrors on success."""
     _LEAVING_ROOMS.discard(room_jid)
-    await muc.join_muc(
-        room_jid,
-        nick,
-        pshow=bot.presence.status["show"],
-        pstatus=bot.presence.status["status"],
-    )
+    await _join_muc_with_timeout(bot, muc, room_jid, nick)
     _mark_room_joined(bot, room_jid, nick, autojoin, status)
 
 
@@ -183,14 +185,10 @@ async def autojoin_rooms(bot):
         )
         return
 
-    rows = await rooms_db.list()
-    for room_jid, nick, autojoin, status in rows:
-        room_jid = _jid_bare(room_jid)
-        if not autojoin or not room_jid:
-            continue
+    async def join_one(room_jid: str, nick: str, autojoin: bool, status) -> None:
         log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
         try:
-            await _join_room(bot, muc, room_jid, str(nick), autojoin, status)
+            await _join_room(bot, muc, room_jid, nick, autojoin, status)
         except TimeoutError as exc:
             delay = _record_join_failure(room_jid, exc)
             log.warning(
@@ -205,6 +203,17 @@ async def autojoin_rooms(bot):
                 room_jid,
                 int(delay),
             )
+
+    rows = await rooms_db.list()
+    attempts = []
+    for raw_room_jid, nick, autojoin, status in rows:
+        room_jid = _jid_bare(raw_room_jid)
+        if autojoin and room_jid:
+            attempts.append(
+                join_one(room_jid, str(nick), autojoin, status)
+            )
+    if attempts:
+        await asyncio.gather(*attempts)
 
 
 async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str, int]:

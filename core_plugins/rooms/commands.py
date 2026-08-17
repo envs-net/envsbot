@@ -17,6 +17,7 @@ from .settings import _handle_room_feature_toggle, set_room_control_defaults
 from .state import (
     _LEAVING_ROOMS,
     JOINED_ROOMS,
+    _join_muc_with_timeout,
     _leave_runtime_room,
     _plugin_cleanup_changed,
     _room_diagnose_lines,
@@ -687,10 +688,7 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
         _LEAVING_ROOMS.discard(room_jid)
         muc = bot.plugin["xep_0045"]
 
-        await muc.join_muc(room_jid,
-                           room_nick,
-                           pshow=bot.presence.status["show"],
-                           pstatus=bot.presence.status["status"])
+        await _join_muc_with_timeout(bot, muc, room_jid, room_nick)
 
         # Get current room state from DB
         db_room = await bot.db.rooms.get(room_jid)
@@ -869,12 +867,7 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
         if autojoin:
             try:
                 _LEAVING_ROOMS.discard(room_jid)
-                await muc.join_muc(
-                    room_jid,
-                    nick_name,
-                    pshow=bot.presence.status['show'],
-                    pstatus=bot.presence.status['status']
-                )
+                await _join_muc_with_timeout(bot, muc, room_jid, nick_name)
                 JOINED_ROOMS[room_jid] = {
                     "nick": nick_name,
                     "autojoin": autojoin,

@@ -1,5 +1,6 @@
 """Split module for core_plugins/rooms.py: state."""
 
+import asyncio
 import inspect
 import logging
 
@@ -23,6 +24,7 @@ _DIRECT_INVITE_NS = "jabber:x:conference"
 
 
 _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
+_ROOM_JOIN_TIMEOUT_SECONDS = 30.0
 
 
 def _jid_bare(value) -> str:
@@ -73,6 +75,31 @@ async def _maybe_await_result(result):
     if inspect.isawaitable(result):
         return await result
     return result
+
+
+async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
+    """Join one MUC without allowing an unavailable room to block forever."""
+    result = muc.join_muc(
+        room_jid,
+        nick,
+        pshow=bot.presence.status["show"],
+        pstatus=bot.presence.status["status"],
+    )
+    try:
+        await asyncio.wait_for(result, timeout=_ROOM_JOIN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        # Slixmpp records a room as soon as it sends the join presence. Clean
+        # that internal state after our shorter timeout so a late response does
+        # not leave a ghost membership while the retry worker owns recovery.
+        try:
+            await _maybe_await_result(muc.leave_muc(room_jid, nick))
+        except Exception:
+            log.debug(
+                "[ROOMS] Could not clean timed-out MUC join state for %s",
+                room_jid,
+                exc_info=True,
+            )
+        raise
 
 
 def _get_plugin_store(bot, plugin_name: str):
