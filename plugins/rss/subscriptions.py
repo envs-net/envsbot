@@ -215,6 +215,12 @@ async def _add_feed(bot, msg, url, store, room):
                 feed_no=feed_no,
                 article_start=1,
             )
+            if burst_num == 0:
+                # A zero-size initial burst still needs the cursor from the
+                # exact add snapshot. Otherwise the first worker poll would
+                # initialize from a later snapshot and could silently skip an
+                # entry published after the subscription was created.
+                last_id = _get_latest_entry_id(feed)
 
             # After burst, remember last_id so next poll ignores
             # already-shown history.

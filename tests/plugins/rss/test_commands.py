@@ -186,6 +186,50 @@ async def test_add_existing_feed_without_cursor_skips_historical_fetch_and_burst
 
 
 @pytest.mark.asyncio
+async def test_add_new_feed_with_zero_history_keeps_add_snapshot_cursor(
+    monkeypatch, make_bot,
+):
+    bot = make_bot()
+    store = bot.plugin_store
+    room = "room@conference.example.org"
+    url = "https://example.org/no-history.xml"
+
+    class DummyFeed:
+        feed = {"title": "No history", "link": "https://example.org/"}
+        entries = [
+            {
+                "title": "Current",
+                "link": "https://example.org/current",
+                "id": "current-entry",
+                "description": "",
+            }
+        ]
+
+    monkeypatch.setattr(
+        rss_subscriptions,
+        "fetch_feed",
+        AsyncMock(return_value=DummyFeed()),
+    )
+    monkeypatch.setattr(rss_subscriptions, "ensure_task", AsyncMock())
+    monkeypatch.setattr(
+        rss_subscriptions,
+        "config",
+        {
+            "max_new_feed_entries": 0,
+            "rss_global_query_interval": 300,
+        },
+    )
+
+    msg = {"from": SimpleNamespace(bare=room), "type": "groupchat"}
+    await rss_subscriptions._add_feed(bot, msg, url, store, room)
+
+    saved = store[rss.RSS_KEY][url]
+    assert saved["last_id"] == "https://example.org/current"
+    assert saved["posted_count"] == 0
+    assert all("Article #" not in _reply_text(reply) for reply in bot.replies)
+
+
+@pytest.mark.asyncio
 async def test_rss_add_usage_uses_normal_prefix_lookup(monkeypatch, make_bot):
     bot = make_bot()
     msg = {"from": SimpleNamespace(bare="room@conf"), "type": "groupchat"}

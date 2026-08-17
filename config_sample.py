@@ -519,7 +519,9 @@ YOUTUBE_API_KEY = None
 # Default global feed check interval in seconds.
 RSS_GLOBAL_QUERY_INTERVAL = 1200
 
-# Number of existing entries to show when a feed is newly added.
+# Number of existing entries to show when a feed is newly added. Set to 0 to suppress
+# the initial history replay while still starting from the feed snapshot seen when the
+# subscription is created.
 MAX_NEW_FEED_ENTRIES = 5
 
 # Maximum personal DM subscriptions for trusted users. Moderators and higher are

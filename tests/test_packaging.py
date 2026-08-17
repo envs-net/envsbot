@@ -361,4 +361,3 @@ def test_markdown_tables_escape_pipes_inside_inline_code():
                     broken.append(f"{path.relative_to(ROOT)}:{line_number}")
 
     assert broken == []
-
