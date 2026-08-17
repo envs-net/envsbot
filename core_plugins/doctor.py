@@ -514,6 +514,11 @@ def _backup_lines(bot: Any | None = None) -> list[str]:
     stale_hours = max(1, int(config.get("admin_alert_backup_max_age_hours", 36) or 36))
     schedule_ok = interval_hours == 0 or interval_hours < stale_hours
     schedule = "disabled" if interval_hours == 0 else f"every {interval_hours}h"
+    schedule_detail = (
+        "stale-age alert inactive"
+        if interval_hours == 0
+        else f"stale alert {stale_hours}h"
+    )
     lines = [
         _line(exists or writable, "Backup directory", str(directory)),
         _line(writable, "Backup writable", "yes" if writable else "no"),
@@ -521,7 +526,7 @@ def _backup_lines(bot: Any | None = None) -> list[str]:
         _line(
             schedule_ok,
             "Backup schedule",
-            f"{schedule} · stale alert {stale_hours}h",
+            f"{schedule} · {schedule_detail}",
         ),
         _line(
             backup_smoke_test_on_create(),

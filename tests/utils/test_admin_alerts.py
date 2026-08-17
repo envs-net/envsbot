@@ -214,3 +214,126 @@ async def test_run_once_isolates_individual_alert_check_failures(monkeypatch):
     assert state["checks"] == 1
     assert state["check_errors"]["outbox"] == "RuntimeError: outbox boom"
     assert "outbox boom" in state["last_error"]
+
+@pytest.mark.asyncio
+async def test_backup_age_alert_is_disabled_when_periodic_backups_are_disabled(monkeypatch, tmp_path):
+    from utils.health import HealthCheck, HealthSnapshot
+
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr("utils.admin_alerts.notify_admin", send)
+    monkeypatch.setattr("utils.backups.verify_backup", lambda _path: {"ok": True})
+    path = tmp_path / "old-backup.zip"
+    path.write_bytes(b"backup")
+    snapshot = HealthSnapshot(
+        checked_at="now",
+        checks={
+            "backup": HealthCheck(
+                "backup",
+                "ok",
+                "old backup with age monitoring disabled",
+                {
+                    "path": path,
+                    "name": path.name,
+                    "age_seconds": 72 * 3600,
+                    "age_check_enabled": False,
+                    "managed_backup_expected": True,
+                    "too_old": False,
+                },
+            )
+        },
+    )
+    bot = SimpleNamespace(
+        config={
+            "backup_interval_hours": 0,
+            "backup_on_start": True,
+            "admin_alert_backup_max_age_hours": 36,
+        }
+    )
+    manager = AdminAlertManager(bot)
+
+    await manager._check_backup(snapshot)
+
+    assert manager._states["backup-age"].active is False
+    assert manager._states["backup-invalid"].active is False
+    assert send.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_backup_does_not_alert_when_managed_backups_are_disabled(monkeypatch):
+    from utils.health import HealthCheck, HealthSnapshot
+
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr("utils.admin_alerts.notify_admin", send)
+    snapshot = HealthSnapshot(
+        checked_at="now",
+        checks={
+            "backup": HealthCheck(
+                "backup",
+                "ok",
+                "managed backups disabled",
+                {
+                    "path": None,
+                    "name": "none",
+                    "age_seconds": None,
+                    "age_check_enabled": False,
+                    "managed_backup_expected": False,
+                    "too_old": False,
+                },
+            )
+        },
+    )
+    bot = SimpleNamespace(
+        config={"backup_interval_hours": 0, "backup_on_start": False}
+    )
+    manager = AdminAlertManager(bot)
+
+    await manager._check_backup(snapshot)
+
+    assert manager._states["backup-age"].active is False
+    assert manager._states["backup-invalid"].active is False
+    assert send.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_backup_age_alert_remains_active_when_periodic_backups_are_enabled(
+    monkeypatch, tmp_path
+):
+    from utils.health import HealthCheck, HealthSnapshot
+
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr("utils.admin_alerts.notify_admin", send)
+    monkeypatch.setattr("utils.backups.verify_backup", lambda _path: {"ok": True})
+    path = tmp_path / "old-backup.zip"
+    path.write_bytes(b"backup")
+    snapshot = HealthSnapshot(
+        checked_at="now",
+        checks={
+            "backup": HealthCheck(
+                "backup",
+                "warning",
+                "old backup",
+                {
+                    "path": path,
+                    "name": path.name,
+                    "age_seconds": 42 * 3600,
+                    "age_check_enabled": True,
+                    "managed_backup_expected": True,
+                    "too_old": True,
+                },
+            )
+        },
+    )
+    bot = SimpleNamespace(
+        config={
+            "backup_interval_hours": 24,
+            "backup_on_start": True,
+            "admin_alert_backup_max_age_hours": 36,
+        }
+    )
+    manager = AdminAlertManager(bot)
+
+    await manager._check_backup(snapshot)
+
+    assert manager._states["backup-age"].active is True
+    assert "42.0h old" in manager._states["backup-age"].summary
+    assert send.await_count == 1

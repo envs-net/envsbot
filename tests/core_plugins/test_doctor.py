@@ -642,3 +642,29 @@ def test_backup_lines_show_periodic_schedule(monkeypatch, tmp_path):
 
     assert any("Backup schedule" in line and "every 24h" in line for line in lines)
     assert any("stale alert 36h" in line for line in lines)
+
+
+def test_backup_lines_show_stale_age_alert_inactive_when_schedule_disabled(
+    monkeypatch, tmp_path
+):
+    directory = tmp_path / "backups"
+    directory.mkdir()
+    monkeypatch.setattr(doctor, "backup_dir", lambda: directory)
+    monkeypatch.setattr(doctor, "backup_keep", lambda: 15)
+    monkeypatch.setattr(doctor, "backup_retention_days", lambda: 0)
+    monkeypatch.setattr(doctor, "backup_smoke_test_on_create", lambda: True)
+    monkeypatch.setattr(doctor, "list_backups", lambda directory=None: [])
+    monkeypatch.setattr(doctor, "list_migration_snapshots", lambda directory=None: [])
+    monkeypatch.setattr(doctor, "migration_backup_keep", lambda: 5)
+    monkeypatch.setattr(doctor, "migration_backup_retention_days", lambda: 90)
+    monkeypatch.setitem(doctor.config, "backup_interval_hours", 0)
+    monkeypatch.setitem(doctor.config, "admin_alert_backup_max_age_hours", 36)
+
+    lines = doctor._backup_lines()
+
+    assert any(
+        "Backup schedule" in line
+        and "disabled" in line
+        and "stale-age alert inactive" in line
+        for line in lines
+    )

@@ -50,9 +50,12 @@ When `BACKUP_ON_START = True`, envsbot creates one startup backup per process
 start; this also covers service restarts. `BACKUP_INTERVAL_HOURS` defaults to
 24 and runs a supervised scheduler that creates another managed backup whenever
 the newest archive reaches that age. Set it to `0` only when periodic backups
-are intentionally provided elsewhere. The default cadence stays below the
-36-hour stale-backup admin alert threshold. Keep `BACKUP_INTERVAL_HOURS` lower
-than `ADMIN_ALERT_BACKUP_MAX_AGE_HOURS` so a scheduled backup is normally
+are intentionally provided elsewhere. When the periodic scheduler is disabled,
+the managed-backup stale-age health warning/admin alert is disabled as well; an
+existing managed archive is still verified when health checks request backup
+verification. The default cadence stays below the 36-hour stale-backup admin
+alert threshold. When periodic backups are enabled, keep `BACKUP_INTERVAL_HOURS`
+lower than `ADMIN_ALERT_BACKUP_MAX_AGE_HOURS` so a scheduled backup is normally
 created before that alert threshold. Each archive contains `bot.db`, `config.py`,
 `vcard.py`, `chat_slang.csv`, `slang_additions.csv`, `slang_removals.csv` and a
 `manifest.json` when those files exist. Restore is owner-only. Before changing

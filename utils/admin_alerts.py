@@ -289,43 +289,56 @@ class AdminAlertManager:
         data = snapshot.check("backup").data
         config = getattr(self.bot, "config", {}) or {}
         max_age_hours = max(1, int(config.get("admin_alert_backup_max_age_hours", 36) or 36))
+        interval_hours = max(
+            0, int(config.get("backup_interval_hours", 24) or 0)
+        )
+        age_check_enabled = bool(data.get("age_check_enabled", interval_hours > 0))
+        managed_backup_expected = bool(
+            data.get(
+                "managed_backup_expected",
+                bool(config.get("backup_on_start", True)) or interval_hours > 0,
+            )
+        )
         path = data.get("path")
         name = str(data.get("name") or "unknown")
         age_seconds = data.get("age_seconds")
         if path is None:
             await self._set(
                 "backup-age",
-                True,
-                "No managed envsbot backup exists",
-                fingerprint="missing",
+                managed_backup_expected,
+                (
+                    "No managed envsbot backup exists"
+                    if managed_backup_expected
+                    else "Managed backup age monitoring is disabled"
+                ),
+                fingerprint="missing" if managed_backup_expected else "",
             )
             await self._set("backup-invalid", False, "Backup validation recovered")
             self._last_backup_verified = None
             return
 
-        too_old = age_seconds is None or int(age_seconds) >= max_age_hours * 3600
+        too_old = bool(data.get("too_old")) if age_check_enabled else False
         age_hours = (
             float(age_seconds) / 3600.0
             if age_seconds is not None
             else float(max_age_hours + 1)
         )
-        interval_hours = max(
-            0, int(config.get("backup_interval_hours", 24) or 0)
-        )
-        schedule = (
-            f"scheduled every {interval_hours}h"
-            if interval_hours > 0
-            else "scheduled backups disabled"
-        )
-        await self._set(
-            "backup-age",
-            too_old,
-            (
-                f"Newest backup is {age_hours:.1f}h old "
-                f"(limit {max_age_hours}h; {schedule}): {name}"
-            ),
-            fingerprint="old" if too_old else "",
-        )
+        if age_check_enabled:
+            await self._set(
+                "backup-age",
+                too_old,
+                (
+                    f"Newest backup is {age_hours:.1f}h old "
+                    f"(limit {max_age_hours}h; scheduled every {interval_hours}h): {name}"
+                ),
+                fingerprint="old" if too_old else "",
+            )
+        else:
+            await self._set(
+                "backup-age",
+                False,
+                "Managed backup age monitoring is disabled",
+            )
         marker = str(path.resolve())
         if self._last_backup_verified is None or self._last_backup_verified[0] != marker:
             try:

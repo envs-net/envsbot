@@ -122,3 +122,73 @@ async def test_health_snapshot_isolates_one_failed_collector(monkeypatch):
     assert "rooms boom" in str(snapshot.check("rooms").error)
     assert snapshot.check("message_cache").status == "ok"
     assert snapshot.check("backup").status == "ok"
+
+@pytest.mark.asyncio
+async def test_backup_age_is_not_unhealthy_when_periodic_backups_are_disabled(monkeypatch):
+    now = datetime.now(timezone.utc)
+    backups = _fake_backups_module(
+        monkeypatch,
+        created_at=(now - timedelta(hours=72)).isoformat(),
+    )
+    bot = SimpleNamespace(
+        config={
+            "backup_interval_hours": 0,
+            "backup_on_start": True,
+            "admin_alert_backup_max_age_hours": 36,
+        },
+        presence=SimpleNamespace(joined_rooms={}),
+        db=SimpleNamespace(
+            rooms=SimpleNamespace(list=AsyncMock(return_value=[])),
+            maintenance_state={},
+        ),
+        tasks=None,
+        outbox=None,
+        message_cache=SimpleNamespace(
+            stats=lambda: {"messages": 0, "degraded": False}
+        ),
+        watchdog=None,
+        bot_plugins=SimpleNamespace(failed_plugins={}),
+        alerts=None,
+    )
+
+    snapshot = await collect_health_snapshot(bot, verify_backup=True)
+
+    backup = snapshot.check("backup")
+    assert backup.status == "ok"
+    assert backup.data["age_check_enabled"] is False
+    assert backup.data["too_old"] is False
+    assert int(backup.data["age_seconds"]) > 36 * 3600
+    backups.verify_backup.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_missing_backup_is_ok_when_all_managed_backups_are_disabled(monkeypatch):
+    module = ModuleType("utils.backups")
+    module.list_backups = MagicMock(return_value=[])
+    module.verify_backup = MagicMock(return_value={"ok": True})
+    module.smoke_test_backup = MagicMock(return_value={"ok": True})
+    monkeypatch.setitem(sys.modules, "utils.backups", module)
+    bot = SimpleNamespace(
+        config={"backup_interval_hours": 0, "backup_on_start": False},
+        presence=SimpleNamespace(joined_rooms={}),
+        db=SimpleNamespace(
+            rooms=SimpleNamespace(list=AsyncMock(return_value=[])),
+            maintenance_state={},
+        ),
+        tasks=None,
+        outbox=None,
+        message_cache=SimpleNamespace(
+            stats=lambda: {"messages": 0, "degraded": False}
+        ),
+        watchdog=None,
+        bot_plugins=SimpleNamespace(failed_plugins={}),
+        alerts=None,
+    )
+
+    snapshot = await collect_health_snapshot(bot, verify_backup=True)
+
+    backup = snapshot.check("backup")
+    assert backup.status == "ok"
+    assert backup.summary == "managed backups disabled"
+    assert backup.data["managed_backup_expected"] is False
+    assert backup.data["too_old"] is False

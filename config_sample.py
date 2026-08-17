@@ -196,9 +196,9 @@ BACKUP_RETENTION_DAYS = 0
 BACKUP_ON_START = True
 
 # Create an automatic managed backup this many hours after the newest managed backup.
-# Set to 0 to disable periodic backups. This value should be lower than
-# ADMIN_ALERT_BACKUP_MAX_AGE_HOURS so a scheduled backup is created before the stale-
-# backup alert threshold.
+# Set to 0 to disable periodic backups and the stale-backup age alert. When enabled,
+# this value should be lower than ADMIN_ALERT_BACKUP_MAX_AGE_HOURS so a scheduled
+# backup is created before the stale-backup alert threshold.
 # Startup-only: restart envsbot after changing this value.
 BACKUP_INTERVAL_HOURS = 24
 
@@ -280,7 +280,8 @@ ADMIN_ALERT_OUTBOX_OLDEST_SECONDS = 1800
 # Admin alert room missing seconds.
 ADMIN_ALERT_ROOM_MISSING_SECONDS = 1800
 
-# Alert when the newest managed backup is older than this many hours.
+# Alert when the newest managed backup is older than this many hours while periodic
+# managed backups are enabled. BACKUP_INTERVAL_HOURS = 0 disables the stale-age alert.
 ADMIN_ALERT_BACKUP_MAX_AGE_HOURS = 36
 
 # Admin alert idlerpg export failures.

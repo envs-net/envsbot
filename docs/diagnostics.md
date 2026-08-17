@@ -149,10 +149,13 @@ before its next failure resets that streak.
 Backups are kept by count with `BACKUP_KEEP` and optionally by age with
 `BACKUP_RETENTION_DAYS`. Set `BACKUP_RETENTION_DAYS = 0` to disable age-based
 retention. `BACKUP_INTERVAL_HOURS` controls the supervised periodic backup
-scheduler (default: 24 hours; `0` disables it). Keep the cadence below
-`ADMIN_ALERT_BACKUP_MAX_AGE_HOURS` so the scheduler normally refreshes the
-archive before the stale-backup alert threshold. `,doctor backups` shows both
-values together.
+scheduler (default: 24 hours; `0` disables it). Disabling the periodic scheduler
+also disables the stale-age warning/admin alert for managed backups, because an
+aging startup/manual archive is then expected. Backup verification remains
+independent of the age check. When the scheduler is enabled, keep the cadence
+below `ADMIN_ALERT_BACKUP_MAX_AGE_HOURS` so it normally refreshes the archive
+before the stale-backup alert threshold. `,doctor backups` shows whether stale-
+age monitoring is active.
 
 Manual inspection and restore planning should be used before destructive restores:
 

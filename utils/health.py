@@ -235,18 +235,40 @@ async def _backup_check(
 
     config = getattr(bot, "config", {}) or {}
     max_age_hours = max(1, int(config.get("admin_alert_backup_max_age_hours", 36) or 36))
+    interval_hours = max(0, int(config.get("backup_interval_hours", 24) or 0))
+    backup_on_start = bool(config.get("backup_on_start", True))
+    age_check_enabled = interval_hours > 0
+    managed_backup_expected = backup_on_start or age_check_enabled
     archives = await asyncio.to_thread(list_backups)
     if not archives:
+        status: HealthStatus = "warning" if managed_backup_expected else "ok"
+        summary = (
+            "no managed envsbot backup exists"
+            if managed_backup_expected
+            else "managed backups disabled"
+        )
         return HealthCheck(
             "backup",
-            "warning",
-            "no managed envsbot backup exists",
-            {"name": "none", "status": "missing", "age_seconds": None, "path": None},
+            status,
+            summary,
+            {
+                "name": "none",
+                "status": "missing" if managed_backup_expected else "disabled",
+                "age_seconds": None,
+                "path": None,
+                "max_age_hours": max_age_hours,
+                "age_check_enabled": age_check_enabled,
+                "managed_backup_expected": managed_backup_expected,
+                "too_old": False,
+                "valid": None,
+            },
         )
 
     latest = archives[0]
     age_seconds = backup_age_seconds(latest)
-    too_old = age_seconds is None or age_seconds >= max_age_hours * 3600
+    too_old = age_check_enabled and (
+        age_seconds is None or age_seconds >= max_age_hours * 3600
+    )
     validation_status = "not-checked"
     valid: bool | None = None
     if verify:
@@ -272,6 +294,8 @@ async def _backup_check(
             "created_at": getattr(latest, "created_at", "unknown"),
             "age_seconds": age_seconds,
             "max_age_hours": max_age_hours,
+            "age_check_enabled": age_check_enabled,
+            "managed_backup_expected": managed_backup_expected,
             "too_old": too_old,
             "valid": valid,
             "status": validation_status,

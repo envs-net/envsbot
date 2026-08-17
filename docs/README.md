@@ -24,7 +24,7 @@ Operational notes:
 - New operators should start with [`tutorial.md`](tutorial.md) before using the full command reference.
 - Runtime help should use `,help <plugin>` for plugin help and `,help ,<command>` for unambiguous command help.
 - Runtime configuration is loaded from `ENVSBOT_CONFIG` when set. A first source-tree run can use `config.py`; hardened systemd deployments normally use `/etc/envsbot/config.py`. Keep the active file private.
-- Managed backups live in `data/backups` by default; startup backups are controlled by `BACKUP_ON_START` and supervised periodic backups by `BACKUP_INTERVAL_HOURS` (default 24h).
+- Managed backups live in `data/backups` by default; startup backups are controlled by `BACKUP_ON_START` and supervised periodic backups by `BACKUP_INTERVAL_HOURS` (default 24h). Setting the periodic interval to `0` also disables stale-age monitoring for managed backups.
 - Operator-tunable plugin limits, timeouts, default pagination and reminder timezone defaults are documented directly in `config_sample.py`.
 - `MESSAGE_CACHE_SIZE` controls the shared recent-message history retained per room or private conversation. Message bodies are stored in SQLite and restored after restart.
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
