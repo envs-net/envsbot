@@ -282,11 +282,11 @@ async def _backup_check(
         else:
             validation_status = "failed"
 
-    status: HealthStatus = "warning" if too_old or valid is False else "ok"
+    backup_status: HealthStatus = "warning" if too_old or valid is False else "ok"
     age_text = "unknown age" if age_seconds is None else f"{age_seconds}s old"
     return HealthCheck(
         "backup",
-        status,
+        backup_status,
         f"{latest.name} · {age_text} · {validation_status}",
         {
             "name": latest.name,
