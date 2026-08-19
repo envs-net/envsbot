@@ -43,6 +43,7 @@ from utils.command import Role, command
 from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_json, fetch_preview, passthrough_validator
+from utils.http_user_agent import resolve_user_agent
 from utils.time_utils import utc_timestamp
 from utils.url_safety import UnsafeFetchURL
 from utils.urlcheck_extraction import extract_urls_from_message_text
@@ -89,10 +90,8 @@ URLCHECK_MAX_READ_BYTES = max(
     1024,
     int(config.get("urlcheck_max_read_bytes", 65536) or 65536),
 )
-URLCHECK_USER_AGENT = str(
-    config.get("urlcheck_user_agent")
-    or config.get("http_user_agent")
-    or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
+URLCHECK_USER_AGENT = resolve_user_agent(
+    config.get("urlcheck_user_agent") or config.get("http_user_agent")
 )
 ALLOW_PRIVATE_FETCH_URLS = bool(config.get("allow_private_fetch_urls", False))
 _CACHE_MAX_ROOMS = 128

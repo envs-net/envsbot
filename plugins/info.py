@@ -23,6 +23,7 @@ import asyncio
 import csv
 import html
 import inspect
+import json
 import logging
 import os
 import re
@@ -38,7 +39,8 @@ from utils.command import Role, command
 from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.formatting import format_page, parse_page_args
-from utils.http_fetch import fetch_json, passthrough_validator
+from utils.http_fetch import fetch_json, fetch_text, passthrough_validator
+from utils.http_user_agent import resolve_user_agent
 from utils.runtime_paths import (
     chat_slang_additions_file,
     chat_slang_file,
@@ -60,7 +62,7 @@ def _command_prefix(bot=None) -> str:
 
 INFO_KEY = "INFORMATION"
 INFO_HTTP_TIMEOUT = float(config.get("http_timeout_seconds", 8) or 8)
-INFO_HTTP_USER_AGENT = str(config.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)")
+INFO_HTTP_USER_AGENT = resolve_user_agent(config.get("http_user_agent"))
 
 PLUGIN_META = {
     "name": "info",
@@ -298,22 +300,43 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
 WIKIPEDIA_API_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{}"
 
 
+class WikipediaLookupError(RuntimeError):
+    """Raised when Wikipedia cannot return a usable API response."""
+
+
 async def fetch_wikipedia_summary(term):
-    """
-    Query the Wikipedia REST API and return extracted data, or None on error.
-    """
+    """Query the Wikipedia REST API and return extracted data."""
     url = WIKIPEDIA_API_URL.format(urllib.parse.quote(term))
-    result = await fetch_json(
-        url,
-        headers={"User-Agent": INFO_HTTP_USER_AGENT},
-        timeout_seconds=INFO_HTTP_TIMEOUT,
-        max_bytes=262144,
-        session_factory=aiohttp.ClientSession,
-        validator=passthrough_validator,
-        raise_for_status=False,
-    )
-    if result.status == 200 and isinstance(result.data, dict):
-        data = result.data
+    try:
+        result = await fetch_text(
+            url,
+            headers={"User-Agent": INFO_HTTP_USER_AGENT},
+            timeout_seconds=INFO_HTTP_TIMEOUT,
+            max_bytes=262144,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+    except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+        raise WikipediaLookupError(f"request failed: {type(exc).__name__}") from exc
+
+    if result.status == 404:
+        return None
+    if result.status != 200:
+        raise WikipediaLookupError(
+            f"HTTP {result.status} ({result.content_type or 'unknown content type'})"
+        )
+
+    try:
+        data = json.loads(result.text)
+    except json.JSONDecodeError as exc:
+        raise WikipediaLookupError(
+            "invalid JSON response "
+            f"(HTTP {result.status}, {result.content_type or 'unknown content type'}, "
+            f"{len(result.text.encode('utf-8', errors='replace'))} bytes)"
+        ) from exc
+
+    if isinstance(data, dict):
         title = data.get("title")
         summary = data.get("extract")
         page_url = data.get("content_urls", {}).get("desktop", {}).get("page")
@@ -353,9 +376,14 @@ async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     term = " ".join(args)
-    result = fetch_wikipedia_summary(term)
-    if inspect.isawaitable(result):
-        result = await result
+    try:
+        result = fetch_wikipedia_summary(term)
+        if inspect.isawaitable(result):
+            result = await result
+    except WikipediaLookupError as exc:
+        log.warning("[WIKIPEDIA] Lookup failed for %r: %s", term, exc)
+        bot.reply(msg, "⚠️ Wikipedia is temporarily unavailable. Please try again later.")
+        return
 
     if result:
         title, summary, url = result

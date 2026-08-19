@@ -399,9 +399,7 @@ COMMAND_RATE_LIMIT_BYPASS_ROLE = 'moderator'
 
 # ================= HTTP DEFAULTS =================
 
-# Generic HTTP timeout and User-Agent used by plugins unless a plugin-specific value
-# is set below. Keep the User-Agent versionless so it does not have to be updated for
-# every release.
+# Generic HTTP timeout used by plugins unless a plugin-specific value is set below.
 HTTP_TIMEOUT_SECONDS = 8
 
 # Http max redirects.
@@ -410,8 +408,9 @@ HTTP_MAX_REDIRECTS = 5
 # Http max read bytes.
 HTTP_MAX_READ_BYTES = 1048576
 
-# Http user agent.
-HTTP_USER_AGENT = 'Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)'
+# Default HTTP User-Agent. The {version} token is expanded automatically to the
+# running envsbot version, so operators do not need to update it for each release.
+HTTP_USER_AGENT = 'envsbot/{version} (https://github.com/envs-net/envsbot)'
 
 # Safety guard for user-supplied URLs fetched by RSS and URL title checks. Keep False
 # for normal public bots. Set True only for trusted/private rooms.
@@ -506,8 +505,9 @@ URLCHECK_MAX_REDIRECTS = 5
 # Urlcheck max read bytes.
 URLCHECK_MAX_READ_BYTES = 65536
 
-# Urlcheck user agent.
-URLCHECK_USER_AGENT = 'Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)'
+# URL-check User-Agent. The {version} token is expanded automatically; set a custom
+# value only when required.
+URLCHECK_USER_AGENT = 'envsbot/{version} (https://github.com/envs-net/envsbot)'
 
 # YouTube Data API key for richer URL metadata lookups. None disables YouTube API data
 # but regular URL title checks still work.
@@ -552,8 +552,9 @@ RSS_BROKEN_ERROR_THRESHOLD = 3
 # Duplicate title/description detection threshold, 0 < value <= 1.
 RSS_SIMILARITY_THRESHOLD = 0.8
 
-# Rss user agent.
-RSS_USER_AGENT = 'Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)'
+# RSS User-Agent. The {version} token is expanded automatically; set a custom value
+# only when required.
+RSS_USER_AGENT = 'envsbot/{version} (https://github.com/envs-net/envsbot)'
 
 # Explicit RSS HTTP fetch limits.
 RSS_FETCH_TIMEOUT_SECONDS = 8

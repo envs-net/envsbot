@@ -1,6 +1,7 @@
 import pytest
 import types
 import csv
+import json
 from plugins import info as info_plugin
 from unittest.mock import AsyncMock, MagicMock
 
@@ -432,13 +433,14 @@ async def test_information_command_toggle_on(dummy_bot, fake_room_msg):
 @pytest.mark.asyncio
 async def test_fetch_wikipedia_summary_paths(monkeypatch):
     class FetchResult:
-        def __init__(self, status, data):
+        def __init__(self, status, data, content_type="application/json"):
             self.status = status
-            self.data = data
+            self.text = json.dumps(data)
+            self.content_type = content_type
 
     calls = []
 
-    async def fake_fetch_json(url, **kwargs):
+    async def fake_fetch_text(url, **kwargs):
         calls.append((url, kwargs))
         return FetchResult(200, {
             "title": "Example",
@@ -446,7 +448,7 @@ async def test_fetch_wikipedia_summary_paths(monkeypatch):
             "content_urls": {"desktop": {"page": "https://example.org/wiki/Example"}},
         })
 
-    monkeypatch.setattr(info_plugin, "fetch_json", fake_fetch_json)
+    monkeypatch.setattr(info_plugin, "fetch_text", fake_fetch_text)
     assert await info_plugin.fetch_wikipedia_summary("Example Page") == (
         "Example", "Summary text", "https://example.org/wiki/Example"
     )
@@ -454,28 +456,49 @@ async def test_fetch_wikipedia_summary_paths(monkeypatch):
     assert calls[0][1]["headers"]["User-Agent"] == info_plugin.INFO_HTTP_USER_AGENT
     assert calls[0][1]["timeout_seconds"] == info_plugin.INFO_HTTP_TIMEOUT
 
-    async def disambiguation_fetch_json(*args, **kwargs):
+    async def disambiguation_fetch_text(*args, **kwargs):
         return FetchResult(200, {
             "type": "disambiguation",
             "titles": {"canonical": "Example_(disambiguation)"},
         })
 
-    monkeypatch.setattr(info_plugin, "fetch_json", disambiguation_fetch_json)
+    monkeypatch.setattr(info_plugin, "fetch_text", disambiguation_fetch_text)
     assert await info_plugin.fetch_wikipedia_summary("Example") == (
         "Example_(disambiguation)", "Disambiguation page", None
     )
 
-    async def missing_fetch_json(*args, **kwargs):
+    async def missing_fetch_text(*args, **kwargs):
         return FetchResult(404, {})
 
-    monkeypatch.setattr(info_plugin, "fetch_json", missing_fetch_json)
+    monkeypatch.setattr(info_plugin, "fetch_text", missing_fetch_text)
     assert await info_plugin.fetch_wikipedia_summary("Missing") is None
 
-    async def incomplete_fetch_json(*args, **kwargs):
+    async def incomplete_fetch_text(*args, **kwargs):
         return FetchResult(200, {"title": "Incomplete"})
 
-    monkeypatch.setattr(info_plugin, "fetch_json", incomplete_fetch_json)
+    monkeypatch.setattr(info_plugin, "fetch_text", incomplete_fetch_text)
     assert await info_plugin.fetch_wikipedia_summary("Incomplete") is None
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_invalid_json_is_reported_as_temporary_failure(
+    monkeypatch, dummy_bot, fake_room_msg
+):
+    class FetchResult:
+        status = 200
+        text = ""
+        content_type = "text/html"
+
+    async def fake_fetch_text(*args, **kwargs):
+        return FetchResult()
+
+    monkeypatch.setattr(info_plugin, "fetch_text", fake_fetch_text)
+
+    await info_plugin.wikipedia_command(
+        dummy_bot, "jid", "nick", ["XMPP"], fake_room_msg, False
+    )
+
+    assert "temporarily unavailable" in dummy_bot.replies[-1][1]
 
 @pytest.mark.asyncio
 async def test_info_store_getter_uses_information_store():

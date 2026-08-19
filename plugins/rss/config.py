@@ -1,6 +1,7 @@
 """Split module for plugins/rss.py: config."""
 
 from utils.config import config
+from utils.http_user_agent import resolve_user_agent
 
 PLUGIN_META = {
     "name": "rss",
@@ -60,10 +61,8 @@ MAX_BACKOFF_TIME = max(
 )
 
 
-RSS_USER_AGENT = str(
-    config.get("rss_user_agent")
-    or config.get("http_user_agent")
-    or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
+RSS_USER_AGENT = resolve_user_agent(
+    config.get("rss_user_agent") or config.get("http_user_agent")
 )
 
 

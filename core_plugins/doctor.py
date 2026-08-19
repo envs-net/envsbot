@@ -36,6 +36,7 @@ from utils.file_security import (
 )
 from utils.formatting import format_page, parse_page_args
 from utils.health import HealthSnapshot, collect_health_snapshot
+from utils.http_user_agent import resolve_user_agent
 from utils.performance import snapshot as performance_snapshot
 from utils.updatecheck import check_for_updates_once, parse_version_tuple
 from utils.version import display_version, normalized_version
@@ -672,7 +673,7 @@ def _network_lines() -> list[str]:
     private_fetch_allowed = bool(config.get("allow_private_fetch_urls", False))
     return [
         _line(True, "HTTP timeout", f"{config.get('http_timeout_seconds', 8)}s"),
-        _line(True, "HTTP user-agent", str(config.get("http_user_agent", ""))[:80]),
+        _line(True, "HTTP user-agent", resolve_user_agent(config.get("http_user_agent"))[:80]),
         (
             _warning_line("Private fetch URLs", "allowed")
             if private_fetch_allowed

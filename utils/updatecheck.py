@@ -10,6 +10,7 @@ import urllib.request
 from urllib.parse import unquote, urlparse, urlsplit
 
 from utils.config import config
+from utils.http_user_agent import resolve_user_agent
 from utils.task_supervisor import sleep_with_heartbeat
 from utils.version import __version__, display_version, normalized_version
 from utils.xmpp_notify import ensure_notification_target_joined, notification_message_type
@@ -48,7 +49,7 @@ def github_api_url_from_release_url(release_url: str) -> str | None:
 
 
 def _user_agent() -> str:
-    return str(config.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)")
+    return resolve_user_agent(config.get("http_user_agent"))
 
 
 def _timeout() -> float:

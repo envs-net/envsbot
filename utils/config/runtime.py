@@ -13,6 +13,7 @@ from utils.config.spec import (
     USER_FIELDS,
     startup_only_keys,
 )
+from utils.http_user_agent import resolve_user_agent
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.redaction import redact_named
 
@@ -273,7 +274,7 @@ def _rss_values(cfg: Mapping[str, object]) -> dict[str, object]:
         "RSS_RETRY_INITIAL_DELAY": max(1, _to_int(cfg.get("rss_retry_initial_delay") or 300, 300)),
         "RSS_RETRY_BACKOFF_MULTIPLIER": max(1.0, _to_float(cfg.get("rss_retry_backoff_multiplier") or 2.0, 2.0)),
         "MAX_BACKOFF_TIME": max(1, _to_int(cfg.get("rss_max_backoff_time") or 3600, 3600)),
-        "RSS_USER_AGENT": _to_str(cfg.get("rss_user_agent") or cfg.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"),
+        "RSS_USER_AGENT": resolve_user_agent(cfg.get("rss_user_agent") or cfg.get("http_user_agent")),
         "RSS_FETCH_TIMEOUT_SECONDS": _to_float(cfg.get("rss_fetch_timeout_seconds") or cfg.get("http_timeout_seconds") or 8, 8),
         "RSS_STARTUP_STAGGER_SECONDS": max(
             0.0,
@@ -414,13 +415,13 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
             ),
             "URLCHECK_MAX_REDIRECTS": max(1, _to_int(cfg.get("urlcheck_max_redirects") or 5, 5)),
             "URLCHECK_MAX_READ_BYTES": max(4096, _to_int(cfg.get("urlcheck_max_read_bytes") or 65536, 65536)),
-            "URLCHECK_USER_AGENT": _to_str(cfg.get("urlcheck_user_agent") or cfg.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"),
+            "URLCHECK_USER_AGENT": resolve_user_agent(cfg.get("urlcheck_user_agent") or cfg.get("http_user_agent")),
             "_wait_secs_url": _to_int(cfg.get("urlcheck_wait_seconds") or 120, 120),
             "ALLOW_PRIVATE_FETCH_URLS": _to_bool(cfg.get("allow_private_fetch_urls"), False),
         },
         "plugins.info": {
             "INFO_HTTP_TIMEOUT": _to_float(cfg.get("http_timeout_seconds") or 8, 8),
-            "INFO_HTTP_USER_AGENT": _to_str(cfg.get("http_user_agent") or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"),
+            "INFO_HTTP_USER_AGENT": resolve_user_agent(cfg.get("http_user_agent")),
         },
         "plugins.sed": {
             "REGEX_TIMEOUT": _to_float(cfg.get("sed_regex_timeout") or 1.0, 1.0),

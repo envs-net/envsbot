@@ -12,6 +12,7 @@ from urllib.parse import urljoin
 import aiohttp
 
 from utils.config import config
+from utils.http_user_agent import resolve_user_agent
 from utils.url_safety import (
     FetchURLTooLarge,
     UnsafeFetchURL,
@@ -76,10 +77,8 @@ async def passthrough_validator(url: str, **_: Any) -> str:
 
 
 def default_user_agent() -> str:
-    return str(
-        config.get("http_user_agent")
-        or "Mozilla/5.0 (compatible; envsbot; +https://github.com/envs-net/envsbot)"
-    )
+    """Return the effective release-aware default HTTP User-Agent."""
+    return resolve_user_agent(config.get("http_user_agent"))
 
 
 class _PinnedResolver(aiohttp.abc.AbstractResolver):
