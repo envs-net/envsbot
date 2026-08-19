@@ -104,6 +104,39 @@ def test_config_display_sections_cover_declarative_schema_exactly_once():
     assert set(displayed) == schema_python_keys
 
 
+def test_config_display_sections_keep_operator_facing_order():
+    assert [title for title, _keys in CONFIG_DISPLAY_SECTIONS] == [
+        "XMPP Account",
+        "Connection",
+        "Bot Runtime",
+        "Backups",
+        "Persistent Outbox",
+        "Immediate Admin Alerts",
+        "Daily Admin Report",
+        "Message Cache",
+        "User Tracking",
+        "Command Rate Limits",
+        "HTTP Defaults",
+        "vCard / Avatar",
+        "Release Update Check",
+        "Room Invites",
+        "Room Plugin Defaults",
+        "URL Check",
+        "RSS / Atom",
+        "Wikipedia",
+        "Birthday Notify",
+        "Reminders",
+        "Sed Corrections",
+        "Polls",
+        "Pins",
+        "Translate",
+        "Karma / Tell",
+        "XKCD",
+        "Duck Game",
+        "IdleRPG",
+    ]
+
+
 def test_new_operational_defaults_are_declared():
     fields = CONFIG_FIELDS
     assert fields["http_max_redirects"].python_key == "HTTP_MAX_REDIRECTS"

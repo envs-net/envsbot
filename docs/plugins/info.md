@@ -170,10 +170,12 @@ Search Wikipedia.
 Role: `user`<br>
 Context: `room, MUC PM or private chat`<br>
 Category: `info`<br>
-Usage: `,wikipedia <term>`
+Usage: `,wikipedia [en|de] <term>`
 
 Aliases: `,wiki`
 
 Examples:
 
-- `,wiki XMPP` — Search Wikipedia.
+- `,wiki XMPP` — Search the configured default Wikipedia.
+- `,wiki de XMPP` — Search the German Wikipedia.
+- `,wiki en XMPP` — Search the English Wikipedia.

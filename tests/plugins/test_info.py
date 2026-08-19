@@ -396,13 +396,13 @@ async def test_wikipedia_usage(dummy_bot, fake_room_msg):
     await info_plugin.wikipedia_command(dummy_bot, "jid", "nick", [],
                                         fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
-    assert "Usage: !wikipedia <search term>" in text
+    assert "Usage: !wikipedia [en|de] <search term>" in text
 
 
 @pytest.mark.asyncio
 async def test_wikipedia_notfound(monkeypatch, dummy_bot, fake_room_msg):
     monkeypatch.setattr(
-        info_plugin, "fetch_wikipedia_summary", lambda term: None)
+        info_plugin, "fetch_wikipedia_summary", lambda term, language=None: None)
     await info_plugin.wikipedia_command(dummy_bot, "jid", "nick",
                                         ["somethingunreal"],
                                         fake_room_msg, True)
@@ -412,12 +412,54 @@ async def test_wikipedia_notfound(monkeypatch, dummy_bot, fake_room_msg):
 
 @pytest.mark.asyncio
 async def test_wikipedia_found(monkeypatch, dummy_bot, fake_room_msg):
-    monkeypatch.setattr(info_plugin, "fetch_wikipedia_summary", lambda term: (
-        "Python", "A summary", "http://wiki/Python"))
+    monkeypatch.setattr(
+        info_plugin,
+        "fetch_wikipedia_summary",
+        lambda term, language=None: ("Python", "A summary", "http://wiki/Python"),
+    )
     await info_plugin.wikipedia_command(dummy_bot, "jid", "nick",
                                         ["Python"], fake_room_msg, True)
     text = "\n".join(str(x) for x in dummy_bot.replies)
     assert "Wikipedia" in text and "Python" in text
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_language_override(monkeypatch, dummy_bot, fake_room_msg):
+    calls = []
+
+    def fake_summary(term, language=None):
+        calls.append((term, language))
+        return "XMPP", "Summary", f"https://{language}.wikipedia.org/wiki/XMPP"
+
+    monkeypatch.setattr(info_plugin, "fetch_wikipedia_summary", fake_summary)
+    monkeypatch.setattr(info_plugin, "WIKIPEDIA_LANGUAGE", "en")
+
+    await info_plugin.wikipedia_command(
+        dummy_bot, "jid", "nick", ["de", "XMPP"], fake_room_msg, True
+    )
+
+    assert calls == [("XMPP", "de")]
+    assert "https://de.wikipedia.org/wiki/XMPP" in str(dummy_bot.replies[-1])
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_uses_configured_default_language(
+    monkeypatch, dummy_bot, fake_room_msg
+):
+    calls = []
+
+    def fake_summary(term, language=None):
+        calls.append((term, language))
+        return "XMPP", "Summary", f"https://{language}.wikipedia.org/wiki/XMPP"
+
+    monkeypatch.setattr(info_plugin, "fetch_wikipedia_summary", fake_summary)
+    monkeypatch.setattr(info_plugin, "WIKIPEDIA_LANGUAGE", "de")
+
+    await info_plugin.wikipedia_command(
+        dummy_bot, "jid", "nick", ["XMPP"], fake_room_msg, True
+    )
+
+    assert calls == [("XMPP", "de")]
 
 
 # ---- INFO ROOM TOGGLE ----
@@ -452,9 +494,16 @@ async def test_fetch_wikipedia_summary_paths(monkeypatch):
     assert await info_plugin.fetch_wikipedia_summary("Example Page") == (
         "Example", "Summary text", "https://example.org/wiki/Example"
     )
+    assert "https://en.wikipedia.org/" in calls[0][0]
     assert "Example%20Page" in calls[0][0]
     assert calls[0][1]["headers"]["User-Agent"] == info_plugin.INFO_HTTP_USER_AGENT
     assert calls[0][1]["timeout_seconds"] == info_plugin.INFO_HTTP_TIMEOUT
+
+    calls.clear()
+    assert await info_plugin.fetch_wikipedia_summary("XMPP", "de") == (
+        "Example", "Summary text", "https://example.org/wiki/Example"
+    )
+    assert "https://de.wikipedia.org/" in calls[0][0]
 
     async def disambiguation_fetch_text(*args, **kwargs):
         return FetchResult(200, {

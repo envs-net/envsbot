@@ -390,6 +390,21 @@ def test_rss_runtime_values_preserve_zero_limit_and_reload_all_command_settings(
     assert any("plugins.rss.formatting" in line for line in refreshed)
 
 
+def test_runtime_refresh_updates_wikipedia_language(monkeypatch):
+    from plugins import info
+
+    monkeypatch.setattr(info, "WIKIPEDIA_LANGUAGE", "en")
+
+    refreshed = runtime.refresh_runtime_config_constants({
+        "wikipedia_language": "de",
+    })
+
+    assert info.WIKIPEDIA_LANGUAGE == "de"
+    assert info._parse_wikipedia_args(["XMPP"]) == ("de", "XMPP")
+    assert info._parse_wikipedia_args(["en", "XMPP"]) == ("en", "XMPP")
+    assert any("plugins.info" in line for line in refreshed)
+
+
 def test_runtime_refresh_updates_translate_defaults(monkeypatch):
     from plugins import translate
 

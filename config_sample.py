@@ -573,6 +573,14 @@ RSS_MAX_READ_BYTES = 1048576
 RSS_TEMPLATE_MAX_LENGTH = 1000
 
 
+# ================= WIKIPEDIA =================
+
+# Default Wikipedia language used by ,wiki when no language prefix is supplied. Use en
+# for English or de for German; users can override it per lookup with ,wiki en <term>
+# or ,wiki de <term>.
+WIKIPEDIA_LANGUAGE = 'en'
+
+
 # ================= BIRTHDAY NOTIFY =================
 
 # Cache positive and negative vCard BDAY results for this many seconds.
@@ -600,6 +608,96 @@ REMINDER_MAX_AGE_DAYS = 365
 # when you want automatic DST handling; CET/CEST are treated as explicit fixed
 # offsets.
 REMINDER_DEFAULT_TIMEZONE = 'UTC'
+
+
+# ================= SED CORRECTIONS =================
+
+# Sed regex timeout.
+SED_REGEX_TIMEOUT = 1.0
+
+# Sed max pattern length.
+SED_MAX_PATTERN_LENGTH = 256
+
+# Sed max replacement length.
+SED_MAX_REPLACEMENT_LENGTH = 1000
+
+# Sed max input length.
+SED_MAX_INPUT_LENGTH = 5000
+
+# Sed max output length.
+SED_MAX_OUTPUT_LENGTH = 8000
+
+
+# ================= POLLS =================
+
+# Poll max options.
+POLL_MAX_OPTIONS = 10
+
+# Poll max question len.
+POLL_MAX_QUESTION_LEN = 200
+
+# Poll max option len.
+POLL_MAX_OPTION_LEN = 100
+
+# Poll max history per room.
+POLL_MAX_HISTORY_PER_ROOM = 50
+
+# Poll default multi max choices.
+POLL_DEFAULT_MULTI_MAX_CHOICES = 3
+
+
+# ================= PINS =================
+
+# Pin page size.
+PIN_PAGE_SIZE = 10
+
+
+# ================= TRANSLATE =================
+
+# Translate uses the same public Google Translate endpoint as translate. No API key is
+# required, but the endpoint is unofficial and may change. Set TRANSLATE_TO to a
+# language code such as "de" to allow `,tr` for replies and `,tr text` for direct
+# text. None keeps the target argument mandatory.
+TRANSLATE_FROM = 'auto'
+
+# Translate to.
+TRANSLATE_TO = None
+
+# Translate timeout seconds.
+TRANSLATE_TIMEOUT_SECONDS = 8
+
+# Translate max input length.
+TRANSLATE_MAX_INPUT_LENGTH = 2000
+
+# Translate max output length.
+TRANSLATE_MAX_OUTPUT_LENGTH = 6000
+
+# Translate max response bytes.
+TRANSLATE_MAX_RESPONSE_BYTES = 262144
+
+
+# ================= KARMA / TELL =================
+
+# Karma delay seconds.
+KARMA_DELAY_SECONDS = 60
+
+# Tell delivery delay seconds.
+TELL_DELIVERY_DELAY_SECONDS = 5
+
+
+# ================= XKCD =================
+
+# Xkcd check interval.
+XKCD_CHECK_INTERVAL = 3600
+
+# Xkcd index start delay seconds.
+XKCD_INDEX_START_DELAY_SECONDS = 30
+
+# Xkcd index request delay seconds.
+XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.15
+
+# Xkcd http timeout.
+XKCD_HTTP_TIMEOUT = 10
 
 
 # ================= DUCK GAME =================
@@ -816,93 +914,3 @@ IDLERPG = {
     # Number of completed seasons retained in the Hall of Fame.
     'season_hof_size': 10,
 }
-
-
-# ================= SED CORRECTIONS =================
-
-# Sed regex timeout.
-SED_REGEX_TIMEOUT = 1.0
-
-# Sed max pattern length.
-SED_MAX_PATTERN_LENGTH = 256
-
-# Sed max replacement length.
-SED_MAX_REPLACEMENT_LENGTH = 1000
-
-# Sed max input length.
-SED_MAX_INPUT_LENGTH = 5000
-
-# Sed max output length.
-SED_MAX_OUTPUT_LENGTH = 8000
-
-
-# ================= POLLS =================
-
-# Poll max options.
-POLL_MAX_OPTIONS = 10
-
-# Poll max question len.
-POLL_MAX_QUESTION_LEN = 200
-
-# Poll max option len.
-POLL_MAX_OPTION_LEN = 100
-
-# Poll max history per room.
-POLL_MAX_HISTORY_PER_ROOM = 50
-
-# Poll default multi max choices.
-POLL_DEFAULT_MULTI_MAX_CHOICES = 3
-
-
-# ================= PINS =================
-
-# Pin page size.
-PIN_PAGE_SIZE = 10
-
-
-# ================= TRANSLATE =================
-
-# Translate uses the same public Google Translate endpoint as translate. No API key is
-# required, but the endpoint is unofficial and may change. Set TRANSLATE_TO to a
-# language code such as "de" to allow `,tr` for replies and `,tr text` for direct
-# text. None keeps the target argument mandatory.
-TRANSLATE_FROM = 'auto'
-
-# Translate to.
-TRANSLATE_TO = None
-
-# Translate timeout seconds.
-TRANSLATE_TIMEOUT_SECONDS = 8
-
-# Translate max input length.
-TRANSLATE_MAX_INPUT_LENGTH = 2000
-
-# Translate max output length.
-TRANSLATE_MAX_OUTPUT_LENGTH = 6000
-
-# Translate max response bytes.
-TRANSLATE_MAX_RESPONSE_BYTES = 262144
-
-
-# ================= KARMA / TELL =================
-
-# Karma delay seconds.
-KARMA_DELAY_SECONDS = 60
-
-# Tell delivery delay seconds.
-TELL_DELIVERY_DELAY_SECONDS = 5
-
-
-# ================= XKCD =================
-
-# Xkcd check interval.
-XKCD_CHECK_INTERVAL = 3600
-
-# Xkcd index start delay seconds.
-XKCD_INDEX_START_DELAY_SECONDS = 30
-
-# Xkcd index request delay seconds.
-XKCD_INDEX_REQUEST_DELAY_SECONDS = 0.15
-
-# Xkcd http timeout.
-XKCD_HTTP_TIMEOUT = 10

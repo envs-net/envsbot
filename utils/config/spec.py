@@ -253,6 +253,7 @@ CONFIG_FIELDS: dict[str, ConfigField] = {
     'http_max_read_bytes': ConfigField(1048576, 'HTTP_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Http max read bytes.'),
     'http_user_agent': ConfigField('envsbot/{version} (https://github.com/envs-net/envsbot)', 'HTTP_USER_AGENT', str, section='HTTP Defaults', description='Default HTTP User-Agent. The {version} token is expanded automatically to the running envsbot version, so operators do not need to update it for each release.'),
     'allow_private_fetch_urls': ConfigField(False, 'ALLOW_PRIVATE_FETCH_URLS', bool, section='HTTP Defaults', description='Safety guard for user-supplied URLs fetched by RSS and URL title checks. Keep False for normal public bots. Set True only for trusted/private rooms.'),
+    'wikipedia_language': ConfigField('en', 'WIKIPEDIA_LANGUAGE', str, choices=('en', 'de'), section='Wikipedia', description='Default Wikipedia language used by ,wiki when no language prefix is supplied. Use en for English or de for German; users can override it per lookup with ,wiki en <term> or ,wiki de <term>.'),
     'avatar': ConfigField(MISSING, 'AVATAR_PATH', str, section='vCard / Avatar', description='Bot avatar. Set AVATAR_PATH = None to disable avatar publishing. The default avatar is bundled with envsbot; put custom avatars below data/.', sample='avatar.jpg'),
     'avatar_type': ConfigField(MISSING, 'AVATAR_TYPE', str, section='vCard / Avatar', description='Avatar type.', sample='image/jpeg'),
     'vcard_fetch_timeout_seconds': ConfigField(10, 'VCARD_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='vCard / Avatar', description='Timeout for vCard fetches made by vcard, weather and birthday helpers.'),
@@ -324,12 +325,54 @@ CONFIG_FIELDS: dict[str, ConfigField] = {
 OPERATIONAL_CONFIG_FIELDS = CONFIG_FIELDS
 
 
+CONFIG_SECTION_ORDER: tuple[str, ...] = (
+    "XMPP Account",
+    "Connection",
+    "Bot Runtime",
+    "Backups",
+    "Persistent Outbox",
+    "Immediate Admin Alerts",
+    "Daily Admin Report",
+    "Message Cache",
+    "User Tracking",
+    "Command Rate Limits",
+    "HTTP Defaults",
+    "vCard / Avatar",
+    "Release Update Check",
+    "Room Invites",
+    "Room Plugin Defaults",
+    "URL Check",
+    "RSS / Atom",
+    "Wikipedia",
+    "Birthday Notify",
+    "Reminders",
+    "Sed Corrections",
+    "Polls",
+    "Pins",
+    "Translate",
+    "Karma / Tell",
+    "XKCD",
+    "Duck Game",
+    "IdleRPG",
+)
+
+
 def config_display_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
-    """Return operator-facing sections derived from the field schema."""
+    """Return operator-facing sections in the deliberate sample/config order."""
     sections: dict[str, list[str]] = {}
     for field in CONFIG_FIELDS.values():
         sections.setdefault(field.section, []).append(field.python_key)
-    return tuple((title, tuple(keys)) for title, keys in sections.items())
+
+    unknown_sections = set(sections) - set(CONFIG_SECTION_ORDER)
+    if unknown_sections:
+        names = ", ".join(sorted(unknown_sections))
+        raise RuntimeError(f"Config section order missing: {names}")
+
+    return tuple(
+        (title, tuple(sections[title]))
+        for title in CONFIG_SECTION_ORDER
+        if title in sections
+    )
 
 
 CONFIG_DISPLAY_SECTIONS = config_display_sections()

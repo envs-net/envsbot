@@ -422,6 +422,7 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
         "plugins.info": {
             "INFO_HTTP_TIMEOUT": _to_float(cfg.get("http_timeout_seconds") or 8, 8),
             "INFO_HTTP_USER_AGENT": resolve_user_agent(cfg.get("http_user_agent")),
+            "WIKIPEDIA_LANGUAGE": _to_str(cfg.get("wikipedia_language") or "en", "en").lower(),
         },
         "plugins.sed": {
             "REGEX_TIMEOUT": _to_float(cfg.get("sed_regex_timeout") or 1.0, 1.0),

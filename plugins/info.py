@@ -8,8 +8,8 @@ This plugin provides various information commands:
 - Fetch an acronym's meaning, or add an acronym meaning not in the list
 
 Commands:
-    {prefix}wikipedia <search term> - lookup a summary for a term using
-                                      Wikipedia
+    {prefix}wikipedia [en|de] <search term> - lookup a summary for a term using
+                                              Wikipedia
     {prefix}fediverse <@user@instance> - fetch latest public toot from a
                                          Fediverse user
     {prefix}udict <term> - search Urban Dictionary for a term
@@ -66,7 +66,7 @@ INFO_HTTP_USER_AGENT = resolve_user_agent(config.get("http_user_agent"))
 
 PLUGIN_META = {
     "name": "info",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Wikipedia, Fediverse, Urban Dictionary and acronym "
                    "lookup.",
     "category": "info",
@@ -297,16 +297,39 @@ async def udict_search(bot, sender_jid, nick, args, msg, is_room):
 
 # ---------------- Wikipedia ----------------
 
-WIKIPEDIA_API_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{}"
+WIKIPEDIA_LANGUAGES = ("en", "de")
+WIKIPEDIA_LANGUAGE = str(config.get("wikipedia_language") or "en").strip().lower()
+WIKIPEDIA_API_URL = "https://{}.wikipedia.org/api/rest_v1/page/summary/{}"
+
+
+def _normalize_wikipedia_language(value: object) -> str:
+    """Return one supported Wikipedia language code, defaulting to English."""
+    language = str(value or "").strip().lower()
+    return language if language in WIKIPEDIA_LANGUAGES else "en"
+
+
+def _parse_wikipedia_args(args: list[str]) -> tuple[str, str]:
+    """Return ``(language, term)`` for one Wikipedia command invocation."""
+    language = _normalize_wikipedia_language(WIKIPEDIA_LANGUAGE)
+    term_args = list(args)
+    if len(term_args) >= 2:
+        requested_language = term_args[0].strip().lower()
+        if requested_language in WIKIPEDIA_LANGUAGES:
+            language = requested_language
+            term_args = term_args[1:]
+    return language, " ".join(term_args).strip()
 
 
 class WikipediaLookupError(RuntimeError):
     """Raised when Wikipedia cannot return a usable API response."""
 
 
-async def fetch_wikipedia_summary(term):
-    """Query the Wikipedia REST API and return extracted data."""
-    url = WIKIPEDIA_API_URL.format(urllib.parse.quote(term))
+async def fetch_wikipedia_summary(term, language=None):
+    """Query the selected Wikipedia REST API and return extracted data."""
+    selected_language = _normalize_wikipedia_language(language or WIKIPEDIA_LANGUAGE)
+    url = WIKIPEDIA_API_URL.format(
+        selected_language, urllib.parse.quote(term)
+    )
     try:
         result = await fetch_text(
             url,
@@ -353,8 +376,12 @@ async def fetch_wikipedia_summary(term):
     role=Role.USER,
     aliases=["wiki"],
     short="Search Wikipedia.",
-    usage="{prefix}wikipedia <term>",
-    examples=["{prefix}wiki XMPP"],
+    usage="{prefix}wikipedia [en|de] <term>",
+    examples=[
+        ("{prefix}wiki XMPP", "Search the configured default Wikipedia."),
+        ("{prefix}wiki de XMPP", "Search the German Wikipedia."),
+        ("{prefix}wiki en XMPP", "Search the English Wikipedia."),
+    ],
     category="info",
     context="any",
 )
@@ -363,8 +390,10 @@ async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
     Lookup a summary for a term using Wikipedia.
 
     Usage:
-        {prefix}wikipedia <search term>
-        {prefix}wiki <search term>
+        {prefix}wikipedia [en|de] <search term>
+        {prefix}wiki [en|de] <search term>
+
+    The configured default language is used when no language is supplied.
     """
     enabled_rooms = await _get_enabled_rooms(bot, INFO_KEY, "information")
     if msg["from"].bare not in enabled_rooms and (is_room or _is_muc_pm(msg)):
@@ -372,12 +401,15 @@ async def wikipedia_command(bot, sender_jid, nick, args, msg, is_room):
         return
 
     if not args:
-        bot.reply(msg, f"Usage: {_command_prefix(bot)}wikipedia <search term>")
+        bot.reply(
+            msg,
+            f"Usage: {_command_prefix(bot)}wikipedia [en|de] <search term>",
+        )
         return
 
-    term = " ".join(args)
+    language, term = _parse_wikipedia_args(args)
     try:
-        result = fetch_wikipedia_summary(term)
+        result = fetch_wikipedia_summary(term, language)
         if inspect.isawaitable(result):
             result = await result
     except WikipediaLookupError as exc:
