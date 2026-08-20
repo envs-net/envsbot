@@ -371,6 +371,21 @@ async def _handle_duel(bot, sender_jid: str, args: list[str], msg, is_room: bool
         _dep_formatting._reply(bot, msg, f"ℹ️ {_dep_formatting._display_player(defender)} is not online in the game room.")
         return
 
+    if _dep_events._quest_companions_share_position(
+        room,
+        str(attacker_jid),
+        str(defender_jid),
+        attacker,
+        defender,
+    ):
+        _dep_formatting._reply(
+            bot,
+            msg,
+            f"🧭 You and {_dep_formatting._display_player(defender)} are together at the same map point "
+            "on the active quest, so quest companions cannot duel each other here.",
+        )
+        return
+
     max_distance = max(0, int(_dep_config.MANUAL_DUEL_MAX_DISTANCE or 0))
     distance = _dep_events._duel_distance(attacker, defender)
     if distance > max_distance:

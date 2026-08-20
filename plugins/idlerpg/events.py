@@ -94,6 +94,25 @@ def _grid_position(player: dict[str, Any]) -> tuple[int, int]:
     return (_dep_map._clamp_grid_coord(player.get("x", 0), _dep_config.MAP_X), _dep_map._clamp_grid_coord(player.get("y", 0), _dep_config.MAP_Y))
 
 
+def _quest_companions_share_position(
+    room: dict[str, Any] | None,
+    attacker_jid: str,
+    defender_jid: str,
+    attacker: dict[str, Any],
+    defender: dict[str, Any],
+) -> bool:
+    """Return whether two members of the active quest currently share one map point."""
+    if not isinstance(room, dict):
+        return False
+    quest = room.get("quest")
+    if not isinstance(quest, dict) or not quest.get("active"):
+        return False
+    questers = {str(jid) for jid in quest.get("questers", [])}
+    if str(attacker_jid) not in questers or str(defender_jid) not in questers:
+        return False
+    return _grid_position(attacker) == _grid_position(defender)
+
+
 def _active_grid_questers(room: dict[str, Any] | None) -> set[str]:
     """Return participants protected from fighting their own grid-quest party."""
     if not isinstance(room, dict):

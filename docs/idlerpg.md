@@ -61,7 +61,7 @@ Use these in the game room or from a MUC private message to the bot:
 
 `status` always shows character progress. Use `,idlerpg enabled` to inspect whether the game is enabled in the current room.
 
-Manual duels are optional player-triggered battles. Both characters must be online, not logged out, within the configured map distance, and outside their duel cooldown. The default maximum distance is 10 map units and the default cooldown is 1 hour for both duelists.
+Manual duels are optional player-triggered battles. Both characters must be online, not logged out, within the configured map distance, and outside their duel cooldown. Members of the same active quest may duel while they are separated, but once they occupy the same map point they cannot manually duel each other. This especially prevents grid-quest companions from repeatedly dueling after their directed paths converge. The default maximum distance is 10 map units and the default cooldown is 1 hour for both duelists.
 
 Aliases:
 

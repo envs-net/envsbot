@@ -1705,6 +1705,63 @@ async def test_manual_duel_nearby_online_players_and_cooldown(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_manual_duel_blocks_quest_companions_once_they_share_a_map_point(monkeypatch):
+    bot = DummyBot()
+    msg = DummyMsg()
+    JOINED_ROOMS["room@conf"]["nicks"]["Bob"] = {
+        "jid": "bob@envs.net",
+        "affiliation": "member",
+    }
+
+    await _register_alice(bot, msg)
+    await idlerpg._handle_register(
+        bot,
+        "bob@envs.net",
+        ["register", "Bob", "wizard"],
+        DummyMsg(resource="Bob"),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    alice = room["players"]["alice@envs.net"]
+    bob = room["players"]["bob@envs.net"]
+    alice.update({"x": 25, "y": 40, "level": 10, "next": 1000})
+    bob.update({"x": 25, "y": 40, "level": 10, "next": 1000})
+    room["quest"] = {
+        "active": True,
+        "type": "grid",
+        "questers": ["alice@envs.net", "bob@envs.net", "third@envs.net", "fourth@envs.net"],
+        "route": [[25, 40], [100, 100]],
+        "route_index": 0,
+    }
+    monkeypatch.setattr(idlerpg_config, "MANUAL_DUEL_MAX_DISTANCE", 10)
+    monkeypatch.setattr(idlerpg_config, "MANUAL_DUEL_COOLDOWN_SECONDS", 3600)
+
+    before_events = list(room["events"])
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Bob"], msg, True)
+
+    assert "same map point" in bot.replies[-1][0]
+    assert "quest companions cannot duel" in bot.replies[-1][0]
+    assert alice["last_manual_duel_at"] == 0
+    assert bob["last_manual_duel_at"] == 0
+    assert alice["stats"]["manual_duels_started"] == 0
+    assert bob["stats"]["manual_duels_received"] == 0
+    assert room["events"] == before_events
+
+    bob.update({"x": 26, "y": 40})
+    rolls = iter([999, 0])
+    monkeypatch.setattr(random, "randint", lambda _start, _stop: next(rolls))
+    monkeypatch.setattr(random, "random", lambda: 1.0)
+
+    await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["duel", "Bob"], msg, True)
+
+    assert "challenged Bob" in bot.replies[-1][0]
+    assert "to a duel" in bot.replies[-1][0]
+    assert alice["last_manual_duel_at"] == bob["last_manual_duel_at"]
+    assert alice["stats"]["manual_duels_started"] == 1
+    assert bob["stats"]["manual_duels_received"] == 1
+
+
+@pytest.mark.asyncio
 async def test_manual_duel_rejects_far_offline_and_self(monkeypatch):
     bot = DummyBot()
     msg = DummyMsg()
