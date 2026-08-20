@@ -83,6 +83,10 @@ def _player(name: str, *, rank: int, online: bool, level: int) -> dict[str, obje
         if name == "Alice"
         else [],
         "stats": {"quests_completed": 4, "battles_lost": 5, "battles_won": 12, "team_battles_lost": 2},
+        "penalties": {"message": 60, "logout": 120} if name == "Alice" else {},
+        "penalty_total": 180 if name == "Alice" else 0,
+        "logout_penalty_pending": name == "Alice",
+        "logout_penalty_due_at": now + 300 if name == "Alice" else 0,
         "achievements": [
             {
                 "key": "founder",
@@ -352,6 +356,9 @@ def test_idlerpg_site_profile_filters_and_room_switching(tmp_path: Path) -> None
     assert "next tier from lv.52" in profile
     assert "Battles Lost" in profile
     assert "Team Battles Lost" in profile
+    assert "Penalties" in profile
+    assert "Pending logout" in profile
+    assert "0 days, 00:03:00" in profile
     assert profile.index("Battles Won") < profile.index("Battles Lost")
     assert profile.index("Battles Lost") < profile.index("Team Battles Lost")
     assert profile.index("Team Battles Lost") < profile.index("Quests Completed")

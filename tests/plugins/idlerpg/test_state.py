@@ -259,3 +259,22 @@ def test_weighted_item_roll_normalizes_low_levels_and_uses_exact_weights(monkeyp
     assert all(entry[2] == 1 for entry in captured)
     for population, weights, _k in captured:
         assert weights == pytest.approx([1.4 ** -level for level in population])
+
+
+def test_player_status_shows_pending_logout_grace(monkeypatch):
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_000)
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "pending_logout_penalty": {
+                "created_at": 900,
+                "due_at": 1_300,
+                "source": "presence",
+            },
+        },
+    )
+
+    status = idlerpg._format_player_status("room@conf", "alice@envs.net", player)
+
+    assert "logout penalty pending in 0 days, 00:05:00" in status

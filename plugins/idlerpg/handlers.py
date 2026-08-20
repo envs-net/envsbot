@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from bot.room_state import JOINED_ROOMS
 from core_plugins import _core
 
 from .config import COUNT_COMMAND_MESSAGES, MESSAGE_PENALTY, log
 from .constants import IDLERPG_ENABLED_KEY, PLUGIN_NAME
 from .formatting import _command_prefix, _now
 from .leveling import _penalize_player
-from .state import _get_data, _room_bucket
+from .state import _get_data, _normalize_player, _room_bucket, _set_data
 
 _MESSAGE_PENALTY_DEDUPE_TTL = 30
 _MESSAGE_PENALTY_SEEN: dict[str, int] = {}
@@ -199,7 +200,65 @@ async def on_message(bot, msg):
     except Exception:
         log.exception("[IDLERPG] Error in on_message")
 
+
+
+def _presence_type(pres) -> str:
+    try:
+        return str(pres.get("type") or pres["type"] or "available")
+    except Exception:
+        return "available"
+
+
+def _presence_nick(pres) -> str:
+    try:
+        return str(getattr(pres["from"], "resource", "") or "")
+    except Exception:
+        return ""
+
+
+def _presence_real_jid(pres, room_jid: str) -> str:
+    try:
+        muc = pres["muc"]
+        value = muc.get("jid") if hasattr(muc, "get") else None
+    except Exception:
+        value = None
+    return _real_bare_jid(value, room_jid)
+
+
+def _presence_is_nick_change(pres) -> bool:
+    try:
+        xml = pres.xml
+    except Exception:
+        return False
+    try:
+        search = ".//{http://jabber.org/protocol/muc#user}status"
+        return any(status.attrib.get("code") == "303" for status in xml.findall(search))
+    except Exception:
+        return False
+
+
+def _presence_has_other_session(room_jid: str, actor_nick: str, player_jid: str) -> bool:
+    room = JOINED_ROOMS.get(room_jid, {})
+    nicks = room.get("nicks", {}) if isinstance(room, dict) else {}
+    if not isinstance(nicks, dict):
+        return False
+    needle = str(player_jid or "").split("/", 1)[0].lower()
+    if not needle:
+        return False
+    for nick, info in nicks.items():
+        if str(nick) == str(actor_nick) or not isinstance(info, dict):
+            continue
+        jid = str(info.get("jid") or "").split("/", 1)[0].lower()
+        if jid and jid == needle:
+            return True
+    return False
+
 async def on_muc_presence(bot, pres):
+    from . import config as idlerpg_config
+    from . import export as idlerpg_export
+    from . import formatting as idlerpg_formatting
+    from . import leveling as idlerpg_leveling
+    from . import quests as idlerpg_quests
     from .tasks import _ensure_game_task
 
     try:
@@ -207,5 +266,101 @@ async def on_muc_presence(bot, pres):
         if not await _core._is_enabled_for_room(bot, IDLERPG_ENABLED_KEY, PLUGIN_NAME, room_jid):
             return
         await _ensure_game_task(bot, room_jid)
+
+        presence_type = _presence_type(pres)
+        actor_nick = _presence_nick(pres)
+        if presence_type not in {"available", "unavailable"}:
+            return
+        if not actor_nick or _presence_is_nick_change(pres):
+            return
+
+        sender_jid = _presence_real_jid(pres, room_jid)
+        data = await _get_data(bot)
+        room = _room_bucket(data, room_jid)
+        player_jid, player = _find_player_by_message_identity(
+            room, sender_jid=sender_jid, actor_nick=actor_nick
+        )
+        if not player or not player_jid:
+            return
+        player = _normalize_player(str(player_jid), player)
+        player["last_nick"] = actor_nick[:128]
+        now = idlerpg_formatting._now()
+
+        if presence_type == "unavailable":
+            # Explicit ,idlerpg logout already owns its own grace/penalty state.
+            if player.get("logged_out"):
+                return
+            if sender_jid and _presence_has_other_session(room_jid, actor_nick, str(player_jid)):
+                return
+            pending = player.get("pending_logout_penalty")
+            if isinstance(pending, dict) and pending:
+                return
+
+            player["logged_out_at"] = now
+            grace = max(0, int(idlerpg_config.LOGOUT_GRACE_SECONDS or 0))
+            name = idlerpg_formatting._display_player(player)
+            if grace > 0:
+                player["pending_logout_penalty"] = {
+                    "created_at": now,
+                    "due_at": now + grace,
+                    "source": "presence",
+                }
+                idlerpg_export._record_event(
+                    room,
+                    "logout",
+                    f"{name} left the room. Logout penalty is pending for "
+                    f"{idlerpg_formatting._duration_clock(grace)}.",
+                    players=[name],
+                )
+            else:
+                changed = idlerpg_leveling._apply_logout_penalty(player, room)
+                text = (
+                    f"👋 {name} left the room. "
+                    f"{idlerpg_formatting._duration_clock(changed)} is added to "
+                    f"{idlerpg_formatting._possessive(name)} clock."
+                )
+                idlerpg_export._record_event(room, "logout", text, players=[name])
+                quest_messages: list[str] = []
+                if changed:
+                    idlerpg_quests._maybe_fail_time_quest_for_penalty(
+                        room, room_jid, str(player_jid), now, quest_messages, reason="logout"
+                    )
+                idlerpg_formatting._system_reply(bot, room_jid, text)
+                for quest_text in quest_messages:
+                    idlerpg_export._record_event(room, "quest", quest_text)
+                    idlerpg_formatting._system_reply(bot, room_jid, quest_text)
+            await _set_data(bot, data, room_jid=room_jid)
+            return
+
+        pending = player.get("pending_logout_penalty")
+        if not isinstance(pending, dict) or pending.get("source") != "presence":
+            return
+
+        due_at = int(pending.get("due_at", 0) or 0)
+        if due_at > now:
+            player["pending_logout_penalty"] = {}
+            player["last_seen"] = now
+            await _set_data(bot, data, room_jid=room_jid)
+            return
+
+        changed = idlerpg_leveling._apply_logout_penalty(player, room)
+        name = idlerpg_formatting._display_player(player)
+        text = (
+            f"👋 {name} stayed offline past the grace period. "
+            f"{idlerpg_formatting._duration_clock(changed)} is added to "
+            f"{idlerpg_formatting._possessive(name)} clock."
+        )
+        idlerpg_export._record_event(room, "logout", text, players=[name])
+        quest_messages = []
+        if changed:
+            idlerpg_quests._maybe_fail_time_quest_for_penalty(
+                room, room_jid, str(player_jid), now, quest_messages, reason="logout"
+            )
+        player["last_seen"] = now
+        await _set_data(bot, data, room_jid=room_jid)
+        idlerpg_formatting._system_reply(bot, room_jid, text)
+        for quest_text in quest_messages:
+            idlerpg_export._record_event(room, "quest", quest_text)
+            idlerpg_formatting._system_reply(bot, room_jid, quest_text)
     except Exception:
         log.debug("[IDLERPG] Presence handling failed", exc_info=True)

@@ -274,6 +274,15 @@ been online long enough, the bot can start a room quest. By default the online
 time requirement is 10 hours, matching classic IdleRPG. Quest completion removes
 25% of the participating players' remaining timer burden.
 
+Physical MUC presence is part of the game state as well. When a registered
+character leaves the game room, IdleRPG starts the same logout grace period as
+for an explicit `,idlerpg logout`. Returning before the grace expires cancels
+that presence-triggered penalty. Remaining offline past the grace adds the
+configured logout penalty to the character clock. Nick changes and a second
+session of the same real JID do not count as logouts. Accumulated message,
+logout and quest penalties are shown by `,idlerpg status` and exported in the
+public player profile.
+
 The bot supports both classic quest types:
 
 - **Grid quests**: four questers automatically walk toward a route containing
@@ -718,8 +727,8 @@ All IdleRPG options live below `IDLERPG` in `config.py` / `config_sample.py`.
 | --- | ---: | --- |
 | `penalty_step` | `1.14` | Exponential scaling for message and logout penalties. |
 | `message_penalty` | `1` | Base penalty in seconds for normal room messages. Formula: `max(1, len(body) * message_penalty) * (penalty_step ** current_level)`. |
-| `logout_penalty` | `20` | Base penalty in seconds when a player logs out. |
-| `logout_grace_seconds` | `300` | Grace period for short reconnects/logouts. If the player logs back in before this expires, the pending logout penalty is cleared. |
+| `logout_penalty` | `20` | Base penalty in seconds when a player explicitly logs out or leaves the game MUC long enough to exceed the logout grace period. |
+| `logout_grace_seconds` | `300` | Grace period for short reconnects/logouts. Presence-triggered departures and explicit logouts are penalized only after this period; a presence-triggered reconnect before expiry cancels the pending penalty. |
 | `max_penalty` | `604800` | Maximum single penalty in seconds. The default is 7 days. Set to `0` to disable the cap. |
 | `count_command_messages` | `False` | Whether bot commands also count as message penalties. Usually keep this disabled. |
 

@@ -32,8 +32,13 @@ async def test_register_status_and_lists():
     )
     assert "Welcome Alice" in bot.replies[-1][0]
 
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["players"]["alice@envs.net"]["penalties"] = {"message": 60, "logout": 120}
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["status"], msg, True)
     assert "level 0 sysadmin" in bot.replies[-1][0]
+    assert "Penalties: 0 days, 00:03:00 total" in bot.replies[-1][0]
+    assert "logout 0 days, 00:02:00" in bot.replies[-1][0]
+    assert "message 0 days, 00:01:00" in bot.replies[-1][0]
 
     await idlerpg.idlerpg_command(bot, "alice@envs.net", "Alice", ["top"], msg, True)
     assert "IdleRPG Top Players" in bot.replies[-1][0]

@@ -938,3 +938,24 @@ async def test_public_export_prefers_db_consistent_snapshot_over_mutable_cache(m
     assert exported["rooms"][room_jid]["players"]["alice@example.org"]["level"] == 4
     assert captured[0][2][room_jid][0]["text"] == "persisted"
     assert captured[0][3] == {room_jid: 1}
+
+
+def test_player_public_record_exports_penalties_and_pending_logout(monkeypatch):
+    from plugins.idlerpg import formatting as idlerpg_formatting
+
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 2_000)
+    player = idlerpg._normalize_player(
+        "alice@envs.net",
+        {
+            "name": "Alice",
+            "penalties": {"message": 60, "logout": 120},
+            "pending_logout_penalty": {"due_at": 2_300, "source": "presence"},
+        },
+    )
+
+    record = idlerpg._player_public_record("room@conf", "alice@envs.net", player, rank=1)
+
+    assert record["penalties"] == {"message": 60, "logout": 120}
+    assert record["penalty_total"] == 180
+    assert record["logout_penalty_pending"] is True
+    assert record["logout_penalty_due_at"] == 2_300

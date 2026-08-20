@@ -1,5 +1,17 @@
 import asyncio
 import copy
+import random
+import types
+import xml.etree.ElementTree as ET
+
+from core_plugins import _core
+from plugins.idlerpg import config as idlerpg_config
+from plugins.idlerpg import events as idlerpg_events
+from plugins.idlerpg import export as idlerpg_export
+from plugins.idlerpg import formatting as idlerpg_formatting
+from plugins.idlerpg import state as idlerpg_state
+from plugins.idlerpg import tasks as idlerpg_tasks
+from utils.task_supervisor import TaskSupervisor
 
 from .helpers import (
     DummyBot,
@@ -9,15 +21,6 @@ from .helpers import (
     idlerpg,
     pytest,
 )
-import random
-from core_plugins import _core
-from plugins.idlerpg import config as idlerpg_config
-from plugins.idlerpg import events as idlerpg_events
-from plugins.idlerpg import export as idlerpg_export
-from plugins.idlerpg import formatting as idlerpg_formatting
-from plugins.idlerpg import state as idlerpg_state
-from plugins.idlerpg import tasks as idlerpg_tasks
-from utils.task_supervisor import TaskSupervisor
 
 
 @pytest.mark.asyncio
@@ -483,3 +486,128 @@ async def test_on_unload_checkpoints_active_room_and_flushes(monkeypatch):
     assert room["last_task_checkpoint_at"] == now
     assert "room@conf" not in idlerpg.ROOM_TASKS
     assert bot.flush_count == 1
+
+
+async def _register_presence_alice(bot):
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+
+
+class _Presence:
+    def __init__(
+        self,
+        *,
+        presence_type: str,
+        nick: str = "Alice",
+        jid: str | None = "alice@envs.net",
+        nick_change: bool = False,
+    ):
+        self.data = {
+            "from": types.SimpleNamespace(bare="room@conf", resource=nick),
+            "type": presence_type,
+            "muc": {"jid": types.SimpleNamespace(bare=jid) if jid else None},
+        }
+        self.xml = ET.Element("presence")
+        if nick_change:
+            x = ET.SubElement(self.xml, "{http://jabber.org/protocol/muc#user}x")
+            ET.SubElement(x, "{http://jabber.org/protocol/muc#user}status", {"code": "303"})
+
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+
+@pytest.mark.asyncio
+async def test_presence_leave_starts_logout_grace_and_quick_rejoin_clears_it(monkeypatch):
+    bot = DummyBot()
+    await _register_presence_alice(bot)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_GRACE_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_000)
+
+    await idlerpg.on_muc_presence(bot, _Presence(presence_type="unavailable"))
+
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    assert player["logged_out"] is False
+    assert player["pending_logout_penalty"] == {
+        "created_at": 1_000,
+        "due_at": 1_300,
+        "source": "presence",
+    }
+    assert player.get("penalties", {}).get("logout", 0) == 0
+
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_100)
+    await idlerpg.on_muc_presence(bot, _Presence(presence_type="available"))
+
+    assert player["pending_logout_penalty"] == {}
+    assert player.get("penalties", {}).get("logout", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_presence_leave_penalty_applies_after_grace_even_without_manual_logout(monkeypatch):
+    bot = DummyBot()
+    await _register_presence_alice(bot)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_GRACE_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_PENALTY", 20)
+    monkeypatch.setattr(idlerpg_config, "PENALTY_STEP", 1.0)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_000)
+
+    await idlerpg.on_muc_presence(bot, _Presence(presence_type="unavailable"))
+    JOINED_ROOMS["room@conf"]["nicks"].pop("Alice", None)
+
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    room["last_tick"] = 1_300
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_301)
+    await idlerpg._tick_room(bot, "room@conf", announce=False)
+
+    player = room["players"]["alice@envs.net"]
+    assert player["pending_logout_penalty"] == {}
+    assert player["penalties"]["logout"] == 20
+    assert player["stats"]["logouts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_presence_nick_change_or_other_session_does_not_start_logout_penalty(monkeypatch):
+    bot = DummyBot()
+    await _register_presence_alice(bot)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_000)
+
+    await idlerpg.on_muc_presence(
+        bot,
+        _Presence(presence_type="unavailable", nick_change=True),
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    assert player["pending_logout_penalty"] == {}
+
+    JOINED_ROOMS["room@conf"]["nicks"]["AliceLaptop"] = {
+        "jid": "alice@envs.net",
+        "affiliation": "member",
+    }
+    await idlerpg.on_muc_presence(bot, _Presence(presence_type="unavailable"))
+    assert player["pending_logout_penalty"] == {}
+
+
+@pytest.mark.asyncio
+async def test_presence_leave_does_not_duplicate_explicit_logout_grace(monkeypatch):
+    bot = DummyBot()
+    await _register_presence_alice(bot)
+    monkeypatch.setattr(idlerpg_config, "LOGOUT_GRACE_SECONDS", 300)
+    monkeypatch.setattr(idlerpg_formatting, "_now", lambda: 1_000)
+
+    await idlerpg._handle_logout(bot, "alice@envs.net", DummyMsg(), True)
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    pending = dict(player["pending_logout_penalty"])
+
+    await idlerpg.on_muc_presence(bot, _Presence(presence_type="unavailable"))
+
+    assert player["logged_out"] is True
+    assert player["pending_logout_penalty"] == pending

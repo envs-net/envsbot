@@ -608,6 +608,12 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
     penalties = player.get("penalties")
     if not isinstance(penalties, dict):
         penalties = {}
+    cleaned_penalties: dict[str, int] = {}
+    for key, value in penalties.items():
+        try:
+            cleaned_penalties[str(key)] = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            cleaned_penalties[str(key)] = 0
 
     stats = player.get("stats")
     if not isinstance(stats, dict):
@@ -654,7 +660,7 @@ def _normalize_player(jid: str, player: dict[str, Any]) -> dict[str, Any]:
         "alignment": str(player.get("alignment") or "n")[:1].lower(),
         "items": items,
         "unique_items": unique_items,
-        "penalties": penalties,
+        "penalties": cleaned_penalties,
         "stats": cleaned_stats,
         "pending_logout_penalty": pending_logout,
         "logged_out_at": int(player.get("logged_out_at", 0) or 0),
@@ -719,12 +725,36 @@ def _format_player_status(room_jid: str, jid: str, player: dict[str, Any]) -> st
     online = "online" if _is_player_online(room_jid, jid, player) else "offline"
     title = _dep_formatting._display_title(player)
     title_part = f" [{title}]" if title else ""
+    penalties = player.get("penalties", {}) if isinstance(player.get("penalties"), dict) else {}
+    penalty_values = {
+        str(key): max(0, int(value or 0))
+        for key, value in penalties.items()
+        if str(key)
+    }
+    penalty_total = sum(penalty_values.values())
+    penalty_parts = ", ".join(
+        f"{key} {_dep_formatting._duration_clock(value)}"
+        for key, value in sorted(penalty_values.items())
+        if value > 0
+    )
+    penalty_text = f"Penalties: {_dep_formatting._duration_clock(penalty_total)} total"
+    if penalty_parts:
+        penalty_text += f" ({penalty_parts})"
+    pending = player.get("pending_logout_penalty")
+    if isinstance(pending, dict) and pending:
+        due_at = int(pending.get("due_at", 0) or 0)
+        remaining = max(0, due_at - _dep_formatting._now())
+        penalty_text += (
+            f"; logout penalty pending in {_dep_formatting._duration_clock(remaining)}"
+            if remaining > 0
+            else "; logout penalty pending now"
+        )
     return (
         f"{_dep_formatting._display_player(player)}{title_part}, the level {player.get('level', 0)} "
         f"{player.get('class', 'idler')} ({_dep_formatting._alignment_name(player.get('alignment'))}); "
         f"Status: {online}; TTL: {_dep_formatting._duration(player.get('next', 0))}; "
         f"Playing: {_dep_formatting._played_for(player)}; Idled: {_dep_formatting._duration(player.get('idled', 0))}; "
-        f"Map: [{player.get('x', 0)},{player.get('y', 0)}]; "
+        f"{penalty_text}; Map: [{player.get('x', 0)},{player.get('y', 0)}]; "
         f"Achievements: {len(player.get('achievements', []) if isinstance(player.get('achievements'), list) else [])}; "
         f"Item sum: {sum(int(v or 0) for v in player.get('items', {}).values())}"
     )

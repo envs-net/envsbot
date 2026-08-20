@@ -50,6 +50,17 @@ def _export_tree_stats(root: Path) -> dict[str, int]:
 def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
     title_key = str(player.get("title") or "")
     display_name = _dep_formatting._display_player(player)
+    penalties = player.get("penalties", {}) if isinstance(player.get("penalties"), dict) else {}
+    public_penalties = {
+        str(key): max(0, int(value or 0))
+        for key, value in penalties.items()
+        if str(key)
+    }
+    pending_logout = (
+        player.get("pending_logout_penalty")
+        if isinstance(player.get("pending_logout_penalty"), dict)
+        else {}
+    )
     return {
         "rank": rank,
         "name": display_name,
@@ -68,6 +79,10 @@ def _player_public_record(room_jid: str, jid: str, player: dict[str, Any], rank:
         "unique_items": dict(player.get("unique_items", {}) if isinstance(player.get("unique_items"), dict) else {}),
         "unique_item_bonuses": _dep_items._unique_bonuses(player),
         "stats": dict(_dep_leveling._stats(player)),
+        "penalties": public_penalties,
+        "penalty_total": sum(public_penalties.values()),
+        "logout_penalty_pending": bool(pending_logout),
+        "logout_penalty_due_at": int(pending_logout.get("due_at", 0) or 0) if pending_logout else 0,
         "achievements": [
             {"key": key, "title": _dep_leveling._achievement_title(key), "description": _dep_leveling._achievement_description(key)}
             for key in player.get("achievements", [])

@@ -1294,6 +1294,8 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     <?php
                     $profile_name = idlerpg_player_name($selected_profile);
                     $profile_stats = idlerpg_ordered_stats(is_array($selected_profile['stats'] ?? null) ? $selected_profile['stats'] : []);
+                    $profile_penalties = is_array($selected_profile['penalties'] ?? null) ? $selected_profile['penalties'] : [];
+                    $profile_penalty_total = max(0, (int) ($selected_profile['penalty_total'] ?? array_sum(array_map('intval', $profile_penalties))));
                     $profile_items = is_array($selected_profile['items'] ?? null) ? $selected_profile['items'] : [];
                     $profile_unique_items = is_array($selected_profile['unique_items'] ?? null) ? $selected_profile['unique_items'] : [];
                     $profile_unique_bonuses = is_array($selected_profile['unique_item_bonuses'] ?? null) ? $selected_profile['unique_item_bonuses'] : [];
@@ -1334,6 +1336,17 @@ details.season summary { cursor: pointer; font-weight: 700; }
                                     <?php endforeach; ?>
                                     </tbody></table>
                                 <?php else: ?><p class="muted">No statistics exported yet.</p><?php endif; ?>
+                                <h4>Penalties</h4>
+                                <table><tbody>
+                                    <tr><th>Total</th><td><?php echo h(idlerpg_ttl($profile_penalty_total)); ?></td></tr>
+                                    <?php foreach ($profile_penalties as $key => $value): ?>
+                                        <?php if ((int) $value > 0): ?><tr><th><?php echo h(idlerpg_human_key($key)); ?></th><td><?php echo h(idlerpg_ttl((int) $value)); ?></td></tr><?php endif; ?>
+                                    <?php endforeach; ?>
+                                    <?php if (!empty($selected_profile['logout_penalty_pending'])): ?>
+                                        <?php $pending_due = max(0, (int) ($selected_profile['logout_penalty_due_at'] ?? 0) - time()); ?>
+                                        <tr><th>Pending logout</th><td><?php echo $pending_due > 0 ? 'in ' . h(idlerpg_ttl($pending_due)) : 'due now'; ?></td></tr>
+                                    <?php endif; ?>
+                                </tbody></table>
                             </div>
                         </div>
 
