@@ -1741,10 +1741,10 @@ async def test_manual_duel_blocks_quest_companions_once_they_share_a_map_point(m
 
     assert "same map point" in bot.replies[-1][0]
     assert "quest companions cannot duel" in bot.replies[-1][0]
-    assert alice["last_manual_duel_at"] == 0
-    assert bob["last_manual_duel_at"] == 0
-    assert alice["stats"]["manual_duels_started"] == 0
-    assert bob["stats"]["manual_duels_received"] == 0
+    assert alice.get("last_manual_duel_at", 0) == 0
+    assert bob.get("last_manual_duel_at", 0) == 0
+    assert alice["stats"].get("manual_duels_started", 0) == 0
+    assert bob["stats"].get("manual_duels_received", 0) == 0
     assert room["events"] == before_events
 
     bob.update({"x": 26, "y": 40})

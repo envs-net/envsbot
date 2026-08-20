@@ -494,7 +494,7 @@ async def test_fetch_wikipedia_summary_paths(monkeypatch):
     assert await info_plugin.fetch_wikipedia_summary("Example Page") == (
         "Example", "Summary text", "https://example.org/wiki/Example"
     )
-    assert "https://en.wikipedia.org/" in calls[0][0]
+    assert calls[0][0] == "https://en.wikipedia.org/api/rest_v1/page/summary/Example%20Page"
     assert "Example%20Page" in calls[0][0]
     assert calls[0][1]["headers"]["User-Agent"] == info_plugin.INFO_HTTP_USER_AGENT
     assert calls[0][1]["timeout_seconds"] == info_plugin.INFO_HTTP_TIMEOUT
@@ -503,7 +503,7 @@ async def test_fetch_wikipedia_summary_paths(monkeypatch):
     assert await info_plugin.fetch_wikipedia_summary("XMPP", "de") == (
         "Example", "Summary text", "https://example.org/wiki/Example"
     )
-    assert "https://de.wikipedia.org/" in calls[0][0]
+    assert calls[0][0] == "https://de.wikipedia.org/api/rest_v1/page/summary/XMPP"
 
     async def disambiguation_fetch_text(*args, **kwargs):
         return FetchResult(200, {
