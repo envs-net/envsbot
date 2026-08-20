@@ -1,5 +1,7 @@
 """Split module for core_plugins/rooms.py: commands."""
 
+import asyncio
+
 from bot.room_state import direct_roster_contacts
 from utils.audit import audit_event
 from utils.command import Role, command
@@ -651,6 +653,7 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
     examples=["{prefix}rooms join test@conference.example.org"],
     category="rooms",
     context="private chat / MUC PM",
+    timeout_seconds=45.0,
 )
 async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -819,6 +822,7 @@ async def rooms_leave(bot, sender_jid, nick, args, msg, is_room):
     examples=["{prefix}rooms sync"],
     category="rooms",
     context="private chat / MUC PM",
+    timeout_seconds=45.0,
 )
 async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
     """
@@ -862,35 +866,51 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
         left.append(room)
     JOINED_ROOMS.clear()
 
-    # Join only rooms from DB with autojoin=True
-    for room_jid, nick_name, autojoin, status in rows:
-        if autojoin:
-            try:
-                _LEAVING_ROOMS.discard(room_jid)
-                await _join_muc_with_timeout(bot, muc, room_jid, nick_name)
-                JOINED_ROOMS[room_jid] = {
-                    "nick": nick_name,
-                    "autojoin": autojoin,
-                    "status": status,
-                    "affiliation": "unknown",
-                    "role": "unknown",
-                    "nicks": {}
-                }
-                bot.presence.joined_rooms[room_jid] = nick_name
-                joined.append(room_jid)
-            except Exception:
-                log.exception(f"[ROOMS] 🚪 Failed to join room {room_jid}")
+    failed = []
+
+    async def join_one(room_jid, nick_name, autojoin, status):
+        try:
+            _LEAVING_ROOMS.discard(room_jid)
+            await _join_muc_with_timeout(bot, muc, room_jid, nick_name)
+            JOINED_ROOMS[room_jid] = {
+                "nick": nick_name,
+                "autojoin": autojoin,
+                "status": status,
+                "affiliation": "unknown",
+                "role": "unknown",
+                "nicks": {},
+            }
+            bot.presence.joined_rooms[room_jid] = nick_name
+            joined.append(room_jid)
+        except Exception:
+            failed.append(room_jid)
+            log.exception("[ROOMS] 🚪 Failed to join room %s", room_jid)
+
+    # Join autojoin rooms concurrently. One unavailable MUC may take the full
+    # bounded join timeout, but it must not consume that timeout once per room
+    # or make the command hit its outer command-execution deadline.
+    attempts = [
+        join_one(room_jid, nick_name, autojoin, status)
+        for room_jid, nick_name, autojoin, status in rows
+        if autojoin
+    ]
+    if attempts:
+        await asyncio.gather(*attempts)
 
     bot.presence.broadcast()
 
-    log.info("[ROOMS] 🔄 Synchronization complete: joined=%d left=%d",
-             len(joined), len(left))
+    log.info(
+        "[ROOMS] 🔄 Synchronization complete: joined=%d left=%d failed=%d",
+        len(joined),
+        len(left),
+        len(failed),
+    )
     await audit_event(
         bot,
         "rooms_synced",
         actor=sender_jid,
         target="rooms",
-        details={"joined": len(joined), "left": len(left)},
+        details={"joined": len(joined), "left": len(left), "failed": len(failed)},
     )
 
     lines = ["🔄 Room synchronization complete"]
@@ -898,7 +918,9 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
         lines.append(f"🚶 Left: {', '.join(left)}")
     if joined:
         lines.append(f"🚪 Joined: {', '.join(joined)}")
-    if not joined and not left:
+    if failed:
+        lines.append(f"⚠️ Failed: {', '.join(failed)}")
+    if not joined and not left and not failed:
         lines.append("ℹ️ No changes required.")
 
     bot.reply(

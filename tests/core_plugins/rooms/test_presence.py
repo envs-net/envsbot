@@ -540,3 +540,46 @@ async def test_room_join_health_loop_uses_heartbeat_aware_wait(fake_bot, monkeyp
             rooms_lifecycle._ROOM_HEALTH_CHECK_INTERVAL_SECONDS,
         )
     ]
+
+@pytest.mark.asyncio
+async def test_rooms_sync_joins_autojoin_rooms_concurrently_and_reports_failures(
+    fake_bot, fake_msg
+):
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[
+            ("one@conf", "BotOne", True, "state1"),
+            ("two@conf", "BotTwo", True, "state2"),
+        ]
+    )
+    fake_bot.presence.joined_rooms = {}
+    rooms.JOINED_ROOMS.clear()
+
+    active = 0
+    peak_active = 0
+
+    async def bounded_join(_bot, _muc, room_jid, _nick):
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        if room_jid == "two@conf":
+            raise TimeoutError("unavailable")
+
+    with patch(
+        "core_plugins.rooms.commands._join_muc_with_timeout",
+        side_effect=bounded_join,
+    ):
+        await rooms.rooms_sync(fake_bot, "jid", "nick", [], fake_msg, False)
+
+    assert peak_active == 2
+    assert "one@conf" in rooms.JOINED_ROOMS
+    assert "two@conf" not in rooms.JOINED_ROOMS
+    text = fake_bot.reply.call_args.args[1]
+    assert "🚪 Joined: one@conf" in text
+    assert "⚠️ Failed: two@conf" in text
+
+
+def test_room_join_commands_allow_bounded_join_timeout_to_finish():
+    assert rooms.rooms_join._command_timeout_seconds == 45.0
+    assert rooms.rooms_sync._command_timeout_seconds == 45.0
