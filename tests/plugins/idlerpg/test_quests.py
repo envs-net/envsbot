@@ -139,7 +139,7 @@ def test_fail_quest_penalizes_only_quest_participants_and_records_stats():
     assert bob["next"] > 100
     assert bob["penalties"]["quest"] == bob["next"] - 100
     assert bob["stats"]["quest_failures"] == 1
-    assert "Alice, Bob receive a p15 penalty" in messages[0]
+    assert messages[0] == "🧭 The quest failed before the route was completed. Quest penalties added: Alice +17s, Bob +17s."
     assert carol["next"] == 100
     assert "quest" not in carol.get("penalties", {})
     assert carol["stats"].get("quest_failures", 0) == 0
@@ -178,7 +178,7 @@ def test_maybe_advance_grid_quest_without_route_waits_or_completes():
 
     assert quests._maybe_advance_grid_quest(room, "room@conf", quest, 500, messages) is True
     assert room["quest"] == {"active": False, "next_at": 500 + idlerpg.QUEST_INTERVAL}
-    assert messages[0] == "🧭 The grid quest had no route to complete. Alice receive a p15 penalty."
+    assert messages[0] == "🧭 The grid quest had no route to complete. Quest penalty added: Alice +47m 13s."
 
 
 def test_maybe_advance_grid_quest_advances_route_then_completes():
@@ -231,7 +231,7 @@ def test_maybe_advance_grid_quest_fails_expired_unfinished_route():
     assert room["quest"] == {"active": False, "next_at": 50 + idlerpg.QUEST_INTERVAL}
     assert alice["next"] > 100
     assert messages == [
-        "🧭 The quest failed before the route was completed. Alice receive a p15 penalty."
+        "🧭 The quest failed before the route was completed. Quest penalty added: Alice +17s."
     ]
 
 

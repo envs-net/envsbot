@@ -288,11 +288,13 @@ The bot supports both classic quest types:
 - **Grid quests**: four questers automatically walk toward a route containing
   `quest_grid_min_points` to `quest_grid_max_points` waypoints (2-3 by default)
   on the world map. If they do not finish before the configured deadline, only the
-  assigned questers receive a p15 quest penalty.
+  assigned questers receive a level-scaled quest penalty (base 15), and the
+  announcement shows the exact time added to each player.
 - **Time quests**: four questers must remain online and avoid message or logout
   penalties until a random 12-24h timer ends. Such a penalty against any
-  quester fails the quest, and only the assigned questers receive the p15 quest
-  penalty. Random battles and other game events may still change a quester's
+  quester fails the quest, and only the assigned questers receive the level-scaled
+  quest penalty (base 15). Random battles and other game events may still change a
+  quester's
   clock without failing the time quest. Logout grace applies, so short XMPP
   reconnects do not immediately destroy it.
 
@@ -803,7 +805,7 @@ full catalog with `,idlerpg achievements list`. Room owners/admins can use
 | `quest_grid_min_points` | `2` | Minimum number of route waypoints for a grid quest. |
 | `quest_grid_max_points` | `3` | Maximum number of route waypoints for a grid quest. |
 | `quest_min_duration` | `43200` | Minimum grid quest deadline in seconds. The default is 12 hours. |
-| `quest_max_duration` | `86400` | Maximum grid quest deadline in seconds. The default is 24 hours. If the route is not completed before the deadline, online players receive a p15 quest penalty. |
+| `quest_max_duration` | `86400` | Maximum grid quest deadline in seconds. The default is 24 hours. If the route is not completed before the deadline, assigned players receive a level-scaled quest penalty (base 15); the failure message shows the exact time added to each player. |
 | `quest_time_enabled` | `True` | Enable time-based idle endurance quests. |
 | `quest_time_weight` | `0.5` | Relative selection weight for time quests when both quest types are enabled. |
 | `quest_time_min_duration` | `43200` | Minimum time-based quest duration in seconds. The default is 12 hours. |

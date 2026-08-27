@@ -230,7 +230,9 @@ def _fail_quest(
         if isinstance(penalties, dict):
             penalties["quest"] = int(penalties.get("quest", 0) or 0) + changed
         _dep_leveling._inc_stat(player, "quest_failures", 1, room)
-        penalized.append(_dep_formatting._display_player(player))
+        penalized.append(
+            f"{_dep_formatting._display_player(player)} +{_dep_formatting._duration(changed)}"
+        )
     if detail:
         base = detail.rstrip(".") + "."
     elif quest_kind == "time":
@@ -238,7 +240,8 @@ def _fail_quest(
     else:
         base = "The quest failed before the route was completed."
     if penalized:
-        messages.append(f"🧭 {base} {', '.join(penalized)} receive a p15 penalty.")
+        label = "Quest penalty" if len(penalized) == 1 else "Quest penalties"
+        messages.append(f"🧭 {base} {label} added: {', '.join(penalized)}.")
     else:
         messages.append(f"🧭 {base}")
     room["quest"] = _inactive_quest_state(quest, now)
