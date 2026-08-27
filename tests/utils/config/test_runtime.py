@@ -410,6 +410,7 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
 
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
+    monkeypatch.setattr(translate, "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS", 5.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
@@ -418,6 +419,7 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
         {
             "translate_from": "en",
             "translate_to": "de",
+            "translate_provider_queue_timeout_seconds": 3,
             "translate_rate_limit_initial_seconds": 45,
             "translate_rate_limit_max_seconds": 600,
             "translate_rate_limit_backoff_multiplier": 1.5,
@@ -426,6 +428,7 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
 
     assert translate.TRANSLATE_FROM == "en"
     assert translate.TRANSLATE_TO == "de"
+    assert translate.TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS == 3
     assert translate.TRANSLATE_RATE_LIMIT_INITIAL_SECONDS == 45
     assert translate.TRANSLATE_RATE_LIMIT_MAX_SECONDS == 600
     assert translate.TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER == 1.5

@@ -157,6 +157,7 @@ def test_validate_config_accepts_translate_defaults_and_rejects_bad_types():
         {
             "translate_from": "en",
             "translate_to": "de",
+            "translate_provider_queue_timeout_seconds": 5,
             "translate_rate_limit_initial_seconds": 60,
             "translate_rate_limit_backoff_multiplier": 2.0,
             "translate_rate_limit_max_seconds": 900,

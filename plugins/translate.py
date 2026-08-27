@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.2.4",
+    "version": "0.2.5",
     "description": (
         "Translate text or replied-to messages with optional "
         "source-language auto-detection."
@@ -82,6 +82,10 @@ TRANSLATE_MAX_OUTPUT_LENGTH = max(
 TRANSLATE_MAX_RESPONSE_BYTES = max(
     4096,
     int(config.get("translate_max_response_bytes", 262144) or 262144),
+)
+TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS = max(
+    0.1,
+    float(config.get("translate_provider_queue_timeout_seconds", 5) or 5),
 )
 TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = max(
     1.0,
@@ -160,10 +164,17 @@ class TranslationRateLimitError(RuntimeError):
         super().__init__("translation provider is rate-limited")
 
 
+class TranslationProviderBusyError(RuntimeError):
+    """Raised when a command cannot obtain the serialized provider slot quickly."""
+
+
 @dataclass
 class _RateLimitState:
     until_monotonic: float = 0.0
     backoff_seconds: float = 0.0
+    total_429_count: int = 0
+    streak_429_count: int = 0
+    last_429_monotonic: float | None = None
 
 
 _RATE_LIMIT_STATE = _RateLimitState()
@@ -244,14 +255,27 @@ def _activate_rate_limit(
         TRANSLATE_RATE_LIMIT_MAX_SECONDS,
         max(1.0, backoff),
     )
+    now = _monotonic()
     _RATE_LIMIT_STATE.backoff_seconds = cooldown
-    _RATE_LIMIT_STATE.until_monotonic = _monotonic() + cooldown
+    _RATE_LIMIT_STATE.until_monotonic = now + cooldown
+    _RATE_LIMIT_STATE.total_429_count += 1
+    _RATE_LIMIT_STATE.streak_429_count += 1
+    _RATE_LIMIT_STATE.last_429_monotonic = now
     return cooldown, provider_retry_after
 
 
-def _reset_rate_limit_state() -> None:
+def _reset_rate_limit_backoff() -> None:
+    """End the active 429 streak while retaining process-local history."""
     _RATE_LIMIT_STATE.backoff_seconds = 0.0
     _RATE_LIMIT_STATE.until_monotonic = 0.0
+    _RATE_LIMIT_STATE.streak_429_count = 0
+
+
+def _reset_rate_limit_state() -> None:
+    """Reset cooldown and process-local diagnostics (primarily for tests)."""
+    _reset_rate_limit_backoff()
+    _RATE_LIMIT_STATE.total_429_count = 0
+    _RATE_LIMIT_STATE.last_429_monotonic = None
 
 
 def _rate_limit_wait_text(seconds: float) -> str:
@@ -269,6 +293,25 @@ def _raise_if_rate_limited() -> None:
     remaining = _rate_limit_remaining()
     if remaining > 0:
         raise TranslationRateLimitError(remaining)
+
+
+def _last_rate_limit_age(*, now: float | None = None) -> float | None:
+    last = _RATE_LIMIT_STATE.last_429_monotonic
+    if last is None:
+        return None
+    current = _monotonic() if now is None else float(now)
+    return max(0.0, current - last)
+
+
+def _elapsed_text(seconds: float) -> str:
+    elapsed = max(0, int(seconds))
+    if elapsed < 60:
+        return f"{elapsed}s"
+    minutes, secs = divmod(elapsed, 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m" if minutes else f"{hours}h"
 
 
 def _prefix() -> str:
@@ -549,7 +592,18 @@ async def translate_text(
         }
     )
     _raise_if_rate_limited()
-    async with _provider_lock():
+    lock = _provider_lock()
+    try:
+        await asyncio.wait_for(
+            lock.acquire(),
+            timeout=TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        raise TranslationProviderBusyError(
+            "translation provider request queue is busy"
+        ) from None
+
+    try:
         # Another command may have received HTTP 429 while this one was waiting
         # for the provider lock. Re-check before sending anything upstream.
         _raise_if_rate_limited()
@@ -575,8 +629,11 @@ async def translate_text(
             )
             raise TranslationRateLimitError(cooldown) from None
         else:
-            # A successful provider response ends the current 429 failure streak.
-            _reset_rate_limit_state()
+            # A successful provider response ends the current 429 failure streak
+            # while keeping the process-local 429 history visible to diagnostics.
+            _reset_rate_limit_backoff()
+    finally:
+        lock.release()
 
     data = result.data
     return TranslationResult(
@@ -710,6 +767,13 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
             mention=False,
         )
         return
+    except TranslationProviderBusyError:
+        bot.reply(
+            msg,
+            "🟡 Translation service is busy. Please try again shortly.",
+            mention=False,
+        )
+        return
     except (TimeoutError, aiohttp.ClientError, UnsafeFetchURL) as exc:
         log.warning(
             "[TRANSLATE] Translation request failed error=%s status=%s",
@@ -811,6 +875,12 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
         if remaining > 0
         else "ready"
     )
+    history = f"429_count={_RATE_LIMIT_STATE.total_429_count}"
+    age = _last_rate_limit_age()
+    if age is not None:
+        history += f", last_429={_elapsed_text(age)} ago"
+    if _RATE_LIMIT_STATE.streak_429_count > 0:
+        history += f", 429_streak={_RATE_LIMIT_STATE.streak_429_count}"
     icon = "⚠️" if remaining > 0 else "✅"
     if room_jid:
         feature = await get_room_feature(bot, str(room_jid), "translate")
@@ -818,13 +888,17 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
         return [
             f"{icon} Translate for {room_jid}: {state}, provider=google, "
             f"default_from={default_from}, default_to={default_to}, "
-            f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, rate_limit={rate_limit}"
+            f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
+            f"queue_wait={TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS:g}s, "
+            f"rate_limit={rate_limit}, {history}"
         ]
     return [
         f"{icon} Translate: provider=google, "
         f"default_from={default_from}, default_to={default_to}, "
         f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
-        f"timeout={TRANSLATE_TIMEOUT_SECONDS:g}s, rate_limit={rate_limit}"
+        f"timeout={TRANSLATE_TIMEOUT_SECONDS:g}s, "
+        f"queue_wait={TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS:g}s, "
+        f"rate_limit={rate_limit}, {history}"
     ]
 
 

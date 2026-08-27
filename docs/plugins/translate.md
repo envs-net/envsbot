@@ -69,17 +69,18 @@ Reply targets are resolved through the shared persistent message cache. Native X
 
 Translate uses Google's public, unofficial translation endpoint. HTTP 429 responses activate a shared in-process cooldown instead of immediately sending more provider requests. The bot honors a longer `Retry-After` response when present, applies bounded exponential backoff to repeated 429 responses, and resets the streak after the next successful translation.
 
-Translation provider requests are serialized. Commands that were already waiting when another request receives HTTP 429 are stopped before they can send another request upstream. While the cooldown is active, users receive a yellow rate-limit message with the remaining wait time and no HTTP request is made.
+Translation provider requests are serialized. A command waits only a bounded time for that provider slot; if another translation is still using it, the queued command returns `🟡 Translation service is busy. Please try again shortly.` without sending another request upstream. Commands that were already waiting when another request receives HTTP 429 are likewise stopped before they can send another request. While the cooldown is active, users receive a yellow rate-limit message with the remaining wait time and no HTTP request is made.
 
 The defaults are:
 
 ```python
+TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS = 5
 TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = 60
 TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
 TRANSLATE_RATE_LIMIT_MAX_SECONDS = 900
 ```
 
-The resulting fallback cooldown sequence is 60s, 120s, 240s, 480s, then 900s. A provider `Retry-After` value can extend a step up to the configured maximum. `,doctor` reports whether Translate is ready or currently in cooldown. These settings support live config reload; an already active cooldown keeps its current deadline.
+The resulting fallback cooldown sequence is 60s, 120s, 240s, 480s, then 900s. A provider `Retry-After` value can extend a step up to the configured maximum. `,doctor` reports the queue-wait limit, whether Translate is ready or currently in cooldown, the number of HTTP 429 responses seen since process start, the age of the most recent 429, and the current 429 streak. These settings support live config reload; an already active cooldown keeps its current deadline.
 
 ## Room setting
 

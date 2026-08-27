@@ -469,6 +469,13 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
                 4096,
                 _to_int(cfg.get("translate_max_response_bytes") or 262144, 262144),
             ),
+            "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS": max(
+                0.1,
+                _to_float(
+                    cfg.get("translate_provider_queue_timeout_seconds") or 5,
+                    5,
+                ),
+            ),
             "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS": max(
                 1.0,
                 _to_float(

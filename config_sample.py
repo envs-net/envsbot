@@ -675,6 +675,10 @@ TRANSLATE_MAX_OUTPUT_LENGTH = 6000
 # Maximum response bytes accepted from the translation provider.
 TRANSLATE_MAX_RESPONSE_BYTES = 262144
 
+# Maximum time a translation command waits for the serialized provider request slot
+# before returning a busy response, limiting queue buildup behind slow provider calls.
+TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS = 5
+
 # Local cooldown after the first HTTP 429 from the translation provider. Retry-After
 # is honored when it requests a longer delay.
 TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = 60

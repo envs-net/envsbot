@@ -46,6 +46,7 @@ def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "FALLBACK_NAMESPACE", "translate-test-fallback")
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
+    monkeypatch.setattr(translate, "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS", 5.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
@@ -281,6 +282,9 @@ async def test_translate_rate_limit_backoff_grows_and_success_resets(monkeypatch
     assert result.text == "Hallo"
     assert translate._rate_limit_remaining() == 0
     assert translate._RATE_LIMIT_STATE.backoff_seconds == 0
+    assert translate._RATE_LIMIT_STATE.total_429_count == 2
+    assert translate._RATE_LIMIT_STATE.streak_429_count == 0
+    assert translate._RATE_LIMIT_STATE.last_429_monotonic is not None
 
     fetcher.side_effect = _rate_limit_error()
     now += 1
@@ -289,6 +293,8 @@ async def test_translate_rate_limit_backoff_grows_and_success_resets(monkeypatch
             "again", target_language="de", fetcher=fetcher
         )
     assert after_success.value.retry_after_seconds == 60
+    assert translate._RATE_LIMIT_STATE.total_429_count == 3
+    assert translate._RATE_LIMIT_STATE.streak_429_count == 1
 
 
 @pytest.mark.asyncio
@@ -335,6 +341,36 @@ async def test_concurrent_translation_waiter_is_stopped_after_first_429(monkeypa
 
     assert calls == 1
     assert all(isinstance(item, translate.TranslationRateLimitError) for item in results)
+
+
+@pytest.mark.asyncio
+async def test_translate_provider_queue_wait_is_bounded(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+    monkeypatch.setattr(translate, "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS", 0.01)
+
+    async def fetcher(url, **kwargs):
+        nonlocal calls
+        del url, kwargs
+        calls += 1
+        started.set()
+        await release.wait()
+        return SimpleNamespace(
+            data=[[["Hallo", "Hello", None, None]], None, "en"]
+        )
+
+    first = asyncio.create_task(
+        translate.translate_text("one", target_language="de", fetcher=fetcher)
+    )
+    await started.wait()
+
+    with pytest.raises(translate.TranslationProviderBusyError):
+        await translate.translate_text("two", target_language="de", fetcher=fetcher)
+
+    assert calls == 1
+    release.set()
+    assert (await first).text == "Hallo"
 
 
 @pytest.mark.asyncio
@@ -965,6 +1001,33 @@ async def test_translate_command_reports_rate_limit_without_generic_failure(monk
 
 
 @pytest.mark.asyncio
+async def test_translate_command_reports_busy_provider_queue(monkeypatch):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(",tr de hello", room="alice@example.org", msg_type="chat")
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_text",
+        AsyncMock(side_effect=translate.TranslationProviderBusyError()),
+    )
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["de", "hello"],
+        msg,
+        False,
+    )
+
+    output = bot.reply.call_args.args[1]
+    assert "Translation service is busy" in output
+    assert "request failed" not in output
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("error", [asyncio.TimeoutError(), aiohttp.ClientError()])
 async def test_translate_command_handles_request_failure(monkeypatch, error):
     bot = SimpleNamespace(reply=Mock())
@@ -1128,7 +1191,9 @@ async def test_doctor_and_on_load(monkeypatch):
     assert global_lines[0].startswith("✅ Translate:")
     assert "default_from=auto" in global_lines[0]
     assert "default_to=none" in global_lines[0]
+    assert "queue_wait=5s" in global_lines[0]
     assert "rate_limit=ready" in global_lines[0]
+    assert "429_count=0" in global_lines[0]
 
     monkeypatch.setattr(translate, "TRANSLATE_TO", "invalid-target")
     assert (await translate.doctor(bot))[0].startswith(
@@ -1145,11 +1210,19 @@ async def test_doctor_and_on_load(monkeypatch):
     assert "enabled" in room_lines[0]
     assert "default_from=auto" in room_lines[0]
     assert "default_to=none" in room_lines[0]
+    assert "queue_wait=5s" in room_lines[0]
 
-    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "until_monotonic", translate._monotonic() + 30)
+    now = translate._monotonic()
+    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "until_monotonic", now + 30)
+    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "total_429_count", 3)
+    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "streak_429_count", 2)
+    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "last_429_monotonic", now - 15)
     cooldown_lines = await translate.doctor(bot)
     assert cooldown_lines[0].startswith("⚠️ Translate:")
     assert "rate_limit=cooldown" in cooldown_lines[0]
+    assert "429_count=3" in cooldown_lines[0]
+    assert "last_429=15s ago" in cooldown_lines[0]
+    assert "429_streak=2" in cooldown_lines[0]
 
 
 @pytest.mark.asyncio
