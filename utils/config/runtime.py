@@ -469,6 +469,33 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
                 4096,
                 _to_int(cfg.get("translate_max_response_bytes") or 262144, 262144),
             ),
+            "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS": max(
+                1.0,
+                _to_float(
+                    cfg.get("translate_rate_limit_initial_seconds") or 60,
+                    60,
+                ),
+            ),
+            "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER": max(
+                1.0,
+                _to_float(
+                    cfg.get("translate_rate_limit_backoff_multiplier") or 2.0,
+                    2.0,
+                ),
+            ),
+            "TRANSLATE_RATE_LIMIT_MAX_SECONDS": max(
+                max(
+                    1.0,
+                    _to_float(
+                        cfg.get("translate_rate_limit_initial_seconds") or 60,
+                        60,
+                    ),
+                ),
+                _to_float(
+                    cfg.get("translate_rate_limit_max_seconds") or 900,
+                    900,
+                ),
+            ),
         },
         "plugins.karma": {
             "KARMA_DELAY_SECONDS": _to_int(cfg.get("karma_delay_seconds") or 60, 60),

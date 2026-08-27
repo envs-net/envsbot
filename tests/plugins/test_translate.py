@@ -46,6 +46,11 @@ def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "FALLBACK_NAMESPACE", "translate-test-fallback")
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
+    monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
+    monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
+    monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
+    translate._reset_rate_limit_state()
+    translate._PROVIDER_LOCKS.clear()
     message_cache._PROCESSED_STANZAS.clear()
     message_cache._PROCESSED_STANZA_ORDER.clear()
 
@@ -192,6 +197,144 @@ async def test_translate_text_builds_provider_request_and_parses_result():
     assert query["q"] == ["Hello, world!"]
     assert calls[0][1]["max_redirects"] == 0
     assert calls[0][1]["allow_private"] is False
+
+
+def test_retry_after_parses_seconds_and_http_date():
+    now = translate.datetime(2026, 8, 26, 20, 0, tzinfo=translate.UTC)
+
+    assert translate._retry_after_seconds({"Retry-After": "75"}, now=now) == 75
+    assert translate._retry_after_seconds(
+        {"Retry-After": "Wed, 26 Aug 2026 20:02:00 GMT"},
+        now=now,
+    ) == 120
+    assert translate._retry_after_seconds({"Retry-After": "invalid"}, now=now) is None
+
+
+def _rate_limit_error(*, retry_after: str | None = None):
+    headers = {} if retry_after is None else {"Retry-After": retry_after}
+    return aiohttp.ClientResponseError(
+        request_info=SimpleNamespace(real_url="https://translate.googleapis.com/"),
+        history=(),
+        status=429,
+        message="Too Many Requests",
+        headers=headers,
+    )
+
+
+@pytest.mark.asyncio
+async def test_translate_text_429_honors_retry_after_and_suppresses_requests(
+    monkeypatch, caplog
+):
+    now = 1000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    fetcher = AsyncMock(side_effect=_rate_limit_error(retry_after="120"))
+
+    with caplog.at_level("WARNING", logger=translate.__name__):
+        with pytest.raises(translate.TranslationRateLimitError) as exc_info:
+            await translate.translate_text(
+                "Hello",
+                target_language="de",
+                fetcher=fetcher,
+            )
+
+    assert exc_info.value.retry_after_seconds == 120
+    assert translate._rate_limit_remaining() == 120
+    assert "status=429" in caplog.text
+    assert "cooldown_seconds=120.0" in caplog.text
+    assert "retry_after_seconds=120.0" in caplog.text
+
+    with pytest.raises(translate.TranslationRateLimitError) as cooldown:
+        await translate.translate_text(
+            "Second request",
+            target_language="de",
+            fetcher=fetcher,
+        )
+
+    assert cooldown.value.retry_after_seconds == 120
+    assert fetcher.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_translate_rate_limit_backoff_grows_and_success_resets(monkeypatch):
+    now = 2000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    fetcher = AsyncMock(side_effect=_rate_limit_error())
+
+    with pytest.raises(translate.TranslationRateLimitError) as first:
+        await translate.translate_text("one", target_language="de", fetcher=fetcher)
+    assert first.value.retry_after_seconds == 60
+
+    now += 61
+    with pytest.raises(translate.TranslationRateLimitError) as second:
+        await translate.translate_text("two", target_language="de", fetcher=fetcher)
+    assert second.value.retry_after_seconds == 120
+
+    now += 121
+    fetcher.side_effect = None
+    fetcher.return_value = SimpleNamespace(
+        data=[[["Hallo", "Hello", None, None]], None, "en"]
+    )
+    result = await translate.translate_text(
+        "Hello", target_language="de", fetcher=fetcher
+    )
+
+    assert result.text == "Hallo"
+    assert translate._rate_limit_remaining() == 0
+    assert translate._RATE_LIMIT_STATE.backoff_seconds == 0
+
+    fetcher.side_effect = _rate_limit_error()
+    now += 1
+    with pytest.raises(translate.TranslationRateLimitError) as after_success:
+        await translate.translate_text(
+            "again", target_language="de", fetcher=fetcher
+        )
+    assert after_success.value.retry_after_seconds == 60
+
+
+@pytest.mark.asyncio
+async def test_translate_rate_limit_backoff_is_capped(monkeypatch):
+    now = 3000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
+    monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 90.0)
+    monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
+    fetcher = AsyncMock(side_effect=_rate_limit_error(retry_after="600"))
+
+    with pytest.raises(translate.TranslationRateLimitError) as exc_info:
+        await translate.translate_text("Hello", target_language="de", fetcher=fetcher)
+
+    assert exc_info.value.retry_after_seconds == 90
+    assert translate._RATE_LIMIT_STATE.backoff_seconds == 90
+
+
+@pytest.mark.asyncio
+async def test_concurrent_translation_waiter_is_stopped_after_first_429(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def fetcher(url, **kwargs):
+        nonlocal calls
+        del url, kwargs
+        calls += 1
+        started.set()
+        await release.wait()
+        raise _rate_limit_error()
+
+    first = asyncio.create_task(
+        translate.translate_text("one", target_language="de", fetcher=fetcher)
+    )
+    await started.wait()
+    second = asyncio.create_task(
+        translate.translate_text("two", target_language="de", fetcher=fetcher)
+    )
+    await asyncio.sleep(0)
+    release.set()
+
+    results = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert calls == 1
+    assert all(isinstance(item, translate.TranslationRateLimitError) for item in results)
 
 
 @pytest.mark.asyncio
@@ -794,6 +937,34 @@ async def test_translate_command_handles_provider_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_translate_command_reports_rate_limit_without_generic_failure(monkeypatch):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(",tr de hello", room="alice@example.org", msg_type="chat")
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_text",
+        AsyncMock(side_effect=translate.TranslationRateLimitError(75)),
+    )
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["de", "hello"],
+        msg,
+        False,
+    )
+
+    output = bot.reply.call_args.args[1]
+    assert "temporarily rate-limited" in output
+    assert "1m 15s" in output
+    assert "request failed" not in output
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("error", [asyncio.TimeoutError(), aiohttp.ClientError()])
 async def test_translate_command_handles_request_failure(monkeypatch, error):
     bot = SimpleNamespace(reply=Mock())
@@ -957,6 +1128,7 @@ async def test_doctor_and_on_load(monkeypatch):
     assert global_lines[0].startswith("✅ Translate:")
     assert "default_from=auto" in global_lines[0]
     assert "default_to=none" in global_lines[0]
+    assert "rate_limit=ready" in global_lines[0]
 
     monkeypatch.setattr(translate, "TRANSLATE_TO", "invalid-target")
     assert (await translate.doctor(bot))[0].startswith(
@@ -973,6 +1145,11 @@ async def test_doctor_and_on_load(monkeypatch):
     assert "enabled" in room_lines[0]
     assert "default_from=auto" in room_lines[0]
     assert "default_to=none" in room_lines[0]
+
+    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "until_monotonic", translate._monotonic() + 30)
+    cooldown_lines = await translate.doctor(bot)
+    assert cooldown_lines[0].startswith("⚠️ Translate:")
+    assert "rate_limit=cooldown" in cooldown_lines[0]
 
 
 @pytest.mark.asyncio

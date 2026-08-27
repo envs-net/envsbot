@@ -65,6 +65,22 @@ The command works in public rooms, MUC private messages and normal direct chats.
 
 Reply targets are resolved through the shared persistent message cache. Native XEP-0461 replies and client-provided visible fallback quotes are supported in all three message contexts.
 
+## Provider rate limits
+
+Translate uses Google's public, unofficial translation endpoint. HTTP 429 responses activate a shared in-process cooldown instead of immediately sending more provider requests. The bot honors a longer `Retry-After` response when present, applies bounded exponential backoff to repeated 429 responses, and resets the streak after the next successful translation.
+
+Translation provider requests are serialized. Commands that were already waiting when another request receives HTTP 429 are stopped before they can send another request upstream. While the cooldown is active, users receive a yellow rate-limit message with the remaining wait time and no HTTP request is made.
+
+The defaults are:
+
+```python
+TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = 60
+TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
+TRANSLATE_RATE_LIMIT_MAX_SECONDS = 900
+```
+
+The resulting fallback cooldown sequence is 60s, 120s, 240s, 480s, then 900s. A provider `Retry-After` value can extend a step up to the configured maximum. `,doctor` reports whether Translate is ready or currently in cooldown. These settings support live config reload; an already active cooldown keeps its current deadline.
+
 ## Room setting
 
 Public-room and MUC-PM use is controlled per room. Inside the room or a MUC PM, use:

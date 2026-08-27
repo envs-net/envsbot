@@ -672,8 +672,20 @@ TRANSLATE_MAX_INPUT_LENGTH = 2000
 # Translate max output length.
 TRANSLATE_MAX_OUTPUT_LENGTH = 6000
 
-# Translate max response bytes.
+# Maximum response bytes accepted from the translation provider.
 TRANSLATE_MAX_RESPONSE_BYTES = 262144
+
+# Local cooldown after the first HTTP 429 from the translation provider. Retry-After
+# is honored when it requests a longer delay.
+TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = 60
+
+# Multiplier applied when the provider returns another HTTP 429 after a cooldown
+# expires.
+TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
+
+# Maximum local translation cooldown in seconds. Provider Retry-After values are
+# capped at this limit.
+TRANSLATE_RATE_LIMIT_MAX_SECONDS = 900
 
 
 # ================= KARMA / TELL =================

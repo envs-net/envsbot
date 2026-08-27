@@ -58,6 +58,9 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.TRANSLATE_MAX_INPUT_LENGTH > 0
     assert sample.TRANSLATE_MAX_OUTPUT_LENGTH > 0
     assert sample.TRANSLATE_MAX_RESPONSE_BYTES > 0
+    assert sample.TRANSLATE_RATE_LIMIT_INITIAL_SECONDS == 60
+    assert sample.TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER == 2.0
+    assert sample.TRANSLATE_RATE_LIMIT_MAX_SECONDS == 900
     assert sample.MESSAGE_CACHE_SIZE > 0
     assert sample.XKCD_CHECK_INTERVAL > 0
     assert sample.ROOM_PLUGIN_DEFAULTS == {

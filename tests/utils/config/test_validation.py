@@ -157,6 +157,9 @@ def test_validate_config_accepts_translate_defaults_and_rejects_bad_types():
         {
             "translate_from": "en",
             "translate_to": "de",
+            "translate_rate_limit_initial_seconds": 60,
+            "translate_rate_limit_backoff_multiplier": 2.0,
+            "translate_rate_limit_max_seconds": 900,
         }
     )
 
@@ -164,6 +167,16 @@ def test_validate_config_accepts_translate_defaults_and_rejects_bad_types():
         config_mod.validate_config({"translate_to": 123})
 
     assert "translate_to: expected str" in str(exc.value)
+
+    with pytest.raises(config_mod.ConfigError) as exc:
+        config_mod.validate_config(
+            {
+                "translate_rate_limit_initial_seconds": 120,
+                "translate_rate_limit_max_seconds": 60,
+            }
+        )
+
+    assert "must be greater than or equal" in str(exc.value)
 
 
 def test_validate_startup_config_rejects_invalid_bot_jid():

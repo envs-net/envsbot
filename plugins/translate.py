@@ -22,9 +22,15 @@ existing envsbot XEP-0461 reply and stanza cache helpers.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import math
+import time
+import weakref
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from functools import partial
 from typing import Any
 from urllib.parse import urlencode
@@ -44,7 +50,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "description": (
         "Translate text or replied-to messages with optional "
         "source-language auto-detection."
@@ -76,6 +82,18 @@ TRANSLATE_MAX_OUTPUT_LENGTH = max(
 TRANSLATE_MAX_RESPONSE_BYTES = max(
     4096,
     int(config.get("translate_max_response_bytes", 262144) or 262144),
+)
+TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = max(
+    1.0,
+    float(config.get("translate_rate_limit_initial_seconds", 60) or 60),
+)
+TRANSLATE_RATE_LIMIT_MAX_SECONDS = max(
+    TRANSLATE_RATE_LIMIT_INITIAL_SECONDS,
+    float(config.get("translate_rate_limit_max_seconds", 900) or 900),
+)
+TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = max(
+    1.0,
+    float(config.get("translate_rate_limit_backoff_multiplier", 2.0) or 2.0),
 )
 TRANSLATE_FROM = str(config.get("translate_from", "auto") or "auto")
 _configured_translate_to = config.get("translate_to")
@@ -132,6 +150,125 @@ class TranslationUsageError(ValueError):
 
 class TranslationProviderError(RuntimeError):
     """Raised when the remote translation provider returns unusable data."""
+
+
+class TranslationRateLimitError(RuntimeError):
+    """Raised when the provider is in a local or upstream rate-limit cooldown."""
+
+    def __init__(self, retry_after_seconds: float):
+        self.retry_after_seconds = max(1.0, float(retry_after_seconds))
+        super().__init__("translation provider is rate-limited")
+
+
+@dataclass
+class _RateLimitState:
+    until_monotonic: float = 0.0
+    backoff_seconds: float = 0.0
+
+
+_RATE_LIMIT_STATE = _RateLimitState()
+_PROVIDER_LOCKS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, asyncio.Lock
+] = weakref.WeakKeyDictionary()
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _provider_lock() -> asyncio.Lock:
+    """Return one serialization lock per event loop."""
+    loop = asyncio.get_running_loop()
+    lock = _PROVIDER_LOCKS.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _PROVIDER_LOCKS[loop] = lock
+    return lock
+
+
+def _retry_after_seconds(
+    headers: object | None,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    """Parse an HTTP Retry-After value as delta seconds or an HTTP date."""
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if not callable(getter):
+        return None
+    value = getter("Retry-After")
+    if value is None:
+        value = getter("retry-after")
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=UTC)
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    return max(0.0, (retry_at - current).total_seconds())
+
+
+def _rate_limit_remaining(*, now: float | None = None) -> float:
+    current = _monotonic() if now is None else float(now)
+    return max(0.0, _RATE_LIMIT_STATE.until_monotonic - current)
+
+
+def _activate_rate_limit(
+    headers: object | None = None,
+) -> tuple[float, float | None]:
+    """Advance the local backoff and return (cooldown, provider Retry-After)."""
+    if _RATE_LIMIT_STATE.backoff_seconds > 0:
+        backoff = (
+            _RATE_LIMIT_STATE.backoff_seconds
+            * TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER
+        )
+    else:
+        backoff = TRANSLATE_RATE_LIMIT_INITIAL_SECONDS
+
+    provider_retry_after = _retry_after_seconds(headers)
+    if provider_retry_after is not None:
+        backoff = max(backoff, provider_retry_after)
+
+    cooldown = min(
+        TRANSLATE_RATE_LIMIT_MAX_SECONDS,
+        max(1.0, backoff),
+    )
+    _RATE_LIMIT_STATE.backoff_seconds = cooldown
+    _RATE_LIMIT_STATE.until_monotonic = _monotonic() + cooldown
+    return cooldown, provider_retry_after
+
+
+def _reset_rate_limit_state() -> None:
+    _RATE_LIMIT_STATE.backoff_seconds = 0.0
+    _RATE_LIMIT_STATE.until_monotonic = 0.0
+
+
+def _rate_limit_wait_text(seconds: float) -> str:
+    remaining = max(1, int(math.ceil(seconds)))
+    if remaining < 60:
+        return f"{remaining}s"
+    minutes, secs = divmod(remaining, 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+
+
+def _raise_if_rate_limited() -> None:
+    remaining = _rate_limit_remaining()
+    if remaining > 0:
+        raise TranslationRateLimitError(remaining)
 
 
 def _prefix() -> str:
@@ -411,15 +548,36 @@ async def translate_text(
             "tl": target,
         }
     )
-    result = await fetcher(
-        f"{GOOGLE_TRANSLATE_ENDPOINT}?{query}",
-        timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
-        max_redirects=0,
-        max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
-        allow_private=False,
-        validator=passthrough_validator,
-        headers={"Accept": "application/json"},
-    )
+    _raise_if_rate_limited()
+    async with _provider_lock():
+        # Another command may have received HTTP 429 while this one was waiting
+        # for the provider lock. Re-check before sending anything upstream.
+        _raise_if_rate_limited()
+        try:
+            result = await fetcher(
+                f"{GOOGLE_TRANSLATE_ENDPOINT}?{query}",
+                timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+                max_redirects=0,
+                max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+                allow_private=False,
+                validator=passthrough_validator,
+                headers={"Accept": "application/json"},
+            )
+        except aiohttp.ClientResponseError as exc:
+            if exc.status != 429:
+                raise
+            cooldown, retry_after = _activate_rate_limit(exc.headers)
+            log.warning(
+                "[TRANSLATE] Provider rate limited request status=429 "
+                "cooldown_seconds=%.1f retry_after_seconds=%s",
+                cooldown,
+                "n/a" if retry_after is None else f"{retry_after:.1f}",
+            )
+            raise TranslationRateLimitError(cooldown) from None
+        else:
+            # A successful provider response ends the current 429 failure streak.
+            _reset_rate_limit_state()
+
     data = result.data
     return TranslationResult(
         text=_clip_output(_translation_text_from_payload(data)),
@@ -544,6 +702,14 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
     except TranslationUsageError as exc:
         bot.reply(msg, f"🟡️ {exc}\nUsage: {_usage()}", mention=False)
         return
+    except TranslationRateLimitError as exc:
+        bot.reply(
+            msg,
+            "🟡 Translation service is temporarily rate-limited. "
+            f"Try again in {_rate_limit_wait_text(exc.retry_after_seconds)}.",
+            mention=False,
+        )
+        return
     except (TimeoutError, aiohttp.ClientError, UnsafeFetchURL) as exc:
         log.warning(
             "[TRANSLATE] Translation request failed error=%s status=%s",
@@ -639,19 +805,26 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
     except TranslationUsageError as exc:
         return [f"❌ Translate: invalid defaults: {exc}"]
 
+    remaining = _rate_limit_remaining()
+    rate_limit = (
+        f"cooldown {_rate_limit_wait_text(remaining)}"
+        if remaining > 0
+        else "ready"
+    )
+    icon = "⚠️" if remaining > 0 else "✅"
     if room_jid:
         feature = await get_room_feature(bot, str(room_jid), "translate")
         state = "enabled" if feature.enabled else "disabled"
         return [
-            f"✅ Translate for {room_jid}: {state}, provider=google, "
+            f"{icon} Translate for {room_jid}: {state}, provider=google, "
             f"default_from={default_from}, default_to={default_to}, "
-            f"max_input={TRANSLATE_MAX_INPUT_LENGTH}"
+            f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, rate_limit={rate_limit}"
         ]
     return [
-        "✅ Translate: provider=google, "
+        f"{icon} Translate: provider=google, "
         f"default_from={default_from}, default_to={default_to}, "
         f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
-        f"timeout={TRANSLATE_TIMEOUT_SECONDS:g}s"
+        f"timeout={TRANSLATE_TIMEOUT_SECONDS:g}s, rate_limit={rate_limit}"
     ]
 
 

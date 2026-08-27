@@ -182,6 +182,22 @@ def _validate_avatar(cfg, errors, warnings):
             warnings.append(f"avatar: file does not exist: {avatar_path}")
 
 
+def _validate_translate_rate_limit(cfg, errors):
+    initial = cfg.get("translate_rate_limit_initial_seconds")
+    maximum = cfg.get("translate_rate_limit_max_seconds")
+    if (
+        isinstance(initial, (int, float))
+        and not isinstance(initial, bool)
+        and isinstance(maximum, (int, float))
+        and not isinstance(maximum, bool)
+        and maximum < initial
+    ):
+        errors.append(
+            "translate_rate_limit_max_seconds: must be greater than or equal to "
+            "translate_rate_limit_initial_seconds"
+        )
+
+
 def _validate_backup_schedule(cfg, warnings):
     """Warn when periodic backup cadence cannot satisfy the age alert."""
     interval = cfg.get("backup_interval_hours")
@@ -367,6 +383,7 @@ def validate_config(cfg, require_required_keys=False):
     _validate_admin_report(cfg, errors)
     _validate_avatar(cfg, errors, [])
     _validate_numeric_ranges(cfg, errors)
+    _validate_translate_rate_limit(cfg, errors)
     _validate_room_plugin_defaults(cfg, errors)
     _validate_nested_config(cfg, errors)
 
