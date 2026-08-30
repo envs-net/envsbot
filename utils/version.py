@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.8.2"
+__version__ = "1.8.3"
 
 
 def normalized_version(version: str | None = None) -> str:
