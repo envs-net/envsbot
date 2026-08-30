@@ -84,10 +84,7 @@ def _write_version_state(path: str | Path, state: dict[str, Any]) -> None:
             os.fsync(handle.fileno())
         os.replace(tmp_path, state_path)
     finally:
-        try:
-            tmp_path.unlink()
-        except FileNotFoundError:
-            pass
+        tmp_path.unlink(missing_ok=True)
 
 
 def _version_notification_target(config_obj: Any) -> str:
