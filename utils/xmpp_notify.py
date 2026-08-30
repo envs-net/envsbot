@@ -62,33 +62,97 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
-def _iter_disco_features(info: Any):
-    """Yield disco features from different Slixmpp response shapes."""
-    for candidate in (
-        info,
-        _safe_get(info, "disco_info"),
-        _safe_get(info, "features"),
-    ):
-        if candidate is None:
-            continue
+def _stanza_interfaces(value: Any) -> set[str] | None:
+    """Return declared stanza interfaces, or ``None`` for non-stanza objects."""
+    interfaces = getattr(value, "interfaces", None)
+    if interfaces is None:
+        return None
+    try:
+        return {str(item) for item in interfaces}
+    except TypeError:
+        return set()
+
+
+def _safe_get_stanza_plugin(stanza: Any, plugin_name: str) -> Any:
+    """Return a registered stanza plugin without probing unknown interfaces."""
+    get_plugin = getattr(stanza, "get_plugin", None)
+    if not callable(get_plugin):
+        return None
+    try:
+        return get_plugin(plugin_name, check=True)
+    except TypeError:
         try:
-            features = candidate["features"]
+            return get_plugin(plugin_name)
         except Exception:
-            features = getattr(candidate, "features", None)
+            return None
+    except Exception:
+        return None
+
+
+def _disco_field(candidate: Any, key: str) -> Any:
+    """Read a disco field without probing unsupported Slixmpp interfaces."""
+    if isinstance(candidate, dict):
+        return candidate.get(key)
+
+    interfaces = _stanza_interfaces(candidate)
+    if interfaces is not None:
+        if key not in interfaces:
+            return None
+        try:
+            return candidate[key]
+        except Exception:
+            return None
+
+    return getattr(candidate, key, None)
+
+
+def _disco_payloads(info: Any):
+    """Yield disco#info payloads from mapping, stanza and test-double shapes."""
+    if isinstance(info, dict):
+        nested = info.get("disco_info")
+        if nested is not None:
+            yield nested
+        if "features" in info or "identities" in info:
+            yield info
+        return
+
+    interfaces = _stanza_interfaces(info)
+    if interfaces is not None:
+        # A local XEP-0030 lookup may already return the DiscoInfo stanza.
+        if {"features", "identities"} & interfaces:
+            yield info
+            return
+
+        # A remote lookup returns an IQ stanza. Use Slixmpp's plugin getter
+        # instead of probing ``info["features"]``/``info["identities"]``;
+        # unsupported IQ interfaces otherwise produce noisy root warnings.
+        disco_info = _safe_get_stanza_plugin(info, "disco_info")
+        if disco_info is not None:
+            yield disco_info
+        return
+
+    # Lightweight test doubles and compatibility objects may expose the
+    # DiscoInfo payload or its fields as normal Python attributes.
+    nested = getattr(info, "disco_info", None)
+    if nested is not None:
+        yield nested
+    if _disco_field(info, "features") or _disco_field(info, "identities"):
+        yield info
+
+
+def _iter_disco_features(info: Any):
+    """Yield disco features from supported response payloads only."""
+    for candidate in _disco_payloads(info):
+        features = _disco_field(candidate, "features")
         if features:
             for feature in features:
                 yield str(feature)
 
 
 def _iter_disco_identities(info: Any):
-    """Yield disco identities from different Slixmpp response shapes."""
-    for candidate in (info, _safe_get(info, "disco_info")):
-        if candidate is None:
-            continue
-        try:
-            identities = candidate["identities"]
-        except Exception:
-            identities = getattr(candidate, "identities", None)
+    """Yield disco identities from supported response payloads only."""
+    for candidate in _disco_payloads(info):
+        identities = _disco_field(candidate, "identities")
         if identities:
             yield from identities
 
@@ -102,14 +166,6 @@ def _identity_is_muc(identity: Any) -> bool:
     else:
         text = str(identity).lower()
     return "conference" in text or "muc" in text
-
-
-def _safe_get(value: Any, key: str) -> Any:
-    """Best-effort mapping/plugin getter."""
-    try:
-        return value[key]
-    except Exception:
-        return getattr(value, key, None)
 
 
 async def target_is_muc_room(bot: Any, target: str) -> bool:

@@ -17,6 +17,27 @@ class AttrInfo:
         self.identities = tuple(identities or ())
 
 
+class StrictStanza:
+    """Stanza double that records field access and supports registered plugins."""
+
+    def __init__(self, interfaces, values, *, plugins=None):
+        self.interfaces = set(interfaces)
+        self.values = dict(values)
+        self.plugins = dict(plugins or {})
+        self.accessed = []
+        self.plugin_accessed = []
+
+    def __getitem__(self, key):
+        self.accessed.append(key)
+        if key not in self.interfaces:
+            raise KeyError(key)
+        return self.values.get(key)
+
+    def get_plugin(self, key, check=False):
+        self.plugin_accessed.append((key, check))
+        return self.plugins.get(key)
+
+
 class GetItemBot:
     """Bot double exposing plugins through Slixmpp-style item access."""
 
@@ -92,6 +113,29 @@ async def test_target_is_muc_room_uses_disco_shapes(info):
 
     assert await xmpp_notify.target_is_muc_room(bot, "room@conf.test") is True
     disco.get_info.assert_awaited_once_with(jid="room@conf.test")
+
+
+@pytest.mark.asyncio
+async def test_target_is_muc_room_does_not_probe_iq_only_disco_interfaces():
+    disco_info = StrictStanza(
+        {"features", "identities", "node"},
+        {
+            "features": {"urn:xmpp:ping"},
+            "identities": {("client", "pc", None, "Desktop")},
+        },
+    )
+    iq = StrictStanza(
+        {"id", "type", "from", "to"},
+        {},
+        plugins={"disco_info": disco_info},
+    )
+    disco = SimpleNamespace(get_info=AsyncMock(return_value=iq))
+    bot = SimpleNamespace(plugin={"xep_0030": disco})
+
+    assert await xmpp_notify.target_is_muc_room(bot, "user@example.org") is False
+    assert iq.accessed == []
+    assert iq.plugin_accessed == [("disco_info", True), ("disco_info", True)]
+    assert disco_info.accessed == ["features", "identities"]
 
 
 @pytest.mark.asyncio
