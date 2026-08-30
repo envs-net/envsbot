@@ -155,6 +155,7 @@ class Bot(
         self.alerts = AdminAlertManager(self)
         self.room_state = room_state
         self._startup_backup_done = False
+        self._restart_version_change_announced = None
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False
         self._shutdown_clean = False

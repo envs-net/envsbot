@@ -36,7 +36,7 @@ from utils.task_display import render_task_lines
 from utils.task_supervisor import create_resilient_plugin_task
 from utils.time_utils import ensure_utc, utc_now
 from utils.updatecheck import check_for_updates_once, version_check_worker
-from utils.version import __version__, display_version
+from utils.version import __version__, display_version, normalized_version
 
 log = logging.getLogger(__name__)
 
@@ -855,6 +855,7 @@ async def bot_restart(bot, sender, nick, args, msg, is_room):
         "room":
             str(msg["from"].bare) if msg.get("type") == "groupchat" else None,
         "is_room": is_room,
+        "version": normalized_version(getattr(bot, "version", __version__)),
     }
 
     saved_paths: list[str] = []

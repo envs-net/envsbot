@@ -34,6 +34,9 @@ tmp/
 /config.py
 config.json
 
+# Local runtime state
+envsbot_version_state.json
+
 # Local XMPP and vCard helper files
 avatar_hash.asc
 delete_vcard.py

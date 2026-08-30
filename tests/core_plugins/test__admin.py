@@ -391,6 +391,7 @@ async def test_bot_restart_saves_notification_to_persistent_paths(monkeypatch, f
         assert data["nick"] == "creme"
         assert data["room"] == "room@conf"
         assert data["is_room"] is True
+        assert data["version"] == fake_bot.version
 
 
 @pytest.mark.asyncio

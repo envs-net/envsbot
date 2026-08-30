@@ -572,12 +572,232 @@ async def test_send_restart_notification_room_and_private(bot, monkeypatch,
     assert (tmp_path / "restart_notification.json").exists()
 
 
+@pytest.mark.asyncio
+async def test_restart_notification_combines_version_change(bot, monkeypatch, tmp_path):
+    import json
+
+    notif_path = str(tmp_path / "restart_notification.json")
+    monkeypatch.setattr(
+        lifecycle,
+        "_restart_notification_paths",
+        lambda config_obj: [notif_path],
+    )
+    notif_file = tmp_path / "restart_notification.json"
+    notif_file.write_text(
+        json.dumps(
+            {
+                "room": None,
+                "nick": "creme",
+                "sender": "owner@example.org",
+                "is_room": False,
+                "version": "1.8.1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    bot.version = "1.8.2"
+    sent = []
+
+    async def fake_send(message):
+        sent.append(message)
+        return True
+
+    bot._safe_send_message = fake_send
+
+    await bot._send_restart_notification()
+
+    bot.make_message.assert_called_with(
+        mto="owner@example.org",
+        mbody="✅ Bot restart complete! ⬆️ EnvsBot updated successfully: v1.8.1 → v1.8.2",
+        mtype="chat",
+    )
+    assert sent
+    assert bot._restart_version_change_announced == {
+        "from": "1.8.1",
+        "to": "1.8.2",
+    }
+    assert not notif_file.exists()
+
+
 def test_restart_notification_paths_include_persistent_fallback(tmp_path):
     configured = str(tmp_path / "custom.json")
     paths = lifecycle._restart_notification_paths({"restart_notification_file": configured})
     assert paths[0] == configured
     assert "data/envsbot_restart_notification.json" in paths
     assert "/tmp/envsbot_restart_notification.json" in paths
+
+
+@pytest.mark.asyncio
+async def test_finalize_successful_startup_version_seeds_without_announcement(
+    bot, monkeypatch, tmp_path
+):
+    state_path = tmp_path / "envsbot_version_state.json"
+    monkeypatch.setattr(lifecycle, "_version_state_path", lambda config_obj: state_path)
+    scheduled = []
+
+    def fake_create_plugin_task(owner, plugin, coro, *, name=None):
+        scheduled.append((owner, plugin, name))
+        coro.close()
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "utils.task_supervisor.create_plugin_task",
+        fake_create_plugin_task,
+    )
+    bot.version = "1.8.2"
+
+    await bot._finalize_successful_startup_version()
+
+    assert lifecycle._read_version_state(state_path) == {"version": "1.8.2"}
+    assert scheduled == []
+
+
+@pytest.mark.asyncio
+async def test_finalize_successful_startup_version_persists_and_schedules_change(
+    bot, monkeypatch, tmp_path
+):
+    state_path = tmp_path / "envsbot_version_state.json"
+    lifecycle._write_version_state(state_path, {"version": "1.8.1"})
+    monkeypatch.setattr(lifecycle, "_version_state_path", lambda config_obj: state_path)
+    scheduled = []
+
+    def fake_create_plugin_task(owner, plugin, coro, *, name=None):
+        scheduled.append((owner, plugin, name))
+        coro.close()
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "utils.task_supervisor.create_plugin_task",
+        fake_create_plugin_task,
+    )
+    bot.version = "v1.8.2"
+
+    await bot._finalize_successful_startup_version()
+
+    assert lifecycle._read_version_state(state_path) == {
+        "version": "1.8.2",
+        "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
+    }
+    assert scheduled == [(bot, "_runtime", "version-change-announcement")]
+
+
+@pytest.mark.asyncio
+async def test_send_version_change_notification_uses_update_target(
+    bot, monkeypatch
+):
+    import utils.outbox as outbox
+    import utils.xmpp_notify as xmpp_notify
+
+    bot.config = {
+        "version_check_notify_jid": "updates@conf.test",
+        "owner": "owner@example.org",
+    }
+    outbound = MagicMock()
+    bot.make_message = MagicMock(return_value=outbound)
+    monkeypatch.setattr(
+        xmpp_notify,
+        "target_is_muc_room",
+        AsyncMock(return_value=True),
+    )
+    ensure_joined = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        xmpp_notify,
+        "ensure_notification_target_joined",
+        ensure_joined,
+    )
+    durable_send = AsyncMock(return_value=True)
+    monkeypatch.setattr(outbox, "durable_send", durable_send)
+
+    assert await bot._send_version_change_notification("1.8.1", "1.8.2") is True
+
+    ensure_joined.assert_awaited_once_with(bot, "updates@conf.test")
+    bot.make_message.assert_called_once_with(
+        mto="updates@conf.test",
+        mbody="⬆️ EnvsBot updated successfully: v1.8.1 → v1.8.2",
+        mtype="groupchat",
+    )
+    durable_send.assert_awaited_once_with(
+        bot,
+        outbound,
+        category="version-update",
+        dedupe_key="version-update:1.8.1:1.8.2:updates@conf.test",
+    )
+
+
+@pytest.mark.asyncio
+async def test_combined_restart_announcement_prevents_duplicate_version_notice(
+    bot, monkeypatch, tmp_path
+):
+    state_path = tmp_path / "envsbot_version_state.json"
+    lifecycle._write_version_state(state_path, {"version": "1.8.1"})
+    monkeypatch.setattr(
+        lifecycle,
+        "_version_state_path",
+        lambda config_obj: state_path,
+    )
+    scheduled = []
+
+    def fake_create_plugin_task(owner, plugin, coro, *, name=None):
+        scheduled.append((owner, plugin, name))
+        coro.close()
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "utils.task_supervisor.create_plugin_task",
+        fake_create_plugin_task,
+    )
+    bot.version = "1.8.2"
+    bot._restart_version_change_announced = {
+        "from": "1.8.1",
+        "to": "1.8.2",
+    }
+
+    await bot._finalize_successful_startup_version()
+
+    assert lifecycle._read_version_state(state_path) == {"version": "1.8.2"}
+    assert scheduled == []
+
+
+@pytest.mark.asyncio
+async def test_failed_version_change_delivery_keeps_pending_state(bot, tmp_path):
+    state_path = tmp_path / "envsbot_version_state.json"
+    expected = {
+        "version": "1.8.2",
+        "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
+    }
+    lifecycle._write_version_state(state_path, expected)
+    bot._send_version_change_notification = AsyncMock(return_value=False)
+
+    await bot._deliver_pending_version_announcement(
+        state_path,
+        "1.8.1",
+        "1.8.2",
+    )
+
+    assert lifecycle._read_version_state(state_path) == expected
+
+
+@pytest.mark.asyncio
+async def test_delivered_version_change_clears_persisted_pending_state(
+    bot, tmp_path
+):
+    state_path = tmp_path / "envsbot_version_state.json"
+    lifecycle._write_version_state(
+        state_path,
+        {
+            "version": "1.8.2",
+            "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
+        },
+    )
+    bot._send_version_change_notification = AsyncMock(return_value=True)
+
+    await bot._deliver_pending_version_announcement(
+        state_path,
+        "1.8.1",
+        "1.8.2",
+    )
+
+    assert lifecycle._read_version_state(state_path) == {"version": "1.8.2"}
 
 
 def test_main_copy_behavior(monkeypatch, tmp_path):
@@ -722,6 +942,7 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert bot.runtime_ready.is_set() is False
     assert bot.accepting_commands is False
     assert bot._startup_backup_done is False
+    assert bot._restart_version_change_announced is None
     assert bot.db.path == "envsbot.sqlite3"
     assert bot.db.task_supervisor is bot.tasks
     assert bot.presence.owner is bot
@@ -1205,6 +1426,9 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         calls.append("restart")
 
     bot._send_restart_notification = AsyncMock(side_effect=record_restart_notification)
+    bot._finalize_successful_startup_version = AsyncMock(
+        side_effect=lambda: calls.append("version-state")
+    )
     bot.alerts = types.SimpleNamespace(
         start=AsyncMock(side_effect=lambda: calls.append("alerts")),
     )
@@ -1240,6 +1464,7 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         "backup-scheduler",
         "restart",
         "systemd-ready",
+        "version-state",
     ]
     assert bot.roster.auto_subscribe is True
     assert [phase.name for phase in bot._last_startup_phases] == [
@@ -1324,6 +1549,7 @@ async def test_on_start_reports_degraded_plugin_state(monkeypatch, bot, caplog):
     )
     bot._create_startup_backup = AsyncMock()
     bot._send_restart_notification = AsyncMock()
+    bot._finalize_successful_startup_version = AsyncMock()
     bot.alerts = types.SimpleNamespace(start=AsyncMock())
     bot.watchdog = types.SimpleNamespace(start=AsyncMock(), notify_ready=MagicMock())
     monkeypatch.setattr("utils.backups.start_periodic_backup_worker", lambda owner: None)
@@ -1336,6 +1562,7 @@ async def test_on_start_reports_degraded_plugin_state(monkeypatch, bot, caplog):
     assert "loaded_plugins=1" in caplog.text
     assert "failed_plugins=1" in caplog.text
     assert "Bot started with 1 plugin load failure(s)" in caplog.text
+    bot._finalize_successful_startup_version.assert_not_awaited()
 
 
 @pytest.mark.asyncio

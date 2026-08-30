@@ -49,3 +49,8 @@ def chat_slang_removals_file(config: Mapping[str, Any]) -> Path:
 def profile_state_file(config: Mapping[str, Any], name: str) -> Path:
     """Return one writable profile-state marker below the runtime directory."""
     return runtime_data_dir(config) / name
+
+
+def version_state_file(config: Mapping[str, Any]) -> Path:
+    """Return the persistent last-successful-version state file."""
+    return runtime_data_dir(config) / "envsbot_version_state.json"

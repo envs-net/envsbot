@@ -9,16 +9,104 @@ import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from utils.logging_helpers import kv
 from utils.time_utils import utc_now
+from utils.version import __version__, display_version, normalized_version
 
 log = logging.getLogger(__name__)
 
 _DEFAULT_RESTART_NOTIFICATION_FILE = "data/envsbot_restart_notification.json"
 _LEGACY_RESTART_NOTIFICATION_FILE = "/tmp/envsbot_restart_notification.json"
+
+
+_VERSION_STATE_SCHEMA = 1
+
+
+def _read_version_state(path: str | Path) -> dict[str, Any]:
+    """Read the persisted last-successful-version state."""
+    state_path = Path(path)
+    try:
+        with state_path.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return {}
+
+    if not isinstance(payload, dict):
+        raise ValueError("version state must be a JSON object")
+
+    raw_version = payload.get("version")
+    version = normalized_version(str(raw_version)) if raw_version is not None else ""
+    if version == "unknown":
+        version = ""
+
+    pending = payload.get("pending_announcement")
+    normalized_pending: dict[str, str] | None = None
+    if isinstance(pending, dict):
+        previous = normalized_version(str(pending.get("from", "")))
+        current = normalized_version(str(pending.get("to", "")))
+        if previous != "unknown" and current != "unknown" and previous != current:
+            normalized_pending = {"from": previous, "to": current}
+
+    result: dict[str, Any] = {}
+    if version:
+        result["version"] = version
+    if normalized_pending is not None:
+        result["pending_announcement"] = normalized_pending
+    return result
+
+
+def _write_version_state(path: str | Path, state: dict[str, Any]) -> None:
+    """Atomically persist the last-successful-version state."""
+    state_path = Path(path)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = state_path.with_name(f".{state_path.name}.{os.getpid()}.tmp")
+    payload = {
+        "schema": _VERSION_STATE_SCHEMA,
+        "version": normalized_version(str(state.get("version") or __version__)),
+        "updated_at": utc_now().isoformat(),
+    }
+    pending = state.get("pending_announcement")
+    if isinstance(pending, dict):
+        payload["pending_announcement"] = {
+            "from": normalized_version(str(pending.get("from", ""))),
+            "to": normalized_version(str(pending.get("to", ""))),
+        }
+
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, state_path)
+    finally:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _version_notification_target(config_obj: Any) -> str:
+    """Return the configured target for successful version-change announcements."""
+    getter = getattr(config_obj, "get", None)
+    if not callable(getter):
+        return ""
+    for key in ("version_check_notify_jid", "owner"):
+        value = str(getter(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _version_state_path(config_obj: Any) -> Path:
+    """Return the persistent successful-version state path lazily."""
+    from utils.runtime_paths import version_state_file
+
+    return version_state_file(config_obj)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +200,9 @@ class LifecycleMixin:
     __getitem__: Any
     _startup_backup_done: bool
     connection_start_time: datetime | None
+    version: str
+    tasks: Any
+    _restart_version_change_announced: dict[str, str] | None
 
     async def _send_restart_notification(self) -> None:
         """Send restart completion notification if one was queued."""
@@ -125,11 +216,23 @@ class LifecycleMixin:
             if notif is None:
                 return
 
+            current_version = normalized_version(getattr(self, "version", __version__))
+            restart_version = normalized_version(str(notif.get("version") or ""))
+            version_change = None
+            if restart_version != "unknown" and restart_version != current_version:
+                version_change = {"from": restart_version, "to": current_version}
+            completion = "✅ Bot restart complete!"
+            if version_change is not None:
+                completion += (
+                    " ⬆️ EnvsBot updated successfully: "
+                    f"{display_version(restart_version)} → {display_version(current_version)}"
+                )
+
             log.info("[ADMIN] event=restart_notification status=processing data=%s", notif)
             if notif.get("is_room") and notif.get("room"):
                 message = self.make_message(
                     mto=notif["room"],
-                    mbody=f"{notif['nick']}: ✅ Bot restart complete!",
+                    mbody=f"{notif['nick']}: {completion}",
                     mtype="groupchat",
                 )
                 sent = await self._safe_send_message(message)
@@ -143,7 +246,7 @@ class LifecycleMixin:
             else:
                 message = self.make_message(
                     mto=notif["sender"],
-                    mbody="✅ Bot restart complete!",
+                    mbody=completion,
                     mtype="chat",
                 )
                 sent = await self._safe_send_message(message)
@@ -155,6 +258,9 @@ class LifecycleMixin:
                     return
                 log.info("[ADMIN] event=restart_notification status=sent target=%s", notif["sender"])
 
+            if version_change is not None:
+                self._restart_version_change_announced = version_change
+
             await asyncio.to_thread(
                 _remove_restart_notifications,
                 restart_files,
@@ -163,6 +269,217 @@ class LifecycleMixin:
             log.debug("[ADMIN] No restart notification file found")
         except Exception as exc:
             log.error("[ADMIN] Failed to process restart notification: %s", exc)
+
+    async def _send_version_change_notification(
+        self,
+        previous_version: str,
+        current_version: str,
+    ) -> bool:
+        """Announce one successful version transition to the update target."""
+        target = _version_notification_target(getattr(self, "config", {}))
+        if not target:
+            log.info(
+                "[ADMIN] event=version_change_notification status=skipped reason=no_target "
+                "from_version=%s to_version=%s",
+                previous_version,
+                current_version,
+            )
+            return False
+
+        try:
+            from utils.outbox import durable_send
+            from utils.xmpp_notify import (
+                ensure_notification_target_joined,
+                target_is_muc_room,
+            )
+
+            is_room = await target_is_muc_room(self, target)
+            if is_room and not await ensure_notification_target_joined(self, target):
+                log.warning(
+                    "[ADMIN] event=version_change_notification status=deferred "
+                    "target=%s reason=room_unavailable from_version=%s to_version=%s",
+                    target,
+                    previous_version,
+                    current_version,
+                )
+                return False
+
+            body = (
+                "⬆️ EnvsBot updated successfully: "
+                f"{display_version(previous_version)} → {display_version(current_version)}"
+            )
+            message = self.make_message(
+                mto=target,
+                mbody=body,
+                mtype="groupchat" if is_room else "chat",
+            )
+            sent = await durable_send(
+                self,
+                message,
+                category="version-update",
+                dedupe_key=f"version-update:{previous_version}:{current_version}:{target}",
+            )
+            if sent:
+                log.info(
+                    "[ADMIN] event=version_change_notification status=sent target=%s "
+                    "from_version=%s to_version=%s",
+                    target,
+                    previous_version,
+                    current_version,
+                )
+                return True
+
+            log.warning(
+                "[ADMIN] event=version_change_notification status=send_failed target=%s "
+                "from_version=%s to_version=%s",
+                target,
+                previous_version,
+                current_version,
+            )
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(
+                "[ADMIN] event=version_change_notification status=failed target=%s "
+                "from_version=%s to_version=%s",
+                target,
+                previous_version,
+                current_version,
+            )
+            return False
+
+    async def _clear_pending_version_announcement(
+        self,
+        state_path: Path,
+        previous_version: str,
+        current_version: str,
+    ) -> None:
+        """Clear a delivered pending transition without clobbering newer state."""
+        try:
+            state = await asyncio.to_thread(_read_version_state, state_path)
+            pending = state.get("pending_announcement")
+            if pending != {"from": previous_version, "to": current_version}:
+                return
+            state.pop("pending_announcement", None)
+            state["version"] = normalized_version(
+                str(state.get("version") or current_version)
+            )
+            await asyncio.to_thread(_write_version_state, state_path, state)
+        except Exception:
+            log.exception(
+                "[ADMIN] event=version_state status=clear_pending_failed path=%s",
+                state_path,
+            )
+
+    async def _deliver_pending_version_announcement(
+        self,
+        state_path: Path,
+        previous_version: str,
+        current_version: str,
+    ) -> None:
+        """Deliver and clear one persisted post-upgrade announcement."""
+        if not await self._send_version_change_notification(
+            previous_version,
+            current_version,
+        ):
+            return
+        await self._clear_pending_version_announcement(
+            state_path,
+            previous_version,
+            current_version,
+        )
+
+    async def _finalize_successful_startup_version(self) -> None:
+        """Persist the successful version and schedule any required announcement."""
+        current_version = normalized_version(getattr(self, "version", __version__))
+        try:
+            state_path = _version_state_path(getattr(self, "config", {}))
+        except Exception:
+            log.warning(
+                "[ADMIN] event=version_state status=path_failed version=%s",
+                current_version,
+                exc_info=True,
+            )
+            return
+
+        try:
+            state = await asyncio.to_thread(_read_version_state, state_path)
+        except Exception:
+            log.warning(
+                "[ADMIN] event=version_state status=read_failed path=%s; "
+                "treating this as first successful startup",
+                state_path,
+                exc_info=True,
+            )
+            state = {}
+
+        previous_version = str(state.get("version") or "")
+        pending = state.get("pending_announcement")
+        if previous_version and previous_version != current_version:
+            pending = {"from": previous_version, "to": current_version}
+        elif not previous_version:
+            pending = None
+
+        restart_announced = getattr(self, "_restart_version_change_announced", None)
+        if isinstance(pending, dict) and pending == restart_announced:
+            pending = None
+
+        next_state: dict[str, Any] = {"version": current_version}
+        if isinstance(pending, dict):
+            next_state["pending_announcement"] = pending
+
+        try:
+            await asyncio.to_thread(_write_version_state, state_path, next_state)
+        except Exception:
+            log.warning(
+                "[ADMIN] event=version_state status=write_failed path=%s version=%s",
+                state_path,
+                current_version,
+                exc_info=True,
+            )
+            return
+
+        if not isinstance(pending, dict):
+            log.info(
+                "[ADMIN] event=version_state status=recorded path=%s version=%s",
+                state_path,
+                current_version,
+            )
+            return
+
+        previous = str(pending["from"])
+        current = str(pending["to"])
+        log.info(
+            "[ADMIN] event=version_state status=pending path=%s "
+            "from_version=%s to_version=%s",
+            state_path,
+            previous,
+            current,
+        )
+
+        try:
+            from utils.task_supervisor import create_plugin_task
+
+            create_plugin_task(
+                self,
+                "_runtime",
+                self._deliver_pending_version_announcement(
+                    state_path,
+                    previous,
+                    current,
+                ),
+                name="version-change-announcement",
+            )
+        except Exception:
+            # The transition stays persisted as pending and is retried on the
+            # next successful process start.
+            log.exception(
+                "[ADMIN] event=version_change_notification status=schedule_failed "
+                "from_version=%s to_version=%s",
+                previous,
+                current,
+            )
 
     async def _create_startup_backup(self) -> None:
         """Create one optional managed backup during this bot process start."""
@@ -311,8 +628,8 @@ class LifecycleMixin:
         except Exception:
             log.exception("[BOT] Failed to clean up partial startup")
 
-    def _log_startup_complete(self) -> None:
-        """Log final plugin/startup health after all mandatory phases succeed."""
+    def _log_startup_complete(self) -> bool:
+        """Log final plugin/startup health and return whether it is fully healthy."""
         failed = getattr(self.bot_plugins, "failed_plugins", None)
         try:
             failed_count = len(failed or {})
@@ -332,6 +649,7 @@ class LifecycleMixin:
             log.warning("[BOT] ⚠️ Bot started with %d plugin load failure(s)", failed_count)
         else:
             log.info("[BOT] ✅ Bot started successfully")
+        return failed_count == 0
 
     async def on_start(self, event: Any) -> None:
         """Handle slixmpp session_start and expose readiness only after startup."""
@@ -357,7 +675,14 @@ class LifecycleMixin:
             for name, operation in phases:
                 await self._run_startup_phase(name, operation, results)
                 self._last_startup_phases = tuple(results)
-            self._log_startup_complete()
+            startup_healthy = self._log_startup_complete()
+            if startup_healthy:
+                await self._finalize_successful_startup_version()
+            else:
+                log.info(
+                    "[ADMIN] event=version_state status=deferred "
+                    "reason=degraded_startup"
+                )
         except Exception:
             self._last_startup_phases = tuple(results)
             log.exception("[BOT] event=startup status=failed")

@@ -244,6 +244,7 @@ VERSION_CHECK_NOTIFY_JID = "admin@example.org"
 
 When `VERSION_CHECK_NOTIFY_JID` is empty, automatic update notifications are sent to the configured `owner` JID.
 If `VERSION_CHECK_NOTIFY_JID` is a MUC room JID, EnvsBot joins that room before sending the notification and uses a groupchat message.
+After a fully healthy startup, EnvsBot also records the running version in `RUNTIME_DATA_DIR`. When a later healthy startup detects a version change, it sends `⬆️ EnvsBot updated successfully: vOLD → vNEW` to the same `VERSION_CHECK_NOTIFY_JID` target (or `OWNER`). The first startup only seeds this state, normal restarts on the same version stay silent, and degraded startups with plugin load failures do not advance the recorded version. Failed deliveries remain pending and are retried after a later healthy process start.
 The notification room is joined at send time and is not automatically added to the stored room list unless you also add it with `,rooms add` or `,rooms join`.
 Manual checks through `,checkupdate` work even when the periodic worker is disabled.
 
@@ -409,7 +410,8 @@ to the configured runtime paths. Set `ENVSBOT_CONFIG=/etc/envsbot/config.py` and
 `LOG_DIR=/var/log/envsbot`, and configure `DB_FILE`, `RUNTIME_DATA_DIR`,
 `BACKUP_DIR`, `RESTART_NOTIFICATION_FILE` and the IdleRPG `export_path` below
 `/var/lib/envsbot`. `RUNTIME_DATA_DIR` holds writable support files such as
-`vcard.py`, `chat_slang.csv`, slang review queues and profile hash markers. Runtime
+`vcard.py`, `chat_slang.csv`, slang review queues, profile hash markers and
+`envsbot_version_state.json`. Runtime
 `config.py` and
 `vcard.py` are read without writing adjacent Python bytecode caches. Logging is
 written both to the configured rotating file and stderr; under systemd the

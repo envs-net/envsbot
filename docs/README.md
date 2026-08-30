@@ -37,6 +37,7 @@ Operational notes:
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.
   Automatic update notifications go to `VERSION_CHECK_NOTIFY_JID`, or to `OWNER` when unset.
   When the notification target is a MUC room, the bot joins it before sending.
+  Fully healthy startups also persist the running version in `RUNTIME_DATA_DIR`; a later version change is announced once to the same target. Same-version restarts are not announced, the first startup only initializes the version state, and degraded plugin startup does not advance it.
 - EnvsBot has no separate fixed `ADMIN_ROOM`; global bot privileges are controlled by `OWNER`, `ADMINS` and stored bot roles.
 - Incoming MUC invites are stored as pending room invites when `ROOM_INVITES_ENABLED` is enabled.
   They are announced to `ROOM_INVITE_NOTIFY_JID`, `VERSION_CHECK_NOTIFY_JID`, or `OWNER` and can be accepted or declined with `,rooms invite`.

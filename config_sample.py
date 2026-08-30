@@ -75,8 +75,9 @@ TIMEZONE = 'Europe/Berlin'
 DB_FILE = 'data/bot.db'
 
 # Directory for mutable support files such as vcard.py, chat_slang.csv, slang review
-# queues and profile hash markers. None keeps the historical application-root location
-# for compatibility. Hardened systemd installs should set /var/lib/envsbot.
+# queues, profile hash markers and the last-successful-version state. None keeps the
+# historical application-root location for compatibility. Hardened systemd installs
+# should set /var/lib/envsbot.
 # Startup-only: restart envsbot after changing this value.
 RUNTIME_DATA_DIR = None
 
