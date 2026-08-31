@@ -20,6 +20,25 @@ def _target_text(target: str | None) -> str:
     return str(target or "").strip()
 
 
+def is_configured_notification_target(bot: Any, target: str) -> bool:
+    """Return whether *target* is one of the configured notification JIDs."""
+    target_bare = _target_text(target).split("/", 1)[0].lower()
+    if not target_bare:
+        return False
+
+    config_obj = getattr(bot, "config", {}) or {}
+    for key in (
+        "admin_report_jid",
+        "version_check_notify_jid",
+        "room_invite_notify_jid",
+        "owner",
+    ):
+        configured = _target_text(config_obj.get(key)).split("/", 1)[0].lower()
+        if configured and configured == target_bare:
+            return True
+    return False
+
+
 def _looks_like_bare_room_jid(target: str) -> bool:
     """Return True for a bare JID shape that can represent a room."""
     return bool(target and "@" in target and "/" not in target)

@@ -382,3 +382,36 @@ async def test_prepare_notification_target_returns_chat_for_direct_jid(monkeypat
 
     assert await xmpp_notify.prepare_notification_target(bot, "user@example.org") == "chat"
     join_room.assert_not_awaited()
+
+def test_is_configured_notification_target_matches_configured_bare_jids():
+    bot = SimpleNamespace(
+        config={
+            "admin_report_jid": "admins@chat.example.org",
+            "version_check_notify_jid": "updates@example.org",
+            "room_invite_notify_jid": "",
+            "owner": "owner@example.org/resource",
+        }
+    )
+
+    assert (
+        xmpp_notify.is_configured_notification_target(
+            bot,
+            "admins@chat.example.org",
+        )
+        is True
+    )
+    assert (
+        xmpp_notify.is_configured_notification_target(
+            bot,
+            "owner@example.org",
+        )
+        is True
+    )
+    assert (
+        xmpp_notify.is_configured_notification_target(
+            bot,
+            "random@chat.example.org",
+        )
+        is False
+    )
+
