@@ -11,6 +11,7 @@ from utils.formatting import format_page, parse_page_args
 from utils.permissions import configured_room_invite_admin_rooms
 from utils.xmpp_notify import (
     ensure_notification_target_joined,
+    notification_message_type,
     prepare_notification_target,
 )
 
@@ -391,7 +392,16 @@ async def _notify_room_invite(bot, body: str) -> None:
         return
 
     joined = await ensure_notification_target_joined(bot, target)
-    message_type = await prepare_notification_target(bot, target, joined=joined)
+    if joined:
+        # A successful notification-target join means the target is a MUC.
+        # Keep the established helper visible here for callers/tests that
+        # override message-type detection, but never downgrade a joined MUC
+        # to a direct-chat stanza if runtime bookkeeping lags behind.
+        message_type = notification_message_type(bot, target)
+        if message_type != "groupchat":
+            message_type = "groupchat"
+    else:
+        message_type = await prepare_notification_target(bot, target, joined=False)
     if message_type is None:
         log.warning(
             "Room invite notification deferred: MUC target %s is unavailable; "
