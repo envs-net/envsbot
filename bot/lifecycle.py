@@ -17,7 +17,6 @@ from utils.logging_helpers import kv
 from utils.time_utils import utc_now
 from utils.version import __version__, display_version, normalized_version
 
-
 log = logging.getLogger(__name__)
 
 _DEFAULT_RESTART_NOTIFICATION_FILE = "data/envsbot_restart_notification.json"
