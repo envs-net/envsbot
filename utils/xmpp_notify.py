@@ -158,14 +158,14 @@ def _iter_disco_identities(info: Any):
 
 
 def _identity_is_muc(identity: Any) -> bool:
-    """Return True when a disco identity describes a MUC service/room."""
-    if isinstance(identity, (tuple, list)):
-        text = "/".join(str(part).lower() for part in identity)
-    elif isinstance(identity, dict):
-        text = "/".join(str(value).lower() for value in identity.values())
+    """Return True when a disco identity has the XEP-0030 conference category."""
+    if isinstance(identity, dict):
+        category = identity.get("category")
+    elif isinstance(identity, (tuple, list)):
+        category = identity[0] if identity else None
     else:
-        text = str(identity).lower()
-    return "conference" in text or "muc" in text
+        category = getattr(identity, "category", None)
+    return str(category or "").strip().lower() == "conference"
 
 
 async def target_is_muc_room(bot: Any, target: str) -> bool:
