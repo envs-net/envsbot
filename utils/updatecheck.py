@@ -25,15 +25,68 @@ DEFAULT_RELEASE_URL = "https://github.com/envs-net/envsbot/releases/latest"
 
 
 def parse_version_tuple(version: str) -> tuple[int, ...]:
-    """Return numeric version parts for simple release comparisons."""
+    """Return numeric version parts for compatibility and diagnostics."""
     parts = re.findall(r"\d+", str(version))
     return tuple(int(part) for part in parts)
+
+
+def _trim_release_zeros(parts: tuple[int, ...]) -> tuple[int, ...]:
+    """Normalize release tuples so ``1.2`` and ``1.2.0`` compare equally."""
+    normalized = list(parts)
+    while len(normalized) > 1 and normalized[-1] == 0:
+        normalized.pop()
+    return tuple(normalized)
+
+
+def _version_sort_key(version: str) -> tuple[tuple[int, ...], int, int] | None:
+    """Return a sortable key for normal and pre-release EnvsBot versions."""
+    value = normalized_version(version).strip().lower()
+    match = re.fullmatch(
+        r"(?P<release>\d+(?:\.\d+)*)"
+        r"(?:[-_.]?(?P<label>a|alpha|b|beta|rc)[-_.]?(?P<number>\d*))?"
+        r"(?:[+.-].*)?",
+        value,
+    )
+    if match is None:
+        return None
+
+    release = _trim_release_zeros(
+        tuple(int(part) for part in match.group("release").split("."))
+    )
+    label = match.group("label")
+    if label is None:
+        # Stable releases sort after alpha, beta and release candidates.
+        return release, 3, 0
+
+    rank = {
+        "a": 0,
+        "alpha": 0,
+        "b": 1,
+        "beta": 1,
+        "rc": 2,
+    }[label]
+    number = int(match.group("number") or 0)
+    return release, rank, number
+
+
+def compare_versions(left: str, right: str) -> int:
+    """Return -1, 0 or 1 using release/pre-release version semantics."""
+    left_key = _version_sort_key(left)
+    right_key = _version_sort_key(right)
+    if left_key is not None and right_key is not None:
+        return (left_key > right_key) - (left_key < right_key)
+
+    # Keep unusual historical/custom tags deterministic rather than failing a
+    # version check. Trailing release zeros are normalized in the fallback too.
+    left_parts = _trim_release_zeros(parse_version_tuple(left))
+    right_parts = _trim_release_zeros(parse_version_tuple(right))
+    return (left_parts > right_parts) - (left_parts < right_parts)
 
 
 def is_remote_version_newer(remote_version: str, local_version: str | None = None) -> bool:
     """Return whether *remote_version* is newer than *local_version*."""
     local = normalized_version(local_version or __version__)
-    return parse_version_tuple(remote_version) > parse_version_tuple(local)
+    return compare_versions(remote_version, local) > 0
 
 
 def github_api_url_from_release_url(release_url: str) -> str | None:

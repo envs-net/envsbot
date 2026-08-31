@@ -18,6 +18,7 @@ from utils.task_supervisor import (
     runtime_is_ready,
     wait_for_event_with_heartbeat,
 )
+from utils.xmpp_notify import ensure_room_joined, is_configured_notification_target
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +109,8 @@ class PersistentOutbox:
         self.failed_attempts = 0
         self.dead_letters = 0
         self.capacity_rejections = 0
+        self._notification_join_failures: dict[str, int] = {}
+        self._notification_join_retry_at: dict[str, float] = {}
 
     @property
     def enabled(self) -> bool:
@@ -118,6 +121,8 @@ class PersistentOutbox:
         self.store = store
         self.stop_event = asyncio.Event()
         self.wakeup = asyncio.Event()
+        self._notification_join_failures.clear()
+        self._notification_join_retry_at.clear()
         # Every inflight row belongs to a previous worker at startup. Recover
         # all of them immediately so a fast process restart cannot strand a row.
         await store.recover_inflight(older_than_seconds=0)
@@ -185,7 +190,10 @@ class PersistentOutbox:
                 ),
                 available_at=available_at,
                 max_pending=int(config.get("outbox_max_pending", 10000) or 10000),
-                max_bytes=int(config.get("outbox_max_bytes", 50 * 1024 * 1024) or 50 * 1024 * 1024),
+                max_bytes=int(
+                    config.get("outbox_max_bytes", 50 * 1024 * 1024)
+                    or 50 * 1024 * 1024
+                ),
                 max_per_destination=int(
                     config.get("outbox_max_per_destination", 1000) or 1000
                 ),
@@ -240,16 +248,58 @@ class PersistentOutbox:
     def _retry_delay(self, attempts: int) -> int:
         config = getattr(self.bot, "config", {}) or {}
         initial = max(1, int(config.get("outbox_retry_initial_seconds", 30) or 30))
-        maximum = max(initial, int(config.get("outbox_retry_max_seconds", 1800) or 1800))
+        maximum = max(
+            initial,
+            int(config.get("outbox_retry_max_seconds", 1800) or 1800),
+        )
         return min(maximum, initial * (2 ** max(0, int(attempts))))
+
+    async def _ensure_notification_room_ready(
+        self,
+        destination: str,
+        message_type: str,
+    ) -> bool:
+        """Rejoin configured notification MUCs without joining arbitrary rooms."""
+        if self._room_ready(destination, message_type):
+            return True
+        if message_type != "groupchat":
+            return False
+
+        room = str(destination).split("/", 1)[0]
+        if not is_configured_notification_target(self.bot, room):
+            return False
+
+        now = time.monotonic()
+        retry_at = self._notification_join_retry_at.get(room, 0.0)
+        if retry_at > now:
+            return False
+
+        joined = await ensure_room_joined(self.bot, room)
+        if joined:
+            self._notification_join_failures.pop(room, None)
+            self._notification_join_retry_at.pop(room, None)
+            return True
+
+        failures = self._notification_join_failures.get(room, 0) + 1
+        self._notification_join_failures[room] = failures
+        delay = self._retry_delay(failures - 1)
+        self._notification_join_retry_at[room] = now + delay
+        log.warning(
+            "[OUTBOX] Notification room %s is unavailable; retrying join in %ds",
+            room,
+            delay,
+        )
+        return False
 
     async def _send_one(self, queued: Any) -> None:
         started = time.perf_counter()
         store = self.store
         if store is None:
             raise RuntimeError("outbox store is not initialized")
-
-        if not self._room_ready(queued.destination, queued.message_type):
+        if not await self._ensure_notification_room_ready(
+            queued.destination,
+            queued.message_type,
+        ):
             await store.defer(
                 queued.id,
                 retry_delay_seconds=self._retry_delay(queued.attempts),
@@ -257,7 +307,6 @@ class PersistentOutbox:
             )
             observe("outbox_delivery", time.perf_counter() - started)
             return
-
         try:
             message = self.bot.make_message(
                 mto=queued.destination,
@@ -279,7 +328,8 @@ class PersistentOutbox:
             if dead:
                 self.dead_letters += 1
                 log.error(
-                    "[OUTBOX] Message moved to dead letter queue: id=%s category=%s destination=%s",
+                    "[OUTBOX] Message moved to dead letter queue: "
+                    "id=%s category=%s destination=%s",
                     queued.id,
                     queued.category,
                     queued.destination,
@@ -290,7 +340,6 @@ class PersistentOutbox:
                     await report(queued.id, queued.category)
             observe("outbox_delivery", time.perf_counter() - started)
             return
-
         await store.mark_sent(queued.id)
         self.delivered += 1
         self.last_delivery_at = int(time.time())
@@ -365,7 +414,9 @@ class PersistentOutbox:
             if self.store is not None
             else {"pending": 0, "inflight": 0, "dead": 0, "total": 0}
         )
-        oldest_age = await self.store.oldest_pending_age() if self.store is not None else 0
+        oldest_age = (
+            await self.store.oldest_pending_age() if self.store is not None else 0
+        )
         usage = await self.store.queue_usage() if self.store is not None else {
             "queued": 0,
             "bytes": 0,

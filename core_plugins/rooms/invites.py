@@ -257,7 +257,7 @@ async def _store_pending_room_invite(
     inviter: str,
     reason: str = "",
 ) -> dict | None:
-    """Persist a pending room invite and add it to runtime state."""
+    """Persist or refresh one pending room invite in runtime and SQLite state."""
     await setup_room_invites_db(bot)
     pending = getattr(bot, "pending_room_invites", {})
     index = getattr(bot, "pending_room_invite_index", {})
@@ -267,13 +267,26 @@ async def _store_pending_room_invite(
         index = {}
     bot.pending_room_invites = pending
     bot.pending_room_invite_index = index
+
     key = (room_jid, inviter)
     existing_id = index.get(key)
     if existing_id is not None and existing_id in pending:
         invite = pending[existing_id]
-        if not _room_invite_is_expired(invite):
+        if _room_invite_is_expired(invite):
+            await _delete_pending_room_invite(bot, existing_id)
+        else:
+            created_at = int(time.time())
+            invite["reason"] = reason or ""
+            invite["created_at"] = created_at
+            db = _db_api(bot)
+            if db is not None:
+                await db.write(
+                    "UPDATE room_invites SET reason = ?, created_at = ? WHERE id = ?",
+                    (reason or "", created_at, existing_id),
+                    label="room_invite_refresh",
+                )
             return invite
-        await _delete_pending_room_invite(bot, existing_id)
+
     db = _db_api(bot)
     created_at = int(time.time())
     if db is None:
@@ -288,19 +301,28 @@ async def _store_pending_room_invite(
         pending[invite_id] = invite
         index[key] = invite_id
         return invite
-    try:
-        cur = await db.write(
-            """
-            INSERT INTO room_invites (room_jid, inviter, reason, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (room_jid, inviter, reason or "", created_at),
-            label="room_invite_store",
-        )
-        invite_id = int(cur.lastrowid)
-    except Exception:
+
+    await db.write(
+        """
+        INSERT INTO room_invites (room_jid, inviter, reason, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(room_jid, inviter) DO UPDATE SET
+            reason = excluded.reason,
+            created_at = excluded.created_at
+        """,
+        (room_jid, inviter, reason or "", created_at),
+        label="room_invite_store",
+    )
+    row = await db.fetch_one(
+        "SELECT id FROM room_invites WHERE room_jid = ? AND inviter = ?",
+        (room_jid, inviter),
+    )
+    if not row:
+        log.error("Could not reload stored room invite for %s from %s", room_jid, inviter)
         await load_pending_room_invites(bot)
         return bot.pending_room_invites.get(bot.pending_room_invite_index.get(key))
+
+    invite_id = int(row[0])
     invite = {
         "id": invite_id,
         "room_jid": room_jid,

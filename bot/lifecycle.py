@@ -103,11 +103,9 @@ def _version_change_message(previous_version: str, current_version: str) -> str:
     previous = normalized_version(previous_version)
     current = normalized_version(current_version)
 
-    from utils.updatecheck import parse_version_tuple
+    from utils.updatecheck import compare_versions
 
-    previous_parts = parse_version_tuple(previous)
-    current_parts = parse_version_tuple(current)
-    if previous_parts and current_parts and current_parts < previous_parts:
+    if compare_versions(current, previous) < 0:
         action = "⬇️ EnvsBot downgraded successfully"
     else:
         action = "⬆️ EnvsBot updated successfully"

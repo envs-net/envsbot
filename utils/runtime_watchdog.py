@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from utils.task_supervisor import (
+    create_plugin_task,
     wait_for_event_with_heartbeat,
     wait_for_runtime_ready,
 )
@@ -68,6 +69,7 @@ class RuntimeWatchdog:
     def __init__(self, bot: Any):
         self.bot = bot
         self.task: asyncio.Task[Any] | None = None
+        self._lag_alert_task: asyncio.Task[Any] | None = None
         self.stop_event = asyncio.Event()
         self.state = WatchdogState()
 
@@ -109,12 +111,65 @@ class RuntimeWatchdog:
     async def stop(self) -> None:
         self.stop_event.set()
         task = self.task
+        alert_task = self._lag_alert_task
         self.task = None
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        self._lag_alert_task = None
+        for running in (task, alert_task):
+            if running is not None:
+                running.cancel()
+        awaitables = [running for running in (task, alert_task) if running is not None]
+        if awaitables:
+            await asyncio.gather(*awaitables, return_exceptions=True)
         self.state.worker_running = False
         sd_notify("STOPPING=1\nSTATUS=EnvsBot shutting down")
+
+    async def _report_lag(self, report: Any, lag: float, warning_threshold: float) -> None:
+        """Send a lag alert outside the watchdog heartbeat path."""
+        try:
+            await report(lag, warning_threshold)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("[WATCHDOG] Failed to report event-loop lag")
+
+    def _schedule_lag_report(self, lag: float, warning_threshold: float) -> None:
+        """Schedule at most one in-flight lag notification."""
+        alerts = getattr(self.bot, "alerts", None)
+        report = getattr(alerts, "report_event_loop_lag", None)
+        if not callable(report):
+            return
+        current = self._lag_alert_task
+        if current is not None and not current.done():
+            return
+        self._lag_alert_task = create_plugin_task(
+            self.bot,
+            "_runtime",
+            self._report_lag(report, lag, warning_threshold),
+            name="runtime-watchdog-lag-alert",
+        )
+
+    def _publish_heartbeat(self, lag: float, failure_threshold: float) -> None:
+        """Publish task/systemd heartbeat state before any external alert I/O."""
+        supervisor = getattr(self.bot, "tasks", None)
+        heartbeat = getattr(supervisor, "heartbeat", None)
+        if callable(heartbeat):
+            heartbeat("_runtime", "runtime-watchdog")
+
+        if lag >= failure_threshold:
+            self.state.heartbeat_suppressed += 1
+            sd_notify(
+                "STATUS=EnvsBot unhealthy: "
+                f"event-loop lag {lag:.3f}s; watchdog heartbeat suppressed"
+            )
+            return
+
+        payload = (
+            "WATCHDOG=1\n"
+            f"STATUS=EnvsBot healthy; event-loop lag {lag:.3f}s"
+        )
+        if sd_notify(payload):
+            self.state.heartbeats += 1
+            self.state.last_heartbeat_at = int(time.time())
 
     async def _run(self) -> None:
         await wait_for_runtime_ready(
@@ -147,12 +202,12 @@ class RuntimeWatchdog:
                 )
                 if stop_requested:
                     break
-
                 now = loop.time()
                 lag = max(0.0, now - expected)
                 expected = now + interval
                 self.state.last_lag_seconds = lag
                 self.state.max_lag_seconds = max(self.state.max_lag_seconds, lag)
+
                 if lag >= warning_threshold:
                     self.state.lag_warnings += 1
                     log.warning(
@@ -160,31 +215,13 @@ class RuntimeWatchdog:
                         lag,
                         warning_threshold,
                     )
-                    alerts = getattr(self.bot, "alerts", None)
-                    report = getattr(alerts, "report_event_loop_lag", None)
-                    if callable(report):
-                        await report(lag, warning_threshold)
 
-                supervisor = getattr(self.bot, "tasks", None)
-                heartbeat = getattr(supervisor, "heartbeat", None)
-                if callable(heartbeat):
-                    heartbeat("_runtime", "runtime-watchdog")
-
-                if lag >= failure_threshold:
-                    self.state.heartbeat_suppressed += 1
-                    sd_notify(
-                        "STATUS=EnvsBot unhealthy: "
-                        f"event-loop lag {lag:.3f}s; watchdog heartbeat suppressed"
-                    )
-                    continue
-
-                payload = (
-                    "WATCHDOG=1\n"
-                    f"STATUS=EnvsBot healthy; event-loop lag {lag:.3f}s"
-                )
-                if sd_notify(payload):
-                    self.state.heartbeats += 1
-                    self.state.last_heartbeat_at = int(time.time())
+                # The watchdog decision must happen before any notification path.
+                # Admin notification discovery/join may involve network I/O and
+                # must never delay WATCHDOG=1 or an intentional suppression.
+                self._publish_heartbeat(lag, failure_threshold)
+                if lag >= warning_threshold:
+                    self._schedule_lag_report(lag, warning_threshold)
                 self.state.last_error = None
         except asyncio.CancelledError:
             raise

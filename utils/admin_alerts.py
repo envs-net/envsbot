@@ -42,7 +42,9 @@ class AdminAlertManager:
 
     @property
     def enabled(self) -> bool:
-        return bool((getattr(self.bot, "config", {}) or {}).get("admin_alerts_enabled", True))
+        return bool(
+            (getattr(self.bot, "config", {}) or {}).get("admin_alerts_enabled", True)
+        )
 
     async def start(self) -> None:
         if not self.enabled or self.task is not None:
@@ -66,18 +68,23 @@ class AdminAlertManager:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    async def _notify(self, text: str, *, key: str, transition: str) -> None:
+    async def _notify(self, text: str, *, key: str, transition: str) -> bool:
+        """Send/queue an alert and report whether delivery ownership was accepted."""
         try:
             sent = await notify_admin(
                 self.bot,
                 text,
                 category="runtime_alert",
-                dedupe_key=f"runtime-alert:{key}:{transition}:{int(time.time()) // 60}",
+                dedupe_key=(
+                    f"runtime-alert:{key}:{transition}:{int(time.time()) // 60}"
+                ),
             )
             if sent:
                 self._notifications += 1
+            return bool(sent)
         except Exception:
             log.exception("[ALERTS] Failed to send admin alert: %s", key)
+            return False
 
     async def _set(
         self,
@@ -90,7 +97,10 @@ class AdminAlertManager:
     ) -> None:
         now = int(time.time())
         config = getattr(self.bot, "config", {}) or {}
-        cooldown = max(60, int(config.get("admin_alert_cooldown_seconds", 3600) or 3600))
+        cooldown = max(
+            60,
+            int(config.get("admin_alert_cooldown_seconds", 3600) or 3600),
+        )
         state = self._states.setdefault(key, AlertState())
         if active:
             first = not state.active
@@ -98,26 +108,38 @@ class AdminAlertManager:
             if first:
                 state.active = True
                 state.since = now
-                state.last_notified_at = now
                 state.summary = summary
                 state.fingerprint = fingerprint
-                await self._notify(f"🔴 {summary}", key=key, transition="open")
+                if await self._notify(
+                    f"🔴 {summary}", key=key, transition="open"
+                ):
+                    state.last_notified_at = now
                 return
             state.summary = summary
             state.fingerprint = fingerprint or state.fingerprint
             if changed or now - state.last_notified_at >= cooldown:
-                state.last_notified_at = now
-                await self._notify(f"🔴 Still active: {summary}", key=key, transition="ongoing")
+                if await self._notify(
+                    f"🔴 Still active: {summary}",
+                    key=key,
+                    transition="ongoing",
+                ):
+                    state.last_notified_at = now
             return
-
         if state.active:
+            previous = state.summary or summary
+            resolved = resolved_summary or previous
+            if not await self._notify(
+                f"✅ Resolved: {resolved}",
+                key=key,
+                transition="resolved",
+            ):
+                # Keep the state active so the next health pass retries the
+                # resolution instead of silently losing the transition.
+                return
             state.active = False
             state.last_notified_at = now
-            previous = state.summary or summary
             state.summary = summary
             state.fingerprint = ""
-            resolved = resolved_summary or previous
-            await self._notify(f"✅ Resolved: {resolved}", key=key, transition="resolved")
 
     async def report_task_circuit(self, plugin: str, name: str, error: str) -> None:
         """Open a task-circuit alert immediately; polling handles recovery."""
@@ -134,7 +156,10 @@ class AdminAlertManager:
         await self._set(
             "outbox-dead",
             True,
-            f"Outbox contains a dead-letter message: id={int(message_id)} category={category}",
+            (
+                "Outbox contains a dead-letter message: "
+                f"id={int(message_id)} category={category}"
+            ),
             fingerprint="dead",
         )
 
@@ -177,13 +202,21 @@ class AdminAlertManager:
         config = getattr(self.bot, "config", {}) or {}
         queued = int(state.get("queued", state.get("pending", 0)) or 0)
         queued_bytes = int(state.get("bytes", 0) or 0)
-        max_pending = max(1, int(config.get("outbox_max_pending", 10000) or 10000))
-        max_bytes = max(1, int(config.get("outbox_max_bytes", 50 * 1024 * 1024) or 1))
+        max_pending = max(
+            1,
+            int(config.get("outbox_max_pending", 10000) or 10000),
+        )
+        max_bytes = max(
+            1,
+            int(config.get("outbox_max_bytes", 50 * 1024 * 1024) or 1),
+        )
         max_destination = max(
-            1, int(config.get("outbox_max_per_destination", 1000) or 1000)
+            1,
+            int(config.get("outbox_max_per_destination", 1000) or 1000),
         )
         max_category = max(
-            1, int(config.get("outbox_max_per_category", 5000) or 5000)
+            1,
+            int(config.get("outbox_max_per_category", 5000) or 5000),
         )
         destination_count = int(state.get("largest_destination_count", 0) or 0)
         category_count = int(state.get("largest_category_count", 0) or 0)
@@ -236,7 +269,10 @@ class AdminAlertManager:
             await self._set(
                 key,
                 True,
-                f"Task circuit is open: {info.plugin}/{info.name} ({info.last_error or 'unknown error'})",
+                (
+                    f"Task circuit is open: {info.plugin}/{info.name} "
+                    f"({info.last_error or 'unknown error'})"
+                ),
                 fingerprint="open",
             )
         stale_keys = [
@@ -252,7 +288,10 @@ class AdminAlertManager:
     ) -> None:
         snapshot = await self._snapshot_for_check(snapshot)
         config = getattr(self.bot, "config", {}) or {}
-        threshold = max(60, int(config.get("admin_alert_room_missing_seconds", 1800) or 1800))
+        threshold = max(
+            60,
+            int(config.get("admin_alert_room_missing_seconds", 1800) or 1800),
+        )
         data = snapshot.check("rooms").data
         configured = set(str(room) for room in data.get("autojoin_rooms", ()) or ())
         missing = set(str(room) for room in data.get("missing", ()) or ())
@@ -288,9 +327,13 @@ class AdminAlertManager:
 
         data = snapshot.check("backup").data
         config = getattr(self.bot, "config", {}) or {}
-        max_age_hours = max(1, int(config.get("admin_alert_backup_max_age_hours", 36) or 36))
+        max_age_hours = max(
+            1,
+            int(config.get("admin_alert_backup_max_age_hours", 36) or 36),
+        )
         interval_hours = max(
-            0, int(config.get("backup_interval_hours", 24) or 0)
+            0,
+            int(config.get("backup_interval_hours", 24) or 0),
         )
         age_check_enabled = bool(data.get("age_check_enabled", interval_hours > 0))
         managed_backup_expected = bool(
@@ -316,7 +359,6 @@ class AdminAlertManager:
             await self._set("backup-invalid", False, "Backup validation recovered")
             self._last_backup_verified = None
             return
-
         too_old = bool(data.get("too_old")) if age_check_enabled else False
         age_hours = (
             float(age_seconds) / 3600.0
@@ -364,7 +406,10 @@ class AdminAlertManager:
         state = check.data
         if not state and check.status == "unknown":
             return
-        degraded = bool(state.get("degraded", False)) or check.status in {"warning", "error"}
+        degraded = bool(state.get("degraded", False)) or check.status in {
+            "warning",
+            "error",
+        }
         error = str(state.get("last_persistence_error") or check.error or "").strip()
         dropped = int(state.get("dropped_persistence_entries", 0) or 0)
         summary = (
@@ -484,7 +529,10 @@ class AdminAlertManager:
             self.bot, plugin="_runtime", name="admin-alert-manager"
         )
         config = getattr(self.bot, "config", {}) or {}
-        interval = max(30, int(config.get("admin_alert_interval_seconds", 60) or 60))
+        interval = max(
+            30,
+            int(config.get("admin_alert_interval_seconds", 60) or 60),
+        )
         while True:
             await self.run_once()
             await sleep_with_heartbeat(
@@ -504,6 +552,8 @@ class AdminAlertManager:
             "last_error": self._last_error,
             "check_errors": dict(self._check_errors),
             "active": self.active_count(),
-            "active_keys": sorted(key for key, state in self._states.items() if state.active),
+            "active_keys": sorted(
+                key for key, state in self._states.items() if state.active
+            ),
             "checked_at": utc_now().isoformat(timespec="seconds"),
         }
