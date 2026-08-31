@@ -13,7 +13,11 @@ from utils.config import config
 from utils.http_user_agent import resolve_user_agent
 from utils.task_supervisor import sleep_with_heartbeat
 from utils.version import __version__, display_version, normalized_version
-from utils.xmpp_notify import ensure_notification_target_joined, notification_message_type
+from utils.xmpp_notify import (
+    ensure_notification_target_joined,
+    notification_message_type,
+    prepare_notification_target,
+)
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +47,6 @@ def github_api_url_from_release_url(release_url: str) -> str | None:
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) < 2:
         return None
-
     owner, repo = parts[0], parts[1]
     return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
@@ -61,7 +64,6 @@ def fetch_latest_release_version_via_github_api_sync(release_url: str) -> str:
     api_url = github_api_url_from_release_url(release_url)
     if not api_url:
         raise ValueError("version_check_url is not a supported GitHub releases URL")
-
     req = urllib.request.Request(
         api_url,
         headers={
@@ -88,7 +90,6 @@ def _release_tag_from_redirect_url(final_url: str) -> str:
     raw_tag = parsed.path.split(marker, 1)[1].strip("/")
     if not raw_tag or "/" in raw_tag:
         raise ValueError("Could not extract release tag from redirect URL")
-
     tag = unquote(raw_tag).strip()
     if not tag:
         raise ValueError("Could not extract release tag from redirect URL")
@@ -99,7 +100,6 @@ def fetch_latest_release_version_via_redirect_sync(release_url: str) -> str:
     """Fetch the latest release version via the /releases/latest redirect."""
     if not release_url:
         raise ValueError("version_check_url is not configured")
-
     req = urllib.request.Request(
         release_url,
         headers={"User-Agent": _user_agent()},
@@ -114,7 +114,6 @@ def fetch_latest_release_version_sync(release_url: str) -> str:
     """Fetch the latest release version, preferring the GitHub API."""
     if not release_url:
         raise ValueError("version_check_url is not configured")
-
     try:
         return fetch_latest_release_version_via_github_api_sync(release_url)
     except Exception as api_error:
@@ -143,7 +142,7 @@ def update_notification_target() -> str | None:
 
 
 def _notification_type(bot, target: str) -> str:
-    """Return a safe message type for update notifications."""
+    """Return the message type for an already prepared notification target."""
     return notification_message_type(bot, target)
 
 
@@ -158,14 +157,20 @@ async def send_update_notification(bot, remote_version: str) -> bool:
     if not target:
         log.debug("Version check found update but no notification target is configured")
         return False
-
     message = getattr(bot, "make_message", None)
     safe_send = getattr(bot, "_safe_send_message", None)
     if not callable(message) or not callable(safe_send):
         log.debug("Version check notification skipped: bot send helpers unavailable")
         return False
 
-    await ensure_notification_target_joined(bot, target)
+    joined = await ensure_notification_target_joined(bot, target)
+    message_type = await prepare_notification_target(bot, target, joined=joined)
+    if message_type is None:
+        log.warning(
+            "Version check notification deferred: MUC target %s is unavailable",
+            target,
+        )
+        return False
 
     release_url = config.get("version_check_url", DEFAULT_RELEASE_URL)
     body = (
@@ -192,7 +197,6 @@ async def check_for_updates_once(
         return False, None, "Version check is disabled"
     if not release_url:
         return False, None, "Version check URL is missing"
-
     try:
         remote_version = await asyncio.to_thread(
             fetch_latest_release_version_sync,
@@ -200,7 +204,6 @@ async def check_for_updates_once(
         )
         bot.last_version_check_result = remote_version
         current_version = normalized_version()
-
         if is_remote_version_newer(remote_version, current_version):
             log.info(
                 "New EnvsBot version available: remote=%s local=%s url=%s",
@@ -212,7 +215,6 @@ async def check_for_updates_once(
                 if await send_update_notification(bot, remote_version):
                     bot.last_update_notified_version = remote_version
             return True, remote_version, None
-
         return False, remote_version, None
     except Exception as error:
         log.warning("Version check failed: %s", error)

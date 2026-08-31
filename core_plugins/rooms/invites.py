@@ -12,6 +12,7 @@ from utils.permissions import configured_room_invite_admin_rooms
 from utils.xmpp_notify import (
     ensure_notification_target_joined,
     notification_message_type,
+    prepare_notification_target,
 )
 
 from .settings import set_room_control_defaults
@@ -140,7 +141,6 @@ def extract_room_invite(msg) -> dict[str, str] | None:
     xml = getattr(msg, "xml", None)
     if xml is None:
         return _room_invite_from_muc_plugin(msg) or _room_invite_from_direct_plugin(msg)
-
     for direct in xml.findall(f".//{{{_DIRECT_INVITE_NS}}}x"):
         room_jid = (direct.attrib.get("jid") or "").strip().lower()
         if not room_jid:
@@ -150,7 +150,6 @@ def extract_room_invite(msg) -> dict[str, str] | None:
             "inviter": _jid_bare(msg["from"]) or "unknown",
             "reason": (direct.attrib.get("reason") or "").strip(),
         }
-
     for invite in xml.findall(f".//{{{_MUC_USER_NS}}}invite"):
         room_jid = _jid_bare(msg["from"])
         if not room_jid:
@@ -214,7 +213,6 @@ async def load_pending_room_invites(bot) -> dict[int, dict]:
             for invite_id, invite in bot.pending_room_invites.items()
         }
         return bot.pending_room_invites
-
     bot.pending_room_invites = {}
     bot.pending_room_invite_index = {}
 
@@ -225,7 +223,6 @@ async def load_pending_room_invites(bot) -> dict[int, dict]:
         ORDER BY id ASC
         """
     )
-
     expired_ids: list[int] = []
     now = int(time.time())
     for row in rows:
@@ -242,7 +239,6 @@ async def load_pending_room_invites(bot) -> dict[int, dict]:
             continue
         bot.pending_room_invites[int(invite_id)] = invite
         bot.pending_room_invite_index[(invite["room_jid"], invite["inviter"])] = int(invite_id)
-
     if expired_ids:
         placeholders = ",".join("?" for _ in expired_ids)
         await db.write(
@@ -255,7 +251,12 @@ async def load_pending_room_invites(bot) -> dict[int, dict]:
     return bot.pending_room_invites
 
 
-async def _store_pending_room_invite(bot, room_jid: str, inviter: str, reason: str = "") -> dict | None:
+async def _store_pending_room_invite(
+    bot,
+    room_jid: str,
+    inviter: str,
+    reason: str = "",
+) -> dict | None:
     """Persist a pending room invite and add it to runtime state."""
     await setup_room_invites_db(bot)
     pending = getattr(bot, "pending_room_invites", {})
@@ -266,7 +267,6 @@ async def _store_pending_room_invite(bot, room_jid: str, inviter: str, reason: s
         index = {}
     bot.pending_room_invites = pending
     bot.pending_room_invite_index = index
-
     key = (room_jid, inviter)
     existing_id = index.get(key)
     if existing_id is not None and existing_id in pending:
@@ -274,7 +274,6 @@ async def _store_pending_room_invite(bot, room_jid: str, inviter: str, reason: s
         if not _room_invite_is_expired(invite):
             return invite
         await _delete_pending_room_invite(bot, existing_id)
-
     db = _db_api(bot)
     created_at = int(time.time())
     if db is None:
@@ -289,7 +288,6 @@ async def _store_pending_room_invite(bot, room_jid: str, inviter: str, reason: s
         pending[invite_id] = invite
         index[key] = invite_id
         return invite
-
     try:
         cur = await db.write(
             """
@@ -303,7 +301,6 @@ async def _store_pending_room_invite(bot, room_jid: str, inviter: str, reason: s
     except Exception:
         await load_pending_room_invites(bot)
         return bot.pending_room_invites.get(bot.pending_room_invite_index.get(key))
-
     invite = {
         "id": invite_id,
         "room_jid": room_jid,
@@ -327,7 +324,6 @@ async def _delete_pending_room_invite(bot, invite_id: int) -> dict | None:
     bot.pending_room_invites = pending
     bot.pending_room_invite_index = index
     invite = pending.pop(invite_id, None)
-
     db = _db_api(bot)
     if db is not None:
         if invite is None:
@@ -349,7 +345,6 @@ async def _delete_pending_room_invite(bot, invite_id: int) -> dict | None:
             (invite_id,),
             label="room_invite_delete",
         )
-
     if invite:
         index.pop((str(invite["room_jid"]), str(invite["inviter"])), None)
     return invite
@@ -361,7 +356,6 @@ async def cleanup_expired_room_invites(bot) -> int:
     max_age_days = _room_invite_max_age_days()
     if max_age_days <= 0:
         return 0
-
     now = int(time.time())
     expired = [
         invite_id
@@ -396,7 +390,17 @@ async def _notify_room_invite(bot, body: str) -> None:
     if not target:
         log.warning("Room invite notification skipped: no target configured")
         return
-    await ensure_notification_target_joined(bot, target)
+
+    joined = await ensure_notification_target_joined(bot, target)
+    message_type = await prepare_notification_target(bot, target, joined=joined)
+    if message_type is None:
+        log.warning(
+            "Room invite notification deferred: MUC target %s is unavailable; "
+            "the invite remains pending",
+            target,
+        )
+        return
+
     message = bot.make_message(
         mto=target,
         mbody=body,
@@ -414,7 +418,6 @@ async def handle_room_invite(bot, msg) -> bool:
     room_jid = (invite.get("room_jid") or "").strip().lower()
     inviter = (invite.get("inviter") or "unknown").strip().lower()
     reason = (invite.get("reason") or "").strip()
-
     if not room_invites_enabled():
         log.info("Room invites disabled; ignoring invite for %s from %s", room_jid, inviter)
         return True
@@ -427,7 +430,6 @@ async def handle_room_invite(bot, msg) -> bool:
             f"Invited by: {inviter}",
         )
         return True
-
     if room_jid in JOINED_ROOMS:
         log.info("Ignoring invite for already joined room %s from %s", room_jid, inviter)
         return True
@@ -440,7 +442,6 @@ async def handle_room_invite(bot, msg) -> bool:
     pending = await _store_pending_room_invite(bot, room_jid, inviter, reason)
     if not pending:
         return True
-
     reason_line = f"\nReason: {reason}" if reason else ""
     await _notify_room_invite(
         bot,
@@ -506,7 +507,6 @@ async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
         await bot.db.rooms.update(room_jid, nick=room_nick, autojoin=True)
     else:
         await bot.db.rooms.add(room_jid, room_nick, True)
-
     JOINED_ROOMS[room_jid] = {
         "nick": room_nick,
         "autojoin": True,
@@ -525,34 +525,60 @@ async def _join_invited_room(bot, room_jid: str, room_nick: str) -> None:
     role=Role.ADMIN,
     aliases=["room invite"],
     short="List, accept, decline or clean up pending room invites.",
-    usage="{prefix}rooms invite list [all|page|last] | {prefix}rooms invite accept <id> | {prefix}rooms invite decline <id> | {prefix}rooms invite cleanup [all|expired]",
+    usage=(
+        "{prefix}rooms invite list [all|page|last] | "
+        "{prefix}rooms invite accept <id> | "
+        "{prefix}rooms invite decline <id> | "
+        "{prefix}rooms invite cleanup [all|expired]"
+    ),
     subcommands=[
         help_subcommand(
             "list",
             "{prefix}rooms invite list [all|page|last]",
             "List pending room invitations waiting for an admin decision.",
             aliases=("ls",),
-            examples=[help_example("{prefix}rooms invite list", "Show the first page of pending invitations.")],
+            examples=[
+                help_example(
+                    "{prefix}rooms invite list",
+                    "Show the first page of pending invitations.",
+                )
+            ],
         ),
         help_subcommand(
             "accept",
             "{prefix}rooms invite accept <id>",
             "Accept one pending invitation and join/store the room.",
-            examples=[help_example("{prefix}rooms invite accept 1", "Accept pending invitation 1.")],
+            examples=[
+                help_example(
+                    "{prefix}rooms invite accept 1",
+                    "Accept pending invitation 1.",
+                )
+            ],
         ),
         help_subcommand(
             "decline",
             "{prefix}rooms invite decline <id>",
             "Decline and remove one pending room invitation.",
-            examples=[help_example("{prefix}rooms invite decline 1", "Decline pending invitation 1.")],
+            examples=[
+                help_example(
+                    "{prefix}rooms invite decline 1",
+                    "Decline pending invitation 1.",
+                )
+            ],
         ),
         help_subcommand(
             "cleanup",
             "{prefix}rooms invite cleanup [all|expired]",
             "Remove all pending invites or only expired entries.",
             examples=[
-                help_example("{prefix}rooms invite cleanup expired", "Delete only expired pending invitations."),
-                help_example("{prefix}rooms invite cleanup all", "Delete every pending invitation."),
+                help_example(
+                    "{prefix}rooms invite cleanup expired",
+                    "Delete only expired pending invitations.",
+                ),
+                help_example(
+                    "{prefix}rooms invite cleanup all",
+                    "Delete every pending invitation.",
+                ),
             ],
         ),
     ],
@@ -577,7 +603,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             "Enable ROOM_INVITES_ENABLED in config.py.",
         )
         return
-
     if not args or args[0].lower() in {"help", "usage"}:
         bot.reply(
             msg,
@@ -590,7 +615,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
         return
 
     action = args[0].lower()
-
     if action == "cleanup":
         cleanup_mode = args[1].lower() if len(args) > 1 else "all"
         if len(args) > 2 or cleanup_mode not in {"all", "expired"}:
@@ -599,7 +623,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
                 f"{bot.prefix}rooms invite cleanup [all|expired]",
             )
             return
-
         if cleanup_mode == "expired":
             count = await cleanup_expired_room_invites(bot)
             bot.reply_ok(
@@ -622,7 +645,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             details={"mode": cleanup_mode, "count": count},
         )
         return
-
     if action in {"list", "ls"}:
         await load_pending_room_invites(bot)
         await cleanup_expired_room_invites(bot)
@@ -635,7 +657,8 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             for invite in invites:
                 reason = f" — {invite['reason']}" if invite.get("reason") else ""
                 lines.append(
-                    f"#{invite['id']} {invite['room_jid']} — invited by {invite['inviter']}{reason}"
+                    f"#{invite['id']} {invite['room_jid']} — invited by "
+                    f"{invite['inviter']}{reason}"
                 )
         else:
             lines.append("None")
@@ -650,7 +673,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             ),
         )
         return
-
     if action not in {"accept", "decline", "reject", "remove", "rm", "delete", "del"}:
         bot.reply_warn(msg, f"Unknown room invite action: {action}")
         return
@@ -664,7 +686,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
     except ValueError:
         bot.reply_error(msg, "Invite id must be a number.")
         return
-
     await load_pending_room_invites(bot)
     invite = getattr(bot, "pending_room_invites", {}).get(invite_id)
     if not invite:
@@ -673,7 +694,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
 
     room_jid = str(invite["room_jid"])
     inviter = str(invite["inviter"])
-
     if action == "accept":
         room_nick = str(config.get("nick") or getattr(bot.boundjid, "resource", None) or "EnvsBot")
         try:
@@ -685,7 +705,6 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
                 f"Room invite #{invite_id} could not be accepted. The invite remains pending.",
             )
             return
-
         await _delete_pending_room_invite(bot, invite_id)
         await audit_event(
             bot,
@@ -695,10 +714,12 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
             details={"invite_id": invite_id, "inviter": inviter, "nick": room_nick},
         )
         lines = _room_invite_onboarding_lines(bot, room_jid)
-        lines[0] = f"✅ Accepted room invite #{invite_id}. Joined and stored {room_jid} with autojoin enabled."
+        lines[0] = (
+            f"✅ Accepted room invite #{invite_id}. Joined and stored {room_jid} "
+            "with autojoin enabled."
+        )
         bot.reply(msg, lines)
         return
-
     removed = await _delete_pending_room_invite(bot, invite_id)
     if not removed:
         bot.reply_error(msg, f"Unknown pending room invite id: {invite_id}")

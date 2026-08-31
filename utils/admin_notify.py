@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from utils.outbox import durable_send
+from utils.xmpp_notify import prepare_notification_target
+
+log = logging.getLogger(__name__)
 
 
 def admin_notify_target(bot: Any) -> str:
@@ -31,7 +35,15 @@ async def notify_admin(
     target = admin_notify_target(bot)
     if not target:
         return False
-    message_type = "groupchat" if "@conference." in target or "@muc." in target else "chat"
+
+    message_type = await prepare_notification_target(bot, target)
+    if message_type is None:
+        log.warning(
+            "Admin notification deferred: MUC target %s is unavailable",
+            target,
+        )
+        return False
+
     message = bot.make_message(mto=target, mbody=str(text), mtype=message_type)
     return await durable_send(
         bot,

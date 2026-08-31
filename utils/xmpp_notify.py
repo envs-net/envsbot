@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from typing import Any
@@ -11,6 +12,7 @@ from utils.config import config
 log = logging.getLogger(__name__)
 
 _MUC_FEATURE = "http://jabber.org/protocol/muc"
+_NOTIFICATION_ROOM_JOIN_TIMEOUT_SECONDS = 30.0
 
 
 def _target_text(target: str | None) -> str:
@@ -168,8 +170,45 @@ def _identity_is_muc(identity: Any) -> bool:
     return str(category or "").strip().lower() == "conference"
 
 
+def _legacy_muc_domain_hint(target: str) -> bool:
+    """Recognize conventional MUC service domains when disco is unavailable."""
+    if not _looks_like_bare_room_jid(target):
+        return False
+    domain = target.split("@", 1)[1].strip().lower()
+    return domain.startswith("conference.") or domain.startswith("muc.")
+
+
+async def _disco_muc_status(bot: Any, target: str) -> bool | None:
+    """Return True/False from disco, or None when discovery is unavailable."""
+    disco = None
+    plugin = getattr(bot, "plugin", None)
+    if isinstance(plugin, dict):
+        disco = plugin.get("xep_0030")
+    if disco is None:
+        try:
+            disco = bot["xep_0030"]
+        except Exception:
+            disco = None
+    if disco is None or not hasattr(disco, "get_info"):
+        return None
+
+    try:
+        info = await _maybe_await(disco.get_info(jid=target))
+    except Exception:
+        log.debug(
+            "Could not discover whether notification target is a MUC: %s",
+            target,
+            exc_info=True,
+        )
+        return None
+
+    if any(feature == _MUC_FEATURE for feature in _iter_disco_features(info)):
+        return True
+    return any(_identity_is_muc(identity) for identity in _iter_disco_identities(info))
+
+
 async def target_is_muc_room(bot: Any, target: str) -> bool:
-    """Return True if *target* looks like or discovers as a MUC room."""
+    """Return True if *target* is known or discovered as a MUC room."""
     target = _target_text(target)
     if not _looks_like_bare_room_jid(target):
         return False
@@ -184,26 +223,10 @@ async def target_is_muc_room(bot: Any, target: str) -> bool:
     except Exception:
         log.debug("Could not inspect stored rooms for notification target", exc_info=True)
 
-    try:
-        disco = None
-        plugin = getattr(bot, "plugin", None)
-        if isinstance(plugin, dict):
-            disco = plugin.get("xep_0030")
-        if disco is None:
-            try:
-                disco = bot["xep_0030"]
-            except Exception:
-                disco = None
-        if disco is None or not hasattr(disco, "get_info"):
-            return False
-
-        info = await _maybe_await(disco.get_info(jid=target))
-        if any(feature == _MUC_FEATURE for feature in _iter_disco_features(info)):
-            return True
-        return any(_identity_is_muc(identity) for identity in _iter_disco_identities(info))
-    except Exception:
-        log.debug("Could not discover whether notification target is a MUC: %s", target, exc_info=True)
-        return False
+    disco_status = await _disco_muc_status(bot, target)
+    if disco_status is not None:
+        return disco_status
+    return _legacy_muc_domain_hint(target)
 
 
 async def ensure_room_joined(bot: Any, room_jid: str, *, nick: str | None = None) -> bool:
@@ -223,19 +246,45 @@ async def ensure_room_joined(bot: Any, room_jid: str, *, nick: str | None = None
         log.warning("Cannot join notification room %s: XEP-0045 plugin unavailable", room_jid)
         return False
 
-    nick = nick or str(config.get("nick") or getattr(getattr(bot, "boundjid", None), "resource", None) or "EnvsBot")
+    nick = nick or str(
+        config.get("nick")
+        or getattr(getattr(bot, "boundjid", None), "resource", None)
+        or "EnvsBot"
+    )
     presence = getattr(bot, "presence", None)
     status = getattr(presence, "status", {}) or {}
 
     try:
-        await _maybe_await(
-            muc.join_muc(
-                room_jid,
-                nick,
-                pshow=status.get("show"),
-                pstatus=status.get("status"),
-            )
+        await asyncio.wait_for(
+            _maybe_await(
+                muc.join_muc(
+                    room_jid,
+                    nick,
+                    pshow=status.get("show"),
+                    pstatus=status.get("status"),
+                )
+            ),
+            timeout=_NOTIFICATION_ROOM_JOIN_TIMEOUT_SECONDS,
         )
+    except TimeoutError:
+        leave_muc = getattr(muc, "leave_muc", None)
+        if callable(leave_muc):
+            try:
+                await _maybe_await(leave_muc(room_jid, nick))
+            except Exception:
+                log.debug(
+                    "Could not clean up timed-out notification room join for %s",
+                    room_jid,
+                    exc_info=True,
+                )
+        log.warning(
+            "Timed out joining notification room %s after %.1fs",
+            room_jid,
+            _NOTIFICATION_ROOM_JOIN_TIMEOUT_SECONDS,
+        )
+        return False
+    except asyncio.CancelledError:
+        raise
     except Exception:
         log.exception("Failed to join notification room %s", room_jid)
         return False
@@ -278,3 +327,25 @@ async def ensure_notification_target_joined(bot: Any, target: str) -> bool:
     if await target_is_muc_room(bot, target):
         return await ensure_room_joined(bot, target)
     return False
+
+
+async def prepare_notification_target(
+    bot: Any,
+    target: str,
+    *,
+    joined: bool | None = None,
+) -> str | None:
+    """Return the safe message type, joining MUC targets before use.
+
+    ``None`` means a known MUC target is currently unavailable and callers
+    must not fall back to a direct-chat stanza.
+    """
+    target = _target_text(target)
+    if not target:
+        return None
+    if not await target_is_muc_room(bot, target):
+        return "chat"
+    if joined is None:
+        joined = await ensure_room_joined(bot, target)
+    return "groupchat" if joined else None
+

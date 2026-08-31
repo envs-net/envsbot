@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -83,23 +84,6 @@ def test_joined_room_nick_from_presence_and_runtime_state():
     assert xmpp_notify.joined_room_nick(SimpleNamespace(), "") is None
 
 
-@pytest.mark.parametrize(
-    ("identity", "expected"),
-    [
-        ({"category": "conference", "type": "text", "name": "Room"}, True),
-        (("conference", "text", None, "Room"), True),
-        ({"category": "client", "type": "pc", "name": "MUC Helper"}, False),
-        (("client", "pc", None, "Conference Browser"), False),
-        ({"category": "server", "type": "im", "name": "conference tools"}, False),
-        (SimpleNamespace(category="conference", name="Room"), True),
-        (SimpleNamespace(category="client", name="MUC Helper"), False),
-        ((), False),
-    ],
-)
-def test_identity_is_muc_uses_only_disco_category(identity, expected):
-    assert xmpp_notify._identity_is_muc(identity) is expected
-
-
 @pytest.mark.asyncio
 async def test_target_is_muc_room_uses_joined_room_and_stored_room():
     joined = SimpleNamespace(presence=SimpleNamespace(joined_rooms={"room@conf.test": "Bot"}))
@@ -130,26 +114,6 @@ async def test_target_is_muc_room_uses_disco_shapes(info):
 
     assert await xmpp_notify.target_is_muc_room(bot, "room@conf.test") is True
     disco.get_info.assert_awaited_once_with(jid="room@conf.test")
-
-
-@pytest.mark.asyncio
-async def test_target_is_muc_room_ignores_muc_words_outside_identity_category():
-    disco = SimpleNamespace(
-        get_info=AsyncMock(
-            return_value={
-                "identities": [
-                    {
-                        "category": "client",
-                        "type": "pc",
-                        "name": "MUC Helper / Conference Browser",
-                    }
-                ]
-            }
-        )
-    )
-    bot = SimpleNamespace(plugin={"xep_0030": disco})
-
-    assert await xmpp_notify.target_is_muc_room(bot, "user@example.org") is False
 
 
 @pytest.mark.asyncio
@@ -309,3 +273,112 @@ async def test_ensure_notification_target_joined(monkeypatch):
     join_room.return_value = True
     assert await xmpp_notify.ensure_notification_target_joined(bot, "room@conf.test") is True
     join_room.assert_awaited_once_with(bot, "room@conf.test")
+
+
+@pytest.mark.asyncio
+async def test_target_is_muc_room_uses_legacy_domain_hint_only_when_disco_unavailable():
+    no_disco = SimpleNamespace(plugin={})
+    assert (
+        await xmpp_notify.target_is_muc_room(
+            no_disco,
+            "admins@conference.example.org",
+        )
+        is True
+    )
+    assert await xmpp_notify.target_is_muc_room(no_disco, "admins@chat.example.org") is False
+
+    disco = SimpleNamespace(get_info=AsyncMock(return_value={"features": ["urn:xmpp:ping"]}))
+    bot = SimpleNamespace(plugin={"xep_0030": disco})
+    assert (
+        await xmpp_notify.target_is_muc_room(
+            bot,
+            "admins@conference.example.org",
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_target_is_muc_room_ignores_muc_words_outside_identity_category():
+    disco = SimpleNamespace(
+        get_info=AsyncMock(
+            return_value={
+                "identities": [
+                    {
+                        "category": "client",
+                        "type": "pc",
+                        "name": "MUC Helper / Conference Browser",
+                    }
+                ]
+            }
+        )
+    )
+    bot = SimpleNamespace(plugin={"xep_0030": disco})
+
+    assert await xmpp_notify.target_is_muc_room(bot, "user@example.org") is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_room_joined_times_out_and_cleans_slixmpp_state(monkeypatch):
+    monkeypatch.setitem(xmpp_notify.config, "nick", "ConfigBot")
+    monkeypatch.setattr(
+        xmpp_notify,
+        "_NOTIFICATION_ROOM_JOIN_TIMEOUT_SECONDS",
+        0.001,
+    )
+
+    async def slow_join(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    muc = SimpleNamespace(
+        join_muc=AsyncMock(side_effect=slow_join),
+        leave_muc=AsyncMock(),
+    )
+    bot = SimpleNamespace(
+        plugin={"xep_0045": muc},
+        presence=SimpleNamespace(joined_rooms={}, status={}),
+    )
+
+    assert await xmpp_notify.ensure_room_joined(bot, "room@conference.example.org") is False
+    muc.leave_muc.assert_awaited_once_with(
+        "room@conference.example.org",
+        "ConfigBot",
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_notification_target_never_falls_back_to_chat_after_failed_muc_join(
+    monkeypatch,
+):
+    bot = SimpleNamespace()
+    monkeypatch.setattr(
+        xmpp_notify,
+        "target_is_muc_room",
+        AsyncMock(return_value=True),
+    )
+    join_room = AsyncMock(return_value=False)
+    monkeypatch.setattr(xmpp_notify, "ensure_room_joined", join_room)
+
+    assert (
+        await xmpp_notify.prepare_notification_target(
+            bot,
+            "admins@chat.example.org",
+        )
+        is None
+    )
+    join_room.assert_awaited_once_with(bot, "admins@chat.example.org")
+
+
+@pytest.mark.asyncio
+async def test_prepare_notification_target_returns_chat_for_direct_jid(monkeypatch):
+    bot = SimpleNamespace()
+    monkeypatch.setattr(
+        xmpp_notify,
+        "target_is_muc_room",
+        AsyncMock(return_value=False),
+    )
+    join_room = AsyncMock()
+    monkeypatch.setattr(xmpp_notify, "ensure_room_joined", join_room)
+
+    assert await xmpp_notify.prepare_notification_target(bot, "user@example.org") == "chat"
+    join_room.assert_not_awaited()
