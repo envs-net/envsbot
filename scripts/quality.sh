@@ -47,12 +47,12 @@ printf '%s\n' '[8/9] Git whitespace errors'
 # without reachable tags still catch whitespace errors.
 latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
 if [ -n "$latest_tag" ]; then
-  git diff --check "$latest_tag"
+  git --no-pager diff --check "$latest_tag"
 fi
-git diff --check HEAD
+git --no-pager diff --check HEAD
 if git diff --quiet HEAD --; then
   empty_tree=$(git hash-object -t tree /dev/null)
-  git diff --check "$empty_tree" HEAD
+  git --no-pager diff --check "$empty_tree" HEAD
 fi
 
 printf '%s\n' '[9/9] Dependency audit (pip-audit)'

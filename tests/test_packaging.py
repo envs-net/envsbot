@@ -245,11 +245,11 @@ def test_quality_checks_git_whitespace_since_release_and_in_worktree():
     quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
 
     assert "git describe --tags --abbrev=0" in quality
-    assert 'git diff --check "$latest_tag"' in quality
-    assert "git diff --check HEAD" in quality
+    assert 'git --no-pager diff --check "$latest_tag"' in quality
+    assert "git --no-pager diff --check HEAD" in quality
     assert "git diff --quiet HEAD --" in quality
     assert "git hash-object -t tree /dev/null" in quality
-    assert 'git diff --check "$empty_tree" HEAD' in quality
+    assert 'git --no-pager diff --check "$empty_tree" HEAD' in quality
 
 
 def test_quality_audits_exact_lock_without_no_deps_warning():
