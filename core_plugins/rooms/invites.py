@@ -392,6 +392,7 @@ async def _notify_room_invite(bot, body: str) -> None:
         return
 
     joined = await ensure_notification_target_joined(bot, target)
+    message_type: str | None
     if joined:
         # A successful notification-target join means the target is a MUC.
         # Keep the established helper visible here for callers/tests that
