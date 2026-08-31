@@ -178,7 +178,7 @@ async def send_update_notification(bot, remote_version: str) -> bool:
         f"Current version: {display_version()}\n"
         f"Release page: {release_url}"
     )
-    outbound = message(mto=target, mbody=body, mtype=_notification_type(bot, target))
+    outbound = message(mto=target, mbody=body, mtype=message_type)
     return await safe_send(outbound) is not False
 
 

@@ -11,7 +11,6 @@ from utils.formatting import format_page, parse_page_args
 from utils.permissions import configured_room_invite_admin_rooms
 from utils.xmpp_notify import (
     ensure_notification_target_joined,
-    notification_message_type,
     prepare_notification_target,
 )
 
@@ -404,7 +403,7 @@ async def _notify_room_invite(bot, body: str) -> None:
     message = bot.make_message(
         mto=target,
         mbody=body,
-        mtype=notification_message_type(bot, target),
+        mtype=message_type,
     )
     await bot._safe_send_message(message)
 

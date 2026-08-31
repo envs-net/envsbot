@@ -38,11 +38,14 @@ async def notify_admin(
 
     message_type = await prepare_notification_target(bot, target)
     if message_type is None:
+        # Durable admin notifications must not be lost just because a known
+        # MUC is temporarily unavailable. Queue them explicitly as groupchat;
+        # the persistent outbox will defer delivery until the room is joined.
         log.warning(
-            "Admin notification deferred: MUC target %s is unavailable",
+            "Admin notification queued: MUC target %s is currently unavailable",
             target,
         )
-        return False
+        message_type = "groupchat"
 
     message = bot.make_message(mto=target, mbody=str(text), mtype=message_type)
     return await durable_send(
