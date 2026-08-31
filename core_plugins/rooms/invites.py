@@ -276,15 +276,16 @@ async def _store_pending_room_invite(
             await _delete_pending_room_invite(bot, existing_id)
         else:
             created_at = int(time.time())
-            invite["reason"] = reason or ""
-            invite["created_at"] = created_at
+            refreshed_reason = reason or ""
             db = _db_api(bot)
             if db is not None:
                 await db.write(
                     "UPDATE room_invites SET reason = ?, created_at = ? WHERE id = ?",
-                    (reason or "", created_at, existing_id),
+                    (refreshed_reason, created_at, existing_id),
                     label="room_invite_refresh",
                 )
+            invite["reason"] = refreshed_reason
+            invite["created_at"] = created_at
             return invite
 
     db = _db_api(bot)

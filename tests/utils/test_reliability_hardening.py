@@ -115,3 +115,55 @@ async def test_failed_resolution_remains_active_for_retry(monkeypatch):
 
     await manager._set("demo", False, "Demo recovered")
     assert manager._states["demo"].active is False
+
+
+@pytest.mark.asyncio
+async def test_recursive_outbox_capacity_alert_is_suppressed(monkeypatch):
+    manager = admin_alerts.AdminAlertManager(SimpleNamespace(config={}))
+    calls = 0
+
+    async def recursive_notify(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        await manager.report_outbox_capacity("queue full")
+        return False
+
+    monkeypatch.setattr(admin_alerts, "notify_admin", recursive_notify)
+
+    await manager.report_outbox_capacity("queue full")
+
+    assert calls == 1
+    assert manager._states["outbox-capacity"].active is True
+    assert manager._states["outbox-capacity"].last_notified_at == 0
+    assert manager._notification_inflight == set()
+
+
+@pytest.mark.asyncio
+async def test_invite_refresh_does_not_mutate_runtime_when_db_write_fails(monkeypatch):
+    invite = {
+        "id": 7,
+        "room_jid": "room@conference.test",
+        "inviter": "alice@example.org",
+        "reason": "old reason",
+        "created_at": 100,
+    }
+    db = SimpleNamespace(write=AsyncMock(side_effect=RuntimeError("db busy")))
+    bot = SimpleNamespace(
+        db=SimpleNamespace(conn=object(), write=db.write),
+        pending_room_invites={7: invite},
+        pending_room_invite_index={("room@conference.test", "alice@example.org"): 7},
+    )
+    monkeypatch.setattr(invites, "setup_room_invites_db", AsyncMock())
+    monkeypatch.setattr(invites, "_db_api", lambda _bot: db)
+    monkeypatch.setattr(invites.time, "time", lambda: 200)
+
+    with pytest.raises(RuntimeError, match="db busy"):
+        await invites._store_pending_room_invite(
+            bot,
+            "room@conference.test",
+            "alice@example.org",
+            "new reason",
+        )
+
+    assert invite["reason"] == "old reason"
+    assert invite["created_at"] == 100

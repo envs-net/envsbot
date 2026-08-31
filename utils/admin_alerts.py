@@ -39,6 +39,7 @@ class AdminAlertManager:
         self._last_check_at = 0
         self._last_error: str | None = None
         self._check_errors: dict[str, str] = {}
+        self._notification_inflight: set[str] = set()
 
     @property
     def enabled(self) -> bool:
@@ -69,22 +70,33 @@ class AdminAlertManager:
         await asyncio.gather(task, return_exceptions=True)
 
     async def _notify(self, text: str, *, key: str, transition: str) -> bool:
-        """Send/queue an alert and report whether delivery ownership was accepted."""
-        try:
-            sent = await notify_admin(
-                self.bot,
-                text,
-                category="runtime_alert",
-                dedupe_key=(
-                    f"runtime-alert:{key}:{transition}:{int(time.time()) // 60}"
-                ),
+        """Send/queue one alert without recursively alerting on its own failure."""
+        if key in self._notification_inflight:
+            log.debug(
+                "[ALERTS] Suppressing recursive notification while %s is in flight",
+                key,
             )
+            return False
+
+        self._notification_inflight.add(key)
+        try:
+            try:
+                sent = await notify_admin(
+                    self.bot,
+                    text,
+                    category="runtime_alert",
+                    dedupe_key=(
+                        f"runtime-alert:{key}:{transition}:{int(time.time()) // 60}"
+                    ),
+                )
+            except Exception:
+                log.exception("[ALERTS] Failed to send admin alert: %s", key)
+                return False
             if sent:
                 self._notifications += 1
             return bool(sent)
-        except Exception:
-            log.exception("[ALERTS] Failed to send admin alert: %s", key)
-            return False
+        finally:
+            self._notification_inflight.discard(key)
 
     async def _set(
         self,

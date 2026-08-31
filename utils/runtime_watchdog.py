@@ -141,12 +141,19 @@ class RuntimeWatchdog:
         current = self._lag_alert_task
         if current is not None and not current.done():
             return
-        self._lag_alert_task = create_plugin_task(
-            self.bot,
-            "_runtime",
-            self._report_lag(report, lag, warning_threshold),
-            name="runtime-watchdog-lag-alert",
-        )
+        report_coro = self._report_lag(report, lag, warning_threshold)
+        try:
+            self._lag_alert_task = create_plugin_task(
+                self.bot,
+                "_runtime",
+                report_coro,
+                name="runtime-watchdog-lag-alert",
+            )
+        except Exception:
+            # create_plugin_task closes an unclaimed coroutine on failure. Alert
+            # scheduling must never take down the watchdog heartbeat worker.
+            log.exception("[WATCHDOG] Could not schedule event-loop lag alert")
+            self._lag_alert_task = None
 
     def _publish_heartbeat(self, lag: float, failure_threshold: float) -> None:
         """Publish task/systemd heartbeat state before any external alert I/O."""
