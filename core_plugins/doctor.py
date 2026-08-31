@@ -38,7 +38,7 @@ from utils.formatting import format_page, parse_page_args
 from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.http_user_agent import resolve_user_agent
 from utils.performance import snapshot as performance_snapshot
-from utils.updatecheck import check_for_updates_once, parse_version_tuple
+from utils.updatecheck import check_for_updates_once, compare_versions
 from utils.version import display_version, normalized_version
 
 PLUGIN_META = {
@@ -757,7 +757,7 @@ def _git_commits_ahead_of_release(remote_version: str) -> int | None:
 async def _latest_release_line(bot: Any) -> str:
     """Return a release-check line for the latest published release."""
     try:
-        update_available, remote_version, error = await check_for_updates_once(
+        _, remote_version, error = await check_for_updates_once(
             bot,
             announce=False,
             require_enabled=False,
@@ -773,29 +773,28 @@ async def _latest_release_line(bot: Any) -> str:
     local_version = normalized_version(
         raw_local if isinstance(raw_local, str) and raw_local.strip() else None
     )
-    remote_parts = parse_version_tuple(remote_version)
-    local_parts = parse_version_tuple(local_version)
-    if update_available or remote_parts > local_parts:
+    version_order = compare_versions(remote_version, local_version)
+    if version_order > 0:
         return _line(
             False,
             "Latest release",
             f"{display_version(remote_version)} (update available)",
         )
-    if local_parts > remote_parts:
+    if version_order < 0:
         return _warning_line(
             "Latest release",
             f"{display_version(remote_version)} (local build ahead / unreleased)",
         )
-    if local_parts == remote_parts:
-        commits_ahead = await asyncio.to_thread(
-            _git_commits_ahead_of_release,
-            remote_version,
+
+    commits_ahead = await asyncio.to_thread(
+        _git_commits_ahead_of_release,
+        remote_version,
+    )
+    if commits_ahead is not None and commits_ahead > 0:
+        return _warning_line(
+            "Latest release",
+            f"{display_version(remote_version)} (local build ahead / unreleased)",
         )
-        if commits_ahead is not None and commits_ahead > 0:
-            return _warning_line(
-                "Latest release",
-                f"{display_version(remote_version)} (local build ahead / unreleased)",
-            )
     return _line(True, "Latest release", f"{display_version(remote_version)} (current)")
 
 

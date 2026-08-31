@@ -414,4 +414,3 @@ def test_is_configured_notification_target_matches_configured_bare_jids():
         )
         is False
     )
-

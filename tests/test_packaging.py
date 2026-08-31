@@ -226,18 +226,30 @@ def test_quality_output_labels_every_gate():
     quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
 
     expected_labels = (
-        "[1/8] Python compilation",
-        "[2/8] Command documentation",
-        "[3/8] Generated configuration sample",
-        "[4/8] Ruff: repository checks",
-        "[5/8] Ruff: unused imports (F401)",
-        "[6/8] Ruff: imports, modernization, and Bugbear (I,UP,B)",
-        "[7/8] mypy: production source tree",
-        "[8/8] Dependency audit (pip-audit)",
+        "[1/9] Python compilation",
+        "[2/9] Command documentation",
+        "[3/9] Generated configuration sample",
+        "[4/9] Ruff: repository checks",
+        "[5/9] Ruff: unused imports (F401)",
+        "[6/9] Ruff: imports, modernization, and Bugbear (I,UP,B)",
+        "[7/9] mypy: production source tree",
+        "[8/9] Git whitespace errors",
+        "[9/9] Dependency audit (pip-audit)",
     )
     for label in expected_labels:
         assert label in quality
-    assert "Quality checks passed (8/8)." in quality
+    assert "Quality checks passed (9/9)." in quality
+
+
+def test_quality_checks_git_whitespace_since_release_and_in_worktree():
+    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
+
+    assert "git describe --tags --abbrev=0" in quality
+    assert 'git diff --check "$latest_tag"' in quality
+    assert "git diff --check HEAD" in quality
+    assert "git diff --quiet HEAD --" in quality
+    assert "git hash-object -t tree /dev/null" in quality
+    assert 'git diff --check "$empty_tree" HEAD' in quality
 
 
 def test_quality_audits_exact_lock_without_no_deps_warning():

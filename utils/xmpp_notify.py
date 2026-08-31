@@ -367,4 +367,3 @@ async def prepare_notification_target(
     if joined is None:
         joined = await ensure_room_joined(bot, target)
     return "groupchat" if joined else None
-

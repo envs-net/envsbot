@@ -291,6 +291,38 @@ async def test_latest_release_line_marks_remote_update_available(bot, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_latest_release_line_treats_stable_as_newer_than_release_candidate(
+    bot, monkeypatch
+):
+    bot.version = "1.8.4rc1"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(True, "1.8.4", None)),
+    )
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "🔴 Latest release: v1.8.4 (update available)"
+
+
+@pytest.mark.asyncio
+async def test_latest_release_line_does_not_treat_release_candidate_as_update(
+    bot, monkeypatch
+):
+    bot.version = "1.8.4"
+    monkeypatch.setattr(
+        doctor,
+        "check_for_updates_once",
+        AsyncMock(return_value=(True, "1.8.4rc1", None)),
+    )
+
+    line = await doctor._latest_release_line(bot)
+
+    assert line == "⚠️ Latest release: v1.8.4rc1 (local build ahead / unreleased)"
+
+
+@pytest.mark.asyncio
 async def test_doctor_release_command_selects_release_section(bot, monkeypatch):
     monkeypatch.setattr(
         doctor,
