@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from math import ceil
+
+from envs_xmpp_core.pagination import paginate
 
 from utils.config import config
 
@@ -90,18 +91,14 @@ def paginate_lines(
     page_size: int = 10,
 ) -> tuple[list[str], int, int]:
     """Return the requested slice, normalized page and total pages."""
-    materialized = list(lines)
-    if page_size <= 0:
-        page_size = 10
-
-    total_pages = max(1, ceil(len(materialized) / page_size))
-    if page == -1:
-        page = total_pages
-    page = min(max(page, 1), total_pages)
-
-    start = (page - 1) * page_size
-    end = start + page_size
-    return materialized[start:end], page, total_pages
+    result = paginate(
+        lines,
+        page=page,
+        page_size=page_size,
+        fallback_page_size=10,
+        last_page_sentinel=-1,
+    )
+    return result.items, result.page, result.total_pages
 
 
 def format_page(

@@ -19,6 +19,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from envs_xmpp_core.storage.archive import (
+    UnsafeArchiveMember,
+    extract_zip_member,
+    safe_zip_members,
+    zip_member_sha256,
+)
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
 
 from utils.config import config
@@ -706,13 +712,10 @@ def _restore_specs(members: set[str]) -> tuple[list[tuple[str, Path]], list[str]
 
 
 def _safe_members(archive: zipfile.ZipFile) -> set[str]:
-    names = set()
-    for info in archive.infolist():
-        name = info.filename
-        if name.startswith("/") or ".." in Path(name).parts:
-            raise BackupError(f"Unsafe archive entry: {name}")
-        names.add(name)
-    return names
+    try:
+        return safe_zip_members(archive)
+    except UnsafeArchiveMember as exc:
+        raise BackupError(str(exc)) from exc
 
 
 def _restore_entry(archive: zipfile.ZipFile, entry: str, target: Path) -> None:
@@ -747,11 +750,13 @@ def _stage_archive_entries(
             if entry not in members:
                 raise BackupError(f"Backup archive is missing restore entry: {entry}")
             target = stage_dir / f"{index:02d}-{Path(entry).name}"
-            with archive.open(entry) as source, target.open("wb") as handle:
-                shutil.copyfileobj(source, handle)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(target, PRIVATE_FILE_MODE)
+            extract_zip_member(
+                archive,
+                entry,
+                target,
+                mode=PRIVATE_FILE_MODE,
+                fsync=True,
+            )
             staged[entry] = target
     return staged
 
@@ -991,11 +996,7 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
 
 def _archive_member_sha256(archive: zipfile.ZipFile, name: str) -> str:
     """Hash one archive member without loading a large database into memory."""
-    digest = hashlib.sha256()
-    with archive.open(name) as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return zip_member_sha256(archive, name)
 
 
 def verify_backup(path: Path) -> dict[str, Any]:
