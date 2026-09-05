@@ -21,7 +21,14 @@ import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from _envs_xmpp_bootstrap import ensure_envs_xmpp  # noqa: E402
 
 # ``deploy.sh`` executes this file directly, so Python otherwise puts only the
 # ``scripts/`` directory on ``sys.path``.  Add the checkout root before loading
@@ -106,16 +113,9 @@ def _default_config(root: Path, service: str) -> Path:
 
 
 def _systemd_property(service: str, prop: str) -> str:
-    try:
-        result = subprocess.run(
-            ["systemctl", "show", service, f"--property={prop}", "--value"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        return ""
-    return result.stdout.strip() if result.returncode == 0 else ""
+    from envs_xmpp_ops.systemd import systemd_property
+
+    return systemd_property(service, prop, run_process=subprocess.run)
 
 
 def _systemd_config_path(service: str) -> Path | None:
@@ -223,12 +223,19 @@ Safety rules:
 
 
 def _deployment(options: argparse.Namespace) -> Deployment:
+    from deploy_profile import PROFILE
+
     root = (options.root or _project_root()).expanduser().resolve()
     service = options.service
-    venv_value = options.venv or os.environ.get("ENVSBOT_VENV") or _systemd_venv(service) or root / ".venv"
+    venv_value = (
+        options.venv
+        or os.environ.get("ENVSBOT_VENV")
+        or _systemd_venv(service)
+        or root / PROFILE.venv_name
+    )
     venv = Path(venv_value).expanduser().resolve()
     config = (options.config or _default_config(root, service)).expanduser().resolve()
-    user = options.user or _default_service_account(service, "User", "envsbot")
+    user = options.user or _default_service_account(service, "User", PROFILE.service_user)
     group = options.group or _default_service_account(service, "Group", user)
     unit_value = options.unit or os.environ.get("ENVSBOT_SYSTEMD_UNIT")
     if unit_value is None:
@@ -302,11 +309,9 @@ def _run(
 
 
 def _confirm(prompt: str) -> bool:
-    try:
-        answer = input(f"{prompt} [y/N] ").strip().casefold()
-    except EOFError:
-        return False
-    return answer in {"y", "yes"}
+    from envs_xmpp_ops.interaction import confirm
+
+    return confirm(prompt, input_func=input)
 
 
 def _require_confirmation(prompt: str) -> None:
@@ -324,11 +329,9 @@ def _require_source_tree(deployment: Deployment) -> None:
 
 
 def _account_exists(user: str) -> bool:
-    try:
-        pwd.getpwnam(user)
-    except KeyError:
-        return False
-    return True
+    from envs_xmpp_ops.accounts import account_exists
+
+    return account_exists(user, getpwnam=pwd.getpwnam)
 
 
 def _ensure_parent(path: Path, deployment: Deployment, *, mode: int = 0o750) -> None:
@@ -403,14 +406,14 @@ def _install_dependencies(deployment: Deployment) -> None:
 
 
 def _create_venv_if_missing(deployment: Deployment) -> None:
-    if deployment.venv_python.is_file():
-        print(f"KEEP existing virtualenv {deployment.venv}")
-        return
-    print(f"CREATE virtualenv {deployment.venv}")
-    _run(
-        [deployment.python, "-m", "venv", deployment.venv],
+    from envs_xmpp_ops.venv import create_venv_if_missing
+
+    create_venv_if_missing(
+        venv=deployment.venv,
+        venv_python=deployment.venv_python,
+        python=deployment.python,
+        run_command=_run,
         deployment=deployment,
-        as_service_user=True,
     )
 
 
@@ -467,21 +470,24 @@ def _envsbot(
 
 
 def _systemctl_exists(deployment: Deployment) -> bool:
-    if not shutil.which("systemctl"):
-        return False
-    result = _run(
-        ["systemctl", "cat", deployment.service], check=False, capture=True, announce=False
+    from envs_xmpp_ops.systemd import systemctl_exists
+
+    return systemctl_exists(
+        deployment.service,
+        run_command=_run,
+        which=shutil.which,
     )
-    return result.returncode == 0
 
 
 def _service_active(deployment: Deployment) -> bool:
-    if not shutil.which("systemctl"):
-        return False
-    result = _run(
-        ["systemctl", "is-active", "--quiet", deployment.service], check=False, announce=False
+    from envs_xmpp_ops.systemd import service_active
+
+    return service_active(
+        deployment.service,
+        run_command=_run,
+        which=shutil.which,
+        capture=False,
     )
-    return result.returncode == 0
 
 
 
@@ -664,26 +670,27 @@ def _check_installed_systemd(deployment: Deployment) -> bool:
 
 
 def _stop_active_service(deployment: Deployment, *, reason: str) -> bool:
-    if not _service_active(deployment):
-        print(f"Service {deployment.service} is not active; no stop required.")
-        return False
-    _require_confirmation(f"Stop {deployment.service} {reason}?")
-    _run(["systemctl", "stop", deployment.service])
-    return True
+    from envs_xmpp_ops.service import stop_active_service
+
+    return stop_active_service(
+        deployment.service,
+        reason=reason,
+        is_active=partial(_service_active, deployment),
+        require_confirmation=_require_confirmation,
+        run_systemctl=lambda action, service: _run(["systemctl", action, service]),
+    )
 
 
 def _ask_start(deployment: Deployment) -> None:
-    if not _systemctl_exists(deployment):
-        print(f"No installed systemd service {deployment.service}; not starting anything.")
-        return
-    if _service_active(deployment):
-        print(f"Service {deployment.service} is already active.")
-        return
-    if _confirm(f"Start {deployment.service} now?"):
-        _run(["systemctl", "start", deployment.service])
-        _run(["systemctl", "is-active", deployment.service])
-    else:
-        print(f"LEAVE {deployment.service} stopped (operator choice)")
+    from envs_xmpp_ops.service import ask_start
+
+    ask_start(
+        deployment.service,
+        exists=partial(_systemctl_exists, deployment),
+        is_active=partial(_service_active, deployment),
+        confirm=_confirm,
+        run_systemctl=lambda action, service: _run(["systemctl", action, service]),
+    )
 
 
 def _git(
@@ -705,25 +712,21 @@ def _git(
 
 
 def _require_clean_tracked_tree(deployment: Deployment) -> None:
-    result = _git(
-        deployment, "status", "--porcelain", "--untracked-files=no", capture=True, announce=False
-    )
-    if result.stdout.strip():
-        raise DeployError(
-            "tracked Git worktree is not clean; commit/stash local code changes before updating\n"
-            + result.stdout.rstrip()
-        )
+    from envs_xmpp_ops.git import require_clean_tracked_tree
+
+    require_clean_tracked_tree(partial(_git, deployment), error_factory=DeployError)
 
 
 def _current_revision(deployment: Deployment) -> str:
-    result = _git(
-        deployment, "describe", "--tags", "--always", "--dirty", capture=True, announce=False
-    )
-    return result.stdout.strip() or "unknown"
+    from envs_xmpp_ops.git import describe_revision
+
+    return describe_revision(partial(_git, deployment))
 
 
 def _is_stable_release_tag(tag: str) -> bool:
-    return _STABLE_RELEASE_TAG.fullmatch(tag) is not None
+    from envs_xmpp_ops.git import is_stable_release_tag
+
+    return is_stable_release_tag(tag)
 
 
 def _latest_tag(deployment: Deployment) -> str:
@@ -787,26 +790,9 @@ def _git_remote(deployment: Deployment) -> str:
 
 
 def _remote_tags(deployment: Deployment, remote: str) -> list[str]:
-    result = _git(
-        deployment,
-        "ls-remote",
-        "--tags",
-        "--refs",
-        "--sort=-version:refname",
-        remote,
-        capture=True,
-        announce=False,
-    )
-    prefix = "refs/tags/"
-    tags: list[str] = []
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=1)
-        if len(fields) != 2 or not fields[1].startswith(prefix):
-            continue
-        tag = fields[1][len(prefix) :].strip()
-        if tag:
-            tags.append(tag)
-    return tags
+    from envs_xmpp_ops.git import remote_tags
+
+    return remote_tags(partial(_git, deployment), remote)
 
 
 def _latest_remote_tag(deployment: Deployment, remote: str) -> str:
@@ -819,41 +805,20 @@ def _latest_remote_tag(deployment: Deployment, remote: str) -> str:
 
 
 def _remote_tag_object(deployment: Deployment, remote: str, tag: str) -> str:
-    result = _git(
-        deployment,
-        "ls-remote",
-        "--tags",
+    from envs_xmpp_ops.git import remote_tag_object
+
+    return remote_tag_object(
+        partial(_git, deployment),
         remote,
-        f"refs/tags/{tag}",
-        capture=True,
-        check=False,
-        announce=False,
+        tag,
+        error_factory=DeployError,
     )
-    if result.returncode != 0:
-        raise DeployError(f"could not query release tag {tag!r} from remote {remote!r}")
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=1)
-        if len(fields) == 2 and fields[1] == f"refs/tags/{tag}":
-            return fields[0]
-    raise DeployError(f"release tag does not exist on remote {remote!r}: {tag}")
 
 
 def _local_tag_object(deployment: Deployment, tag: str) -> str | None:
-    result = _git(
-        deployment,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"refs/tags/{tag}",
-        capture=True,
-        check=False,
-        announce=False,
-    )
-    if result.returncode == 0:
-        return result.stdout.strip() or None
-    if result.returncode == 1:
-        return None
-    raise DeployError(f"could not inspect local release tag: {tag}")
+    from envs_xmpp_ops.git import local_tag_object
+
+    return local_tag_object(partial(_git, deployment), tag, error_factory=DeployError)
 
 
 def _sync_release_tag(deployment: Deployment, remote: str, tag: str) -> None:
@@ -888,36 +853,20 @@ def _prepare_release_target(deployment: Deployment, requested_tag: str | None) -
 
 
 def _validate_tag(deployment: Deployment, tag: str) -> None:
-    result = _git(
-        deployment,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"refs/tags/{tag}^{{commit}}",
-        capture=True,
-        check=False,
-        announce=False,
-    )
-    if result.returncode != 0:
-        raise DeployError(f"release tag does not exist: {tag}")
+    from envs_xmpp_ops.git import validate_tag
+
+    validate_tag(partial(_git, deployment), tag, error_factory=DeployError)
 
 
 def _git_is_ancestor(deployment: Deployment, older: str, newer: str) -> bool:
-    result = _git(
-        deployment,
-        "merge-base",
-        "--is-ancestor",
+    from envs_xmpp_ops.git import git_is_ancestor
+
+    return git_is_ancestor(
+        partial(_git, deployment),
         older,
         newer,
-        capture=True,
-        check=False,
-        announce=False,
+        error_factory=DeployError,
     )
-    if result.returncode == 0:
-        return True
-    if result.returncode == 1:
-        return False
-    raise DeployError(f"could not compare Git revisions {older!r} and {newer!r}")
 
 
 def _target_relation(deployment: Deployment, target: str) -> str:
@@ -934,20 +883,9 @@ def _target_relation(deployment: Deployment, target: str) -> str:
 
 
 def _head_is_detached(deployment: Deployment) -> bool:
-    result = _git(
-        deployment,
-        "symbolic-ref",
-        "--quiet",
-        "HEAD",
-        capture=True,
-        check=False,
-        announce=False,
-    )
-    if result.returncode == 0:
-        return False
-    if result.returncode == 1:
-        return True
-    raise DeployError("could not determine whether the Git checkout is attached to a branch")
+    from envs_xmpp_ops.git import head_is_detached
+
+    return head_is_detached(partial(_git, deployment), error_factory=DeployError)
 
 
 def _approve_update_target(
@@ -1001,13 +939,9 @@ def _approve_update_target(
 
 
 def _relative_to_root(path: Path | None, root: Path) -> bool:
-    if path is None:
-        return False
-    try:
-        path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return False
-    return True
+    from envs_xmpp_ops.paths import relative_to_root
+
+    return relative_to_root(path, root)
 
 
 def _protected_paths(deployment: Deployment) -> dict[str, Path]:
@@ -1353,6 +1287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--allow-downgrade is only valid with the update command")
     if options.allow_downgrade and not options.to:
         parser.error("--allow-downgrade requires an explicit --to TAG")
+    ensure_envs_xmpp()
     deployment = _deployment(options)
     try:
         if options.command == "status":

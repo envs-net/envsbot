@@ -3,6 +3,25 @@
 import time
 from xml.etree import ElementTree as ET
 
+from envs_xmpp_core.xmpp.invites import (
+    extract_room_invite as _core_extract_room_invite,
+)
+from envs_xmpp_core.xmpp.invites import (
+    invite_is_expired as _core_invite_is_expired,
+)
+from envs_xmpp_core.xmpp.invites import (
+    inviter_from_attr as _core_inviter_from_attr,
+)
+from envs_xmpp_core.xmpp.invites import (
+    reason_from_invite_element as _core_reason_from_invite_element,
+)
+from envs_xmpp_core.xmpp.invites import (
+    room_invite_from_direct_plugin as _core_room_invite_from_direct_plugin,
+)
+from envs_xmpp_core.xmpp.invites import (
+    room_invite_from_muc_plugin as _core_room_invite_from_muc_plugin,
+)
+
 from utils.audit import audit_event
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
@@ -17,9 +36,7 @@ from utils.xmpp_notify import (
 
 from .settings import set_room_control_defaults
 from .state import (
-    _DIRECT_INVITE_NS,
     _LEAVING_ROOMS,
-    _MUC_USER_NS,
     JOINED_ROOMS,
     _jid_bare,
     _join_muc_with_timeout,
@@ -64,104 +81,54 @@ def _room_invite_max_age_days() -> int:
 
 def _room_invite_is_expired(invite: dict, now: int | None = None) -> bool:
     """Return True when a pending invite exceeded the configured max age."""
-    max_age_days = _room_invite_max_age_days()
-    if max_age_days <= 0:
-        return False
-    try:
-        created_at = int(invite.get("created_at", 0) or 0)
-    except (TypeError, ValueError):
-        created_at = 0
-    if created_at <= 0:
-        return False
-    now = int(time.time()) if now is None else int(now)
-    return created_at < now - (max_age_days * 86400)
+    return _core_invite_is_expired(
+        invite.get("created_at", 0),
+        _room_invite_max_age_days(),
+        now=now,
+    )
 
 
 def _invite_inviter_from_attr(value: str | None, room_jid: str = "") -> str:
     """Return the best available inviter identity."""
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    bare = _jid_bare(raw)
-    if room_jid and bare == room_jid and "/" in raw:
-        return raw.lower()
-    return bare or raw.lower()
+    return _core_inviter_from_attr(value, room_jid, jid_bare=_jid_bare)
 
 
 def _room_invite_reason_from_invite(invite_el: ET.Element) -> str:
     """Extract an optional mediated invite reason."""
-    reason_el = invite_el.find(f"{{{_MUC_USER_NS}}}reason")
-    if reason_el is not None and reason_el.text:
-        return reason_el.text.strip()
-    return ""
+    return _core_reason_from_invite_element(invite_el)
 
 
 def _room_invite_from_muc_plugin(msg) -> dict[str, str] | None:
     """Extract mediated MUC invites from Slixmpp stanza plugins."""
-    muc = _safe_get_plugin(msg, "muc")
-    if muc is None:
-        return None
-    invite = _safe_get_plugin(muc, "invite")
-    if invite is None:
-        return None
-    room_jid = _jid_bare(msg["from"])
-    if not room_jid:
-        return None
-    inviter = _invite_inviter_from_attr(_safe_plugin_value(invite, "from"), room_jid)
-    return {
-        "room_jid": room_jid,
-        "inviter": inviter or "unknown",
-        "reason": _safe_plugin_value(invite, "reason"),
-    }
+    invite = _core_room_invite_from_muc_plugin(
+        msg,
+        jid_bare=_jid_bare,
+        get_plugin=_safe_get_plugin,
+        plugin_value=_safe_plugin_value,
+    )
+    return invite.as_dict() if invite is not None else None
 
 
 def _room_invite_from_direct_plugin(msg) -> dict[str, str] | None:
     """Extract XEP-0249 direct invites from Slixmpp stanza plugins."""
-    direct = _safe_get_plugin(msg, "groupchat_invite")
-    if direct is None:
-        direct = _safe_get_plugin(msg, "conference")
-    if direct is None:
-        return None
-    room_jid = (
-        _safe_plugin_value(direct, "jid")
-        or _safe_plugin_value(direct, "room")
-        or _safe_plugin_value(direct, "to")
-    ).lower()
-    if not room_jid:
-        return None
-    return {
-        "room_jid": room_jid,
-        "inviter": _jid_bare(msg["from"]) or "unknown",
-        "reason": _safe_plugin_value(direct, "reason"),
-    }
+    invite = _core_room_invite_from_direct_plugin(
+        msg,
+        jid_bare=_jid_bare,
+        get_plugin=_safe_get_plugin,
+        plugin_value=_safe_plugin_value,
+    )
+    return invite.as_dict() if invite is not None else None
 
 
 def extract_room_invite(msg) -> dict[str, str] | None:
     """Extract room, inviter and reason from direct or mediated MUC invites."""
-    xml = getattr(msg, "xml", None)
-    if xml is None:
-        return _room_invite_from_muc_plugin(msg) or _room_invite_from_direct_plugin(msg)
-    for direct in xml.findall(f".//{{{_DIRECT_INVITE_NS}}}x"):
-        room_jid = (direct.attrib.get("jid") or "").strip().lower()
-        if not room_jid:
-            continue
-        return {
-            "room_jid": room_jid,
-            "inviter": _jid_bare(msg["from"]) or "unknown",
-            "reason": (direct.attrib.get("reason") or "").strip(),
-        }
-    for invite in xml.findall(f".//{{{_MUC_USER_NS}}}invite"):
-        room_jid = _jid_bare(msg["from"])
-        if not room_jid:
-            continue
-        inviter = _invite_inviter_from_attr(invite.attrib.get("from"), room_jid)
-        return {
-            "room_jid": room_jid,
-            "inviter": inviter or "unknown",
-            "reason": _room_invite_reason_from_invite(invite),
-        }
-
-    return _room_invite_from_muc_plugin(msg) or _room_invite_from_direct_plugin(msg)
+    invite = _core_extract_room_invite(
+        msg,
+        jid_bare=_jid_bare,
+        get_plugin=_safe_get_plugin,
+        plugin_value=_safe_plugin_value,
+    )
+    return invite.as_dict() if invite is not None else None
 
 
 def _db_api(bot):

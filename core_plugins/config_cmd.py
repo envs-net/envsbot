@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import ast
 import json
-import os
 import pprint
-import tempfile
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
+
+from envs_xmpp_core.config.python_file import assignment_ranges as _core_assignment_ranges
+from envs_xmpp_core.config.python_file import replace_or_append_assignment_text
+from envs_xmpp_core.storage.files import atomic_write_text
 
 from utils.audit import audit_event
 from utils.backups import create_backup
@@ -133,79 +135,21 @@ def _format_config_assignment(display_key: str, value: object) -> str:
 
 
 def _config_assignment_ranges(source: str) -> dict[str, tuple[int, int, str]]:
-    """Return top-level uppercase assignment line ranges in a Python config file."""
-    tree = ast.parse(source)
-    ranges: dict[str, tuple[int, int, str]] = {}
-    lines = source.splitlines()
-    for node in tree.body:
-        targets = []
-        if isinstance(node, ast.Assign):
-            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            targets = [node.target.id]
-        for target in targets:
-            if not target.isupper():
-                continue
-            start = max(0, int(getattr(node, "lineno", 1)) - 1)
-            end = int(getattr(node, "end_lineno", start + 1))
-            line = lines[start] if start < len(lines) else ""
-            indent = line[: len(line) - len(line.lstrip())]
-            ranges[target] = (start, end, indent)
-    return ranges
+    return _core_assignment_ranges(source, uppercase_only=True)
 
 
 def _replace_config_assignment(source: str, display_key: str, value: object) -> str:
-    """Replace or append a top-level assignment in config.py."""
-    lines = source.splitlines()
-    had_trailing_newline = source.endswith("\n")
-    ranges = _config_assignment_ranges(source)
-    start_end_indent = ranges.get(display_key)
-    assignment_lines = _format_config_assignment(display_key, value).splitlines()
-    if start_end_indent is not None:
-        start, end, indent = start_end_indent
-        replacement = [indent + assignment_lines[0]]
-        replacement.extend(indent + line for line in assignment_lines[1:])
-        lines[start:end] = replacement
-    else:
-        while lines and lines[-1].strip() == "":
-            lines.pop()
-        if lines:
-            lines.append("")
-        lines.append(_CONFIG_EDIT_SECTION)
-        lines.extend(assignment_lines)
-    result = "\n".join(lines)
-    return result + "\n" if had_trailing_newline or not result.endswith("\n") else result
+    assignment = _format_config_assignment(display_key, value)
+    return replace_or_append_assignment_text(
+        source,
+        display_key,
+        assignment,
+        section_comment=_CONFIG_EDIT_SECTION,
+    )
 
 
 def _write_config_text_atomic(path, text: str) -> None:
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-    )
-    tmp_path = type(path)(tmp_name)
-    try:
-        os.chmod(tmp_path, PRIVATE_FILE_MODE)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-        os.chmod(path, PRIVATE_FILE_MODE)
-    except Exception:
-        with suppress(OSError):
-            os.close(fd)
-        with suppress(FileNotFoundError):
-            tmp_path.unlink()
-        raise
-    # Directory fsync is best-effort: some platforms/filesystems do not
-    # support opening directories, but the atomic replace above is complete.
-    with suppress(OSError):
-        dir_fd = os.open(path.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+    atomic_write_text(path, text, mode=PRIVATE_FILE_MODE)
 
 
 def _write_config_text_with_rollback(path, new_text: str, *, rollback_text: str | None = None) -> None:

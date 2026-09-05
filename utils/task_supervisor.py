@@ -7,20 +7,27 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any, Protocol, cast
 
-from utils.time_utils import datetime_from_timestamp, utc_now
+from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
+
+from envs_xmpp_core.runtime.tasks import (
+    ExpectedTaskExit as CoreExpectedTaskExit,
+)
+from envs_xmpp_core.runtime.tasks import (
+    SupervisorOptions,
+)
+from envs_xmpp_core.runtime.tasks import (
+    TaskSupervisor as CoreTaskSupervisor,
+)
 
 _COMPLETED_ONE_SHOT_HISTORY_LIMIT = 50
 
 
-class ExpectedTaskExit(Exception):
-    """Signal an intentional service-task exit outside process shutdown."""
-
+ExpectedTaskExit = CoreExpectedTaskExit
 
 class BotLike(Protocol):
     """Minimal bot shape required for plugin task creation."""
@@ -299,13 +306,23 @@ def create_resilient_plugin_task(
     return creator(bot, plugin, factory(), name=name)
 
 
-class TaskSupervisor:
-    """Track plugin background tasks and cancel them on unload/shutdown."""
+
+class TaskSupervisor(CoreTaskSupervisor):
+    """Compatibility facade preserving envsbot's plugin-facing API."""
 
     def __init__(self, bot: Any | None = None):
         self.bot = bot
-        self._tasks: dict[asyncio.Task[Any], dict[str, Any]] = {}
-        self._by_plugin: dict[str, set[asyncio.Task[Any]]] = {}
+        config = getattr(bot, "config", {}) if bot is not None else {}
+        config = config or {}
+        options = SupervisorOptions(
+            max_restarts=max(0, int(config.get("task_restart_max_attempts", 5) or 0)),
+            initial_backoff=max(0.0, float(config.get("task_restart_initial_seconds", 5.0) or 0.0)),
+            max_backoff=max(0.0, float(config.get("task_restart_max_seconds", 300.0) or 0.0)),
+            reset_after=max(0.0, float(config.get("task_restart_reset_seconds", 900.0) or 0.0)),
+            stale_after=max(0.05, float(config.get("task_stale_after_seconds", 3600.0) or 3600.0)),
+        )
+        super().__init__(options, on_circuit_open=self._envs_circuit_open)
+        self._by_plugin = self._by_scope
 
     def create(
         self,
@@ -315,101 +332,23 @@ class TaskSupervisor:
         name: str | None = None,
         kind: str = "one-shot",
     ) -> asyncio.Task[Any]:
-        """Create and track a task for a plugin."""
-        task_name = name or f"{plugin}-task"
-        task_coro = cast(Coroutine[Any, Any, Any], coro)
-        task: asyncio.Task[Any]
-        if _asyncio_create_task_supports_name():
-            try:
-                task = asyncio.create_task(task_coro, name=task_name)
-            except TypeError as exc:
-                if "name" not in str(exc):
-                    raise
-                # Some tests monkeypatch asyncio.create_task with a reduced callable.
-                task = asyncio.create_task(task_coro)
-        else:
-            task = asyncio.create_task(task_coro)
-        meta = {
-            "plugin": plugin,
-            "name": task_name,
-            "created_at": _now(),
-            "done_at": None,
-            "last_error": None,
-            # Keep explicit heartbeat state separate from creation time. Stale
-            # detection uses ``created_at`` only as the initial service progress
-            # marker; one-shot tasks without a heartbeat remain exempt.
-            "heartbeat_at": None,
-            "restart_count": 0,
-            "circuit_state": "closed",
-            "next_restart_at": None,
-            "kind": kind,
-            "expected_exit": False,
-        }
-        self._tasks[task] = meta
-        self._by_plugin.setdefault(plugin, set()).add(task)
-        task.add_done_callback(self._on_task_done)
+        """Create a core task while preserving envsbot's private metadata key."""
+        task = super().create(plugin, coro, name=name, kind=kind)
+        meta = self._tasks.get(task)
+        if meta is not None:
+            meta["plugin"] = plugin
         return task
 
-    def create_resilient(
-        self,
-        plugin: str,
-        factory: Callable[[], Awaitable[Any]],
-        *,
-        name: str | None = None,
-        max_restarts: int | None = None,
-        initial_backoff: float | None = None,
-        max_backoff: float | None = None,
-        reset_after: float | None = None,
-        service: bool = True,
-    ) -> asyncio.Task[Any]:
-        """Create a worker protected by restart backoff and a circuit breaker."""
-        config = getattr(self.bot, "config", {}) if self.bot is not None else {}
-        config = config or {}
-        restart_limit = max(0, int(
-            config.get("task_restart_max_attempts", 5)
-            if max_restarts is None else max_restarts
-        ))
-        initial = max(0.0, float(
-            config.get("task_restart_initial_seconds", 5.0)
-            if initial_backoff is None else initial_backoff
-        ))
-        maximum = max(initial, float(
-            config.get("task_restart_max_seconds", 300.0)
-            if max_backoff is None else max_backoff
-        ))
-        reset = max(0.0, float(
-            config.get("task_restart_reset_seconds", 900.0)
-            if reset_after is None else reset_after
-        ))
-        task_name = name or f"{plugin}-task"
-        return self.create(
-            plugin,
-            self._resilient_runner(
-                plugin,
-                task_name,
-                factory,
-                restart_limit=restart_limit,
-                initial_backoff=initial,
-                max_backoff=maximum,
-                reset_after=reset,
-                service=service,
-            ),
-            name=task_name,
-            kind="service" if service else "one-shot",
-        )
-
-    async def _notify_circuit_open(self, plugin: str, name: str, error: str) -> None:
+    async def _envs_circuit_open(self, plugin: str, name: str, error: str) -> None:
         if self.bot is None:
             return
+        alerts = getattr(self.bot, "alerts", None)
+        report = getattr(alerts, "report_task_circuit", None)
+        if callable(report):
+            await report(plugin, name, error)
+            return
         try:
-            alerts = getattr(self.bot, "alerts", None)
-            report = getattr(alerts, "report_task_circuit", None)
-            if callable(report):
-                await report(plugin, name, error)
-                return
-
             from utils.admin_notify import notify_admin
-
             await notify_admin(
                 self.bot,
                 "🔴 Background task circuit opened\n"
@@ -420,119 +359,19 @@ class TaskSupervisor:
         except Exception:
             log.exception("[TASKS] Failed to notify admin about open circuit")
 
-    async def _resilient_runner(
-        self,
-        plugin: str,
-        name: str,
-        factory: Callable[[], Awaitable[Any]],
-        *,
-        restart_limit: int,
-        initial_backoff: float,
-        max_backoff: float,
-        reset_after: float,
-        service: bool,
-    ) -> Any:
-        await asyncio.sleep(0)
-        consecutive = 0
-        while True:
-            started = asyncio.get_running_loop().time()
-            try:
-                result = await factory()
-                if service:
-                    raise RuntimeError("service task exited unexpectedly")
-            except asyncio.CancelledError:
-                raise
-            except ExpectedTaskExit:
-                task = asyncio.current_task()
-                if task is not None:
-                    self._tasks.get(task, {})["expected_exit"] = True
-                return None
-            except Exception as exc:
-                run_seconds = asyncio.get_running_loop().time() - started
-                if reset_after and run_seconds >= reset_after:
-                    consecutive = 0
-                consecutive += 1
-                task = asyncio.current_task()
-                meta = self._tasks.get(task, {}) if task is not None else {}
-                meta["restart_count"] = int(meta.get("restart_count") or 0) + 1
-                meta["last_error"] = f"{type(exc).__name__}: {exc}"
-                if consecutive > restart_limit:
-                    meta["circuit_state"] = "open"
-                    meta["next_restart_at"] = None
-                    error = str(meta["last_error"] or "unknown error")
-                    await self._notify_circuit_open(plugin, name, error)
-                    raise RuntimeError(
-                        f"task circuit open after {restart_limit} restart(s): {error}"
-                    ) from exc
-                delay = min(
-                    max_backoff,
-                    initial_backoff * (2 ** max(0, consecutive - 1)),
-                )
-                next_at = utc_now().timestamp() + delay
-                meta["circuit_state"] = "half-open"
-                meta["next_restart_at"] = datetime_from_timestamp(next_at).isoformat(timespec="seconds")
-                log.warning(
-                    "[TASKS] Restarting %s/%s in %.1fs after failure %d/%d: %s",
-                    plugin,
-                    name,
-                    delay,
-                    consecutive,
-                    restart_limit,
-                    exc,
-                )
-                await sleep_with_heartbeat(self.bot, plugin, name, delay)
-                meta["circuit_state"] = "closed"
-                meta["next_restart_at"] = None
-                continue
-            else:
-                task = asyncio.current_task()
-                meta = self._tasks.get(task, {}) if task is not None else {}
-                meta["circuit_state"] = "closed"
-                meta["next_restart_at"] = None
-                meta["last_error"] = None
-                return result
+    async def _sleep_with_heartbeat(self, plugin: str, name: str, delay: float) -> None:
+        await sleep_with_heartbeat(self.bot, plugin, name, delay)
+
 
     def _on_task_done(self, task: asyncio.Task[Any]) -> None:
-        meta = self._tasks.get(task)
-        if not meta:
-            log.debug(
-                "[TASKS] Done callback for untracked task; metadata missing: %r",
-                task,
-            )
+        if task not in self._tasks:
+            log.debug("[TASKS] Done callback for untracked task; metadata missing: %r", task)
             return
-        meta["done_at"] = _now()
-        plugin = meta["plugin"]
-        self._by_plugin.get(plugin, set()).discard(task)
-        if task.cancelled():
-            return
-
-        try:
-            exc = task.exception()
-        except asyncio.InvalidStateError:
-            log.debug(
-                "[TASKS] Task exception unavailable due to invalid state: %r",
-                task,
-            )
-            return
-
-        if exc is not None:
-            meta["last_error"] = f"{type(exc).__name__}: {exc}"
-            log.error(
-                "[TASKS] Background task failed: %s.%s",
-                plugin,
-                meta["name"],
-                exc_info=exc,
-            )
-        elif meta.get("kind") == "service" and meta.get("expected_exit"):
-            self._forget_task(task)
-        elif meta.get("kind") != "service":
-            self._prune_completed_one_shot_history()
+        super()._on_task_done(task)
 
     def _prune_completed_one_shot_history(self) -> None:
-        """Keep recent successful one-shots for UX without leaking task metadata."""
         completed = [
-            task
-            for task, meta in self._tasks.items()
+            task for task, meta in self._tasks.items()
             if task.done()
             and not task.cancelled()
             and meta.get("kind") != "service"
@@ -542,132 +381,33 @@ class TaskSupervisor:
         for task in completed[: max(0, excess)]:
             self._forget_task(task)
 
-    def _forget_task(self, task: asyncio.Task[Any]) -> None:
-        """Remove a task from supervisor indexes."""
-        meta = self._tasks.pop(task, None)
-        if not meta:
-            return
-        plugin_tasks = self._by_plugin.get(meta["plugin"])
-        if plugin_tasks is not None:
-            plugin_tasks.discard(task)
-            if not plugin_tasks:
-                self._by_plugin.pop(meta["plugin"], None)
-
-    def _prune_task_unless_failed(self, task: asyncio.Task[Any]) -> None:
-        """Remove task metadata unless it should be kept for failure diagnostics."""
-        meta = self._tasks.get(task, {})
-        has_error = meta.get("last_error") is not None
-        keep_for_diagnostics = has_error and task.done() and not task.cancelled()
-        if not keep_for_diagnostics:
-            self._forget_task(task)
-
-    def heartbeat(self, plugin: str, name: str | None = None) -> bool:
-        """Update heartbeat timestamp for a running task by plugin/name."""
-        for task, meta in tuple(self._tasks.items()):
-            if task.done():
-                continue
-            if meta.get("plugin") != plugin:
-                continue
-            if name is not None and meta.get("name") != name:
-                continue
-            meta["heartbeat_at"] = _now()
-            return True
-        return False
-
-    def touch(self, task: asyncio.Task[Any]) -> bool:
-        """Update heartbeat timestamp for a specific supervised task."""
-        meta = self._tasks.get(task)
-        if meta is None or task.done():
-            return False
-        meta["heartbeat_at"] = _now()
-        return True
-
-    def stale_tasks(self, *, max_age_seconds: float = 3600.0) -> list[TaskInfo]:
-        """Return running tasks whose progress signal is too old.
-
-        A service that hangs before its first explicit heartbeat used to be
-        invisible forever.  For services only, creation time is therefore the
-        initial progress timestamp until the first heartbeat arrives.  One-shot
-        tasks keep the historical behavior because they are not required to
-        implement a heartbeat contract.
-        """
-        now = utc_now()
-        stale: list[TaskInfo] = []
-        for info in self.snapshot(include_done=False):
-            if info.status != "running":
-                continue
-            progress_at = info.heartbeat_at
-            if not progress_at and info.kind == "service":
-                progress_at = info.created_at
-            if not progress_at:
-                continue
-            try:
-                heartbeat = datetime.fromisoformat(progress_at)
-                if heartbeat.tzinfo is None:
-                    heartbeat = heartbeat.replace(tzinfo=UTC)
-                age = (now - heartbeat.astimezone(UTC)).total_seconds()
-            except Exception:
-                age = max_age_seconds + 1
-            if age > max_age_seconds:
-                stale.append(info)
-        return stale
-
     async def cancel_task(
         self,
         task: asyncio.Task[Any],
         *,
         timeout: float = 5.0,
     ) -> bool:
-        """Cancel one supervised task and remove normal cancellation noise.
-
-        This is useful for plugins that restart one worker without unloading the
-        whole plugin. Failed tasks remain visible for diagnostics, while
-        successful or cancelled tasks are pruned from task status output.
-
-        Returns:
-            Whether a running task was requested to cancel.
-        """
         was_running = not task.done()
         if was_running:
             task.cancel()
             done, pending = await asyncio.wait({task}, timeout=timeout)
             if pending:
-                log.warning(
-                    "[TASKS] Plugin task did not stop in time: %s",
-                    task.get_name(),
-                )
+                log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
                 return True
-
             for done_task in done:
                 try:
                     done_task.result()
                 except asyncio.CancelledError:
                     continue
                 except Exception as exc:
-                    log.debug(
-                        "[TASKS] Task raised during cancellation",
-                        exc_info=exc,
-                    )
-
+                    log.debug("[TASKS] Task raised during cancellation", exc_info=exc)
         self._prune_task_unless_failed(task)
         return was_running
 
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
-        """Cancel all tasks owned by a plugin and prune finished noise.
-
-        Plugins often cancel their own workers in ``on_unload`` before the
-        manager calls into the supervisor.  Those tasks are already done by the
-        time we get here, so looking only at running tasks leaves stale
-        ``cancelled`` entries in ``tasks all``.  Snapshot all tasks for the
-        plugin, cancel only the running ones, then prune every non-failed task.
-
-        Returns:
-            Number of running tasks that were requested to cancel.
-        """
         plugin_tasks = [
-            task
-            for task, meta in tuple(self._tasks.items())
-            if meta.get("plugin") == plugin
+            task for task, meta in tuple(self._tasks.items())
+            if meta.get("scope") == plugin
         ]
         running_tasks = [task for task in plugin_tasks if not task.done()]
         for task in running_tasks:
@@ -676,133 +416,37 @@ class TaskSupervisor:
         if running_tasks:
             done, pending = await asyncio.wait(running_tasks, timeout=timeout)
             for task in pending:
-                log.warning(
-                    "[TASKS] Plugin task did not stop in time: %s",
-                    task.get_name(),
-                )
-
+                log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
             for done_task in done:
                 try:
                     done_task.result()
                 except asyncio.CancelledError:
                     continue
                 except Exception as exc:
-                    log.debug(
-                        "[TASKS] Task raised during cancellation",
-                        exc_info=exc,
-                    )
-
+                    log.debug("[TASKS] Task raised during cancellation", exc_info=exc)
         for task in plugin_tasks:
             if task not in pending:
                 self._prune_task_unless_failed(task)
         return len(running_tasks)
 
     def clear_plugin_failures(self, plugin: str) -> int:
-        """Forget completed failure and open-circuit diagnostics for a plugin.
-
-        A successful manual task restart is an explicit circuit reset. Keeping
-        the old failed runner afterward would make ``tasks`` and ``doctor``
-        continue to report an open circuit even though a replacement worker is
-        running.
-        """
-        failed_tasks = [
-            task
-            for task, meta in tuple(self._tasks.items())
-            if meta.get("plugin") == plugin
-            and task.done()
-            and meta.get("last_error") is not None
-        ]
-        for task in failed_tasks:
-            self._forget_task(task)
-        return len(failed_tasks)
-
-    async def cancel_all(self, *, timeout: float = 5.0) -> int:
-        """Cancel all running supervised tasks.
-
-        Returns:
-            Total number of running tasks cancelled across all plugins.
-        """
-        plugins = list(self._by_plugin)
-        total = 0
-        for plugin in plugins:
-            total += await self.cancel_plugin(plugin, timeout=timeout)
-        return total
+        return super().clear_scope_failures(plugin)
 
     def snapshot(self, *, include_done: bool = True) -> list[TaskInfo]:
-        """Return a stable snapshot of supervised task states."""
-        items = []
-        for task, meta in tuple(self._tasks.items()):
-            if task.done():
-                cancelled = task.cancelled()
-                last_error = meta.get("last_error")
-
-                if not include_done and (cancelled or last_error is None):
-                    continue
-
-                if cancelled:
-                    status = "cancelled"
-                elif last_error:
-                    status = "failed"
-                else:
-                    status = "done"
-            else:
-                cancelled = False
-                last_error = meta.get("last_error")
-                status = "running"
-            items.append(
-                TaskInfo(
-                    plugin=meta["plugin"],
-                    name=meta["name"],
-                    status=status,
-                    created_at=meta["created_at"],
-                    done_at=meta.get("done_at"),
-                    cancelled=cancelled,
-                    last_error=last_error,
-                    heartbeat_at=meta.get("heartbeat_at"),
-                    restart_count=int(meta.get("restart_count") or 0),
-                    circuit_state=str(meta.get("circuit_state") or "closed"),
-                    next_restart_at=meta.get("next_restart_at"),
-                    kind=str(meta.get("kind") or "one-shot"),
-                )
+        return [
+            TaskInfo(
+                plugin=item.scope,
+                name=item.name,
+                status=item.status,
+                created_at=item.created_at,
+                done_at=item.done_at,
+                cancelled=item.cancelled,
+                last_error=item.last_error,
+                heartbeat_at=item.heartbeat_at,
+                restart_count=item.restart_count,
+                circuit_state=item.circuit_state,
+                next_restart_at=item.next_restart_at,
+                kind=item.kind,
             )
-        return sorted(items, key=lambda item: (item.plugin, item.name))
-
-    def summary_by_kind(self) -> dict[str, int]:
-        """Return operator-friendly task counts split by lifecycle kind."""
-        counts = {
-            "services_running": 0,
-            "one_shots_running": 0,
-            "one_shots_completed": 0,
-            "services_finished": 0,
-            "failed": 0,
-            "cancelled": 0,
-        }
-        for info in self.snapshot(include_done=True):
-            if info.status == "failed":
-                counts["failed"] += 1
-            elif info.status == "cancelled":
-                counts["cancelled"] += 1
-            elif info.status == "running":
-                key = (
-                    "services_running"
-                    if info.kind == "service"
-                    else "one_shots_running"
-                )
-                counts[key] += 1
-            elif info.kind == "service":
-                counts["services_finished"] += 1
-            else:
-                counts["one_shots_completed"] += 1
-        return counts
-
-    def summary(self) -> tuple[int, int, int]:
-        """Return (running, failed, done_or_cancelled) counts."""
-        running = failed = finished = 0
-        for info in self.snapshot(include_done=True):
-            if info.status == "running":
-                running += 1
-            elif info.status == "failed":
-                failed += 1
-            else:
-                finished += 1
-        return running, failed, finished
+            for item in super().snapshot(include_done=include_done)
+        ]

@@ -10,6 +10,8 @@ Run these commands from the repository root unless a script explicitly says othe
 | --- | --- | --- |
 | `deploy.sh` | Preservation-first installation and release-update entrypoint. Bare invocation only shows help. | `./scripts/deploy.sh status`, `./scripts/deploy.sh check`, `./scripts/deploy.sh update --dry-run` |
 | `deploy.py` | Python backend used by `deploy.sh`; normally do not invoke it directly. | Use `deploy.sh` instead. |
+| `_envs_xmpp_bootstrap.py` | Stdlib-only bootstrap for the shared `envs-xmpp` deployment tooling. | Internal helper; `deploy.py` uses it automatically. |
+| `deploy_profile.py` | Declarative envs-xmpp deployment profile used by `deploy.py` after the shared ops bootstrap. | Defines bot-specific defaults while shared deployment mechanics live in `envs_xmpp_ops`. |
 | `quality.sh` | Runs the local release-quality gates: compilation, generated-doc/config checks, Ruff, mypy, dependency validation/audit, and related checks. | `./scripts/quality.sh`, `./scripts/quality.sh --fix` |
 | `test.sh` | Runs the warning-strict pytest suite with compact output; coverage is optional so normal developer loops stay fast without skipping tests. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed`, `./scripts/test.sh --durations 25` |
 | `mutmut.sh` | Safe wrapper around mutation testing that prevents imports from the unmutated checkout. | `./scripts/mutmut.sh fresh`, `./scripts/mutmut.sh results` |

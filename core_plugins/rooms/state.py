@@ -1,9 +1,17 @@
 """Split module for core_plugins/rooms.py: state."""
 
-import asyncio
-import inspect
 import logging
 
+from envs_xmpp_core.xmpp.muc_join import join_muc_with_timeout as _core_join_muc_with_timeout
+from envs_xmpp_core.xmpp.stanza import (
+    maybe_await_result as _maybe_await_result,
+)
+from envs_xmpp_core.xmpp.stanza import (
+    safe_get_plugin as _safe_get_plugin,
+)
+from envs_xmpp_core.xmpp.stanza import (
+    safe_plugin_value as _safe_plugin_value,
+)
 from slixmpp import JID
 
 from bot.room_state import (
@@ -40,66 +48,27 @@ def _jid_bare(value) -> str:
         return str(value).split("/", 1)[0].lower()
 
 
-def _safe_get_plugin(stanza, plugin_name: str):
-    """Return a stanza plugin without noisy unknown-interface warnings."""
-    get_plugin = getattr(stanza, "get_plugin", None)
-    if not callable(get_plugin):
-        return None
-    try:
-        return get_plugin(plugin_name, check=True)
-    except TypeError:
-        try:
-            return get_plugin(plugin_name)
-        except Exception:
-            return None
-    except Exception:
-        return None
-
-
-def _safe_plugin_value(plugin, key: str) -> str:
-    """Return a string value from a stanza plugin."""
-    if plugin is None:
-        return ""
-    try:
-        value = plugin.get(key)
-    except Exception:
-        try:
-            value = plugin[key]
-        except Exception:
-            return ""
-    return "" if value is None else str(value).strip()
-
-
-async def _maybe_await_result(result):
-    """Await result when a slixmpp helper returns an awaitable."""
-    if inspect.isawaitable(result):
-        return await result
-    return result
-
-
 async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
     """Join one MUC without allowing an unavailable room to block forever."""
-    result = muc.join_muc(
+
+    def log_cleanup_error(exc: Exception) -> None:
+        log.debug(
+            "[ROOMS] Could not clean timed-out MUC join state for %s",
+            room_jid,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+    await _core_join_muc_with_timeout(
+        muc,
         room_jid,
         nick,
-        pshow=bot.presence.status["show"],
-        pstatus=bot.presence.status["status"],
+        timeout=_ROOM_JOIN_TIMEOUT_SECONDS,
+        join_kwargs={
+            "pshow": bot.presence.status["show"],
+            "pstatus": bot.presence.status["status"],
+        },
+        on_cleanup_error=log_cleanup_error,
     )
-    try:
-        await asyncio.wait_for(result, timeout=_ROOM_JOIN_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # Slixmpp records a room as soon as it sends the join presence. Clean
-        # that internal state after our shorter timeout so a late response does
-        # not leave a ghost membership while the retry worker owns recovery.
-        try:
-            await _maybe_await_result(muc.leave_muc(room_jid, nick))
-        except Exception:
-            log.debug(
-                "[ROOMS] Could not clean timed-out MUC join state for %s",
-                room_jid,
-                exc_info=True,
-            )
-        raise
 
 
 def _get_plugin_store(bot, plugin_name: str):

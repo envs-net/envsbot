@@ -1,5 +1,4 @@
-"""XMPP connection and JID helpers for envsbot."""
-
+"""XMPP connection and JID compatibility facade for envsbot."""
 from __future__ import annotations
 
 import inspect
@@ -7,122 +6,77 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from envs_xmpp_core.xmpp.connection import (
+    connect_kwargs_from_mapping,
+    maybe_await,
+)
+from envs_xmpp_core.xmpp.connection import (
+    connection_target as _core_connection_target,
+)
+from envs_xmpp_core.xmpp.jid import (
+    boundjid_domain,
+    build_client_jid,
+    configured_jid_domain,
+)
+
 log = logging.getLogger(__name__)
+
+__all__ = [
+    "boundjid_domain",
+    "build_client_jid",
+    "configured_jid_domain",
+    "connect_kwargs",
+    "connect_signature_parameters",
+    "connect_xmpp",
+    "connection_target",
+    "get_configured_resource",
+    "session_is_ready",
+]
 
 
 def get_configured_resource(config: Mapping[str, Any]) -> str | None:
-    """Return the optional configured XMPP resource."""
     resource = config.get("resource")
     if resource is None:
         return None
-    resource = str(resource).strip()
-    return resource or None
-
-
-def build_client_jid(jid: object, resource: object | None = None) -> str:
-    """Build the login JID, optionally replacing/adding a resource."""
-    jid_text = str(jid)
-    if not resource:
-        return jid_text
-    bare_jid = jid_text.split("/", 1)[0]
-    return f"{bare_jid}/{resource}"
-
-
-def configured_jid_domain(config: Mapping[str, Any]) -> str | None:
-    """Return the domain part of the configured bot JID if available."""
-    jid = str(config.get("jid", ""))
-    if "@" not in jid:
-        return None
-    domain = jid.split("@", 1)[1].split("/", 1)[0].strip()
-    return domain or None
-
-
-def boundjid_domain(xmpp: Any) -> str | None:
-    """Return a best-effort domain from Slixmpp's bound JID object."""
-    boundjid = getattr(xmpp, "boundjid", None)
-    if boundjid is None:
-        return None
-
-    for attribute in ("domain", "host"):
-        value = getattr(boundjid, attribute, None)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def session_is_ready(xmpp: Any) -> bool:
-    """Return whether envsbot's established XMPP session is still usable.
-
-    Lightweight test doubles and third-party embedders that do not expose the
-    envsbot session marker retain the historical behavior and are treated as
-    ready.
-    """
-    marker = getattr(xmpp, "session_ready", None)
-    if marker is None:
-        return True
-    is_set = getattr(marker, "is_set", None)
-    if not callable(is_set):
-        return True
-    return bool(is_set())
+    value = str(resource).strip()
+    return value or None
 
 
 def connect_signature_parameters(connect_method: Any) -> Mapping[str, inspect.Parameter]:
-    """Return inspectable connect() parameters, or an empty mapping."""
+    """Return inspectable connect() parameters, preserving envsbot monkeypatch hooks."""
     try:
         return inspect.signature(connect_method).parameters
     except (TypeError, ValueError):
         return {}
 
 
+def session_is_ready(xmpp: Any) -> bool:
+    marker = getattr(xmpp, "session_ready", None)
+    if marker is None:
+        return True
+    is_set = getattr(marker, "is_set", None)
+    return bool(is_set()) if callable(is_set) else True
+
+
 def connect_kwargs(xmpp: Any, config: Mapping[str, Any]) -> dict[str, Any]:
-    """Build kwargs for xmpp.connect() without passing unsupported names."""
-    host = config.get("host") or configured_jid_domain(config) or boundjid_domain(xmpp)
-    port = config.get("port")
-    direct_tls = bool(config.get("direct_tls", False))
-
-    parameters = connect_signature_parameters(xmpp.connect)
-    kwargs: dict[str, Any] = {}
-
-    if "address" in parameters and host and port is not None:
-        kwargs["address"] = (host, int(port))
-    else:
-        if "host" in parameters and host:
-            kwargs["host"] = host
-        if "port" in parameters and port is not None:
-            kwargs["port"] = int(port)
-
-    if "use_ssl" in parameters:
-        kwargs["use_ssl"] = direct_tls
-    if direct_tls and "force_starttls" in parameters:
-        kwargs["force_starttls"] = False
-
-    return kwargs
+    return connect_kwargs_from_mapping(
+        xmpp,
+        config,
+        parameters=connect_signature_parameters(xmpp.connect),
+    )
 
 
 def connection_target(kwargs: Mapping[str, Any], config: Mapping[str, Any]) -> tuple[object, object, str]:
-    """Return host, port and mode for connection logging."""
-    host = (
-        kwargs.get("host")
-        or (kwargs.get("address") or (None, None))[0]
-        or configured_jid_domain(config)
-        or "auto"
+    return _core_connection_target(
+        kwargs,
+        fallback_host=configured_jid_domain(config) or "auto",
+        fallback_port="auto",
+        direct_tls=bool(config.get("direct_tls", False)),
     )
-    port = kwargs.get("port") or (kwargs.get("address") or (None, None))[1] or "auto"
-    mode = "direct TLS" if config.get("direct_tls", False) else "STARTTLS"
-    return host, port, mode
 
 
 async def connect_xmpp(xmpp: Any, config: Mapping[str, Any]) -> Any:
-    """Connect using optional host, port and direct-TLS config."""
     kwargs = connect_kwargs(xmpp, config)
     host, port, mode = connection_target(kwargs, config)
-    log.info(
-        "[XMPP] event=connect target=%s:%s mode=%s",
-        host,
-        port,
-        mode,
-    )
-    result = xmpp.connect(**kwargs)
-    if inspect.isawaitable(result):
-        return await result
-    return result
+    log.info("[XMPP] event=connect target=%s:%s mode=%s", host, port, mode)
+    return await maybe_await(xmpp.connect(**kwargs))

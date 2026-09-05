@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
 import urllib.request
-from urllib.parse import unquote, urlparse, urlsplit
+
+from envs_xmpp_core.release.github import (
+    fetch_latest_release_version_via_github_api_sync as _core_fetch_api,
+)
+from envs_xmpp_core.release.github import (
+    fetch_latest_release_version_via_redirect_sync as _core_fetch_redirect,
+)
+from envs_xmpp_core.release.github import (
+    github_api_url_from_release_url,
+)
+from envs_xmpp_core.release.github import (
+    release_tag_from_redirect_url as _release_tag_from_redirect_url,
+)
+from envs_xmpp_core.release.versions import (
+    compare_versions,
+    parse_version_tuple,
+)
 
 from utils.config import config
 from utils.http_user_agent import resolve_user_agent
@@ -21,87 +35,19 @@ from utils.xmpp_notify import (
 
 log = logging.getLogger(__name__)
 
+__all__ = [
+    "_release_tag_from_redirect_url",
+    "github_api_url_from_release_url",
+    "parse_version_tuple",
+]
+
 DEFAULT_RELEASE_URL = "https://github.com/envs-net/envsbot/releases/latest"
-
-
-def parse_version_tuple(version: str) -> tuple[int, ...]:
-    """Return numeric version parts for compatibility and diagnostics."""
-    parts = re.findall(r"\d+", str(version))
-    return tuple(int(part) for part in parts)
-
-
-def _trim_release_zeros(parts: tuple[int, ...]) -> tuple[int, ...]:
-    """Normalize release tuples so ``1.2`` and ``1.2.0`` compare equally."""
-    normalized = list(parts)
-    while len(normalized) > 1 and normalized[-1] == 0:
-        normalized.pop()
-    return tuple(normalized)
-
-
-def _version_sort_key(version: str) -> tuple[tuple[int, ...], int, int] | None:
-    """Return a sortable key for normal and pre-release EnvsBot versions."""
-    value = normalized_version(version).strip().lower()
-    match = re.fullmatch(
-        r"(?P<release>\d+(?:\.\d+)*)"
-        r"(?:[-_.]?(?P<label>a|alpha|b|beta|rc)[-_.]?(?P<number>\d*))?"
-        r"(?:[+.-].*)?",
-        value,
-    )
-    if match is None:
-        return None
-
-    release = _trim_release_zeros(
-        tuple(int(part) for part in match.group("release").split("."))
-    )
-    label = match.group("label")
-    if label is None:
-        # Stable releases sort after alpha, beta and release candidates.
-        return release, 3, 0
-
-    rank = {
-        "a": 0,
-        "alpha": 0,
-        "b": 1,
-        "beta": 1,
-        "rc": 2,
-    }[label]
-    number = int(match.group("number") or 0)
-    return release, rank, number
-
-
-def compare_versions(left: str, right: str) -> int:
-    """Return -1, 0 or 1 using release/pre-release version semantics."""
-    left_key = _version_sort_key(left)
-    right_key = _version_sort_key(right)
-    if left_key is not None and right_key is not None:
-        return (left_key > right_key) - (left_key < right_key)
-
-    # Keep unusual historical/custom tags deterministic rather than failing a
-    # version check. Trailing release zeros are normalized in the fallback too.
-    left_parts = _trim_release_zeros(parse_version_tuple(left))
-    right_parts = _trim_release_zeros(parse_version_tuple(right))
-    return (left_parts > right_parts) - (left_parts < right_parts)
 
 
 def is_remote_version_newer(remote_version: str, local_version: str | None = None) -> bool:
     """Return whether *remote_version* is newer than *local_version*."""
     local = normalized_version(local_version or __version__)
     return compare_versions(remote_version, local) > 0
-
-
-def github_api_url_from_release_url(release_url: str) -> str | None:
-    """Convert a GitHub releases URL to the releases/latest API endpoint."""
-    parsed = urlparse(str(release_url))
-    if parsed.scheme not in {"http", "https"}:
-        return None
-    if parsed.netloc.lower() != "github.com":
-        return None
-
-    parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) < 2:
-        return None
-    owner, repo = parts[0], parts[1]
-    return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
 
 def _user_agent() -> str:
@@ -113,67 +59,33 @@ def _timeout() -> float:
 
 
 def fetch_latest_release_version_via_github_api_sync(release_url: str) -> str:
-    """Fetch the latest GitHub release tag via the GitHub REST API."""
-    api_url = github_api_url_from_release_url(release_url)
-    if not api_url:
-        raise ValueError("version_check_url is not a supported GitHub releases URL")
-    req = urllib.request.Request(
-        api_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": _user_agent(),
-        },
-    )
-    with urllib.request.urlopen(req, timeout=_timeout()) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-
-    tag = str(payload.get("tag_name", "")).strip()
-    if not tag:
-        raise ValueError("GitHub API response did not contain tag_name")
-    return tag.removeprefix("v")
-
-
-def _release_tag_from_redirect_url(final_url: str) -> str:
-    """Extract one release tag path segment from a redirect URL."""
-    parsed = urlsplit(str(final_url))
-    marker = "/releases/tag/"
-    if marker not in parsed.path:
-        raise ValueError(f"Unexpected release redirect URL: {final_url}")
-
-    raw_tag = parsed.path.split(marker, 1)[1].strip("/")
-    if not raw_tag or "/" in raw_tag:
-        raise ValueError("Could not extract release tag from redirect URL")
-    tag = unquote(raw_tag).strip()
-    if not tag:
-        raise ValueError("Could not extract release tag from redirect URL")
-    return tag.removeprefix("v")
+    try:
+        return _core_fetch_api(
+            release_url, user_agent=_user_agent(), timeout=_timeout(),
+            urlopen=urllib.request.urlopen,
+        )
+    except ValueError as exc:
+        if "supported GitHub" in str(exc):
+            raise ValueError("version_check_url is not a supported GitHub releases URL") from exc
+        raise
 
 
 def fetch_latest_release_version_via_redirect_sync(release_url: str) -> str:
-    """Fetch the latest release version via the /releases/latest redirect."""
     if not release_url:
         raise ValueError("version_check_url is not configured")
-    req = urllib.request.Request(
-        release_url,
-        headers={"User-Agent": _user_agent()},
+    return _core_fetch_redirect(
+        release_url, user_agent=_user_agent(), timeout=_timeout(),
+        urlopen=urllib.request.urlopen,
     )
-    with urllib.request.urlopen(req, timeout=_timeout()) as response:
-        final_url = response.geturl()
-
-    return _release_tag_from_redirect_url(final_url)
 
 
 def fetch_latest_release_version_sync(release_url: str) -> str:
-    """Fetch the latest release version, preferring the GitHub API."""
     if not release_url:
         raise ValueError("version_check_url is not configured")
     try:
         return fetch_latest_release_version_via_github_api_sync(release_url)
     except Exception as api_error:
-        log.debug(
-            "Version check via GitHub API failed, falling back to redirect: %s",
-            api_error,
-        )
+        log.debug("Version check via GitHub API failed, falling back to redirect: %s", api_error)
         return fetch_latest_release_version_via_redirect_sync(release_url)
 
 

@@ -54,6 +54,8 @@ prints help and performs no action:
 ./scripts/deploy.sh update --dry-run
 ```
 
+The deploy frontend uses the shared `envs-xmpp` operations layer. On a fresh checkout it bootstraps the exact deployment-tooling version into `$XDG_CACHE_HOME/envs-xmpp/deploy/` (or `~/.cache/envs-xmpp/deploy/`) before continuing; no manual pre-install is required. `ENVS_XMPP_DEPLOY_SOURCE` can point to a local checkout or wheel for pre-release testing.
+
 `install`/`update` require explicit confirmation, and stopping/starting systemd
 are confirmed separately. Existing config, database, vCard, operator-managed avatar and systemd
 unit files are preserved; an existing service file is never replaced. Automatic updates select

@@ -19,6 +19,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
+
 from utils.config import config
 from utils.config.defaults import BASE_DIR
 from utils.config.loader import get_runtime_config_path
@@ -589,37 +591,25 @@ def prune_migration_snapshots(
 def verify_sqlite_snapshot(path: Path) -> dict[str, Any]:
     """Open a standalone SQLite snapshot read-only and run integrity checks."""
     path = path.resolve()
+    result = check_sqlite_integrity(path, check_foreign_keys=True)
+    integrity = list(result.integrity)
+    foreign_key_count = len(result.foreign_key_violations)
     errors: list[str] = []
-    integrity: list[str] = []
-    foreign_keys: list[tuple[Any, ...]] = []
-    try:
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        try:
-            integrity = [
-                str(row[0])
-                for row in connection.execute("PRAGMA integrity_check;").fetchall()
-            ]
-            foreign_keys = [
-                tuple(row)
-                for row in connection.execute("PRAGMA foreign_key_check;").fetchall()
-            ]
-        finally:
-            connection.close()
-    except Exception as exc:
-        errors.append(f"database open/integrity check failed: {exc}")
+    if result.error is not None:
+        errors.append(f"database open/integrity check failed: {result.error}")
     if integrity != ["ok"]:
         errors.append(
             "database integrity check failed: "
             + ", ".join(integrity or ["no result"])
         )
-    if foreign_keys:
-        errors.append(f"foreign key check failed: {len(foreign_keys)} violation(s)")
+    if foreign_key_count:
+        errors.append(f"foreign key check failed: {foreign_key_count} violation(s)")
     return {
         "name": path.name,
         "ok": not errors,
         "errors": errors,
         "database_integrity": integrity,
-        "foreign_key_violations": len(foreign_keys),
+        "foreign_key_violations": foreign_key_count,
     }
 
 
