@@ -17,7 +17,7 @@ authors = [
 license = "GPL-3.0-only"
 
 dependencies = [
-    "envs-xmpp>=0.3.1,<0.4",
+    "envs-xmpp>=0.3.2,<0.4",
     "aiosqlite>=0.20,<1",
     "aiohttp>=3.14.3,<4",
     "beautifulsoup4>=4.12.3,<5",
@@ -148,3 +148,21 @@ ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true
 no_implicit_optional = true
+
+[tool.envs-xmpp.quality]
+compile-targets = ["envsbot.py", "bot", "core_plugins", "plugins", "database", "utils", "scripts"]
+ruff-targets = ["envsbot.py", "bot", "core_plugins", "plugins", "database", "utils", "scripts"]
+mypy-targets = ["envsbot.py", "bot", "core_plugins", "plugins", "database", "utils", "scripts"]
+
+[[tool.envs-xmpp.quality.project-checks]]
+name = "Command documentation"
+command = ["python", "scripts/check_command_docs.py"]
+
+[[tool.envs-xmpp.quality.project-checks]]
+name = "Generated configuration sample"
+command = ["python", "scripts/generate_config_sample.py", "--check"]
+
+[tool.envs-xmpp.testing]
+coverage-source = "."
+coverage-report = "term"
+coverage-fail-under = 85

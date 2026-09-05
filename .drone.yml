@@ -10,7 +10,7 @@ steps:
     - python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
     - python -m pip check
     - python scripts/check_constraints.py constraints/python313.txt
-    - sh scripts/quality.sh
+    - sh scripts/quality.sh --skip-tests
     - python -m build
     - python scripts/check_wheel.py
 

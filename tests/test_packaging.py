@@ -109,12 +109,12 @@ def test_ci_verifies_constraint_dependency_closure():
     assert "python scripts/check_constraints.py constraints/python313.txt" in drone
 
 
-def test_ci_invokes_quality_script_via_shell():
+def test_ci_invokes_shared_quality_script_via_shell():
     github = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
     drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
 
-    assert "run: sh scripts/quality.sh" in github
-    assert drone.count("- sh scripts/quality.sh") == 1
+    assert "run: sh scripts/quality.sh --skip-tests" in github
+    assert drone.count("- sh scripts/quality.sh --skip-tests") == 1
     assert "./scripts/quality.sh" not in github
     assert "./scripts/quality.sh" not in drone
 
@@ -192,72 +192,33 @@ def test_aiohttp_security_floor_and_locks():
         assert "aiohttp==3.14.3" in path.read_text(encoding="utf-8").lower()
 
 
-def test_strict_quality_gates_cover_all_runtime_roots():
+def test_shared_quality_profile_covers_all_runtime_roots():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    quality = pyproject["tool"]["envs-xmpp"]["quality"]
+    expected = ["envsbot.py", "bot", "core_plugins", "plugins", "database", "utils", "scripts"]
+
+    assert quality["compile-targets"] == expected
+    assert quality["ruff-targets"] == expected
+    assert quality["mypy-targets"] == expected
+    assert [check["name"] for check in quality["project-checks"]] == [
+        "Command documentation",
+        "Generated configuration sample",
+    ]
+
+
+def test_quality_helper_delegates_to_shared_runner():
     quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
 
-    assert (
-        'runtime_targets="envsbot.py bot core_plugins plugins database utils scripts"'
-        in quality
-    )
-    assert "ruff check $ruff_fix_args --select I,UP,B $runtime_targets" in quality
-    assert (
-        "ruff check $ruff_fix_args --select F401 "
-        "--extend-exclude '**/__init__.py' ."
-        in quality
-    )
-    assert "mypy $runtime_targets" in quality
-    # Directory-based targets mean new production modules are included without
-    # editing a hand-maintained file list.
-    assert "scripts/deploy.py \\" not in quality
+    assert 'exec python -m envs_xmpp_ops.quality "$@"' in quality
 
 
-def test_quality_fix_flag_is_forwarded_to_both_ruff_passes():
-    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
+def test_shared_testing_profile_preserves_envsbot_coverage_policy():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    testing = pyproject["tool"]["envs-xmpp"]["testing"]
 
-    assert 'if [ "${1:-}" = "--fix" ]; then' in quality
-    assert 'ruff_fix_args="--fix"' in quality
-    assert "ruff check $ruff_fix_args ." in quality
-    assert "ruff check $ruff_fix_args --select I,UP,B" in quality
-    assert "ruff check $ruff_fix_args --select F401" in quality
-    assert 'echo "usage: $0 [--fix]" >&2' in quality
-
-
-def test_quality_output_labels_every_gate():
-    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
-
-    expected_labels = (
-        "[1/9] Python compilation",
-        "[2/9] Command documentation",
-        "[3/9] Generated configuration sample",
-        "[4/9] Ruff: repository checks",
-        "[5/9] Ruff: unused imports (F401)",
-        "[6/9] Ruff: imports, modernization, and Bugbear (I,UP,B)",
-        "[7/9] mypy: production source tree",
-        "[8/9] Git whitespace errors",
-        "[9/9] Dependency audit (pip-audit)",
-    )
-    for label in expected_labels:
-        assert label in quality
-    assert "Quality checks passed (9/9)." in quality
-
-
-def test_quality_checks_git_whitespace_since_release_and_in_worktree():
-    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
-
-    assert "git describe --tags --abbrev=0" in quality
-    assert 'git --no-pager diff --check "$latest_tag"' in quality
-    assert "git --no-pager diff --check HEAD" in quality
-    assert "git diff --quiet HEAD --" in quality
-    assert "git hash-object -t tree /dev/null" in quality
-    assert 'git --no-pager diff --check "$empty_tree" HEAD' in quality
-
-
-def test_quality_audits_exact_lock_without_no_deps_warning():
-    """The full lock can be resolved normally, avoiding pip-audit no-deps warnings."""
-    quality = (ROOT / "scripts/quality.sh").read_text(encoding="utf-8")
-
-    assert 'pip-audit -r "$constraint_file"' in quality
-    assert "--no-deps" not in quality
+    assert testing["coverage-source"] == "."
+    assert testing["coverage-report"] == "term"
+    assert testing["coverage-fail-under"] == 85
 
 
 def test_wheel_packages_runtime_defaults_inside_utils():
@@ -319,16 +280,10 @@ def test_ci_runs_complete_suite_on_both_pythons_without_duplicate_coverage():
     assert "pip-audit -r constraints/python312.txt" in drone
 
 
-def test_test_helper_keeps_fast_and_release_modes_explicit():
+def test_test_helper_delegates_to_shared_runner():
     helper = (ROOT / "scripts/test.sh").read_text(encoding="utf-8")
 
-    assert "-W error::RuntimeWarning" in helper
-    assert "-W error::DeprecationWarning" in helper
-    assert "--cov-fail-under=85" in helper
-    assert "--last-failed" in helper
-    assert "--durations" in helper
-    assert "-o addopts=" in helper
-    assert "--no-cov" not in helper
+    assert 'exec python -m envs_xmpp_ops.testing "$@"' in helper
 
 
 def test_scripts_readme_documents_all_repository_helpers():

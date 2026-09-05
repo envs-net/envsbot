@@ -22,6 +22,12 @@ Run these commands from the repository root unless a script explicitly says othe
 | `check_command_docs.py` | Validates that the checked-in generated command documentation matches the current command registry. | `python scripts/check_command_docs.py` |
 | `check_wheel.py` | Smoke-tests the single built envsbot wheel and verifies packaged runtime assets. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
 
+`quality.sh` and `test.sh` intentionally use the same shared runners as the
+other envs.net XMPP bot. Repository-specific source roots, project validation
+commands, integration markers and coverage thresholds are declared under
+`[tool.envs-xmpp.quality]` and `[tool.envs-xmpp.testing]` in `pyproject.toml`;
+the runner implementation lives in `envs-xmpp`.
+
 ## Which helper should I use?
 
 For normal installation, upgrades, systemd validation, and path discovery, start with [`deploy.sh`](../docs/deployment.md).
