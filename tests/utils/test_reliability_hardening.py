@@ -38,7 +38,7 @@ async def test_outbox_does_not_join_arbitrary_groupchat_destination(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_repeated_room_invite_refreshes_reason_and_timestamp(monkeypatch):
+async def test_repeated_room_invite_is_deduplicated_without_refresh() -> None:
     bot = SimpleNamespace(
         db=SimpleNamespace(conn=None),
         pending_room_invites={
@@ -47,14 +47,13 @@ async def test_repeated_room_invite_refreshes_reason_and_timestamp(monkeypatch):
                 "room_jid": "room@conference.test",
                 "inviter": "alice@example.org",
                 "reason": "old reason",
-                "created_at": 100,
+                "created_at": 2_000_000_000,
             }
         },
         pending_room_invite_index={
             ("room@conference.test", "alice@example.org"): 7
         },
     )
-    monkeypatch.setattr(invites.time, "time", lambda: 200)
 
     stored = await invites._store_pending_room_invite(
         bot,
@@ -63,9 +62,11 @@ async def test_repeated_room_invite_refreshes_reason_and_timestamp(monkeypatch):
         "new reason",
     )
 
-    assert stored is bot.pending_room_invites[7]
-    assert stored["reason"] == "new reason"
-    assert stored["created_at"] == 200
+    assert stored is not None
+    assert stored.created is False
+    assert stored.invite is bot.pending_room_invites[7]
+    assert stored.invite["reason"] == "old reason"
+    assert stored.invite["created_at"] == 2_000_000_000
 
 
 @pytest.mark.parametrize(
@@ -139,31 +140,30 @@ async def test_recursive_outbox_capacity_alert_is_suppressed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_invite_refresh_does_not_mutate_runtime_when_db_write_fails(monkeypatch):
+async def test_duplicate_invite_does_not_write_database() -> None:
     invite = {
         "id": 7,
         "room_jid": "room@conference.test",
         "inviter": "alice@example.org",
         "reason": "old reason",
-        "created_at": 100,
+        "created_at": 2_000_000_000,
     }
-    db = SimpleNamespace(write=AsyncMock(side_effect=RuntimeError("db busy")))
+    write = AsyncMock(side_effect=RuntimeError("db busy"))
     bot = SimpleNamespace(
-        db=SimpleNamespace(conn=object(), write=db.write),
+        db=SimpleNamespace(conn=object(), write=write),
         pending_room_invites={7: invite},
         pending_room_invite_index={("room@conference.test", "alice@example.org"): 7},
     )
-    monkeypatch.setattr(invites, "setup_room_invites_db", AsyncMock())
-    monkeypatch.setattr(invites, "_db_api", lambda _bot: db)
-    monkeypatch.setattr(invites.time, "time", lambda: 200)
 
-    with pytest.raises(RuntimeError, match="db busy"):
-        await invites._store_pending_room_invite(
-            bot,
-            "room@conference.test",
-            "alice@example.org",
-            "new reason",
-        )
+    stored = await invites._store_pending_room_invite(
+        bot,
+        "room@conference.test",
+        "alice@example.org",
+        "new reason",
+    )
 
-    assert invite["reason"] == "old reason"
-    assert invite["created_at"] == 100
+    assert stored is not None
+    assert stored.created is False
+    write.assert_not_awaited()
+    assert stored.invite["reason"] == "old reason"
+    assert stored.invite["created_at"] == 2_000_000_000

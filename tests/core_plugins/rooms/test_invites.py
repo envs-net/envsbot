@@ -65,6 +65,31 @@ async def test_handle_room_invite_stores_and_announces(fake_bot, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_room_invite_deduplicates_notification(fake_bot, monkeypatch):
+    xml = ET.fromstring(
+        "<message><x xmlns='jabber:x:conference' "
+        "jid='room2@conference.test' reason='first'/></message>"
+    )
+    msg = InviteMessage("inviter@example.org", xml)
+    fake_bot.db.conn = None
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+    fake_bot.make_message = MagicMock(side_effect=lambda **kwargs: kwargs)
+    fake_bot._safe_send_message = AsyncMock()
+    fake_bot.audit = AsyncMock()
+    monkeypatch.setitem(config, "room_invites_enabled", True)
+    monkeypatch.setitem(config, "room_invite_notify_jid", "admins@conference.test")
+    monkeypatch.setattr(rooms, "ensure_notification_target_joined", AsyncMock(return_value=True))
+    monkeypatch.setattr(rooms, "notification_message_type", lambda bot, target: "groupchat")
+
+    assert await rooms.handle_room_invite(fake_bot, msg) is True
+    assert await rooms.handle_room_invite(fake_bot, msg) is True
+
+    assert len(fake_bot.pending_room_invites) == 1
+    assert fake_bot._safe_send_message.await_count == 1
+    assert fake_bot.audit.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_rooms_invite_accept_joins_and_removes_pending(fake_bot, fake_msg, monkeypatch):
     fake_bot.db.conn = None
     fake_bot.pending_room_invites = {
@@ -207,7 +232,8 @@ async def test_room_invite_database_lifecycle(fake_bot, monkeypatch):
         assert pending[1]["reason"] == ""
         assert fake_bot.pending_room_invite_index == {("active@conference.test", "inviter@example.org"): 1}
 
-        # Duplicate insert path reloads the already persisted row after UNIQUE failure.
+        # A duplicate already present in SQLite is returned unchanged and does
+        # not refresh its reason or lifetime, even if the runtime cache was reset.
         fake_bot.pending_room_invites = {}
         fake_bot.pending_room_invite_index = {}
         duplicate = await rooms._store_pending_room_invite(
@@ -216,7 +242,11 @@ async def test_room_invite_database_lifecycle(fake_bot, monkeypatch):
             "inviter@example.org",
             "ignored",
         )
-        assert duplicate["id"] == 1
+        assert duplicate is not None
+        assert duplicate.created is False
+        assert duplicate.invite["id"] == 1
+        assert duplicate.invite["reason"] == ""
+        assert duplicate.invite["created_at"] == now
 
         stored = await rooms._store_pending_room_invite(
             fake_bot,
@@ -224,8 +254,10 @@ async def test_room_invite_database_lifecycle(fake_bot, monkeypatch):
             "new@example.org",
             "new reason",
         )
-        assert stored["id"] >= 2
-        removed = await rooms._delete_pending_room_invite(fake_bot, stored["id"])
+        assert stored is not None
+        assert stored.created is True
+        assert stored.invite["id"] >= 2
+        removed = await rooms._delete_pending_room_invite(fake_bot, stored.invite["id"])
         assert removed["room_jid"] == "new@conference.test"
         assert ("new@conference.test", "new@example.org") not in fake_bot.pending_room_invite_index
 
@@ -256,16 +288,36 @@ async def test_room_invite_runtime_lifecycle_without_database(fake_bot, monkeypa
 
     monkeypatch.setitem(config, "room_invite_max_age_days", 1)
     fresh = await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "hi")
-    assert fresh["id"] == 1
-    assert await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "hi") == fresh
+    assert fresh is not None
+    assert fresh.created is True
+    assert fresh.invite["id"] == 1
 
-    fresh["created_at"] = int(time.time()) - 3 * 86400
+    duplicate = await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "ignored")
+    assert duplicate is not None
+    assert duplicate.created is False
+    assert duplicate.invite == fresh.invite
+    assert duplicate.invite["reason"] == "hi"
+
+    now = int(time.time())
+    fake_bot.pending_room_invites = {
+        1: {**fresh.invite.as_dict(), "created_at": now - 3 * 86400},
+    }
     replacement = await rooms._store_pending_room_invite(fake_bot, "room@conf", "user@example.org", "new")
-    assert replacement["id"] == 1
-    assert replacement["reason"] == "new"
+    assert replacement is not None
+    assert replacement.created is True
+    assert replacement.invite["id"] == 2
+    assert replacement.invite["reason"] == "new"
 
-    old = await rooms._store_pending_room_invite(fake_bot, "old@conf", "old@example.org", "old")
-    old["created_at"] = int(time.time()) - 3 * 86400
+    fake_bot.pending_room_invites = {
+        replacement.invite.id: replacement.invite,
+        3: {
+            "id": 3,
+            "room_jid": "old@conf",
+            "inviter": "old@example.org",
+            "reason": "old",
+            "created_at": now - 3 * 86400,
+        },
+    }
     assert await rooms.cleanup_expired_room_invites(fake_bot) == 1
 
     monkeypatch.setitem(config, "room_invite_max_age_days", 0)
