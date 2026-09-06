@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from envs_xmpp_core.config.changes import (
+    flatten_config_value as _core_flatten_config_value,
+)
+from envs_xmpp_core.config.changes import (
+    flattened_config_value_changes,
+)
+
 from .defaults import (
     _LOWER_TO_PYTHON_CONFIG_KEY,
     BASE_DIR,
@@ -52,19 +59,8 @@ def load_default_config_for_diff() -> dict:
 
 
 def _flatten_config_value(name: str, value: object) -> list[tuple[str, object]]:
-    """Return leaf-level config entries using dotted names for nested dicts."""
-    if not isinstance(value, dict):
-        return [(name, value)]
-
-    flattened: list[tuple[str, object]] = []
-    for key in sorted(value):
-        child_name = f"{name}.{key}"
-        child_value = value[key]
-        if isinstance(child_value, dict):
-            flattened.extend(_flatten_config_value(child_name, child_value))
-        else:
-            flattened.append((child_name, child_value))
-    return flattened
+    """Compatibility wrapper around the shared dotted-value flattener."""
+    return list(_core_flatten_config_value(name, value))
 
 
 def get_config_diff_sections(
@@ -97,13 +93,12 @@ def get_config_diff_sections(
             default_value = defaults.get(normalized_key)
             seen.add(normalized_key)
 
-            current_items = dict(_flatten_config_value(python_key, current_value))
-            default_items = dict(_flatten_config_value(python_key, default_value))
-            for display_name in sorted(set(current_items) | set(default_items)):
-                current_item = current_items.get(display_name)
-                default_item = default_items.get(display_name)
-                if current_item != default_item:
-                    entries.append((display_name, current_item, default_item))
+            for change in flattened_config_value_changes(
+                python_key,
+                default_value,
+                current_value,
+            ):
+                entries.append((change.key, change.after, change.before))
 
         if entries:
             sections.append((title, entries))

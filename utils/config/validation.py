@@ -10,6 +10,7 @@ from envs_xmpp_core.config.schema import (
     expected_type_name,
     is_config_int,
     matches_expected_type,
+    schema_value_violation,
 )
 
 from utils.bundled_assets import resolve_bundled_asset
@@ -65,34 +66,37 @@ def _validate_numeric_ranges(cfg, errors):
         value = cfg.get(key)
         if value is None or isinstance(value, bool):
             continue
-        if field.choices and isinstance(value, str) and value not in field.choices:
+        if not isinstance(value, (str, int, float)):
+            continue
+
+        violation = schema_value_violation(
+            value,
+            field,
+            assume_type_valid=True,
+        )
+        if violation == "choice":
             errors.append(f"{key}: expected one of {', '.join(field.choices)}")
             continue
-        if not isinstance(value, (int, float)):
-            continue
-        if field.minimum is not None and field.maximum is not None:
-            if field.minimum_exclusive:
-                invalid = value <= field.minimum or value > field.maximum
-                if invalid:
+        if violation in {"minimum", "minimum_exclusive", "maximum"}:
+            if field.minimum is not None and field.maximum is not None:
+                if field.minimum_exclusive:
                     errors.append(
                         f"{key}: must be greater than {field.minimum} and at most {field.maximum}"
                     )
-            elif value < field.minimum or value > field.maximum:
-                errors.append(
-                    f"{key}: must be between {field.minimum} and {field.maximum}"
-                )
-            continue
-        if field.minimum is not None:
-            invalid = value <= field.minimum if field.minimum_exclusive else value < field.minimum
-            if invalid:
-                if field.minimum_exclusive:
-                    errors.append(f"{key}: must be greater than {field.minimum}")
-                elif field.minimum == 0:
+                else:
+                    errors.append(
+                        f"{key}: must be between {field.minimum} and {field.maximum}"
+                    )
+                continue
+            if violation == "minimum_exclusive":
+                errors.append(f"{key}: must be greater than {field.minimum}")
+            elif violation == "minimum":
+                if field.minimum == 0:
                     errors.append(f"{key}: must be 0 or greater")
                 else:
                     errors.append(f"{key}: must be at least {field.minimum}")
-        if field.maximum is not None and value > field.maximum:
-            errors.append(f"{key}: must be at most {field.maximum}")
+            elif violation == "maximum":
+                errors.append(f"{key}: must be at most {field.maximum}")
 
 
 def _validate_timezone(cfg, errors):
@@ -210,9 +214,11 @@ def check_required_keys(cfg):
             errors.append(f"Missing required key: {key}")
             continue
 
-        if expected_type is str:
-            _validate_string(cfg[key], key, errors)
-        elif not isinstance(cfg[key], expected_type):
+        field = CONFIG_FIELDS[key]
+        violation = schema_value_violation(cfg[key], field, none_is_valid=False)
+        if violation == "empty":
+            errors.append(f"{key}: must not be empty")
+        elif violation == "type":
             errors.append(
                 f"{key}: expected {expected_type_name(expected_type)}, "
                 f"got {type(cfg[key]).__name__}"
@@ -230,24 +236,28 @@ def check_optional_keys(cfg):
         if value is None:
             continue
 
+        field = CONFIG_FIELDS[key]
+        violation = schema_value_violation(value, field)
+        if violation == "empty":
+            errors.append(f"{key}: must not be empty")
+            continue
+        if violation != "type":
+            continue
+
         if expected_type is str:
-            _validate_string(
-                value,
-                key,
-                errors,
-                allow_empty=bool(CONFIG_FIELDS.get(key) and CONFIG_FIELDS[key].allow_empty),
+            errors.append(
+                f"{key}: expected string, got {type(value).__name__}"
             )
             continue
 
         expected_types = (
             expected_type if isinstance(expected_type, tuple) else (expected_type,)
         )
-        if not matches_expected_type(value, expected_types):
-            expected_names = " or ".join(t.__name__ for t in expected_types)
-            errors.append(
-                f"{key}: expected {expected_names}, "
-                f"got {type(value).__name__}"
-            )
+        expected_names = " or ".join(t.__name__ for t in expected_types)
+        errors.append(
+            f"{key}: expected {expected_names}, "
+            f"got {type(value).__name__}"
+        )
     return errors
 
 

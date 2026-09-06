@@ -7,6 +7,8 @@ import sys
 from collections.abc import Mapping
 from typing import Any, cast
 
+from envs_xmpp_core.config.changes import config_value_changes
+
 from utils.config.spec import (
     DUCK_FIELDS,
     IDLERPG_FIELDS,
@@ -49,17 +51,12 @@ def _display_value(key: str, value: object) -> str:
 
 def config_change_lines(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:
     """Return human-readable changed config values."""
-    lines = []
-    for key in sorted(set(before) | set(after)):
-        old = before.get(key)
-        new = after.get(key)
-        if old == new:
-            continue
-        lines.append(
-            f"- {_display_key(key)}: "
-            f"{_display_value(key, old)} → {_display_value(key, new)}"
-        )
-    return lines
+    return [
+        f"- {_display_key(change.key)}: "
+        f"{_display_value(change.key, change.before)} → "
+        f"{_display_value(change.key, change.after)}"
+        for change in config_value_changes(before, after)
+    ]
 
 
 def startup_change_lines(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:

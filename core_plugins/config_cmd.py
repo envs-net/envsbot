@@ -8,6 +8,7 @@ import pprint
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
 
+from envs_xmpp_core.config.literals import parse_literal
 from envs_xmpp_core.config.python_file import assignment_ranges as _core_assignment_ranges
 from envs_xmpp_core.config.python_file import replace_or_append_assignment_text
 from envs_xmpp_core.storage.files import atomic_write_text
@@ -108,19 +109,8 @@ def _format_config_search_line(name: str, value: object) -> str:
 
 
 def _parse_config_value(raw: str) -> object:
-    """Parse a chat-provided config literal with convenient bool/None handling."""
-    text = str(raw).strip()
-    lowered = text.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    if lowered == "none":
-        return None
-    try:
-        return ast.literal_eval(text)
-    except Exception:
-        return text
+    """Parse a chat-provided config literal using the shared safe parser."""
+    return parse_literal(raw)
 
 
 def _format_config_assignment(display_key: str, value: object) -> str:
