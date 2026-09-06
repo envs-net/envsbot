@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import urllib.request
 
+from envs_xmpp_core.release.checks import check_latest_release
 from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_github_api_sync as _core_fetch_api,
 )
@@ -17,7 +18,6 @@ from envs_xmpp_core.release.github import (
 from envs_xmpp_core.release.github import (
     release_tag_from_redirect_url as _release_tag_from_redirect_url,
 )
-from envs_xmpp_core.release.checks import check_latest_release
 from envs_xmpp_core.release.versions import (
     compare_versions,
     parse_version_tuple,
