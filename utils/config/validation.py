@@ -6,6 +6,11 @@ import sys
 from pathlib import Path
 
 import slixmpp
+from envs_xmpp_core.config.schema import (
+    expected_type_name,
+    is_config_int,
+    matches_expected_type,
+)
 
 from utils.bundled_assets import resolve_bundled_asset
 from utils.time_utils import is_timezone_name
@@ -13,36 +18,6 @@ from utils.time_utils import is_timezone_name
 from .defaults import BASE_DIR, OPTIONAL_CONFIG_TYPES, REQUIRED_CONFIG_KEYS
 from .errors import ConfigError
 from .spec import CONFIG_FIELDS, NESTED_CONFIG_FIELDS
-
-
-def _is_config_int(value: object) -> bool:
-    """Return True for real integers, but not bool values."""
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _expected_type_name(expected_type: type | tuple[type, ...]) -> str:
-    """Return a readable name for one or more accepted config types."""
-    if isinstance(expected_type, tuple):
-        return " or ".join(item.__name__ for item in expected_type)
-    return expected_type.__name__
-
-
-def _matches_expected_type(value: object, expected_type: object) -> bool:
-    expected_types = (
-        expected_type if isinstance(expected_type, tuple) else (expected_type,)
-    )
-
-    for typ in expected_types:
-        if typ is int and _is_config_int(value):
-            return True
-        if typ is float and isinstance(value, float) and not isinstance(value, bool):
-            return True
-        if typ is bool and isinstance(value, bool):
-            return True
-        if typ not in {int, float, bool} and isinstance(value, typ):
-            return True
-
-    return False
 
 
 def _validate_string(value, key, errors, allow_empty=False):
@@ -203,9 +178,9 @@ def _validate_backup_schedule(cfg, warnings):
     interval = cfg.get("backup_interval_hours")
     max_age = cfg.get("admin_alert_backup_max_age_hours")
     if (
-        _is_config_int(interval)
+        is_config_int(interval)
         and interval > 0
-        and _is_config_int(max_age)
+        and is_config_int(max_age)
         and max_age > 0
         and interval >= max_age
     ):
@@ -239,7 +214,7 @@ def check_required_keys(cfg):
             _validate_string(cfg[key], key, errors)
         elif not isinstance(cfg[key], expected_type):
             errors.append(
-                f"{key}: expected {_expected_type_name(expected_type)}, "
+                f"{key}: expected {expected_type_name(expected_type)}, "
                 f"got {type(cfg[key]).__name__}"
             )
     return errors
@@ -267,7 +242,7 @@ def check_optional_keys(cfg):
         expected_types = (
             expected_type if isinstance(expected_type, tuple) else (expected_type,)
         )
-        if not _matches_expected_type(value, expected_types):
+        if not matches_expected_type(value, expected_types):
             expected_names = " or ".join(t.__name__ for t in expected_types)
             errors.append(
                 f"{key}: expected {expected_names}, "
@@ -299,10 +274,10 @@ def _validate_nested_config(cfg: dict[str, object], errors: list[str]) -> None:
                     allow_empty=field.allow_empty,
                 )
                 continue
-            if not _matches_expected_type(value, field.accepted_type):
+            if not matches_expected_type(value, field.accepted_type):
                 errors.append(
                     f"{dotted_key}: expected "
-                    f"{_expected_type_name(field.accepted_type)}, "
+                    f"{expected_type_name(field.accepted_type)}, "
                     f"got {type(value).__name__}"
                 )
 

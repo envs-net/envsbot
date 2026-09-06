@@ -9,24 +9,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-MISSING = object()
+from envs_xmpp_core.config.schema import (
+    MISSING,
+    ConfigKeySpec,
+    schema_defaults,
+    schema_display_sections,
+    schema_optional_types,
+    schema_python_key_map,
+    schema_required_types,
+    schema_sample_defaults,
+    schema_sensitive_keys,
+    schema_startup_only_keys,
+)
 
-@dataclass(frozen=True)
-class ConfigField:
-    default: Any
-    python_key: str
-    accepted_type: type | tuple[type, ...]
-    startup_only: bool = False
-    required: bool = False
-    minimum: float | int | None = None
-    maximum: float | int | None = None
-    minimum_exclusive: bool = False
-    choices: tuple[str, ...] = ()
-    allow_empty: bool = False
-    section: str = "Other"
-    description: str = ""
-    sensitive: bool = False
-    sample: Any = MISSING
+# Compatibility alias for older imports; new declarations use the shared name.
+ConfigField = ConfigKeySpec
 
 
 @dataclass(frozen=True)
@@ -157,173 +154,173 @@ NESTED_CONFIG_FIELDS: dict[str, dict[str, NestedConfigField]] = {
 def nested_config_defaults(group: str) -> dict[str, Any]:
     return {key: field.default for key, field in NESTED_CONFIG_FIELDS.get(group, {}).items()}
 
-CONFIG_FIELDS: dict[str, ConfigField] = {
-    'jid': ConfigField(MISSING, 'JID', str, startup_only=True, required=True, section='XMPP Account', description='XMPP account used by the bot.', sample='envsbot@domain.tld'),
-    'password': ConfigField(MISSING, 'PASSWORD', str, startup_only=True, required=True, section='XMPP Account', description='Password.', sensitive=True, sample='yourpassword'),
-    'nick': ConfigField(MISSING, 'NICK', str, required=True, section='XMPP Account', description='Nick.', sample='EnvsBot'),
-    'resource': ConfigField(None, 'RESOURCE', str, startup_only=True, section='XMPP Account', description='Optional XMPP resource. Set to None to let Slixmpp/server choose one.', sample='service'),
-    'owner': ConfigField(MISSING, 'OWNER', str, required=True, section='XMPP Account', description='Bare JID of the bot owner. The owner has the highest runtime role.', sample='owner@domain.tld'),
-    'admins': ConfigField(MISSING, 'ADMINS', list, section='XMPP Account', description='Optional additional privileged users. Roles can also be managed at runtime through the users commands.', sample=[]),
-    'host': ConfigField(None, 'CONNECT_HOST', str, startup_only=True, section='Connection', description='Optional connection host override. None uses the domain from JID.'),
-    'port': ConfigField(5222, 'CONNECT_PORT', int, startup_only=True, minimum=1, maximum=65535, section='Connection', description='XMPP client-to-server port. 5222 = normal C2S with STARTTLS 5223 = direct TLS / legacy SSL when your server requires it'),
-    'direct_tls': ConfigField(False, 'CONNECT_DIRECT_TLS', bool, startup_only=True, section='Connection', description='False = regular STARTTLS on port 5222. True = direct TLS / legacy SSL, commonly on port 5223.'),
-    'xmpp_query_timeout_seconds': ConfigField(8, 'XMPP_QUERY_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Connection', description='XMPP query timeout used by diagnostic/info commands.'),
-    'xmpp_compliance_max_read_bytes': ConfigField(262144, 'XMPP_COMPLIANCE_MAX_READ_BYTES', int, section='Connection', description='Maximum bytes read from compliance.conversations.im for ,xmpp compliance. The command only needs a small HTML preview containing the score marker.'),
-    'loglevel': ConfigField('INFO', 'LOG_LEVEL', str, section='Bot Runtime', description='Python logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.'),
-    'log_dir': ConfigField('logs', 'LOG_DIR', str, startup_only=True, section='Bot Runtime', description='Directory for the rotating envsbot.log file. Use an absolute path such as /var/log/envsbot with the hardened systemd unit.'),
-    'prefix': ConfigField(',', 'COMMAND_PREFIX', str, section='Bot Runtime', description='Command prefix used to trigger bot commands in rooms and direct chats.'),
-    'timezone': ConfigField(MISSING, 'TIMEZONE', str, section='Bot Runtime', description='Default timezone for bot-side date/time handling.', sample='Europe/Berlin'),
-    'db': ConfigField('bot.db', 'DB_FILE', str, startup_only=True, section='Bot Runtime', description='SQLite database file, relative to the bot directory unless absolute.', sample='data/bot.db'),
-    'runtime_data_dir': ConfigField(None, 'RUNTIME_DATA_DIR', str, startup_only=True, section='Bot Runtime', description='Directory for mutable support files such as vcard.py, chat_slang.csv, slang review queues, profile hash markers and the last-successful-version state. None keeps the historical application-root location for compatibility. Hardened systemd installs should set /var/lib/envsbot.', sample=None),
-    'restart_notification_file': ConfigField('data/envsbot_restart_notification.json', 'RESTART_NOTIFICATION_FILE', str, section='Bot Runtime', description='File used to remember who requested a bot restart across process restarts. Keep this outside /tmp when systemd PrivateTmp=true is enabled.'),
-    'stop_cmd': ConfigField([], 'STOP_CMD', list, section='Bot Runtime', description='Optional external command used by ,bot shutdown. Leave empty to perform a clean internal exit. With systemd, use Restart=on-failure so ,bot restart (exit code 75) restarts while a clean shutdown remains stopped.'),
-    'stop_cmd_timeout_seconds': ConfigField(10.0, 'STOP_CMD_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Stop cmd timeout seconds.'),
-    'command_timeout_seconds': ConfigField(30, 'COMMAND_TIMEOUT_SECONDS', (int, float), section='Bot Runtime', description='Command execution guardrails. Slow commands are logged; timed-out commands return a friendly error and the traceback stays in the log.'),
-    'command_slow_log_seconds': ConfigField(2.0, 'COMMAND_SLOW_LOG_SECONDS', (int, float), section='Bot Runtime', description='Command slow log seconds.'),
-    'default_pagination': ConfigField('all', 'DEFAULT_PAGINATION', (str, int), section='Bot Runtime', description='Default paging behavior for commands supporting [page|last|all]. "all" shows the full list by default. A positive integer, e.g. 20, shows page 1 with that many entries unless the user explicitly asks for all/last/page.'),
-    'database_busy_timeout_ms': ConfigField(5000, 'DATABASE_BUSY_TIMEOUT_MS', int, startup_only=True, section='Bot Runtime', description='SQLite connection busy timeout in milliseconds. Applied when the database connection is opened.'),
-    'database_wal_enabled': ConfigField(False, 'DATABASE_WAL_ENABLED', bool, startup_only=True, section='Bot Runtime', description='Whether SQLite WAL journal mode is enabled. Applied when the database connection is opened.'),
-    'database_shutdown_timeout_seconds': ConfigField(15.0, 'DATABASE_SHUTDOWN_TIMEOUT_SECONDS', (int, float), section='Bot Runtime', description='Grace period for shutdown/restart DB cleanup. Keep this larger than the internal flush wait so the SQLite connection can close cleanly.'),
-    'database_maintenance_interval_seconds': ConfigField(21600, 'DATABASE_MAINTENANCE_INTERVAL_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Periodic low-impact SQLite maintenance. The worker runs PRAGMA optimize, checkpoints WAL when enabled and prunes old aggregate command statistics.'),
-    'database_backup_before_migrate': ConfigField(True, 'DATABASE_BACKUP_BEFORE_MIGRATE', bool, startup_only=True, section='Bot Runtime', description='Create a consistent SQLite snapshot before applying pending schema migrations.'),
-    'database_migration_backup_keep': ConfigField(5, 'DATABASE_MIGRATION_BACKUP_KEEP', int, minimum=1, section='Backups', description='Keep this many verified pre-migration SQLite snapshots.'),
-    'database_migration_backup_retention_days': ConfigField(90, 'DATABASE_MIGRATION_BACKUP_RETENTION_DAYS', int, minimum=0, section='Backups', description='Also prune pre-migration SQLite snapshots older than this many days. 0 disables age-based pruning.'),
-    'command_usage_retention_days': ConfigField(365, 'COMMAND_USAGE_RETENTION_DAYS', int, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Command usage retention days.'),
-    'watchdog_enabled': ConfigField(True, 'WATCHDOG_ENABLED', bool, startup_only=True, section='Bot Runtime', description='Event-loop monitor and native systemd watchdog integration. With the bundled service unit, a process that is alive but no longer responsive is restarted.'),
-    'watchdog_interval_seconds': ConfigField(20.0, 'WATCHDOG_INTERVAL_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Watchdog interval seconds.'),
-    'watchdog_lag_warning_seconds': ConfigField(2.0, 'WATCHDOG_LAG_WARNING_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Watchdog lag warning seconds.'),
-    'watchdog_lag_failure_seconds': ConfigField(30.0, 'WATCHDOG_LAG_FAILURE_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Watchdog lag failure seconds.'),
-    'task_restart_max_attempts': ConfigField(5, 'TASK_RESTART_MAX_ATTEMPTS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Automatic restart/backoff for protected long-running plugin workers. This many automatic restarts are allowed in one failure streak; if the restarted worker fails again, the circuit opens and an admin is notified.'),
-    'task_restart_initial_seconds': ConfigField(5.0, 'TASK_RESTART_INITIAL_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Task restart initial seconds.'),
-    'task_restart_max_seconds': ConfigField(300.0, 'TASK_RESTART_MAX_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Task restart max seconds.'),
-    'task_restart_reset_seconds': ConfigField(900.0, 'TASK_RESTART_RESET_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Task restart reset seconds.'),
-    'task_stale_after_seconds': ConfigField(3600.0, 'TASK_STALE_AFTER_SECONDS', (int, float), minimum=60, section='Bot Runtime', description='Heartbeats older than this are reported by `,tasks stale`; values below 60 seconds are rejected.'),
-    'outbox_enabled': ConfigField(True, 'OUTBOX_ENABLED', bool, startup_only=True, section='Persistent Outbox', description='Persistent outbound delivery queue. Failed RSS, reminder and admin-report messages are stored in SQLite and retried across reconnects/restarts.'),
-    'outbox_poll_seconds': ConfigField(5.0, 'OUTBOX_POLL_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox poll seconds.'),
-    'outbox_batch_size': ConfigField(20, 'OUTBOX_BATCH_SIZE', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox batch size.'),
-    'outbox_max_attempts': ConfigField(12, 'OUTBOX_MAX_ATTEMPTS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max attempts.'),
-    'outbox_retry_initial_seconds': ConfigField(30, 'OUTBOX_RETRY_INITIAL_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox retry initial seconds.'),
-    'outbox_retry_max_seconds': ConfigField(1800, 'OUTBOX_RETRY_MAX_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox retry max seconds.'),
-    'outbox_inflight_timeout_seconds': ConfigField(300, 'OUTBOX_INFLIGHT_TIMEOUT_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox inflight timeout seconds.'),
-    'outbox_max_pending': ConfigField(10000, 'OUTBOX_MAX_PENDING', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Hard growth limits for long outages or broken destinations.'),
-    'outbox_max_bytes': ConfigField(52428800, 'OUTBOX_MAX_BYTES', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max bytes.'),
-    'outbox_max_per_destination': ConfigField(1000, 'OUTBOX_MAX_PER_DESTINATION', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max per destination.'),
-    'outbox_max_per_category': ConfigField(5000, 'OUTBOX_MAX_PER_CATEGORY', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max per category.'),
-    'outbox_dead_retention_days': ConfigField(30, 'OUTBOX_DEAD_RETENTION_DAYS', int, minimum=0, section='Persistent Outbox', description='Dead letters older than this are pruned by database maintenance. 0 disables age-based pruning.'),
-    'admin_alerts_enabled': ConfigField(True, 'ADMIN_ALERTS_ENABLED', bool, startup_only=True, section='Immediate Admin Alerts', description='Send deduplicated state-change warnings to the same destination used by the admin report. Ongoing incidents are repeated only after the cooldown.'),
-    'admin_alert_interval_seconds': ConfigField(60, 'ADMIN_ALERT_INTERVAL_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert interval seconds.'),
-    'admin_alert_cooldown_seconds': ConfigField(3600, 'ADMIN_ALERT_COOLDOWN_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert cooldown seconds.'),
-    'admin_alert_outbox_oldest_seconds': ConfigField(1800, 'ADMIN_ALERT_OUTBOX_OLDEST_SECONDS', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert outbox oldest seconds.'),
-    'admin_alert_room_missing_seconds': ConfigField(1800, 'ADMIN_ALERT_ROOM_MISSING_SECONDS', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert room missing seconds.'),
-    'admin_alert_backup_max_age_hours': ConfigField(36, 'ADMIN_ALERT_BACKUP_MAX_AGE_HOURS', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Alert when the newest managed backup is older than this many hours while periodic managed backups are enabled. BACKUP_INTERVAL_HOURS = 0 disables the stale-age alert.'),
-    'admin_alert_idlerpg_export_failures': ConfigField(3, 'ADMIN_ALERT_IDLERPG_EXPORT_FAILURES', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert idlerpg export failures.'),
-    'admin_report_enabled': ConfigField(False, 'ADMIN_REPORT_ENABLED', bool, section='Daily Admin Report', description='Optional compact XMPP-only health report. No HTTP metrics endpoint is opened.'),
-    'admin_report_mode': ConfigField('daily', 'ADMIN_REPORT_MODE', str, choices=("daily", "problems_only"), section='Daily Admin Report', description='"daily" always sends; "problems_only" skips a scheduled report when the immediate alert manager currently has no active incident.'),
-    'admin_report_jid': ConfigField('', 'ADMIN_REPORT_JID', str, allow_empty=True, section='Daily Admin Report', description='Empty uses VERSION_CHECK_NOTIFY_JID, ROOM_INVITE_NOTIFY_JID or OWNER.'),
-    'admin_report_time': ConfigField('08:00', 'ADMIN_REPORT_TIME', str, section='Daily Admin Report', description='Admin report time.'),
-    'admin_report_timezone': ConfigField('', 'ADMIN_REPORT_TIMEZONE', str, allow_empty=True, section='Daily Admin Report', description='Empty uses TIMEZONE.'),
-    'admin_report_backup_smoke_test': ConfigField(False, 'ADMIN_REPORT_BACKUP_SMOKE_TEST', bool, section='Daily Admin Report', description='Optionally extract the newest backup into a temporary directory and run an SQLite integrity check on the contained bot.db while building the report.'),
-    'message_cache_size': ConfigField(100, 'MESSAGE_CACHE_SIZE', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Message Cache', description='Number of recent messages retained per room or private conversation. The cache is shared by all plugins, stored in SQLite and restored on restart. Message bodies are therefore persisted in the bot database and included in normal database backups. Lower this value if less retained history is wanted.'),
-    'message_cache_max_age_days': ConfigField(30, 'MESSAGE_CACHE_MAX_AGE_DAYS', int, startup_only=True, minimum=0, section='Message Cache', description='Remove cached messages older than this many days. Set 0 to disable age pruning.'),
-    'user_cache_max_entries': ConfigField(5000, 'USER_CACHE_MAX_ENTRIES', int, startup_only=True, minimum=1, section='User Tracking', description='Maximum number of clean user rows kept in the read-through cache. Dirty entries are never evicted.'),
-    'user_runtime_cache_max_entries': ConfigField(5000, 'USER_RUNTIME_CACHE_MAX_ENTRIES', int, startup_only=True, minimum=1, section='User Tracking', description='Maximum number of clean per-user runtime JSON blobs kept in memory. Dirty entries and the global plugin runtime blob are never evicted.'),
-    'user_cache_ttl_seconds': ConfigField(86400, 'USER_CACHE_TTL_SECONDS', int, startup_only=True, minimum=0, section='User Tracking', description='Evict clean user/runtime cache entries that have not been accessed for this many seconds. 0 disables TTL eviction.'),
-    'user_cache_prune_interval_seconds': ConfigField(300, 'USER_CACHE_PRUNE_INTERVAL_SECONDS', int, startup_only=True, minimum=1, section='User Tracking', description='Minimum interval between automatic cache-prune passes.'),
-    'backup_dir': ConfigField('data/backups', 'BACKUP_DIR', str, section='Backups', description='Managed ZIP backups are written here. The default is ignored by git. Archives include bot.db, config.py, vcard.py, chat_slang.csv, slang_additions.csv and slang_removals.csv when present.'),
-    'backup_keep': ConfigField(15, 'BACKUP_KEEP', int, minimum=0, minimum_exclusive=True, section='Backups', description='Keep this many managed backup archives after creating a new one.'),
-    'backup_retention_days': ConfigField(0, 'BACKUP_RETENTION_DAYS', int, section='Backups', description='Also prune managed backup archives older than this many days. Set to 0 to disable age-based pruning.'),
-    'backup_on_start': ConfigField(True, 'BACKUP_ON_START', bool, section='Backups', description='Create a managed backup once during each bot process start. This also covers service restarts, because a restart starts a fresh bot process.'),
-    'backup_interval_hours': ConfigField(24, 'BACKUP_INTERVAL_HOURS', int, startup_only=True, minimum=0, section='Backups', description='Create an automatic managed backup this many hours after the newest managed backup. Set to 0 to disable periodic backups and the stale-backup age alert. When enabled, this value should be lower than ADMIN_ALERT_BACKUP_MAX_AGE_HOURS so a scheduled backup is created before the stale-backup alert threshold.'),
-    'backup_smoke_test_on_create': ConfigField(True, 'BACKUP_SMOKE_TEST_ON_CREATE', bool, section='Backups', description='Restore each newly created backup into a temporary directory and run SQLite integrity_check before accepting it.'),
-    'command_rate_limit_enabled': ConfigField(True, 'COMMAND_RATE_LIMIT_ENABLED', bool, section='Command Rate Limits', description='Protect the bot from command spam. Limits are in-memory and reset on restart.'),
-    'command_rate_limit_capacity': ConfigField(4, 'COMMAND_RATE_LIMIT_CAPACITY', int, section='Command Rate Limits', description='Command rate limit capacity.'),
-    'command_rate_limit_refill_amount': ConfigField(1, 'COMMAND_RATE_LIMIT_REFILL_AMOUNT', int, section='Command Rate Limits', description='Command rate limit refill amount.'),
-    'command_rate_limit_refill_interval_seconds': ConfigField(0.5, 'COMMAND_RATE_LIMIT_REFILL_INTERVAL_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit refill interval seconds.'),
-    'command_rate_limit_deny_window_seconds': ConfigField(10.0, 'COMMAND_RATE_LIMIT_DENY_WINDOW_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit deny window seconds.'),
-    'command_rate_limit_deny_threshold': ConfigField(6, 'COMMAND_RATE_LIMIT_DENY_THRESHOLD', int, section='Command Rate Limits', description='Command rate limit deny threshold.'),
-    'command_rate_limit_base_block_seconds': ConfigField(30.0, 'COMMAND_RATE_LIMIT_BASE_BLOCK_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit base block seconds.'),
-    'command_rate_limit_backoff_multiplier': ConfigField(2.0, 'COMMAND_RATE_LIMIT_BACKOFF_MULTIPLIER', (int, float), section='Command Rate Limits', description='Command rate limit backoff multiplier.'),
-    'command_rate_limit_max_block_seconds': ConfigField(3600.0, 'COMMAND_RATE_LIMIT_MAX_BLOCK_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit max block seconds.'),
-    'command_rate_limit_notify_cooldown_seconds': ConfigField(10.0, 'COMMAND_RATE_LIMIT_NOTIFY_COOLDOWN_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit notify cooldown seconds.'),
-    'command_rate_limit_idle_ttl_seconds': ConfigField(3600, 'COMMAND_RATE_LIMIT_IDLE_TTL_SECONDS', (int, float), minimum=0, section='Command Rate Limits', description='Prune inactive command rate-limit client state after this many seconds. Set 0 to disable TTL pruning; the hard client limit still applies.'),
-    'command_rate_limit_prune_interval_seconds': ConfigField(60, 'COMMAND_RATE_LIMIT_PRUNE_INTERVAL_SECONDS', (int, float), minimum=1, section='Command Rate Limits', description='Minimum interval between opportunistic command rate-limit idle-prune passes.'),
-    'command_rate_limit_bypass_role': ConfigField('moderator', 'COMMAND_RATE_LIMIT_BYPASS_ROLE', str, section='Command Rate Limits', description='Users with this role or better bypass command rate limits. Use one of: owner, superadmin, admin, moderator, trusted, user, new, none.'),
-    'http_timeout_seconds': ConfigField(8, 'HTTP_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Generic HTTP timeout used by plugins unless a plugin-specific value is set below.'),
-    'http_max_redirects': ConfigField(5, 'HTTP_MAX_REDIRECTS', int, minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Http max redirects.'),
-    'http_max_read_bytes': ConfigField(1048576, 'HTTP_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Http max read bytes.'),
-    'http_user_agent': ConfigField('envsbot/{version} (https://github.com/envs-net/envsbot)', 'HTTP_USER_AGENT', str, section='HTTP Defaults', description='Default HTTP User-Agent. The {version} token is expanded automatically to the running envsbot version, so operators do not need to update it for each release.'),
-    'allow_private_fetch_urls': ConfigField(False, 'ALLOW_PRIVATE_FETCH_URLS', bool, section='HTTP Defaults', description='Safety guard for user-supplied URLs fetched by RSS and URL title checks. Keep False for normal public bots. Set True only for trusted/private rooms.'),
-    'wikipedia_language': ConfigField('en', 'WIKIPEDIA_LANGUAGE', str, choices=('en', 'de'), section='Wikipedia', description='Default Wikipedia language used by ,wiki when no language prefix is supplied. Use en for English or de for German; users can override it per lookup with ,wiki en <term> or ,wiki de <term>.'),
-    'avatar': ConfigField(MISSING, 'AVATAR_PATH', str, section='vCard / Avatar', description='Bot avatar. Set AVATAR_PATH = None to disable avatar publishing. The default avatar is bundled with envsbot; put custom avatars below data/.', sample='avatar.jpg'),
-    'avatar_type': ConfigField(MISSING, 'AVATAR_TYPE', str, section='vCard / Avatar', description='Avatar type.', sample='image/jpeg'),
-    'vcard_fetch_timeout_seconds': ConfigField(10, 'VCARD_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='vCard / Avatar', description='Timeout for vCard fetches made by vcard, weather and birthday helpers.'),
-    'version_check_enabled': ConfigField(False, 'VERSION_CHECK_ENABLED', bool, section='Release Update Check', description='Manual ,checkupdate works even when periodic checks are disabled.'),
-    'version_check_interval': ConfigField(3600, 'VERSION_CHECK_INTERVAL', int, minimum=60, section='Release Update Check', description='Version check interval.'),
-    'version_check_url': ConfigField('https://github.com/envs-net/envsbot/releases/latest', 'VERSION_CHECK_URL', str, section='Release Update Check', description='Version check url.'),
-    'version_check_notify_jid': ConfigField(MISSING, 'VERSION_CHECK_NOTIFY_JID', str, allow_empty=True, section='Release Update Check', description='Empty = notify OWNER. If this is a MUC room, the bot joins it before sending.', sample=''),
-    'updatecheck_timeout_seconds': ConfigField(15, 'UPDATECHECK_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Release Update Check', description='Updatecheck timeout seconds.'),
-    'room_invites_enabled': ConfigField(True, 'ROOM_INVITES_ENABLED', bool, section='Room Invites', description='When enabled, incoming MUC invites are stored as pending room invites and announced to ROOM_INVITE_NOTIFY_JID, VERSION_CHECK_NOTIFY_JID, or OWNER. The bot does not join the invited room until an admin accepts the invite.'),
-    'room_invite_notify_jid': ConfigField('', 'ROOM_INVITE_NOTIFY_JID', str, allow_empty=True, section='Room Invites', description='Room invite notify jid.'),
-    'room_invite_max_age_days': ConfigField(30, 'ROOM_INVITE_MAX_AGE_DAYS', int, section='Room Invites', description='Pending room invites older than this many days are expired automatically. Set to 0 to keep pending invites until accepted/declined/cleanup.'),
-    'room_plugin_defaults': ConfigField({'birthday_notify': False, 'dice': True, 'ducks': False, 'help': False, 'information': True, 'karma': False, 'idlerpg': False, 'pin': True, 'poll': False, 'presence': True, 'reminder': True, 'sed': True, 'tell': True, 'tools': True, 'translate': True, 'urlcheck': True, 'vcard': True, 'weather': True, 'xkcd': False, 'xmpp': True}, 'ROOM_PLUGIN_DEFAULTS', dict, section='Room Plugin Defaults', description='Default room feature state used for newly added rooms and for ,rooms set_plugin_defaults. Missing keys keep their internal fallback. Unknown keys are ignored with a warning. Per-room changes are still stored in the database and can be managed with ,rooms enable/disable.'),
-    'urlcheck_wait_seconds': ConfigField(120, 'URLCHECK_WAIT_SECONDS', int, minimum=0, minimum_exclusive=True, section='URL Check', description='Suppress repeated output for the same URL in the same room for this many seconds.'),
-    'urlcheck_fetch_timeout_seconds': ConfigField(8, 'URLCHECK_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='URL Check', description='URL fetch limits for title/description extraction and YouTube metadata.'),
-    'urlcheck_max_redirects': ConfigField(5, 'URLCHECK_MAX_REDIRECTS', int, minimum=0, minimum_exclusive=True, section='URL Check', description='Urlcheck max redirects.'),
-    'urlcheck_max_read_bytes': ConfigField(65536, 'URLCHECK_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='URL Check', description='Urlcheck max read bytes.'),
-    'urlcheck_user_agent': ConfigField('envsbot/{version} (https://github.com/envs-net/envsbot)', 'URLCHECK_USER_AGENT', str, section='URL Check', description='URL-check User-Agent. The {version} token is expanded automatically; set a custom value only when required.'),
-    'youtube_api_key': ConfigField(MISSING, 'YOUTUBE_API_KEY', str, section='URL Check', description='YouTube Data API key for richer URL metadata lookups. None disables YouTube API data but regular URL title checks still work.', sensitive=True, sample=None),
-    'rss_global_query_interval': ConfigField(1200, 'RSS_GLOBAL_QUERY_INTERVAL', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Default global feed check interval in seconds.'),
-    'max_new_feed_entries': ConfigField(5, 'MAX_NEW_FEED_ENTRIES', int, minimum=0, section='RSS / Atom', description='Number of existing entries to show when a feed is newly added. Set to 0 to suppress the initial history replay while still starting from the feed snapshot seen when the subscription is created.'),
-    'rss_trusted_max_feeds': ConfigField(10, 'RSS_TRUSTED_MAX_FEEDS', int, minimum=0, section='RSS / Atom', description='Maximum personal DM subscriptions for trusted users. Moderators and higher are unlimited. Set to 0 to disable trusted-user DM subscriptions.'),
-    'rss_list_page_size': ConfigField(10, 'RSS_LIST_PAGE_SIZE', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Number of entries shown on one paginated RSS list page.'),
-    'rss_max_entries_per_poll': ConfigField(10, 'RSS_MAX_ENTRIES_PER_POLL', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Maximum number of new entries posted per regular feed poll. If a very active feed publishes more than this between two checks, older unseen entries are skipped and the newest item is remembered as seen.'),
-    'rss_retry_initial_delay': ConfigField(300, 'RSS_RETRY_INITIAL_DELAY', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Retry/backoff behavior for failing feeds. First failure retries after 5 minutes, second after 10 minutes, then grows exponentially up to the maximum delay.'),
-    'rss_retry_backoff_multiplier': ConfigField(2.0, 'RSS_RETRY_BACKOFF_MULTIPLIER', (int, float), minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss retry backoff multiplier.'),
-    'rss_max_backoff_time': ConfigField(3600, 'RSS_MAX_BACKOFF_TIME', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss max backoff time.'),
-    'rss_broken_error_threshold': ConfigField(3, 'RSS_BROKEN_ERROR_THRESHOLD', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='A feed is considered broken in ,rss broken after this many consecutive errors.'),
-    'rss_similarity_threshold': ConfigField(0.8, 'RSS_SIMILARITY_THRESHOLD', (int, float), minimum=0, maximum=1, minimum_exclusive=True, section='RSS / Atom', description='Duplicate title/description detection threshold, 0 < value <= 1.'),
-    'rss_user_agent': ConfigField('envsbot/{version} (https://github.com/envs-net/envsbot)', 'RSS_USER_AGENT', str, section='RSS / Atom', description='RSS User-Agent. The {version} token is expanded automatically; set a custom value only when required.'),
-    'rss_fetch_timeout_seconds': ConfigField(8, 'RSS_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Explicit RSS HTTP fetch limits.'),
-    'rss_startup_stagger_seconds': ConfigField(2.0, 'RSS_STARTUP_STAGGER_SECONDS', (int, float), minimum=0, section='RSS / Atom', description='Spread initial requests to the same host across a few seconds after startup. This avoids a burst when many feeds are hosted by one slower service.'),
-    'rss_max_redirects': ConfigField(5, 'RSS_MAX_REDIRECTS', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss max redirects.'),
-    'rss_max_read_bytes': ConfigField(1048576, 'RSS_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss max read bytes.'),
-    'rss_template_max_length': ConfigField(1000, 'RSS_TEMPLATE_MAX_LENGTH', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Maximum length of an RSS message template configured with ,rss template.'),
-    'birthday_cache_ttl_seconds': ConfigField(43200, 'BIRTHDAY_CACHE_TTL_SECONDS', int, minimum=0, minimum_exclusive=True, section='Birthday Notify', description='Cache positive and negative vCard BDAY results for this many seconds.'),
-    'birthday_initial_scan_delay_seconds': ConfigField(10, 'BIRTHDAY_INITIAL_SCAN_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='Birthday Notify', description='Delay first scan after startup so room joins and presence can settle.'),
-    'birthday_check_interval_seconds': ConfigField(3600, 'BIRTHDAY_CHECK_INTERVAL_SECONDS', int, minimum=0, minimum_exclusive=True, section='Birthday Notify', description='Periodic loop interval in seconds. The expensive full scan still only runs once per day.'),
-    'reminder_enabled': ConfigField(MISSING, 'REMINDER_ENABLED', bool, section='Reminders', description='Reminder enabled.', sample=True),
-    'reminder_max_age_days': ConfigField(MISSING, 'REMINDER_MAX_AGE_DAYS', int, minimum=0, minimum_exclusive=True, section='Reminders', description='Reminder max age days.', sample=365),
-    'reminder_default_timezone': ConfigField('UTC', 'REMINDER_DEFAULT_TIMEZONE', str, section='Reminders', description='Fallback timezone for absolute reminder dates when the user has no TIMEZONE set in their bot profile. Explicit command timezones such as CEST, CET, UTC, Europe/Berlin or +02:00 override this per reminder. Use an IANA timezone such as Europe/Berlin when you want automatic DST handling; CET/CEST are treated as explicit fixed offsets.'),
-    'ducks': ConfigField(MISSING, 'DUCKS', dict, section='Duck Game', description='Global defaults for rooms with the Ducks plugin enabled. Room owners/admins and bot moderators can override gameplay pacing for one room through a MUC private chat with `,duck config`; see docs/plugins/ducks.md for examples.', sample=nested_config_defaults('ducks')),
-    'users': ConfigField(MISSING, 'USERS', dict, section='User Tracking', description='Users.', sample=nested_config_defaults('users')),
-    'idlerpg': ConfigField(MISSING, 'IDLERPG', dict, section='IdleRPG', description="Classic IRC-style IdleRPG adapted for XMPP MUCs. Players level up by staying online and idle. Normal room messages add penalty time to the player's timer. See docs/idlerpg.md for details.", sample=nested_config_defaults('idlerpg')),
-    'sed_regex_timeout': ConfigField(1.0, 'SED_REGEX_TIMEOUT', (int, float), minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed regex timeout.'),
-    'sed_max_pattern_length': ConfigField(256, 'SED_MAX_PATTERN_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max pattern length.'),
-    'sed_max_replacement_length': ConfigField(1000, 'SED_MAX_REPLACEMENT_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max replacement length.'),
-    'sed_max_input_length': ConfigField(5000, 'SED_MAX_INPUT_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max input length.'),
-    'sed_max_output_length': ConfigField(8000, 'SED_MAX_OUTPUT_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max output length.'),
-    'poll_max_options': ConfigField(10, 'POLL_MAX_OPTIONS', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max options.'),
-    'poll_max_question_len': ConfigField(200, 'POLL_MAX_QUESTION_LEN', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max question len.'),
-    'poll_max_option_len': ConfigField(100, 'POLL_MAX_OPTION_LEN', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max option len.'),
-    'poll_max_history_per_room': ConfigField(50, 'POLL_MAX_HISTORY_PER_ROOM', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max history per room.'),
-    'poll_default_multi_max_choices': ConfigField(3, 'POLL_DEFAULT_MULTI_MAX_CHOICES', int, section='Polls', description='Poll default multi max choices.'),
-    'pin_page_size': ConfigField(10, 'PIN_PAGE_SIZE', int, minimum=0, minimum_exclusive=True, section='Pins', description='Pin page size.'),
-    'translate_from': ConfigField('auto', 'TRANSLATE_FROM', str, section='Translate', description='Translate uses the same public Google Translate endpoint as translate. No API key is required, but the endpoint is unofficial and may change. Set TRANSLATE_TO to a language code such as "de" to allow `,tr` for replies and `,tr text` for direct text. None keeps the target argument mandatory.'),
-    'translate_to': ConfigField(None, 'TRANSLATE_TO', str, section='Translate', description='Translate to.'),
-    'translate_timeout_seconds': ConfigField(8, 'TRANSLATE_TIMEOUT_SECONDS', (int, float), section='Translate', description='Translate timeout seconds.'),
-    'translate_max_input_length': ConfigField(2000, 'TRANSLATE_MAX_INPUT_LENGTH', int, section='Translate', description='Translate max input length.'),
-    'translate_max_output_length': ConfigField(6000, 'TRANSLATE_MAX_OUTPUT_LENGTH', int, section='Translate', description='Translate max output length.'),
-    'translate_max_response_bytes': ConfigField(262144, 'TRANSLATE_MAX_RESPONSE_BYTES', int, minimum=4096, section='Translate', description='Maximum response bytes accepted from the translation provider.'),
-    'translate_provider_queue_timeout_seconds': ConfigField(5, 'TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Translate', description='Maximum time a translation command waits for the serialized provider request slot before returning a busy response, limiting queue buildup behind slow provider calls.'),
-    'translate_rate_limit_initial_seconds': ConfigField(60, 'TRANSLATE_RATE_LIMIT_INITIAL_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Translate', description='Local cooldown after the first HTTP 429 from the translation provider. Retry-After is honored when it requests a longer delay.'),
-    'translate_rate_limit_backoff_multiplier': ConfigField(2.0, 'TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER', (int, float), minimum=1, section='Translate', description='Multiplier applied when the provider returns another HTTP 429 after a cooldown expires.'),
-    'translate_rate_limit_max_seconds': ConfigField(900, 'TRANSLATE_RATE_LIMIT_MAX_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Translate', description='Maximum local translation cooldown in seconds. Provider Retry-After values are capped at this limit.'),
-    'karma_delay_seconds': ConfigField(60, 'KARMA_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='Karma / Tell', description='Karma delay seconds.'),
-    'tell_delivery_delay_seconds': ConfigField(5, 'TELL_DELIVERY_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='Karma / Tell', description='Tell delivery delay seconds.'),
-    'xkcd_check_interval': ConfigField(3600, 'XKCD_CHECK_INTERVAL', int, minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd check interval.'),
-    'xkcd_index_start_delay_seconds': ConfigField(30, 'XKCD_INDEX_START_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd index start delay seconds.'),
-    'xkcd_index_request_delay_seconds': ConfigField(0.15, 'XKCD_INDEX_REQUEST_DELAY_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd index request delay seconds.'),
-    'xkcd_http_timeout': ConfigField(10, 'XKCD_HTTP_TIMEOUT', (int, float), minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd http timeout.'),
+CONFIG_FIELDS: dict[str, ConfigKeySpec] = {
+    'jid': ConfigKeySpec(MISSING, 'JID', str, startup_only=True, required=True, section='XMPP Account', description='XMPP account used by the bot.', sample='envsbot@domain.tld'),
+    'password': ConfigKeySpec(MISSING, 'PASSWORD', str, startup_only=True, required=True, section='XMPP Account', description='Password.', sensitive=True, sample='yourpassword'),
+    'nick': ConfigKeySpec(MISSING, 'NICK', str, required=True, section='XMPP Account', description='Nick.', sample='EnvsBot'),
+    'resource': ConfigKeySpec(None, 'RESOURCE', str, startup_only=True, section='XMPP Account', description='Optional XMPP resource. Set to None to let Slixmpp/server choose one.', sample='service'),
+    'owner': ConfigKeySpec(MISSING, 'OWNER', str, required=True, section='XMPP Account', description='Bare JID of the bot owner. The owner has the highest runtime role.', sample='owner@domain.tld'),
+    'admins': ConfigKeySpec(MISSING, 'ADMINS', list, section='XMPP Account', description='Optional additional privileged users. Roles can also be managed at runtime through the users commands.', sample=[]),
+    'host': ConfigKeySpec(None, 'CONNECT_HOST', str, startup_only=True, section='Connection', description='Optional connection host override. None uses the domain from JID.'),
+    'port': ConfigKeySpec(5222, 'CONNECT_PORT', int, startup_only=True, minimum=1, maximum=65535, section='Connection', description='XMPP client-to-server port. 5222 = normal C2S with STARTTLS 5223 = direct TLS / legacy SSL when your server requires it'),
+    'direct_tls': ConfigKeySpec(False, 'CONNECT_DIRECT_TLS', bool, startup_only=True, section='Connection', description='False = regular STARTTLS on port 5222. True = direct TLS / legacy SSL, commonly on port 5223.'),
+    'xmpp_query_timeout_seconds': ConfigKeySpec(8, 'XMPP_QUERY_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Connection', description='XMPP query timeout used by diagnostic/info commands.'),
+    'xmpp_compliance_max_read_bytes': ConfigKeySpec(262144, 'XMPP_COMPLIANCE_MAX_READ_BYTES', int, section='Connection', description='Maximum bytes read from compliance.conversations.im for ,xmpp compliance. The command only needs a small HTML preview containing the score marker.'),
+    'loglevel': ConfigKeySpec('INFO', 'LOG_LEVEL', str, section='Bot Runtime', description='Python logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.'),
+    'log_dir': ConfigKeySpec('logs', 'LOG_DIR', str, startup_only=True, section='Bot Runtime', description='Directory for the rotating envsbot.log file. Use an absolute path such as /var/log/envsbot with the hardened systemd unit.'),
+    'prefix': ConfigKeySpec(',', 'COMMAND_PREFIX', str, section='Bot Runtime', description='Command prefix used to trigger bot commands in rooms and direct chats.'),
+    'timezone': ConfigKeySpec(MISSING, 'TIMEZONE', str, section='Bot Runtime', description='Default timezone for bot-side date/time handling.', sample='Europe/Berlin'),
+    'db': ConfigKeySpec('bot.db', 'DB_FILE', str, startup_only=True, section='Bot Runtime', description='SQLite database file, relative to the bot directory unless absolute.', sample='data/bot.db'),
+    'runtime_data_dir': ConfigKeySpec(None, 'RUNTIME_DATA_DIR', str, startup_only=True, section='Bot Runtime', description='Directory for mutable support files such as vcard.py, chat_slang.csv, slang review queues, profile hash markers and the last-successful-version state. None keeps the historical application-root location for compatibility. Hardened systemd installs should set /var/lib/envsbot.', sample=None),
+    'restart_notification_file': ConfigKeySpec('data/envsbot_restart_notification.json', 'RESTART_NOTIFICATION_FILE', str, section='Bot Runtime', description='File used to remember who requested a bot restart across process restarts. Keep this outside /tmp when systemd PrivateTmp=true is enabled.'),
+    'stop_cmd': ConfigKeySpec([], 'STOP_CMD', list, section='Bot Runtime', description='Optional external command used by ,bot shutdown. Leave empty to perform a clean internal exit. With systemd, use Restart=on-failure so ,bot restart (exit code 75) restarts while a clean shutdown remains stopped.'),
+    'stop_cmd_timeout_seconds': ConfigKeySpec(10.0, 'STOP_CMD_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Stop cmd timeout seconds.'),
+    'command_timeout_seconds': ConfigKeySpec(30, 'COMMAND_TIMEOUT_SECONDS', (int, float), section='Bot Runtime', description='Command execution guardrails. Slow commands are logged; timed-out commands return a friendly error and the traceback stays in the log.'),
+    'command_slow_log_seconds': ConfigKeySpec(2.0, 'COMMAND_SLOW_LOG_SECONDS', (int, float), section='Bot Runtime', description='Command slow log seconds.'),
+    'default_pagination': ConfigKeySpec('all', 'DEFAULT_PAGINATION', (str, int), section='Bot Runtime', description='Default paging behavior for commands supporting [page|last|all]. "all" shows the full list by default. A positive integer, e.g. 20, shows page 1 with that many entries unless the user explicitly asks for all/last/page.'),
+    'database_busy_timeout_ms': ConfigKeySpec(5000, 'DATABASE_BUSY_TIMEOUT_MS', int, startup_only=True, section='Bot Runtime', description='SQLite connection busy timeout in milliseconds. Applied when the database connection is opened.'),
+    'database_wal_enabled': ConfigKeySpec(False, 'DATABASE_WAL_ENABLED', bool, startup_only=True, section='Bot Runtime', description='Whether SQLite WAL journal mode is enabled. Applied when the database connection is opened.'),
+    'database_shutdown_timeout_seconds': ConfigKeySpec(15.0, 'DATABASE_SHUTDOWN_TIMEOUT_SECONDS', (int, float), section='Bot Runtime', description='Grace period for shutdown/restart DB cleanup. Keep this larger than the internal flush wait so the SQLite connection can close cleanly.'),
+    'database_maintenance_interval_seconds': ConfigKeySpec(21600, 'DATABASE_MAINTENANCE_INTERVAL_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Periodic low-impact SQLite maintenance. The worker runs PRAGMA optimize, checkpoints WAL when enabled and prunes old aggregate command statistics.'),
+    'database_backup_before_migrate': ConfigKeySpec(True, 'DATABASE_BACKUP_BEFORE_MIGRATE', bool, startup_only=True, section='Bot Runtime', description='Create a consistent SQLite snapshot before applying pending schema migrations.'),
+    'database_migration_backup_keep': ConfigKeySpec(5, 'DATABASE_MIGRATION_BACKUP_KEEP', int, minimum=1, section='Backups', description='Keep this many verified pre-migration SQLite snapshots.'),
+    'database_migration_backup_retention_days': ConfigKeySpec(90, 'DATABASE_MIGRATION_BACKUP_RETENTION_DAYS', int, minimum=0, section='Backups', description='Also prune pre-migration SQLite snapshots older than this many days. 0 disables age-based pruning.'),
+    'command_usage_retention_days': ConfigKeySpec(365, 'COMMAND_USAGE_RETENTION_DAYS', int, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Command usage retention days.'),
+    'watchdog_enabled': ConfigKeySpec(True, 'WATCHDOG_ENABLED', bool, startup_only=True, section='Bot Runtime', description='Event-loop monitor and native systemd watchdog integration. With the bundled service unit, a process that is alive but no longer responsive is restarted.'),
+    'watchdog_interval_seconds': ConfigKeySpec(20.0, 'WATCHDOG_INTERVAL_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Watchdog interval seconds.'),
+    'watchdog_lag_warning_seconds': ConfigKeySpec(2.0, 'WATCHDOG_LAG_WARNING_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Watchdog lag warning seconds.'),
+    'watchdog_lag_failure_seconds': ConfigKeySpec(30.0, 'WATCHDOG_LAG_FAILURE_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Watchdog lag failure seconds.'),
+    'task_restart_max_attempts': ConfigKeySpec(5, 'TASK_RESTART_MAX_ATTEMPTS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Automatic restart/backoff for protected long-running plugin workers. This many automatic restarts are allowed in one failure streak; if the restarted worker fails again, the circuit opens and an admin is notified.'),
+    'task_restart_initial_seconds': ConfigKeySpec(5.0, 'TASK_RESTART_INITIAL_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Task restart initial seconds.'),
+    'task_restart_max_seconds': ConfigKeySpec(300.0, 'TASK_RESTART_MAX_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Task restart max seconds.'),
+    'task_restart_reset_seconds': ConfigKeySpec(900.0, 'TASK_RESTART_RESET_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Bot Runtime', description='Task restart reset seconds.'),
+    'task_stale_after_seconds': ConfigKeySpec(3600.0, 'TASK_STALE_AFTER_SECONDS', (int, float), minimum=60, section='Bot Runtime', description='Heartbeats older than this are reported by `,tasks stale`; values below 60 seconds are rejected.'),
+    'outbox_enabled': ConfigKeySpec(True, 'OUTBOX_ENABLED', bool, startup_only=True, section='Persistent Outbox', description='Persistent outbound delivery queue. Failed RSS, reminder and admin-report messages are stored in SQLite and retried across reconnects/restarts.'),
+    'outbox_poll_seconds': ConfigKeySpec(5.0, 'OUTBOX_POLL_SECONDS', (int, float), startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox poll seconds.'),
+    'outbox_batch_size': ConfigKeySpec(20, 'OUTBOX_BATCH_SIZE', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox batch size.'),
+    'outbox_max_attempts': ConfigKeySpec(12, 'OUTBOX_MAX_ATTEMPTS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max attempts.'),
+    'outbox_retry_initial_seconds': ConfigKeySpec(30, 'OUTBOX_RETRY_INITIAL_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox retry initial seconds.'),
+    'outbox_retry_max_seconds': ConfigKeySpec(1800, 'OUTBOX_RETRY_MAX_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox retry max seconds.'),
+    'outbox_inflight_timeout_seconds': ConfigKeySpec(300, 'OUTBOX_INFLIGHT_TIMEOUT_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox inflight timeout seconds.'),
+    'outbox_max_pending': ConfigKeySpec(10000, 'OUTBOX_MAX_PENDING', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Hard growth limits for long outages or broken destinations.'),
+    'outbox_max_bytes': ConfigKeySpec(52428800, 'OUTBOX_MAX_BYTES', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max bytes.'),
+    'outbox_max_per_destination': ConfigKeySpec(1000, 'OUTBOX_MAX_PER_DESTINATION', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max per destination.'),
+    'outbox_max_per_category': ConfigKeySpec(5000, 'OUTBOX_MAX_PER_CATEGORY', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Persistent Outbox', description='Outbox max per category.'),
+    'outbox_dead_retention_days': ConfigKeySpec(30, 'OUTBOX_DEAD_RETENTION_DAYS', int, minimum=0, section='Persistent Outbox', description='Dead letters older than this are pruned by database maintenance. 0 disables age-based pruning.'),
+    'admin_alerts_enabled': ConfigKeySpec(True, 'ADMIN_ALERTS_ENABLED', bool, startup_only=True, section='Immediate Admin Alerts', description='Send deduplicated state-change warnings to the same destination used by the admin report. Ongoing incidents are repeated only after the cooldown.'),
+    'admin_alert_interval_seconds': ConfigKeySpec(60, 'ADMIN_ALERT_INTERVAL_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert interval seconds.'),
+    'admin_alert_cooldown_seconds': ConfigKeySpec(3600, 'ADMIN_ALERT_COOLDOWN_SECONDS', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert cooldown seconds.'),
+    'admin_alert_outbox_oldest_seconds': ConfigKeySpec(1800, 'ADMIN_ALERT_OUTBOX_OLDEST_SECONDS', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert outbox oldest seconds.'),
+    'admin_alert_room_missing_seconds': ConfigKeySpec(1800, 'ADMIN_ALERT_ROOM_MISSING_SECONDS', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert room missing seconds.'),
+    'admin_alert_backup_max_age_hours': ConfigKeySpec(36, 'ADMIN_ALERT_BACKUP_MAX_AGE_HOURS', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Alert when the newest managed backup is older than this many hours while periodic managed backups are enabled. BACKUP_INTERVAL_HOURS = 0 disables the stale-age alert.'),
+    'admin_alert_idlerpg_export_failures': ConfigKeySpec(3, 'ADMIN_ALERT_IDLERPG_EXPORT_FAILURES', int, minimum=0, minimum_exclusive=True, section='Immediate Admin Alerts', description='Admin alert idlerpg export failures.'),
+    'admin_report_enabled': ConfigKeySpec(False, 'ADMIN_REPORT_ENABLED', bool, section='Daily Admin Report', description='Optional compact XMPP-only health report. No HTTP metrics endpoint is opened.'),
+    'admin_report_mode': ConfigKeySpec('daily', 'ADMIN_REPORT_MODE', str, choices=("daily", "problems_only"), section='Daily Admin Report', description='"daily" always sends; "problems_only" skips a scheduled report when the immediate alert manager currently has no active incident.'),
+    'admin_report_jid': ConfigKeySpec('', 'ADMIN_REPORT_JID', str, allow_empty=True, section='Daily Admin Report', description='Empty uses VERSION_CHECK_NOTIFY_JID, ROOM_INVITE_NOTIFY_JID or OWNER.'),
+    'admin_report_time': ConfigKeySpec('08:00', 'ADMIN_REPORT_TIME', str, section='Daily Admin Report', description='Admin report time.'),
+    'admin_report_timezone': ConfigKeySpec('', 'ADMIN_REPORT_TIMEZONE', str, allow_empty=True, section='Daily Admin Report', description='Empty uses TIMEZONE.'),
+    'admin_report_backup_smoke_test': ConfigKeySpec(False, 'ADMIN_REPORT_BACKUP_SMOKE_TEST', bool, section='Daily Admin Report', description='Optionally extract the newest backup into a temporary directory and run an SQLite integrity check on the contained bot.db while building the report.'),
+    'message_cache_size': ConfigKeySpec(100, 'MESSAGE_CACHE_SIZE', int, startup_only=True, minimum=0, minimum_exclusive=True, section='Message Cache', description='Number of recent messages retained per room or private conversation. The cache is shared by all plugins, stored in SQLite and restored on restart. Message bodies are therefore persisted in the bot database and included in normal database backups. Lower this value if less retained history is wanted.'),
+    'message_cache_max_age_days': ConfigKeySpec(30, 'MESSAGE_CACHE_MAX_AGE_DAYS', int, startup_only=True, minimum=0, section='Message Cache', description='Remove cached messages older than this many days. Set 0 to disable age pruning.'),
+    'user_cache_max_entries': ConfigKeySpec(5000, 'USER_CACHE_MAX_ENTRIES', int, startup_only=True, minimum=1, section='User Tracking', description='Maximum number of clean user rows kept in the read-through cache. Dirty entries are never evicted.'),
+    'user_runtime_cache_max_entries': ConfigKeySpec(5000, 'USER_RUNTIME_CACHE_MAX_ENTRIES', int, startup_only=True, minimum=1, section='User Tracking', description='Maximum number of clean per-user runtime JSON blobs kept in memory. Dirty entries and the global plugin runtime blob are never evicted.'),
+    'user_cache_ttl_seconds': ConfigKeySpec(86400, 'USER_CACHE_TTL_SECONDS', int, startup_only=True, minimum=0, section='User Tracking', description='Evict clean user/runtime cache entries that have not been accessed for this many seconds. 0 disables TTL eviction.'),
+    'user_cache_prune_interval_seconds': ConfigKeySpec(300, 'USER_CACHE_PRUNE_INTERVAL_SECONDS', int, startup_only=True, minimum=1, section='User Tracking', description='Minimum interval between automatic cache-prune passes.'),
+    'backup_dir': ConfigKeySpec('data/backups', 'BACKUP_DIR', str, section='Backups', description='Managed ZIP backups are written here. The default is ignored by git. Archives include bot.db, config.py, vcard.py, chat_slang.csv, slang_additions.csv and slang_removals.csv when present.'),
+    'backup_keep': ConfigKeySpec(15, 'BACKUP_KEEP', int, minimum=0, minimum_exclusive=True, section='Backups', description='Keep this many managed backup archives after creating a new one.'),
+    'backup_retention_days': ConfigKeySpec(0, 'BACKUP_RETENTION_DAYS', int, section='Backups', description='Also prune managed backup archives older than this many days. Set to 0 to disable age-based pruning.'),
+    'backup_on_start': ConfigKeySpec(True, 'BACKUP_ON_START', bool, section='Backups', description='Create a managed backup once during each bot process start. This also covers service restarts, because a restart starts a fresh bot process.'),
+    'backup_interval_hours': ConfigKeySpec(24, 'BACKUP_INTERVAL_HOURS', int, startup_only=True, minimum=0, section='Backups', description='Create an automatic managed backup this many hours after the newest managed backup. Set to 0 to disable periodic backups and the stale-backup age alert. When enabled, this value should be lower than ADMIN_ALERT_BACKUP_MAX_AGE_HOURS so a scheduled backup is created before the stale-backup alert threshold.'),
+    'backup_smoke_test_on_create': ConfigKeySpec(True, 'BACKUP_SMOKE_TEST_ON_CREATE', bool, section='Backups', description='Restore each newly created backup into a temporary directory and run SQLite integrity_check before accepting it.'),
+    'command_rate_limit_enabled': ConfigKeySpec(True, 'COMMAND_RATE_LIMIT_ENABLED', bool, section='Command Rate Limits', description='Protect the bot from command spam. Limits are in-memory and reset on restart.'),
+    'command_rate_limit_capacity': ConfigKeySpec(4, 'COMMAND_RATE_LIMIT_CAPACITY', int, section='Command Rate Limits', description='Command rate limit capacity.'),
+    'command_rate_limit_refill_amount': ConfigKeySpec(1, 'COMMAND_RATE_LIMIT_REFILL_AMOUNT', int, section='Command Rate Limits', description='Command rate limit refill amount.'),
+    'command_rate_limit_refill_interval_seconds': ConfigKeySpec(0.5, 'COMMAND_RATE_LIMIT_REFILL_INTERVAL_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit refill interval seconds.'),
+    'command_rate_limit_deny_window_seconds': ConfigKeySpec(10.0, 'COMMAND_RATE_LIMIT_DENY_WINDOW_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit deny window seconds.'),
+    'command_rate_limit_deny_threshold': ConfigKeySpec(6, 'COMMAND_RATE_LIMIT_DENY_THRESHOLD', int, section='Command Rate Limits', description='Command rate limit deny threshold.'),
+    'command_rate_limit_base_block_seconds': ConfigKeySpec(30.0, 'COMMAND_RATE_LIMIT_BASE_BLOCK_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit base block seconds.'),
+    'command_rate_limit_backoff_multiplier': ConfigKeySpec(2.0, 'COMMAND_RATE_LIMIT_BACKOFF_MULTIPLIER', (int, float), section='Command Rate Limits', description='Command rate limit backoff multiplier.'),
+    'command_rate_limit_max_block_seconds': ConfigKeySpec(3600.0, 'COMMAND_RATE_LIMIT_MAX_BLOCK_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit max block seconds.'),
+    'command_rate_limit_notify_cooldown_seconds': ConfigKeySpec(10.0, 'COMMAND_RATE_LIMIT_NOTIFY_COOLDOWN_SECONDS', (int, float), section='Command Rate Limits', description='Command rate limit notify cooldown seconds.'),
+    'command_rate_limit_idle_ttl_seconds': ConfigKeySpec(3600, 'COMMAND_RATE_LIMIT_IDLE_TTL_SECONDS', (int, float), minimum=0, section='Command Rate Limits', description='Prune inactive command rate-limit client state after this many seconds. Set 0 to disable TTL pruning; the hard client limit still applies.'),
+    'command_rate_limit_prune_interval_seconds': ConfigKeySpec(60, 'COMMAND_RATE_LIMIT_PRUNE_INTERVAL_SECONDS', (int, float), minimum=1, section='Command Rate Limits', description='Minimum interval between opportunistic command rate-limit idle-prune passes.'),
+    'command_rate_limit_bypass_role': ConfigKeySpec('moderator', 'COMMAND_RATE_LIMIT_BYPASS_ROLE', str, section='Command Rate Limits', description='Users with this role or better bypass command rate limits. Use one of: owner, superadmin, admin, moderator, trusted, user, new, none.'),
+    'http_timeout_seconds': ConfigKeySpec(8, 'HTTP_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Generic HTTP timeout used by plugins unless a plugin-specific value is set below.'),
+    'http_max_redirects': ConfigKeySpec(5, 'HTTP_MAX_REDIRECTS', int, minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Http max redirects.'),
+    'http_max_read_bytes': ConfigKeySpec(1048576, 'HTTP_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='HTTP Defaults', description='Http max read bytes.'),
+    'http_user_agent': ConfigKeySpec('envsbot/{version} (https://github.com/envs-net/envsbot)', 'HTTP_USER_AGENT', str, section='HTTP Defaults', description='Default HTTP User-Agent. The {version} token is expanded automatically to the running envsbot version, so operators do not need to update it for each release.'),
+    'allow_private_fetch_urls': ConfigKeySpec(False, 'ALLOW_PRIVATE_FETCH_URLS', bool, section='HTTP Defaults', description='Safety guard for user-supplied URLs fetched by RSS and URL title checks. Keep False for normal public bots. Set True only for trusted/private rooms.'),
+    'wikipedia_language': ConfigKeySpec('en', 'WIKIPEDIA_LANGUAGE', str, choices=('en', 'de'), section='Wikipedia', description='Default Wikipedia language used by ,wiki when no language prefix is supplied. Use en for English or de for German; users can override it per lookup with ,wiki en <term> or ,wiki de <term>.'),
+    'avatar': ConfigKeySpec(MISSING, 'AVATAR_PATH', str, section='vCard / Avatar', description='Bot avatar. Set AVATAR_PATH = None to disable avatar publishing. The default avatar is bundled with envsbot; put custom avatars below data/.', sample='avatar.jpg'),
+    'avatar_type': ConfigKeySpec(MISSING, 'AVATAR_TYPE', str, section='vCard / Avatar', description='Avatar type.', sample='image/jpeg'),
+    'vcard_fetch_timeout_seconds': ConfigKeySpec(10, 'VCARD_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='vCard / Avatar', description='Timeout for vCard fetches made by vcard, weather and birthday helpers.'),
+    'version_check_enabled': ConfigKeySpec(False, 'VERSION_CHECK_ENABLED', bool, section='Release Update Check', description='Manual ,checkupdate works even when periodic checks are disabled.'),
+    'version_check_interval': ConfigKeySpec(3600, 'VERSION_CHECK_INTERVAL', int, minimum=60, section='Release Update Check', description='Version check interval.'),
+    'version_check_url': ConfigKeySpec('https://github.com/envs-net/envsbot/releases/latest', 'VERSION_CHECK_URL', str, section='Release Update Check', description='Version check url.'),
+    'version_check_notify_jid': ConfigKeySpec(MISSING, 'VERSION_CHECK_NOTIFY_JID', str, allow_empty=True, section='Release Update Check', description='Empty = notify OWNER. If this is a MUC room, the bot joins it before sending.', sample=''),
+    'updatecheck_timeout_seconds': ConfigKeySpec(15, 'UPDATECHECK_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Release Update Check', description='Updatecheck timeout seconds.'),
+    'room_invites_enabled': ConfigKeySpec(True, 'ROOM_INVITES_ENABLED', bool, section='Room Invites', description='When enabled, incoming MUC invites are stored as pending room invites and announced to ROOM_INVITE_NOTIFY_JID, VERSION_CHECK_NOTIFY_JID, or OWNER. The bot does not join the invited room until an admin accepts the invite.'),
+    'room_invite_notify_jid': ConfigKeySpec('', 'ROOM_INVITE_NOTIFY_JID', str, allow_empty=True, section='Room Invites', description='Room invite notify jid.'),
+    'room_invite_max_age_days': ConfigKeySpec(30, 'ROOM_INVITE_MAX_AGE_DAYS', int, section='Room Invites', description='Pending room invites older than this many days are expired automatically. Set to 0 to keep pending invites until accepted/declined/cleanup.'),
+    'room_plugin_defaults': ConfigKeySpec({'birthday_notify': False, 'dice': True, 'ducks': False, 'help': False, 'information': True, 'karma': False, 'idlerpg': False, 'pin': True, 'poll': False, 'presence': True, 'reminder': True, 'sed': True, 'tell': True, 'tools': True, 'translate': True, 'urlcheck': True, 'vcard': True, 'weather': True, 'xkcd': False, 'xmpp': True}, 'ROOM_PLUGIN_DEFAULTS', dict, section='Room Plugin Defaults', description='Default room feature state used for newly added rooms and for ,rooms set_plugin_defaults. Missing keys keep their internal fallback. Unknown keys are ignored with a warning. Per-room changes are still stored in the database and can be managed with ,rooms enable/disable.'),
+    'urlcheck_wait_seconds': ConfigKeySpec(120, 'URLCHECK_WAIT_SECONDS', int, minimum=0, minimum_exclusive=True, section='URL Check', description='Suppress repeated output for the same URL in the same room for this many seconds.'),
+    'urlcheck_fetch_timeout_seconds': ConfigKeySpec(8, 'URLCHECK_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='URL Check', description='URL fetch limits for title/description extraction and YouTube metadata.'),
+    'urlcheck_max_redirects': ConfigKeySpec(5, 'URLCHECK_MAX_REDIRECTS', int, minimum=0, minimum_exclusive=True, section='URL Check', description='Urlcheck max redirects.'),
+    'urlcheck_max_read_bytes': ConfigKeySpec(65536, 'URLCHECK_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='URL Check', description='Urlcheck max read bytes.'),
+    'urlcheck_user_agent': ConfigKeySpec('envsbot/{version} (https://github.com/envs-net/envsbot)', 'URLCHECK_USER_AGENT', str, section='URL Check', description='URL-check User-Agent. The {version} token is expanded automatically; set a custom value only when required.'),
+    'youtube_api_key': ConfigKeySpec(MISSING, 'YOUTUBE_API_KEY', str, section='URL Check', description='YouTube Data API key for richer URL metadata lookups. None disables YouTube API data but regular URL title checks still work.', sensitive=True, sample=None),
+    'rss_global_query_interval': ConfigKeySpec(1200, 'RSS_GLOBAL_QUERY_INTERVAL', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Default global feed check interval in seconds.'),
+    'max_new_feed_entries': ConfigKeySpec(5, 'MAX_NEW_FEED_ENTRIES', int, minimum=0, section='RSS / Atom', description='Number of existing entries to show when a feed is newly added. Set to 0 to suppress the initial history replay while still starting from the feed snapshot seen when the subscription is created.'),
+    'rss_trusted_max_feeds': ConfigKeySpec(10, 'RSS_TRUSTED_MAX_FEEDS', int, minimum=0, section='RSS / Atom', description='Maximum personal DM subscriptions for trusted users. Moderators and higher are unlimited. Set to 0 to disable trusted-user DM subscriptions.'),
+    'rss_list_page_size': ConfigKeySpec(10, 'RSS_LIST_PAGE_SIZE', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Number of entries shown on one paginated RSS list page.'),
+    'rss_max_entries_per_poll': ConfigKeySpec(10, 'RSS_MAX_ENTRIES_PER_POLL', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Maximum number of new entries posted per regular feed poll. If a very active feed publishes more than this between two checks, older unseen entries are skipped and the newest item is remembered as seen.'),
+    'rss_retry_initial_delay': ConfigKeySpec(300, 'RSS_RETRY_INITIAL_DELAY', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Retry/backoff behavior for failing feeds. First failure retries after 5 minutes, second after 10 minutes, then grows exponentially up to the maximum delay.'),
+    'rss_retry_backoff_multiplier': ConfigKeySpec(2.0, 'RSS_RETRY_BACKOFF_MULTIPLIER', (int, float), minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss retry backoff multiplier.'),
+    'rss_max_backoff_time': ConfigKeySpec(3600, 'RSS_MAX_BACKOFF_TIME', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss max backoff time.'),
+    'rss_broken_error_threshold': ConfigKeySpec(3, 'RSS_BROKEN_ERROR_THRESHOLD', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='A feed is considered broken in ,rss broken after this many consecutive errors.'),
+    'rss_similarity_threshold': ConfigKeySpec(0.8, 'RSS_SIMILARITY_THRESHOLD', (int, float), minimum=0, maximum=1, minimum_exclusive=True, section='RSS / Atom', description='Duplicate title/description detection threshold, 0 < value <= 1.'),
+    'rss_user_agent': ConfigKeySpec('envsbot/{version} (https://github.com/envs-net/envsbot)', 'RSS_USER_AGENT', str, section='RSS / Atom', description='RSS User-Agent. The {version} token is expanded automatically; set a custom value only when required.'),
+    'rss_fetch_timeout_seconds': ConfigKeySpec(8, 'RSS_FETCH_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Explicit RSS HTTP fetch limits.'),
+    'rss_startup_stagger_seconds': ConfigKeySpec(2.0, 'RSS_STARTUP_STAGGER_SECONDS', (int, float), minimum=0, section='RSS / Atom', description='Spread initial requests to the same host across a few seconds after startup. This avoids a burst when many feeds are hosted by one slower service.'),
+    'rss_max_redirects': ConfigKeySpec(5, 'RSS_MAX_REDIRECTS', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss max redirects.'),
+    'rss_max_read_bytes': ConfigKeySpec(1048576, 'RSS_MAX_READ_BYTES', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Rss max read bytes.'),
+    'rss_template_max_length': ConfigKeySpec(1000, 'RSS_TEMPLATE_MAX_LENGTH', int, minimum=0, minimum_exclusive=True, section='RSS / Atom', description='Maximum length of an RSS message template configured with ,rss template.'),
+    'birthday_cache_ttl_seconds': ConfigKeySpec(43200, 'BIRTHDAY_CACHE_TTL_SECONDS', int, minimum=0, minimum_exclusive=True, section='Birthday Notify', description='Cache positive and negative vCard BDAY results for this many seconds.'),
+    'birthday_initial_scan_delay_seconds': ConfigKeySpec(10, 'BIRTHDAY_INITIAL_SCAN_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='Birthday Notify', description='Delay first scan after startup so room joins and presence can settle.'),
+    'birthday_check_interval_seconds': ConfigKeySpec(3600, 'BIRTHDAY_CHECK_INTERVAL_SECONDS', int, minimum=0, minimum_exclusive=True, section='Birthday Notify', description='Periodic loop interval in seconds. The expensive full scan still only runs once per day.'),
+    'reminder_enabled': ConfigKeySpec(MISSING, 'REMINDER_ENABLED', bool, section='Reminders', description='Reminder enabled.', sample=True),
+    'reminder_max_age_days': ConfigKeySpec(MISSING, 'REMINDER_MAX_AGE_DAYS', int, minimum=0, minimum_exclusive=True, section='Reminders', description='Reminder max age days.', sample=365),
+    'reminder_default_timezone': ConfigKeySpec('UTC', 'REMINDER_DEFAULT_TIMEZONE', str, section='Reminders', description='Fallback timezone for absolute reminder dates when the user has no TIMEZONE set in their bot profile. Explicit command timezones such as CEST, CET, UTC, Europe/Berlin or +02:00 override this per reminder. Use an IANA timezone such as Europe/Berlin when you want automatic DST handling; CET/CEST are treated as explicit fixed offsets.'),
+    'ducks': ConfigKeySpec(MISSING, 'DUCKS', dict, section='Duck Game', description='Global defaults for rooms with the Ducks plugin enabled. Room owners/admins and bot moderators can override gameplay pacing for one room through a MUC private chat with `,duck config`; see docs/plugins/ducks.md for examples.', sample=nested_config_defaults('ducks')),
+    'users': ConfigKeySpec(MISSING, 'USERS', dict, section='User Tracking', description='Users.', sample=nested_config_defaults('users')),
+    'idlerpg': ConfigKeySpec(MISSING, 'IDLERPG', dict, section='IdleRPG', description="Classic IRC-style IdleRPG adapted for XMPP MUCs. Players level up by staying online and idle. Normal room messages add penalty time to the player's timer. See docs/idlerpg.md for details.", sample=nested_config_defaults('idlerpg')),
+    'sed_regex_timeout': ConfigKeySpec(1.0, 'SED_REGEX_TIMEOUT', (int, float), minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed regex timeout.'),
+    'sed_max_pattern_length': ConfigKeySpec(256, 'SED_MAX_PATTERN_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max pattern length.'),
+    'sed_max_replacement_length': ConfigKeySpec(1000, 'SED_MAX_REPLACEMENT_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max replacement length.'),
+    'sed_max_input_length': ConfigKeySpec(5000, 'SED_MAX_INPUT_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max input length.'),
+    'sed_max_output_length': ConfigKeySpec(8000, 'SED_MAX_OUTPUT_LENGTH', int, minimum=0, minimum_exclusive=True, section='Sed Corrections', description='Sed max output length.'),
+    'poll_max_options': ConfigKeySpec(10, 'POLL_MAX_OPTIONS', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max options.'),
+    'poll_max_question_len': ConfigKeySpec(200, 'POLL_MAX_QUESTION_LEN', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max question len.'),
+    'poll_max_option_len': ConfigKeySpec(100, 'POLL_MAX_OPTION_LEN', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max option len.'),
+    'poll_max_history_per_room': ConfigKeySpec(50, 'POLL_MAX_HISTORY_PER_ROOM', int, minimum=0, minimum_exclusive=True, section='Polls', description='Poll max history per room.'),
+    'poll_default_multi_max_choices': ConfigKeySpec(3, 'POLL_DEFAULT_MULTI_MAX_CHOICES', int, section='Polls', description='Poll default multi max choices.'),
+    'pin_page_size': ConfigKeySpec(10, 'PIN_PAGE_SIZE', int, minimum=0, minimum_exclusive=True, section='Pins', description='Pin page size.'),
+    'translate_from': ConfigKeySpec('auto', 'TRANSLATE_FROM', str, section='Translate', description='Translate uses the same public Google Translate endpoint as translate. No API key is required, but the endpoint is unofficial and may change. Set TRANSLATE_TO to a language code such as "de" to allow `,tr` for replies and `,tr text` for direct text. None keeps the target argument mandatory.'),
+    'translate_to': ConfigKeySpec(None, 'TRANSLATE_TO', str, section='Translate', description='Translate to.'),
+    'translate_timeout_seconds': ConfigKeySpec(8, 'TRANSLATE_TIMEOUT_SECONDS', (int, float), section='Translate', description='Translate timeout seconds.'),
+    'translate_max_input_length': ConfigKeySpec(2000, 'TRANSLATE_MAX_INPUT_LENGTH', int, section='Translate', description='Translate max input length.'),
+    'translate_max_output_length': ConfigKeySpec(6000, 'TRANSLATE_MAX_OUTPUT_LENGTH', int, section='Translate', description='Translate max output length.'),
+    'translate_max_response_bytes': ConfigKeySpec(262144, 'TRANSLATE_MAX_RESPONSE_BYTES', int, minimum=4096, section='Translate', description='Maximum response bytes accepted from the translation provider.'),
+    'translate_provider_queue_timeout_seconds': ConfigKeySpec(5, 'TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Translate', description='Maximum time a translation command waits for the serialized provider request slot before returning a busy response, limiting queue buildup behind slow provider calls.'),
+    'translate_rate_limit_initial_seconds': ConfigKeySpec(60, 'TRANSLATE_RATE_LIMIT_INITIAL_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Translate', description='Local cooldown after the first HTTP 429 from the translation provider. Retry-After is honored when it requests a longer delay.'),
+    'translate_rate_limit_backoff_multiplier': ConfigKeySpec(2.0, 'TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER', (int, float), minimum=1, section='Translate', description='Multiplier applied when the provider returns another HTTP 429 after a cooldown expires.'),
+    'translate_rate_limit_max_seconds': ConfigKeySpec(900, 'TRANSLATE_RATE_LIMIT_MAX_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Translate', description='Maximum local translation cooldown in seconds. Provider Retry-After values are capped at this limit.'),
+    'karma_delay_seconds': ConfigKeySpec(60, 'KARMA_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='Karma / Tell', description='Karma delay seconds.'),
+    'tell_delivery_delay_seconds': ConfigKeySpec(5, 'TELL_DELIVERY_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='Karma / Tell', description='Tell delivery delay seconds.'),
+    'xkcd_check_interval': ConfigKeySpec(3600, 'XKCD_CHECK_INTERVAL', int, minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd check interval.'),
+    'xkcd_index_start_delay_seconds': ConfigKeySpec(30, 'XKCD_INDEX_START_DELAY_SECONDS', int, minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd index start delay seconds.'),
+    'xkcd_index_request_delay_seconds': ConfigKeySpec(0.15, 'XKCD_INDEX_REQUEST_DELAY_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd index request delay seconds.'),
+    'xkcd_http_timeout': ConfigKeySpec(10, 'XKCD_HTTP_TIMEOUT', (int, float), minimum=0, minimum_exclusive=True, section='XKCD', description='Xkcd http timeout.'),
 }
 
 OPERATIONAL_CONFIG_FIELDS = CONFIG_FIELDS
@@ -363,52 +360,38 @@ CONFIG_SECTION_ORDER: tuple[str, ...] = (
 
 def config_display_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Return operator-facing sections in the deliberate sample/config order."""
-    sections: dict[str, list[str]] = {}
-    for field in CONFIG_FIELDS.values():
-        sections.setdefault(field.section, []).append(field.python_key)
-
-    unknown_sections = set(sections) - set(CONFIG_SECTION_ORDER)
-    if unknown_sections:
-        names = ", ".join(sorted(unknown_sections))
-        raise RuntimeError(f"Config section order missing: {names}")
-
-    return tuple(
-        (title, tuple(sections[title]))
-        for title in CONFIG_SECTION_ORDER
-        if title in sections
-    )
+    return schema_display_sections(CONFIG_FIELDS, CONFIG_SECTION_ORDER)
 
 
 CONFIG_DISPLAY_SECTIONS = config_display_sections()
 
 def config_defaults() -> dict[str, Any]:
-    return {name: field.default for name, field in CONFIG_FIELDS.items() if field.default is not MISSING}
+    return schema_defaults(CONFIG_FIELDS)
 
 
 def sample_config_defaults() -> dict[str, Any]:
     """Return documented sample values entirely from the declarative schema."""
-    result: dict[str, Any] = {}
-    for name, field in CONFIG_FIELDS.items():
-        value = field.sample if field.sample is not MISSING else field.default
-        if value is not MISSING:
-            result[name] = value
-    return result
+    return schema_sample_defaults(CONFIG_FIELDS)
+
 
 def required_config_types() -> dict[str, type | tuple[type, ...]]:
-    return {name: field.accepted_type for name, field in CONFIG_FIELDS.items() if field.required}
+    return schema_required_types(CONFIG_FIELDS)
+
 
 def optional_config_types() -> dict[str, type | tuple[type, ...]]:
-    return {name: field.accepted_type for name, field in CONFIG_FIELDS.items() if not field.required}
+    return schema_optional_types(CONFIG_FIELDS)
+
 
 def python_config_key_map() -> dict[str, str]:
-    return {field.python_key: name for name, field in CONFIG_FIELDS.items()}
+    return schema_python_key_map(CONFIG_FIELDS)
+
 
 def startup_only_keys() -> set[str]:
-    return {name for name, field in CONFIG_FIELDS.items() if field.startup_only}
+    return schema_startup_only_keys(CONFIG_FIELDS)
 
 
 def sensitive_keys() -> set[str]:
-    return {name for name, field in CONFIG_FIELDS.items() if field.sensitive}
+    return schema_sensitive_keys(CONFIG_FIELDS)
 
 # Compatibility names used by older imports/tests.
 operational_defaults = config_defaults
