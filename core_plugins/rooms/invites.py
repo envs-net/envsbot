@@ -22,6 +22,7 @@ from envs_xmpp_core.xmpp.invites import (
 )
 from envs_xmpp_core.xmpp.pending_invites import (
     PendingRoomInvite,
+    PendingRoomInviteSqlRepository,
     PendingRoomInviteStore,
     PendingRoomInviteStoreResult,
 )
@@ -140,14 +141,14 @@ def _db_api(bot):
     db = getattr(bot, "db", None)
     if db is None or getattr(db, "conn", None) is None:
         return None
-    required = ("transaction", "write", "fetch_one", "fetch_all")
+    required = ("write", "fetch_one", "fetch_all")
     if not all(callable(getattr(db, name, None)) for name in required):
         return None
     return db
 
 
-class _EnvsBotRoomInviteRepository:
-    """Adapt envsbot's DatabaseManager API to the shared invite store."""
+class _EnvsBotRoomInviteSqlBackend:
+    """Adapt envsbot's DatabaseManager API to the shared SQL repository."""
 
     def __init__(self, bot) -> None:
         self.bot = bot
@@ -155,131 +156,33 @@ class _EnvsBotRoomInviteRepository:
     def available(self) -> bool:
         return _db_api(self.bot) is not None
 
-    async def setup(self) -> None:
-        db = _db_api(self.bot)
-        if db is None:
-            return
-        async with db.transaction(label="room_invites_init") as conn:
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS room_invites (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    room_jid TEXT NOT NULL,
-                    inviter TEXT NOT NULL,
-                    reason TEXT,
-                    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-                    UNIQUE(room_jid, inviter)
-                )
-                """
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_room_invites_created_at "
-                "ON room_invites(created_at)"
-            )
-
-    async def load_all(self) -> list[PendingRoomInvite]:
-        db = _db_api(self.bot)
-        if db is None:
-            return []
-        rows = await db.fetch_all(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            ORDER BY id ASC
-            """
-        )
-        return [PendingRoomInvite.from_row(row) for row in rows]
-
-    async def insert_if_absent(
-        self,
-        room_jid: str,
-        inviter: str,
-        reason: str,
-        created_at: int,
-    ) -> PendingRoomInviteStoreResult:
+    async def execute(self, query, params=(), *, label: str = "room_invites") -> int:
         db = _db_api(self.bot)
         if db is None:
             raise RuntimeError("room invite database is unavailable")
-        cur = await db.write(
-            """
-            INSERT INTO room_invites (room_jid, inviter, reason, created_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(room_jid, inviter) DO NOTHING
-            """,
-            (room_jid, inviter, reason, created_at),
-            label="room_invite_store",
-        )
-        row = await db.fetch_one(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            WHERE room_jid = ? AND inviter = ?
-            """,
-            (room_jid, inviter),
-        )
-        if not row:
-            raise RuntimeError(f"could not reload stored room invite for {room_jid} from {inviter}")
-        return PendingRoomInviteStoreResult(
-            PendingRoomInvite.from_row(row),
-            created=cur.rowcount == 1,
-        )
+        cur = await db.write(query, params, label=label)
+        rowcount = cur.rowcount
+        return rowcount if rowcount is not None and rowcount >= 0 else 0
 
-    async def get(self, invite_id: int) -> PendingRoomInvite | None:
+    async def fetch_one(self, query, params=()):
         db = _db_api(self.bot)
         if db is None:
             return None
-        row = await db.fetch_one(
-            """
-            SELECT id, room_jid, inviter, reason, created_at
-            FROM room_invites
-            WHERE id = ?
-            """,
-            (invite_id,),
-        )
-        return PendingRoomInvite.from_row(row) if row else None
+        return await db.fetch_one(query, params)
 
-    async def delete(self, invite_id: int) -> int:
+    async def fetch_all(self, query, params=()):
         db = _db_api(self.bot)
         if db is None:
-            return 0
-        cur = await db.write(
-            "DELETE FROM room_invites WHERE id = ?",
-            (invite_id,),
-            label="room_invite_delete",
-        )
-        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
-
-    async def delete_many(self, invite_ids) -> int:
-        ids = [int(invite_id) for invite_id in invite_ids]
-        if not ids:
-            return 0
-        db = _db_api(self.bot)
-        if db is None:
-            return 0
-        placeholders = ",".join("?" for _ in ids)
-        cur = await db.write(
-            f"DELETE FROM room_invites WHERE id IN ({placeholders})",
-            ids,
-            label="room_invites_expire",
-        )
-        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(ids)
-
-    async def clear(self) -> int:
-        db = _db_api(self.bot)
-        if db is None:
-            return 0
-        cur = await db.write(
-            "DELETE FROM room_invites",
-            label="room_invites_clear",
-        )
-        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
+            return []
+        return await db.fetch_all(query, params)
 
 
 def _pending_invite_store(bot) -> PendingRoomInviteStore:
     """Return the shared store while adopting historical injected test state."""
     store = getattr(bot, "_pending_room_invite_store", None)
     if not isinstance(store, PendingRoomInviteStore):
-        store = PendingRoomInviteStore(_EnvsBotRoomInviteRepository(bot))
+        repository = PendingRoomInviteSqlRepository(_EnvsBotRoomInviteSqlBackend(bot))
+        store = PendingRoomInviteStore(repository)
         bot._pending_room_invite_store = store
 
     current = getattr(bot, "pending_room_invites", None)
