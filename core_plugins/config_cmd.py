@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import pprint
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
 
 from envs_xmpp_core.config.literals import parse_literal
-from envs_xmpp_core.config.python_file import assignment_ranges as _core_assignment_ranges
-from envs_xmpp_core.config.python_file import replace_or_append_assignment_text
-from envs_xmpp_core.storage.files import atomic_write_text
+from envs_xmpp_core.config.python_file import (
+    ConfigFileTransactionError,
+    PythonConfigEdit,
+    apply_config_edit_transaction,
+    prepare_assignment_edit,
+    replace_or_append_assignment_text,
+)
+from envs_xmpp_core.config.python_file import (
+    assignment_ranges as _core_assignment_ranges,
+)
 
 from utils.audit import audit_event
 from utils.backups import create_backup
@@ -138,34 +144,47 @@ def _replace_config_assignment(source: str, display_key: str, value: object) -> 
     )
 
 
-def _write_config_text_atomic(path, text: str) -> None:
-    atomic_write_text(path, text, mode=PRIVATE_FILE_MODE)
-
-
-def _write_config_text_with_rollback(path, new_text: str, *, rollback_text: str | None = None) -> None:
-    """Atomically write config text and restore the previous text on failure."""
-    if rollback_text is None and path.exists():
-        rollback_text = path.read_text(encoding="utf-8")
-    try:
-        _write_config_text_atomic(path, new_text)
-    except Exception:
-        if rollback_text is not None:
-            with suppress(Exception):
-                _write_config_text_atomic(path, rollback_text)
-        raise
-
-
-def _candidate_config_text(display_key: str, value: object) -> tuple[object, str, str]:
-    """Return path, original text and validated candidate config text."""
+def _candidate_config_edit(display_key: str, value: object) -> PythonConfigEdit:
+    """Prepare one validated config.py assignment edit without mutating disk."""
     path = get_runtime_config_path()
     if path.suffix.lower() == ".json":
         raise ConfigError("config set/unset only supports config.py, not legacy config.json")
     if not path.exists():
         raise ConfigError(f"Missing config file: {path}")
-    source = path.read_text(encoding="utf-8")
-    updated = _replace_config_assignment(source, display_key, value)
-    ast.parse(updated, filename=str(path))
-    return path, source, updated
+    return prepare_assignment_edit(
+        path,
+        display_key,
+        _format_config_assignment(display_key, value),
+        section_comment=_CONFIG_EDIT_SECTION,
+        mode=PRIVATE_FILE_MODE,
+    )
+
+
+def _format_config_transaction_error(exc: ConfigFileTransactionError) -> str:
+    message = str(exc.error)
+    if exc.rollback_errors:
+        rollback = "; ".join(str(error) for error in exc.rollback_errors)
+        message += f"\n⚠️ Failed to restore the previous config.py cleanly: {rollback}"
+    return message
+
+
+async def _persist_config_edit(
+    bot,
+    sender: str,
+    before: dict,
+    display_key: str,
+    value: object,
+) -> str:
+    edit = _candidate_config_edit(display_key, value)
+
+    async def apply_candidate() -> str:
+        reloaded = load_config(require_required_keys=True)
+        return await _apply_config_reload(bot, sender, before, reloaded)
+
+    try:
+        return await apply_config_edit_transaction(edit, apply=apply_candidate)
+    except ConfigFileTransactionError as exc:
+        raise ConfigError(_format_config_transaction_error(exc)) from exc
 
 
 async def _maybe_create_config_backup(bot) -> str | None:
@@ -473,14 +492,9 @@ async def config_set(bot, sender, nick, args, msg, is_room):
     old_value = before.get(normalized_key)
     backup_name = await _maybe_create_config_backup(bot)
     try:
-        path, original_source, updated_source = _candidate_config_text(display_key, new_value)
-        _write_config_text_with_rollback(path, updated_source, rollback_text=original_source)
-        try:
-            reloaded = load_config(require_required_keys=True)
-            reply = await _apply_config_reload(bot, sender, before, reloaded)
-        except Exception:
-            _write_config_text_with_rollback(path, original_source, rollback_text=updated_source)
-            raise
+        reply = await _persist_config_edit(
+            bot, sender, before, display_key, new_value
+        )
     except Exception as exc:
         bot.reply_error(msg, f"Failed to write/apply config: {exc}")
         return
@@ -541,14 +555,9 @@ async def config_unset(bot, sender, nick, args, msg, is_room):
     old_value = before.get(normalized_key)
     backup_name = await _maybe_create_config_backup(bot)
     try:
-        path, original_source, updated_source = _candidate_config_text(display_key, default_value)
-        _write_config_text_with_rollback(path, updated_source, rollback_text=original_source)
-        try:
-            reloaded = load_config(require_required_keys=True)
-            reply = await _apply_config_reload(bot, sender, before, reloaded)
-        except Exception:
-            _write_config_text_with_rollback(path, original_source, rollback_text=updated_source)
-            raise
+        reply = await _persist_config_edit(
+            bot, sender, before, display_key, default_value
+        )
     except Exception as exc:
         bot.reply_error(msg, f"Failed to write/apply config: {exc}")
         return

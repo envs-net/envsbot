@@ -441,6 +441,30 @@ async def test_config_unset_resets_to_sample_default(tmp_path, monkeypatch):
     assert "LOG_LEVEL reset to default" in bot.reply_ok.call_args.args[1]
 
 
+@pytest.mark.asyncio
+async def test_persist_config_edit_restores_file_when_reload_fails(tmp_path, monkeypatch):
+    path = tmp_path / "config.py"
+    original = 'LOG_LEVEL = "INFO"\n'
+    path.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("ENVSBOT_CONFIG", str(path))
+    monkeypatch.setattr(
+        config_cmd,
+        "load_config",
+        MagicMock(side_effect=RuntimeError("reload failed")),
+    )
+
+    with pytest.raises(config_cmd.ConfigError, match="reload failed"):
+        await config_cmd._persist_config_edit(
+            _bot(),
+            "admin@example.org",
+            {"loglevel": "INFO"},
+            "LOG_LEVEL",
+            "DEBUG",
+        )
+
+    assert path.read_text(encoding="utf-8") == original
+
+
 def test_format_config_assignment_uses_safe_double_quoted_strings():
     assignment = config_cmd._format_config_assignment(
         "TRANSLATE_TO",
@@ -451,12 +475,14 @@ def test_format_config_assignment_uses_safe_double_quoted_strings():
     compile(assignment, "<config-assignment>", "exec")
 
 
-def test_write_config_text_atomic_enforces_owner_only_mode(tmp_path):
+def test_candidate_config_edit_enforces_owner_only_mode(tmp_path, monkeypatch):
     path = tmp_path / "config.py"
-    path.write_text('JID = "bot@example.org"\n', encoding="utf-8")
+    path.write_text('LOG_LEVEL = "INFO"\n', encoding="utf-8")
     path.chmod(0o644)
+    monkeypatch.setenv("ENVSBOT_CONFIG", str(path))
 
-    config_cmd._write_config_text_atomic(path, 'JID = "new@example.org"\n')
+    edit = config_cmd._candidate_config_edit("LOG_LEVEL", "DEBUG")
+    edit.write()
 
-    assert path.read_text(encoding="utf-8") == 'JID = "new@example.org"\n'
+    assert path.read_text(encoding="utf-8") == 'LOG_LEVEL = "DEBUG"\n'
     assert path.stat().st_mode & 0o777 == 0o600
