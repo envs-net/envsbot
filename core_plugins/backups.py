@@ -6,6 +6,8 @@ import asyncio
 import inspect
 import logging
 
+from envs_xmpp_core.formatting import format_bytes
+
 from utils.audit import audit_event
 from utils.backups import (
     BackupError,
@@ -51,13 +53,9 @@ PLUGIN_META = {
 
 
 def _format_bytes(value: int) -> str:
-    units = ("B", "KiB", "MiB", "GiB")
-    size = float(value)
-    for unit in units:
-        if size < 1024 or unit == units[-1]:
-            return f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{value} B"
+    if value < 0:
+        return f"{float(value):.1f} B"
+    return format_bytes(value, negative_label=None, max_unit="GiB", bytes_decimals=1)
 
 
 def _backup_list_line(index: int, backup) -> str:

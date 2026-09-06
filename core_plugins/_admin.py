@@ -23,6 +23,8 @@ from pathlib import Path
 
 import psutil
 
+from envs_xmpp_core.formatting import format_bytes, format_duration
+
 from bot.lifecycle import _restart_notification_paths
 from bot.room_state import direct_roster_contacts
 from core_plugins._core import JOINED_ROOMS
@@ -66,43 +68,12 @@ def set_bot_start_time(bot):
 
 def human_time(seconds: int) -> str:
     """Convert seconds to human-readable string."""
-    seconds = int(seconds)
-    if seconds <= 0:
-        return "0s"
-
-    m, s = divmod(seconds, 60)
-    h, m = divmod(m, 60)
-    d, h = divmod(h, 24)
-
-    parts = []
-    if d:
-        parts.append(f"{d}d")
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    if s or not parts:
-        parts.append(f"{s}s")
-
-    return " ".join(parts)
+    return format_duration(seconds)
 
 
 def human_size(size_bytes: int) -> str:
     """Convert bytes to a human-readable size string."""
-    if size_bytes < 0:
-        return "unknown"
-
-    units = ["B", "KiB", "MiB", "GiB", "TiB"]
-    size = float(size_bytes)
-
-    for unit in units:
-        if size < 1024 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(size)} {unit}"
-            return f"{size:.1f} {unit}"
-        size /= 1024
-
-    return f"{size_bytes} B"
+    return format_bytes(size_bytes)
 
 
 _STATUS_SECTION_ICONS = {

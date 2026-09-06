@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import urllib.request
 
@@ -18,6 +17,7 @@ from envs_xmpp_core.release.github import (
 from envs_xmpp_core.release.github import (
     release_tag_from_redirect_url as _release_tag_from_redirect_url,
 )
+from envs_xmpp_core.release.checks import check_latest_release
 from envs_xmpp_core.release.versions import (
     compare_versions,
     parse_version_tuple,
@@ -162,28 +162,28 @@ async def check_for_updates_once(
         return False, None, "Version check is disabled"
     if not release_url:
         return False, None, "Version check URL is missing"
-    try:
-        remote_version = await asyncio.to_thread(
-            fetch_latest_release_version_sync,
+    current_version = normalized_version()
+    result = await check_latest_release(
+        current_version,
+        lambda: fetch_latest_release_version_sync(release_url),
+    )
+    if result.error:
+        log.warning("Version check failed: %s", result.error)
+        return result.as_tuple()
+
+    remote_version = result.remote_version
+    bot.last_version_check_result = remote_version
+    if result.update_available and remote_version is not None:
+        log.info(
+            "New EnvsBot version available: remote=%s local=%s url=%s",
+            remote_version,
+            current_version,
             release_url,
         )
-        bot.last_version_check_result = remote_version
-        current_version = normalized_version()
-        if is_remote_version_newer(remote_version, current_version):
-            log.info(
-                "New EnvsBot version available: remote=%s local=%s url=%s",
-                remote_version,
-                current_version,
-                release_url,
-            )
-            if announce and getattr(bot, "last_update_notified_version", None) != remote_version:
-                if await send_update_notification(bot, remote_version):
-                    bot.last_update_notified_version = remote_version
-            return True, remote_version, None
-        return False, remote_version, None
-    except Exception as error:
-        log.warning("Version check failed: %s", error)
-        return False, None, str(error)
+        if announce and getattr(bot, "last_update_notified_version", None) != remote_version:
+            if await send_update_notification(bot, remote_version):
+                bot.last_update_notified_version = remote_version
+    return result.as_tuple()
 
 
 async def version_check_worker(bot) -> None:

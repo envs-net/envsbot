@@ -23,6 +23,21 @@ from envs_xmpp_core.runtime.tasks import (
 from envs_xmpp_core.runtime.tasks import (
     TaskSupervisor as CoreTaskSupervisor,
 )
+from envs_xmpp_core.runtime.tasks import (
+    runtime_is_ready as _core_runtime_is_ready,
+)
+from envs_xmpp_core.runtime.tasks import (
+    sleep_with_heartbeat as _core_sleep_with_heartbeat,
+)
+from envs_xmpp_core.runtime.tasks import (
+    task_heartbeat_interval as _core_task_heartbeat_interval,
+)
+from envs_xmpp_core.runtime.tasks import (
+    wait_for_event_with_heartbeat as _core_wait_for_event_with_heartbeat,
+)
+from envs_xmpp_core.runtime.tasks import (
+    wait_for_runtime_ready as _core_wait_for_runtime_ready,
+)
 
 _COMPLETED_ONE_SHOT_HISTORY_LIMIT = 50
 
@@ -40,16 +55,8 @@ def _now() -> str:
 
 
 def runtime_is_ready(bot: Any) -> bool:
-    """Return whether autonomous runtime work may proceed.
-
-    Bots created before the readiness gate (and lightweight test doubles) keep
-    the historical immediate behavior by omitting ``runtime_ready``.
-    """
-    runtime_ready = getattr(bot, "runtime_ready", None)
-    if runtime_ready is None:
-        return True
-    is_set = getattr(runtime_ready, "is_set", None)
-    return bool(is_set()) if callable(is_set) else True
+    """Return whether autonomous runtime work may proceed."""
+    return _core_runtime_is_ready(bot)
 
 
 async def wait_for_runtime_ready(
@@ -59,29 +66,19 @@ async def wait_for_runtime_ready(
     name: str | None = None,
 ) -> None:
     """Wait until startup releases background work and mark service progress."""
-    if not runtime_is_ready(bot):
-        runtime_ready = getattr(bot, "runtime_ready", None)
-        wait = getattr(runtime_ready, "wait", None)
-        if callable(wait):
-            await wait()
+    heartbeat = None
     if plugin is not None and name is not None:
-        _touch_heartbeat(bot, plugin, name)
+        heartbeat = lambda: _touch_heartbeat(bot, plugin, name)
+    await _core_wait_for_runtime_ready(bot, heartbeat=heartbeat)
 
 
 def task_heartbeat_interval(bot: Any, *, maximum: float = 30.0) -> float:
-    """Return a heartbeat cadence that stays safely below the stale threshold.
-
-    Operators may tune ``TASK_STALE_AFTER_SECONDS`` below the historical
-    five-minute heartbeat cadence.  A 30-second absolute ceiling also keeps an
-    in-progress wait safe when the threshold is lowered by runtime reload.
-    """
+    """Return a heartbeat cadence that stays safely below the stale threshold."""
     config = getattr(bot, "config", {}) or {}
-    try:
-        stale_after = float(config.get("task_stale_after_seconds", 3600.0) or 3600.0)
-    except (TypeError, ValueError):
-        stale_after = 3600.0
-    safe_maximum = max(0.05, float(maximum))
-    return max(0.05, min(safe_maximum, max(0.05, stale_after / 2.0)))
+    return _core_task_heartbeat_interval(
+        config.get("task_stale_after_seconds", 3600.0),
+        maximum=maximum,
+    )
 
 
 def _touch_heartbeat(bot: Any, plugin: str, name: str) -> None:
@@ -99,21 +96,15 @@ async def sleep_with_heartbeat(
     *,
     interval: float = 30.0,
 ) -> None:
-    """Sleep while keeping a supervised service task heartbeat fresh.
-
-    Long, intentional waits (for example a daily report schedule or RSS
-    backoff) must not look like a hung worker to `tasks stale`.  The cadence is
-    capped by half of the configured stale threshold so custom operator values
-    remain safe.  The remaining delay is decremented explicitly so tests can
-    replace ``asyncio.sleep`` without requiring a real monotonic clock advance.
-    """
-    remaining = max(0.0, float(delay))
-    heartbeat_interval = task_heartbeat_interval(bot, maximum=interval)
-    while remaining > 0:
-        _touch_heartbeat(bot, plugin, name)
-        step = min(remaining, heartbeat_interval)
-        await asyncio.sleep(step)
-        remaining -= step
+    """Sleep while keeping a supervised service task heartbeat fresh."""
+    config = getattr(bot, "config", {}) or {}
+    await _core_sleep_with_heartbeat(
+        delay,
+        heartbeat=lambda: _touch_heartbeat(bot, plugin, name),
+        stale_after=config.get("task_stale_after_seconds", 3600.0),
+        interval=interval,
+        sleep_func=asyncio.sleep,
+    )
 
 
 async def wait_for_event_with_heartbeat(
@@ -125,23 +116,16 @@ async def wait_for_event_with_heartbeat(
     *,
     interval: float = 30.0,
 ) -> bool:
-    """Wait up to ``delay`` seconds for an event while refreshing heartbeat.
-
-    Returns ``True`` when the event became set and ``False`` when the complete
-    delay elapsed.  This is the event-aware counterpart to
-    :func:`sleep_with_heartbeat` for stoppable/wakeable service loops.
-    """
-    remaining = max(0.0, float(delay))
-    heartbeat_interval = task_heartbeat_interval(bot, maximum=interval)
-    while remaining > 0 and not event.is_set():
-        _touch_heartbeat(bot, plugin, name)
-        step = min(remaining, heartbeat_interval)
-        try:
-            await asyncio.wait_for(event.wait(), timeout=step)
-            return True
-        except TimeoutError:
-            remaining -= step
-    return event.is_set()
+    """Wait up to ``delay`` seconds for an event while refreshing heartbeat."""
+    config = getattr(bot, "config", {}) or {}
+    return await _core_wait_for_event_with_heartbeat(
+        event,
+        delay,
+        heartbeat=lambda: _touch_heartbeat(bot, plugin, name),
+        stale_after=config.get("task_stale_after_seconds", 3600.0),
+        interval=interval,
+        wait_for_func=asyncio.wait_for,
+    )
 
 
 @dataclass(frozen=True)
