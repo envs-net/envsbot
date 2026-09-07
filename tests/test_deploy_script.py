@@ -145,7 +145,7 @@ def test_project_protected_files_are_restored_after_checkout_changes(tmp_path):
         backup_dir,
     )
 
-    assert set(backups) == {"config", "database"}
+    assert {item.label for item in backups} == {"config", "database"}
     config.unlink()
     database.write_bytes(b"checkout replacement")
     deploy._restore_project_protected_paths(backups)
@@ -681,14 +681,14 @@ def test_target_relation_uses_git_ancestry(
 ):
     deployment = _current_deployment(tmp_path)
 
-    def fake_is_ancestor(_deployment, older, newer):
-        if (older, newer) == ("HEAD", "v1.8.0"):
-            return head_before_target
-        if (older, newer) == ("v1.8.0", "HEAD"):
-            return target_before_head
-        raise AssertionError(f"unexpected ancestry comparison: {older} -> {newer}")
+    def fake_git(_deployment, *args, **_kwargs):
+        if args == ("merge-base", "--is-ancestor", "HEAD", "v1.8.0"):
+            return subprocess.CompletedProcess([], 0 if head_before_target else 1, "", "")
+        if args == ("merge-base", "--is-ancestor", "v1.8.0", "HEAD"):
+            return subprocess.CompletedProcess([], 0 if target_before_head else 1, "", "")
+        raise AssertionError(f"unexpected Git call: {args}")
 
-    monkeypatch.setattr(deploy, "_git_is_ancestor", fake_is_ancestor)
+    monkeypatch.setattr(deploy, "_git", fake_git)
 
     relation = deploy._target_relation(deployment, "v1.8.0")
 
@@ -766,65 +766,28 @@ def test_latest_local_release_tag_ignores_prerelease_and_nonrelease_tags(tmp_pat
     assert deploy._latest_tag(deployment) == "v1.9.0"
 
 
-def test_latest_remote_release_tag_ignores_prerelease_and_nonrelease_tags(tmp_path, monkeypatch):
+def test_prepare_release_target_uses_shared_release_planner(tmp_path, monkeypatch):
+    import envs_xmpp_ops.git as shared_git
+
     deployment = _current_deployment(tmp_path)
-    monkeypatch.setattr(
-        deploy,
-        "_remote_tags",
-        lambda _deployment, _remote: [
-            "v2.0.0-rc1",
-            "backup-20260810",
-            "v1.9.0",
-            "v1.8.1",
-        ],
-    )
+    observed = {}
+    monkeypatch.setenv("ENVSBOT_DEPLOY_REMOTE", "upstream")
 
-    assert deploy._latest_remote_tag(deployment, "origin") == "v1.9.0"
+    def fake_prepare(run_git, requested, *, configured_remote, error_factory):
+        observed["run_git"] = run_git
+        observed["requested"] = requested
+        observed["configured_remote"] = configured_remote
+        observed["error_factory"] = error_factory
+        return "upstream", "v1.8.0"
 
-
-def test_latest_remote_release_tag_requires_stable_release(tmp_path, monkeypatch):
-    deployment = _current_deployment(tmp_path)
-    monkeypatch.setattr(
-        deploy,
-        "_remote_tags",
-        lambda _deployment, _remote: ["v2.0.0-rc1", "backup-20260810"],
-    )
-
-    with pytest.raises(deploy.DeployError, match=r"no stable Git release tags \(vX\.Y\.Z\)"):
-        deploy._latest_remote_tag(deployment, "origin")
-
-
-def test_prepare_release_target_fetches_branches_without_bulk_tags(tmp_path, monkeypatch):
-    deployment = _current_deployment(tmp_path)
-    git_calls = []
-    synced = []
-    validated = []
-
-    monkeypatch.setattr(deploy, "_git_remote", lambda _deployment: "upstream")
-    monkeypatch.setattr(deploy, "_latest_remote_tag", lambda _deployment, _remote: "v1.8.0")
-    monkeypatch.setattr(
-        deploy,
-        "_sync_release_tag",
-        lambda _deployment, remote, tag: synced.append((remote, tag)),
-    )
-    monkeypatch.setattr(
-        deploy,
-        "_validate_tag",
-        lambda _deployment, tag: validated.append(tag),
-    )
-    monkeypatch.setattr(
-        deploy,
-        "_git",
-        lambda _deployment, *args, **_kwargs: git_calls.append(args)
-        or subprocess.CompletedProcess([], 0, stdout="", stderr=""),
-    )
+    monkeypatch.setattr(shared_git, "prepare_release_target", fake_prepare)
 
     remote, target = deploy._prepare_release_target(deployment, None)
 
     assert (remote, target) == ("upstream", "v1.8.0")
-    assert git_calls == [("fetch", "--prune", "--no-tags", "upstream")]
-    assert synced == [("upstream", "v1.8.0")]
-    assert validated == ["v1.8.0"]
+    assert observed["requested"] is None
+    assert observed["configured_remote"] == "upstream"
+    assert observed["error_factory"] is deploy.DeployError
 
 
 def _git_test_env() -> dict[str, str]:
