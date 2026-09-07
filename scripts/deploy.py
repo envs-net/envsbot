@@ -16,7 +16,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -990,6 +989,8 @@ def update(
     *,
     allow_downgrade: bool = False,
 ) -> int:
+    from envs_xmpp_ops.deploy import run_release_update_transaction
+
     _require_source_tree(deployment)
     if not (deployment.root / ".git").exists():
         raise DeployError(f"update requires a Git checkout: {deployment.root}")
@@ -1002,33 +1003,7 @@ def update(
         return 0
     _require_confirmation("Proceed with the envsbot update plan shown above?")
 
-    remote, target = _prepare_release_target(deployment, requested_tag)
-    print(f"Selected release: {target} (remote: {remote})")
-    if not _approve_update_target(
-        deployment,
-        target,
-        requested_tag=requested_tag,
-        allow_downgrade=allow_downgrade,
-    ):
-        return 0
-
-    protected = _protected_paths(deployment)
-    print("\nProtected operator files:")
-    for label, path in protected.items():
-        state = "exists" if path.exists() else "missing"
-        print(f"  {label}: {path} ({state})")
-
-    stopped = _stop_active_service(
-        deployment, reason="before changing code, dependencies and database schema"
-    )
-    try:
-        with tempfile.TemporaryDirectory(prefix="envsbot-deploy-protect.") as temporary:
-            backups = _backup_project_protected_paths(
-                deployment, protected, Path(temporary)
-            )
-            _git(deployment, "checkout", target)
-            _restore_project_protected_paths(backups)
-
+    def apply_target(_target: str) -> None:
         _install_dependencies(deployment)
         _envsbot(deployment, "db", "status")
         _envsbot(deployment, "db", "migrate", "--dry-run")
@@ -1045,17 +1020,30 @@ def update(
             "--group",
             deployment.service_group,
         )
-    except Exception:
-        if stopped:
-            print(
-                f"\nUPDATE FAILED: {deployment.service} was stopped and will remain stopped. "
-                "The helper does not automatically start old code against a possibly migrated database.",
-                file=sys.stderr,
-            )
-        raise
 
-    _ask_start(deployment)
-    print(f"Update to {target} completed.")
+    run_release_update_transaction(
+        root=deployment.root,
+        prepare_target=lambda: _prepare_release_target(deployment, requested_tag),
+        approve_target=lambda target: _approve_update_target(
+            deployment,
+            target,
+            requested_tag=requested_tag,
+            allow_downgrade=allow_downgrade,
+        ),
+        protected_paths=lambda: _protected_paths(deployment),
+        stop_service=lambda: _stop_active_service(
+            deployment, reason="before changing code, dependencies and database schema"
+        ),
+        checkout_target=lambda target: _git(deployment, "checkout", target),
+        apply_target=apply_target,
+        ask_start=lambda: _ask_start(deployment),
+        temp_prefix="envsbot-deploy-protect.",
+        announce_protected=True,
+        failure_message=(
+            f"UPDATE FAILED: {deployment.service} was stopped and will remain stopped. "
+            "The helper does not automatically start old code against a possibly migrated database."
+        ),
+    )
     return 0
 
 
