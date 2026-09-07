@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import urllib.request
 
-from envs_xmpp_core.release.checks import check_latest_release
+from envs_xmpp_core.release.checks import evaluate_release_check
 from envs_xmpp_core.release.github import (
     fetch_latest_release_version_via_github_api_sync as _core_fetch_api,
 )
@@ -163,10 +163,13 @@ async def check_for_updates_once(
     if not release_url:
         return False, None, "Version check URL is missing"
     current_version = normalized_version()
-    result = await check_latest_release(
+    decision = await evaluate_release_check(
         current_version,
         lambda: fetch_latest_release_version_sync(release_url),
+        announce=announce,
+        last_notified_version=getattr(bot, "last_update_notified_version", None),
     )
+    result = decision.result
     if result.error:
         log.warning("Version check failed: %s", result.error)
         return result.as_tuple()
@@ -180,7 +183,7 @@ async def check_for_updates_once(
             current_version,
             release_url,
         )
-        if announce and getattr(bot, "last_update_notified_version", None) != remote_version:
+        if decision.notification_version is not None:
             if await send_update_notification(bot, remote_version):
                 bot.last_update_notified_version = remote_version
     return result.as_tuple()

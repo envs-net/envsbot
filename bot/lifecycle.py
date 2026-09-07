@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
+from envs_xmpp_core.release.transitions import (
+    merge_pending_version_transition,
+    version_transition,
+)
 
 from utils.logging_helpers import kv
 from utils.time_utils import utc_now
@@ -101,10 +105,8 @@ def _version_change_message(previous_version: str, current_version: str) -> str:
     """Return an upgrade/downgrade message for one successful version change."""
     previous = normalized_version(previous_version)
     current = normalized_version(current_version)
-
-    from utils.updatecheck import compare_versions
-
-    if compare_versions(current, previous) < 0:
+    transition = version_transition(previous, current)
+    if transition.is_downgrade:
         action = "⬇️ EnvsBot downgraded successfully"
     else:
         action = "⬆️ EnvsBot updated successfully"
@@ -117,29 +119,11 @@ def _merge_pending_version_change(
     pending: object,
 ) -> dict[str, str] | None:
     """Preserve the earliest undelivered version when extending a transition."""
-    previous = normalized_version(previous_version)
-    current = normalized_version(current_version)
-    if previous == "unknown" or current == "unknown":
-        return None
-
-    existing: dict[str, str] | None = None
-    if isinstance(pending, dict):
-        pending_from = normalized_version(str(pending.get("from", "")))
-        pending_to = normalized_version(str(pending.get("to", "")))
-        if (
-            pending_from != "unknown"
-            and pending_to == previous
-            and pending_from != pending_to
-        ):
-            existing = {"from": pending_from, "to": pending_to}
-
-    if previous == current:
-        return existing
-
-    start = existing["from"] if existing is not None else previous
-    if start == current:
-        return None
-    return {"from": start, "to": current}
+    return merge_pending_version_transition(
+        previous_version,
+        current_version,
+        pending,
+    )
 
 
 def _restart_notification_paths(config_obj: Any) -> list[str]:
