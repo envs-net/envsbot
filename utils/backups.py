@@ -15,7 +15,7 @@ import tempfile
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,12 @@ from envs_xmpp_core.storage.archive import (
     extract_zip_member,
     safe_zip_members,
     zip_member_sha256,
+)
+from envs_xmpp_core.storage.managed import (
+    ManagedFile,
+    list_managed_files,
+    resolve_managed_file,
+    select_managed_files_for_prune,
 )
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
 
@@ -363,11 +369,15 @@ def _read_manifest(path: Path) -> dict[str, Any]:
 def list_backups(*, directory: Path | None = None) -> list[BackupArchive]:
     """List managed backup archives newest first."""
     directory = directory or backup_dir()
-    if not directory.exists():
-        return []
+    managed_files = list_managed_files(directory, f"{BACKUP_PREFIX}-*.zip")
+    # Backup filenames contain a sortable UTC timestamp. Keep the historical
+    # name-based ordering contract while delegating safe enumeration/stat calls
+    # to the shared managed-file catalog.
+    managed_files.sort(key=lambda item: item.name, reverse=True)
 
     items: list[BackupArchive] = []
-    for path in sorted(directory.glob(f"{BACKUP_PREFIX}-*.zip"), reverse=True):
+    for managed_file in managed_files:
+        path = managed_file.path
         try:
             manifest = _read_manifest(path)
             files = [item.get("name", "?") for item in manifest.get("files", [])]
@@ -380,8 +390,8 @@ def list_backups(*, directory: Path | None = None) -> list[BackupArchive]:
         items.append(
             BackupArchive(
                 path=path,
-                name=path.name,
-                size=path.stat().st_size,
+                name=managed_file.name,
+                size=managed_file.size,
                 created_at=created_at,
                 reason=reason,
                 files=files,
@@ -496,19 +506,34 @@ def plan_backup_prune(
     days = backup_retention_days() if days is None else max(0, int(days))
     archives = list_backups(directory=directory)
 
-    selected: dict[Path, BackupArchive] = {}
-    for archive in archives[keep:]:
-        selected[archive.path] = archive
+    managed: list[ManagedFile] = []
+    for archive in archives:
+        created_at = _parse_archive_created_at(archive.created_at)
+        if created_at is not None:
+            timestamp = created_at.timestamp()
+        else:
+            try:
+                timestamp = archive.path.stat().st_mtime
+            except OSError:
+                timestamp = _now().timestamp()
+        managed.append(
+            ManagedFile(
+                path=archive.path,
+                size=archive.size,
+                mtime=timestamp,
+            )
+        )
 
-    if days > 0:
-        cutoff = _now() - timedelta(days=days)
-        for archive in archives:
-            created_at = _parse_archive_created_at(archive.created_at)
-            if created_at is not None and created_at < cutoff:
-                selected[archive.path] = archive
-
-    # Preserve newest-first listing order from list_backups().
-    return [archive for archive in archives if archive.path in selected]
+    selected_paths = {
+        item.path
+        for item in select_managed_files_for_prune(
+            managed,
+            keep=keep,
+            max_age_seconds=days * 86400 if days > 0 else None,
+            now=_now().timestamp(),
+        )
+    }
+    return [archive for archive in archives if archive.path in selected_paths]
 
 
 def prune_old_backups(
@@ -536,14 +561,13 @@ def prune_old_backups(
 def list_migration_snapshots(*, directory: Path | None = None) -> list[Path]:
     """List pre-migration SQLite snapshots newest first."""
     directory = directory or backup_dir()
-    if not directory.exists():
-        return []
-    paths = [
-        path
-        for path in directory.glob(f"{MIGRATION_BACKUP_PREFIX}-*.sqlite3")
-        if path.is_file()
+    return [
+        managed_file.path
+        for managed_file in list_managed_files(
+            directory,
+            f"{MIGRATION_BACKUP_PREFIX}-*.sqlite3",
+        )
     ]
-    return sorted(paths, key=lambda path: (path.stat().st_mtime, path.name), reverse=True)
 
 
 def plan_migration_snapshot_prune(
@@ -553,20 +577,24 @@ def plan_migration_snapshot_prune(
     days: int | None = None,
 ) -> list[Path]:
     """Return pre-migration snapshots selected by count/age retention."""
-    snapshots = list_migration_snapshots(directory=directory)
+    directory = directory or backup_dir()
     keep = migration_backup_keep() if keep is None else max(1, int(keep))
     days = (
         migration_backup_retention_days()
         if days is None
         else max(0, int(days))
     )
-    selected = set(snapshots[keep:])
-    if days > 0:
-        cutoff = _now().timestamp() - days * 86400
-        selected.update(
-            path for path in snapshots if path.stat().st_mtime < cutoff
-        )
-    return [path for path in snapshots if path in selected]
+    snapshots = list_managed_files(
+        directory,
+        f"{MIGRATION_BACKUP_PREFIX}-*.sqlite3",
+    )
+    selected = select_managed_files_for_prune(
+        snapshots,
+        keep=keep,
+        max_age_seconds=days * 86400 if days > 0 else None,
+        now=_now().timestamp(),
+    )
+    return [managed_file.path for managed_file in selected]
 
 
 def prune_migration_snapshots(
@@ -626,21 +654,36 @@ def resolve_backup(name: str) -> Path:
         raise BackupError("Missing backup archive name.")
 
     archives = list_backups()
-    if value == "last":
-        if not archives:
+    if not archives:
+        if value == "last":
             raise BackupError("No backups found.")
-        return archives[0].path
+        if not value.endswith(".zip"):
+            value = f"{value}.zip"
+        raise BackupError(f"Backup not found: {value}")
 
     if "/" in value or "\\" in value or value in {".", ".."}:
         raise BackupError("Backup name must not contain path separators.")
 
-    candidates = {archive.name: archive.path for archive in archives}
-    if not value.endswith(".zip"):
-        value = f"{value}.zip"
-    try:
-        return candidates[value]
-    except KeyError as exc:
-        raise BackupError(f"Backup not found: {value}") from exc
+    managed = [
+        ManagedFile(
+            path=archive.path,
+            size=archive.size,
+            mtime=0.0,
+        )
+        for archive in archives
+    ]
+    query = value
+    if query != "last" and not query.endswith(".zip"):
+        query = f"{query}.zip"
+    resolved = resolve_managed_file(
+        backup_dir(),
+        query,
+        managed,
+        latest_aliases=("last",),
+    )
+    if resolved is not None:
+        return resolved
+    raise BackupError(f"Backup not found: {query}")
 
 
 def backup_details(path: Path) -> dict[str, Any]:
