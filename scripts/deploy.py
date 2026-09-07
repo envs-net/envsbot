@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from envs_xmpp_ops.deploy import ProtectedFileBackup
+    from envs_xmpp_ops.deploy import InstallApplyResult, ProtectedFileBackup
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -865,7 +865,9 @@ def _install_plan(deployment: Deployment) -> None:
     print("  - ask separately before starting the service")
 
 
-def _finish_install(deployment: Deployment, *, stopped: bool) -> int:
+def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyResult:
+    from envs_xmpp_ops.deploy import InstallApplyResult
+
     _create_venv_if_missing(deployment)
     _install_dependencies(deployment)
     created_config = _copy_if_missing(
@@ -879,7 +881,7 @@ def _finish_install(deployment: Deployment, *, stopped: bool) -> int:
         print("No database, vCard or systemd unit was changed after creating the config.")
         if stopped:
             print(f"LEAVE {deployment.service} stopped until the new configuration has been reviewed.")
-        return 0
+        return InstallApplyResult(ready_for_start=False)
 
     _envsbot(deployment, "--check")
     runtime = _runtime_paths(deployment)
@@ -934,33 +936,40 @@ def _finish_install(deployment: Deployment, *, stopped: bool) -> int:
     else:
         print("SKIP systemd unit installation (operator choice)")
 
-    _ask_start(deployment)
-    return 0
+    return InstallApplyResult()
 
 
 def install(deployment: Deployment) -> int:
+    from envs_xmpp_ops.deploy import run_install_transaction
+
     _require_source_tree(deployment)
     _install_plan(deployment)
     if deployment.dry_run:
         print("\nDRY RUN: no files, packages or services were changed.")
         return 0
-    _require_confirmation("Proceed with the envsbot installation shown above?")
-    if not _account_exists(deployment.service_user):
-        raise DeployError(
-            f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
-        )
-    stopped = _stop_active_service(
-        deployment, reason="before installing dependencies and deployment files"
-    )
-    try:
-        return _finish_install(deployment, stopped=stopped)
-    except Exception:
-        if stopped:
-            print(
-                f"\nINSTALL FAILED: {deployment.service} was stopped and will remain stopped.",
-                file=sys.stderr,
+
+    def validate_preconditions() -> None:
+        if not _account_exists(deployment.service_user):
+            raise DeployError(
+                f"service user {deployment.service_user!r} does not exist; "
+                "create it manually or use --user"
             )
-        raise
+
+    run_install_transaction(
+        confirm_install=lambda: _require_confirmation(
+            "Proceed with the envsbot installation shown above?"
+        ),
+        validate_preconditions=validate_preconditions,
+        stop_service=lambda: _stop_active_service(
+            deployment, reason="before installing dependencies and deployment files"
+        ),
+        apply_install=lambda stopped: _finish_install(deployment, stopped=stopped),
+        ask_start=lambda: _ask_start(deployment),
+        failure_message=(
+            f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."
+        ),
+    )
+    return 0
 
 def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     runtime = _runtime_paths(deployment) if deployment.venv_python.is_file() and deployment.config.exists() else None
