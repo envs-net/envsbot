@@ -6,12 +6,11 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from time import perf_counter
 from typing import Any
+
+from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
 
 from utils.logging_helpers import kv
 from utils.time_utils import utc_now
@@ -141,20 +140,6 @@ def _merge_pending_version_change(
     if start == current:
         return None
     return {"from": start, "to": current}
-
-
-@dataclass(frozen=True, slots=True)
-class LifecyclePhaseResult:
-    """One startup/shutdown phase result used for logging and diagnostics."""
-
-    name: str
-    status: str
-    duration_seconds: float
-    details: dict[str, object] = field(default_factory=dict)
-    @property
-    def healthy(self) -> bool:
-        """Return whether the phase completed cleanly or was not applicable."""
-        return self.status in {"ok", "skipped"}
 
 
 def _restart_notification_paths(config_obj: Any) -> list[str]:
@@ -506,40 +491,29 @@ class LifecycleMixin:
             log.info("[BACKUP] event=startup_backup status=created archive=%s", archive_path.name)
         except Exception:
             log.exception("[BACKUP] event=startup_backup status=failed")
-    async def _run_startup_phase(
+    def _observe_startup_phase(
         self,
-        name: str,
-        operation: Callable[[], Awaitable[None]],
-        results: list[LifecyclePhaseResult],
+        result: LifecyclePhaseResult,
+        error: Exception | None,
     ) -> None:
-        """Run one mandatory startup phase and record its duration/status."""
-        started = perf_counter()
-        try:
-            await operation()
-        except Exception:
-            result = LifecyclePhaseResult(
-                name=name,
-                status="failed",
-                duration_seconds=perf_counter() - started,
-            )
-            results.append(result)
+        """Log one shared lifecycle startup phase result."""
+        fields = kv(
+            status=result.status,
+            duration_ms=round(result.duration_seconds * 1000, 1),
+        )
+        if error is not None:
             log.exception(
                 "[LIFECYCLE] event=startup phase=%s %s",
-                name,
-                kv(status=result.status, duration_ms=round(result.duration_seconds * 1000, 1)),
+                result.name,
+                fields,
             )
-            raise
-        result = LifecyclePhaseResult(
-            name=name,
-            status="ok",
-            duration_seconds=perf_counter() - started,
-        )
-        results.append(result)
+            return
         log.info(
             "[LIFECYCLE] event=startup phase=%s %s",
-            name,
-            kv(status=result.status, duration_ms=round(result.duration_seconds * 1000, 1)),
+            result.name,
+            fields,
         )
+
     async def _startup_transport(self) -> None:
         """Advertise transport features, publish presence and fetch the roster."""
         try:
@@ -648,8 +622,8 @@ class LifecycleMixin:
             runtime_ready.clear()
         self.accepting_commands = False
         self.connection_start_time = utc_now()
-        results: list[LifecyclePhaseResult] = []
-        self._last_startup_phases = tuple(results)
+        runner = LifecyclePhaseRunner(observer=self._observe_startup_phase)
+        self._last_startup_phases = runner.results
         phases = (
             ("transport", self._startup_transport),
             ("storage", self._startup_storage),
@@ -658,9 +632,8 @@ class LifecycleMixin:
             ("readiness", self._startup_publish_ready),
         )
         try:
-            for name, operation in phases:
-                await self._run_startup_phase(name, operation, results)
-                self._last_startup_phases = tuple(results)
+            await runner.run_all(phases)
+            self._last_startup_phases = runner.results
             startup_healthy = self._log_startup_complete()
             if startup_healthy:
                 await self._finalize_successful_startup_version()
@@ -670,7 +643,7 @@ class LifecycleMixin:
                     "reason=degraded_startup"
                 )
         except Exception:
-            self._last_startup_phases = tuple(results)
+            self._last_startup_phases = runner.results
             log.exception("[BOT] event=startup status=failed")
             await self._handle_startup_failure()
             raise
@@ -699,41 +672,30 @@ class LifecycleMixin:
             finally:
                 self._shutdown_clean = clean
                 self._shutdown_complete = True
-    async def _run_shutdown_phase(
+    def _observe_shutdown_phase(
         self,
-        name: str,
-        operation: Callable[[], Awaitable[tuple[str, dict[str, object]]]],
-    ) -> LifecyclePhaseResult:
-        """Run one best-effort shutdown phase without aborting later phases."""
-        started = perf_counter()
-        try:
-            status, details = await operation()
-        except Exception:
-            result = LifecyclePhaseResult(
-                name=name,
-                status="failed",
-                duration_seconds=perf_counter() - started,
-            )
+        result: LifecyclePhaseResult,
+        error: Exception | None,
+    ) -> None:
+        """Log one shared lifecycle shutdown phase result."""
+        if error is not None:
             log.exception(
                 "[LIFECYCLE] event=shutdown phase=%s %s",
-                name,
-                kv(status=result.status, duration_ms=round(result.duration_seconds * 1000, 1)),
+                result.name,
+                kv(
+                    status=result.status,
+                    duration_ms=round(result.duration_seconds * 1000, 1),
+                ),
             )
-            return result
-        result = LifecyclePhaseResult(
-            name=name,
-            status=status,
-            duration_seconds=perf_counter() - started,
-            details=details,
-        )
+            return
         fields = {
             "status": result.status,
             "duration_ms": round(result.duration_seconds * 1000, 1),
             **result.details,
         }
         logger = log.info if result.healthy else log.warning
-        logger("[LIFECYCLE] event=shutdown phase=%s %s", name, kv(**fields))
-        return result
+        logger("[LIFECYCLE] event=shutdown phase=%s %s", result.name, kv(**fields))
+
     async def _shutdown_alerts(self) -> tuple[str, dict[str, object]]:
         alerts = getattr(self, "alerts", None)
         stop_alerts = getattr(alerts, "stop", None)
@@ -875,7 +837,6 @@ class LifecycleMixin:
             ("tasks", self._shutdown_tasks),
             ("db", self._shutdown_database),
         )
-        results: list[LifecyclePhaseResult] = []
-        for name, operation in phases:
-            results.append(await self._run_shutdown_phase(name, operation))
-        return self._log_shutdown_complete(results)
+        runner = LifecyclePhaseRunner(observer=self._observe_shutdown_phase)
+        results = await runner.run_all(phases, continue_on_error=True)
+        return self._log_shutdown_complete(list(results))
