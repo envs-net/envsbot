@@ -226,12 +226,7 @@ def _deployment(options: argparse.Namespace) -> Deployment:
 
     root = (options.root or _project_root()).expanduser().resolve()
     service = options.service
-    venv_value = (
-        options.venv
-        or os.environ.get("ENVSBOT_VENV")
-        or _systemd_venv(service)
-        or root / PROFILE.venv_name
-    )
+    venv_value = options.venv or os.environ.get("ENVSBOT_VENV") or _systemd_venv(service) or root / PROFILE.venv_name
     venv = Path(venv_value).expanduser().resolve()
     config = (options.config or _default_config(root, service)).expanduser().resolve()
     user = options.user or _default_service_account(service, "User", PROFILE.service_user)
@@ -255,10 +250,6 @@ def _deployment(options: argparse.Namespace) -> Deployment:
     )
 
 
-def _quote(args: Sequence[object]) -> str:
-    return " ".join(shlex.quote(str(item)) for item in args)
-
-
 def _run(
     args: Sequence[object],
     *,
@@ -269,42 +260,19 @@ def _run(
     cwd: Path | None = None,
     announce: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    command = [str(item) for item in args]
-    if as_service_user and deployment is not None:
-        current = pwd.getpwuid(os.geteuid()).pw_name
-        if deployment.service_user != current:
-            if os.geteuid() != 0:
-                raise DeployError(
-                    f"run this command as {deployment.service_user!r} or as root; "
-                    f"current user is {current!r}"
-                )
-            if shutil.which("runuser"):
-                command = ["runuser", "-u", deployment.service_user, "--", *command]
-            elif shutil.which("sudo"):
-                command = ["sudo", "-u", deployment.service_user, "--", *command]
-            else:
-                raise DeployError("runuser/sudo is required to execute commands as the service user")
-    if announce:
-        print(f"+ {_quote(command)}")
-    try:
-        result = subprocess.run(
-            command,
-            check=False,
-            cwd=str(cwd) if cwd else None,
-            env=deployment.environment if deployment else None,
-            capture_output=capture,
-            text=True,
-        )
-    except OSError as exc:
-        raise DeployError(f"could not execute {command[0]}: {exc}") from exc
-    if check and result.returncode != 0:
-        if capture:
-            if result.stdout.strip():
-                print(result.stdout.rstrip())
-            if result.stderr.strip():
-                print(result.stderr.rstrip(), file=sys.stderr)
-        raise DeployError(f"command failed with exit code {result.returncode}: {_quote(command)}")
-    return result
+    from envs_xmpp_ops.process import run_deploy_command
+
+    return run_deploy_command(
+        args,
+        cwd=cwd,
+        env=deployment.environment if deployment else None,
+        service_user=(deployment.service_user if as_service_user and deployment is not None else None),
+        capture=capture,
+        check=check,
+        announce=announce,
+        announce_prefix="+",
+        error_factory=DeployError,
+    )
 
 
 def _confirm(prompt: str) -> bool:
@@ -314,17 +282,24 @@ def _confirm(prompt: str) -> bool:
 
 
 def _require_confirmation(prompt: str) -> None:
-    if not _confirm(prompt):
-        raise UserCancelled("cancelled by operator")
+    from envs_xmpp_ops.interaction import require_confirmation
+
+    require_confirmation(
+        prompt,
+        confirm_func=_confirm,
+        error_factory=UserCancelled,
+    )
 
 
 def _require_source_tree(deployment: Deployment) -> None:
-    required = ("pyproject.toml", "config_sample.py", "vcard_sample.py", "scripts/deploy.sh")
-    missing = [name for name in required if not (deployment.root / name).is_file()]
-    if missing:
-        raise DeployError(
-            f"not an envsbot source checkout: {deployment.root} (missing: {', '.join(missing)})"
-        )
+    from envs_xmpp_ops.paths import require_source_tree
+
+    require_source_tree(
+        deployment.root,
+        ("pyproject.toml", "config_sample.py", "vcard_sample.py", "scripts/deploy.sh"),
+        project_name="envsbot",
+        error_factory=DeployError,
+    )
 
 
 def _account_exists(user: str) -> bool:
@@ -396,11 +371,14 @@ def _constraint_file(deployment: Deployment) -> Path:
 
 
 def _install_dependencies(deployment: Deployment) -> None:
-    constraints = _constraint_file(deployment)
-    _run(
-        [deployment.pip, "install", "-c", constraints, "-e", deployment.root],
+    from envs_xmpp_ops.venv import install_editable_checkout
+
+    install_editable_checkout(
+        pip=deployment.pip,
+        root=deployment.root,
+        constraints=_constraint_file(deployment),
+        run_command=_run,
         deployment=deployment,
-        as_service_user=True,
     )
 
 
@@ -417,7 +395,7 @@ def _create_venv_if_missing(deployment: Deployment) -> None:
 
 
 def _runtime_paths(deployment: Deployment) -> dict[str, Path | None]:
-    code = r'''
+    code = r"""
 import json
 from pathlib import Path
 from utils.bundled_assets import resolve_bundled_asset
@@ -435,7 +413,7 @@ print(json.dumps({
     "vcard": str(vcard_file(config).resolve()),
     "avatar": str(avatar.resolve()) if avatar else None,
 }))
-'''
+"""
     result = _run(
         [deployment.venv_python, "-c", code],
         deployment=deployment,
@@ -487,20 +465,6 @@ def _service_active(deployment: Deployment) -> bool:
         which=shutil.which,
         capture=False,
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _desired_systemd_values(deployment: Deployment) -> dict[str, object]:
@@ -572,26 +536,16 @@ def _desired_systemd_values(deployment: Deployment) -> dict[str, object]:
     }
 
 
-
-
 def _actual_systemd_values(deployment: Deployment) -> dict[str, object]:
     environment = _systemd_property(deployment.service, "Environment")
     config_value = _environment_assignment(environment, "ENVSBOT_CONFIG")
     fragment = _systemd_property(deployment.service, "FragmentPath")
     working_directory = _systemd_property(deployment.service, "WorkingDirectory")
-    exec_start = _exec_start_executable(
-        _systemd_property(deployment.service, "ExecStart")
-    )
+    exec_start = _exec_start_executable(_systemd_property(deployment.service, "ExecStart"))
     watchdog = _duration_seconds(_systemd_property(deployment.service, "WatchdogUSec"))
-    restart_delay = _duration_seconds(
-        _systemd_property(deployment.service, "RestartUSec")
-    )
-    start_timeout = _duration_seconds(
-        _systemd_property(deployment.service, "TimeoutStartUSec")
-    )
-    stop_timeout = _duration_seconds(
-        _systemd_property(deployment.service, "TimeoutStopUSec")
-    )
+    restart_delay = _duration_seconds(_systemd_property(deployment.service, "RestartUSec"))
+    start_timeout = _duration_seconds(_systemd_property(deployment.service, "TimeoutStartUSec"))
+    stop_timeout = _duration_seconds(_systemd_property(deployment.service, "TimeoutStopUSec"))
     return {
         "Unit file": _resolved_path_text(fragment),
         "Type": _systemd_property(deployment.service, "Type"),
@@ -607,39 +561,19 @@ def _actual_systemd_values(deployment: Deployment) -> dict[str, object]:
         "Start timeout": start_timeout,
         "Stop timeout": stop_timeout,
         "UMask": _umask_value(_systemd_property(deployment.service, "UMask")),
-        "NoNewPrivileges": _bool_value(
-            _systemd_property(deployment.service, "NoNewPrivileges")
-        ),
+        "NoNewPrivileges": _bool_value(_systemd_property(deployment.service, "NoNewPrivileges")),
         "PrivateTmp": _bool_value(_systemd_property(deployment.service, "PrivateTmp")),
-        "PrivateDevices": _bool_value(
-            _systemd_property(deployment.service, "PrivateDevices")
-        ),
+        "PrivateDevices": _bool_value(_systemd_property(deployment.service, "PrivateDevices")),
         "ProtectSystem": _systemd_property(deployment.service, "ProtectSystem"),
         "ProtectHome": _bool_value(_systemd_property(deployment.service, "ProtectHome")),
-        "ProtectKernelTunables": _bool_value(
-            _systemd_property(deployment.service, "ProtectKernelTunables")
-        ),
-        "ProtectKernelModules": _bool_value(
-            _systemd_property(deployment.service, "ProtectKernelModules")
-        ),
-        "ProtectKernelLogs": _bool_value(
-            _systemd_property(deployment.service, "ProtectKernelLogs")
-        ),
-        "ProtectControlGroups": _bool_value(
-            _systemd_property(deployment.service, "ProtectControlGroups")
-        ),
-        "RestrictSUIDSGID": _bool_value(
-            _systemd_property(deployment.service, "RestrictSUIDSGID")
-        ),
-        "LockPersonality": _bool_value(
-            _systemd_property(deployment.service, "LockPersonality")
-        ),
-        "ReadWritePaths": _path_set(
-            _systemd_property(deployment.service, "ReadWritePaths")
-        ),
+        "ProtectKernelTunables": _bool_value(_systemd_property(deployment.service, "ProtectKernelTunables")),
+        "ProtectKernelModules": _bool_value(_systemd_property(deployment.service, "ProtectKernelModules")),
+        "ProtectKernelLogs": _bool_value(_systemd_property(deployment.service, "ProtectKernelLogs")),
+        "ProtectControlGroups": _bool_value(_systemd_property(deployment.service, "ProtectControlGroups")),
+        "RestrictSUIDSGID": _bool_value(_systemd_property(deployment.service, "RestrictSUIDSGID")),
+        "LockPersonality": _bool_value(_systemd_property(deployment.service, "LockPersonality")),
+        "ReadWritePaths": _path_set(_systemd_property(deployment.service, "ReadWritePaths")),
     }
-
-
 
 
 def _check_installed_systemd(deployment: Deployment) -> bool:
@@ -665,7 +599,6 @@ def _check_installed_systemd(deployment: Deployment) -> bool:
             print(f"  FAIL  {name}: {current_text}")
             print(f"        expected: {expected_text}")
     return all_ok
-
 
 
 def _stop_active_service(deployment: Deployment, *, reason: str) -> bool:
@@ -730,11 +663,7 @@ def _is_stable_release_tag(tag: str) -> bool:
 
 def _latest_tag(deployment: Deployment) -> str:
     result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
-    tags = [
-        line.strip()
-        for line in result.stdout.splitlines()
-        if _is_stable_release_tag(line.strip())
-    ]
+    tags = [line.strip() for line in result.stdout.splitlines() if _is_stable_release_tag(line.strip())]
     if not tags:
         raise DeployError("no stable Git release tags (vX.Y.Z) found")
     return tags[0]
@@ -872,16 +801,18 @@ def _install_unit_if_missing(deployment: Deployment) -> None:
     install_unit_if_missing(
         unit=deployment.unit,
         service=deployment.service,
-        render_unit=lambda: _envsbot(
-            deployment,
-            "systemd",
-            "render",
-            "--user",
-            deployment.service_user,
-            "--group",
-            deployment.service_group,
-            capture=True,
-        ).stdout,
+        render_unit=lambda: (
+            _envsbot(
+                deployment,
+                "systemd",
+                "render",
+                "--user",
+                deployment.service_user,
+                "--group",
+                deployment.service_group,
+                capture=True,
+            ).stdout
+        ),
         service_exists=lambda: _systemctl_exists(deployment),
         confirm=_confirm,
         run_command=_run,
@@ -893,9 +824,7 @@ def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyRes
 
     _create_venv_if_missing(deployment)
     _install_dependencies(deployment)
-    created_config = _copy_if_missing(
-        deployment.root / "config_sample.py", deployment.config, deployment, mode=0o600
-    )
+    created_config = _copy_if_missing(deployment.root / "config_sample.py", deployment.config, deployment, mode=0o600)
     if created_config:
         print(
             "\nConfiguration was created but not guessed or edited. "
@@ -943,25 +872,21 @@ def install(deployment: Deployment) -> int:
     def validate_preconditions() -> None:
         if not _account_exists(deployment.service_user):
             raise DeployError(
-                f"service user {deployment.service_user!r} does not exist; "
-                "create it manually or use --user"
+                f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
             )
 
     run_install_transaction(
-        confirm_install=lambda: _require_confirmation(
-            "Proceed with the envsbot installation shown above?"
-        ),
+        confirm_install=lambda: _require_confirmation("Proceed with the envsbot installation shown above?"),
         validate_preconditions=validate_preconditions,
         stop_service=lambda: _stop_active_service(
             deployment, reason="before installing dependencies and deployment files"
         ),
         apply_install=lambda stopped: _finish_install(deployment, stopped=stopped),
         ask_start=lambda: _ask_start(deployment),
-        failure_message=(
-            f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."
-        ),
+        failure_message=(f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."),
     )
     return 0
+
 
 def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     runtime = _runtime_paths(deployment) if deployment.venv_python.is_file() and deployment.config.exists() else None
@@ -973,8 +898,7 @@ def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     print("  - preserve config/database/vCard/operator-avatar/systemd unit files")
     print("  - ask before stopping an active service")
     print(
-        "  - query stable vX.Y.Z release tags from the configured Git remote "
-        "without overwriting unrelated local tags"
+        "  - query stable vX.Y.Z release tags from the configured Git remote without overwriting unrelated local tags"
     )
     print("  - fetch and checkout only the selected release tag (never deploy main automatically)")
     print("  - refuse automatic downgrades; explicit older --to tags require --allow-downgrade")
@@ -1076,6 +1000,7 @@ def status(deployment: Deployment) -> int:
             print(f"  {label + ':':<{width + 1}}  {value}")
     return 0
 
+
 def check(deployment: Deployment) -> int:
     _require_source_tree(deployment)
     if not deployment.envsbot.is_file():
@@ -1099,11 +1024,11 @@ def check(deployment: Deployment) -> int:
 
     if not _check_installed_systemd(deployment):
         raise DeployError(
-            "installed systemd service differs from the rendered envsbot service; "
-            "review the FAIL entries above"
+            "installed systemd service differs from the rendered envsbot service; review the FAIL entries above"
         )
     print("OK  installed systemd service matches the rendered deployment")
     return 0
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
