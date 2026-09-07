@@ -11,6 +11,8 @@ from envs_xmpp_core.runtime.health import (
     HealthCheck,
     HealthSnapshot,
     HealthStatus,
+    analyze_task_snapshot,
+    watchdog_health_state,
 )
 from envs_xmpp_core.runtime.health import (
     collect_health_snapshot as collect_shared_health_snapshot,
@@ -19,6 +21,7 @@ from envs_xmpp_core.runtime.health import (
 from utils.backups import backup_age_seconds
 
 log = logging.getLogger(__name__)
+
 
 def _row_value(row: Any, key: str, default: Any = None) -> Any:
     try:
@@ -87,26 +90,28 @@ async def _tasks_check(bot: Any) -> HealthCheck:
     if supervisor is None:
         return HealthCheck("tasks", "unknown", "task supervisor unavailable")
 
+    snapshot_getter = getattr(supervisor, "snapshot", None)
+    tasks = list(snapshot_getter(include_done=True)) if callable(snapshot_getter) else []
+    diagnostics = analyze_task_snapshot(tasks)
+
     details = getattr(supervisor, "summary_by_kind", None)
     if callable(details):
         counts = dict(details() or {})
     else:
-        running, failed, finished = supervisor.summary()
-        counts = {
-            "services_running": int(running),
-            "one_shots_running": 0,
-            "one_shots_completed": int(finished),
-            "services_finished": 0,
-            "failed": int(failed),
-        }
+        summary = getattr(supervisor, "summary", None)
+        if callable(summary):
+            running, failed_count, finished = summary()
+            counts = {
+                "services_running": int(running),
+                "one_shots_running": 0,
+                "one_shots_completed": int(finished),
+                "services_finished": 0,
+                "failed": int(failed_count),
+            }
+        else:
+            counts = diagnostics.counts
 
-    snapshot_getter = getattr(supervisor, "snapshot", None)
-    tasks = list(snapshot_getter(include_done=True)) if callable(snapshot_getter) else []
-    open_circuits = tuple(
-        f"{getattr(item, 'plugin', '?')}/{getattr(item, 'name', '?')}"
-        for item in tasks
-        if str(getattr(item, "circuit_state", "closed")) == "open"
-    )
+    open_circuits = tuple(task.label for task in diagnostics.open_circuits)
     failed = int(counts.get("failed", 0) or 0)
     service_finished = int(counts.get("services_finished", 0) or 0)
     status: HealthStatus = "warning" if failed or service_finished or open_circuits else "ok"
@@ -186,9 +191,7 @@ async def _message_cache_check(bot: Any) -> HealthCheck:
     )
 
 
-async def _backup_check(
-    bot: Any, *, verify: bool, smoke_test: bool = False
-) -> HealthCheck:
+async def _backup_check(bot: Any, *, verify: bool, smoke_test: bool = False) -> HealthCheck:
     from utils.backups import list_backups, smoke_test_backup, verify_backup
 
     config = getattr(bot, "config", {}) or {}
@@ -200,11 +203,7 @@ async def _backup_check(
     archives = await asyncio.to_thread(list_backups)
     if not archives:
         status: HealthStatus = "warning" if managed_backup_expected else "ok"
-        summary = (
-            "no managed envsbot backup exists"
-            if managed_backup_expected
-            else "managed backups disabled"
-        )
+        summary = "no managed envsbot backup exists" if managed_backup_expected else "managed backups disabled"
         return HealthCheck(
             "backup",
             status,
@@ -224,9 +223,7 @@ async def _backup_check(
 
     latest = archives[0]
     age_seconds = backup_age_seconds(latest)
-    too_old = age_check_enabled and (
-        age_seconds is None or age_seconds >= max_age_hours * 3600
-    )
+    too_old = age_check_enabled and (age_seconds is None or age_seconds >= max_age_hours * 3600)
     validation_status = "not-checked"
     valid: bool | None = None
     if verify:
@@ -282,30 +279,21 @@ async def _database_check(bot: Any) -> HealthCheck:
 
 
 async def _watchdog_check(bot: Any) -> HealthCheck:
-    watchdog = getattr(bot, "watchdog", None)
-    runtime_state = getattr(watchdog, "runtime_state", None)
-    if callable(runtime_state):
-        state = dict(runtime_state() or {})
-    else:
-        raw = getattr(watchdog, "state", None)
-        if raw is None:
-            return HealthCheck("watchdog", "unknown", "runtime watchdog unavailable")
-        state = {
-            "last_lag_seconds": float(getattr(raw, "last_lag_seconds", 0.0) or 0.0),
-            "max_lag_seconds": float(getattr(raw, "max_lag_seconds", 0.0) or 0.0),
-            "last_error": getattr(raw, "last_error", None),
-            "worker_running": True,
-        }
+    diagnostics = watchdog_health_state(getattr(bot, "watchdog", None))
+    if not diagnostics.available:
+        return HealthCheck("watchdog", "unknown", "runtime watchdog unavailable")
+
     config = getattr(bot, "config", {}) or {}
     warning = max(0.1, float(config.get("watchdog_lag_warning_seconds", 2.0) or 2.0))
-    lag = float(state.get("last_lag_seconds", 0.0) or 0.0)
-    error = str(state.get("last_error") or "").strip()
+    lag = diagnostics.last_lag_seconds
+    error = diagnostics.last_error or ""
     status: HealthStatus = "warning" if error or lag >= warning else "ok"
+    state = diagnostics.as_dict()
     state["warning_seconds"] = warning
     return HealthCheck(
         "watchdog",
         status,
-        f"last lag {lag:.3f}s, max {float(state.get('max_lag_seconds', 0.0) or 0.0):.3f}s",
+        f"last lag {lag:.3f}s, max {diagnostics.max_lag_seconds:.3f}s",
         state,
         error or None,
     )
@@ -379,9 +367,7 @@ async def collect_health_snapshot(
         ("message_cache", lambda: _message_cache_check(bot)),
         (
             "backup",
-            lambda: _backup_check(
-                bot, verify=verify_backup, smoke_test=backup_smoke_test
-            ),
+            lambda: _backup_check(bot, verify=verify_backup, smoke_test=backup_smoke_test),
         ),
         ("database", lambda: _database_check(bot)),
         ("watchdog", lambda: _watchdog_check(bot)),
