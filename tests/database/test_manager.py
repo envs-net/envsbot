@@ -48,6 +48,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
     assert "command_usage" in table_names
     assert "schema_migrations" in table_names
     assert "reminders" in table_names
+    assert "release_state" in table_names
 
     applied = await db.applied_migration_versions()
     assert applied == {
@@ -61,6 +62,7 @@ async def test_database_manager_init_and_connect(tmp_db_path):
         "0008_outbox_dead_timestamp",
         "0009_outbox_origin_id",
         "0010_reminders",
+        "0011_release_state",
     }
     await db.close()
 

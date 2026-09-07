@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from envs_xmpp_core.release.state import ReleaseState
 
 from bot import lifecycle
 
@@ -75,23 +76,29 @@ def test_pending_version_change_ignores_unknown_baselines(previous, current, pen
 
 
 @pytest.mark.asyncio
-async def test_finalize_version_state_extends_existing_pending_chain(
-    monkeypatch,
-    tmp_path,
-):
-    state_path = tmp_path / "envsbot_version_state.json"
-    lifecycle._write_version_state(
-        state_path,
-        {
-            "version": "1.8.3",
-            "pending_announcement": {"from": "1.8.2", "to": "1.8.3"},
-        },
-    )
-    monkeypatch.setattr(
-        lifecycle,
-        "_version_state_path",
-        lambda config_obj: state_path,
-    )
+async def test_finalize_version_state_extends_existing_pending_chain(monkeypatch):
+    class Repo:
+        def __init__(self):
+            self.state = ReleaseState(
+                version="1.8.3",
+                pending_from="1.8.2",
+                pending_to="1.8.3",
+            )
+
+        def available(self):
+            return True
+
+        async def setup(self):
+            return None
+
+        async def load(self):
+            return self.state
+
+        async def save(self, state):
+            self.state = state
+
+    repo = Repo()
+    monkeypatch.setattr(lifecycle, "release_state_repository", lambda owner: repo)
     scheduled = []
 
     def fake_create_plugin_task(owner, plugin, coro, *, name=None):
@@ -112,8 +119,9 @@ async def test_finalize_version_state_extends_existing_pending_chain(
     bot = Bot()
     await bot._finalize_successful_startup_version()
 
-    assert lifecycle._read_version_state(state_path) == {
-        "version": "1.8.4",
-        "pending_announcement": {"from": "1.8.2", "to": "1.8.4"},
-    }
+    assert repo.state == ReleaseState(
+        version="1.8.4",
+        pending_from="1.8.2",
+        pending_to="1.8.4",
+    )
     assert scheduled == [(bot, "_runtime", "version-change-announcement")]

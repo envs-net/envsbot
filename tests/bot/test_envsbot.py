@@ -3,12 +3,14 @@ import asyncio
 import logging
 import slixmpp
 import types
+from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import envsbot
 import bot.lifecycle as lifecycle
 import bot.connection as connection
 import bot.permissions as bot_permissions
+from envs_xmpp_core.release.state import ReleaseState
 
 
 def noop(self):
@@ -45,6 +47,41 @@ def _check_no_mock_jid(val, path="jid"):
             _check_no_mock_jid(v, path+f"[{idx}]")
     elif isinstance(val, _mock.MagicMock):
         raise RuntimeError(f"MagicMock detected at {path}: {val}")
+
+
+class FakeReleaseStateRepository:
+    def __init__(self, state: ReleaseState | None = None):
+        self.state = state or ReleaseState()
+        self.setup_calls = 0
+
+    def available(self):
+        return True
+
+    async def setup(self):
+        self.setup_calls += 1
+
+    async def load(self):
+        return self.state
+
+    async def save(self, state):
+        self.state = state
+
+    async def clear_pending_if_matches(self, previous, current):
+        if self.state.pending_announcement != {"from": previous, "to": current}:
+            return False
+        self.state = ReleaseState(version=self.state.version)
+        return True
+
+
+def _patch_release_state(monkeypatch, state: ReleaseState | None = None):
+    repo = FakeReleaseStateRepository(state)
+    monkeypatch.setattr(lifecycle, "release_state_repository", lambda owner: repo)
+    monkeypatch.setattr(
+        lifecycle,
+        "_legacy_version_state_path",
+        lambda config_obj: Path("/definitely/missing/envsbot_version_state.json"),
+    )
+    return repo
 
 
 @pytest.fixture
@@ -629,10 +666,9 @@ def test_restart_notification_paths_include_persistent_fallback(tmp_path):
 
 @pytest.mark.asyncio
 async def test_finalize_successful_startup_version_seeds_without_announcement(
-    bot, monkeypatch, tmp_path
+    bot, monkeypatch
 ):
-    state_path = tmp_path / "envsbot_version_state.json"
-    monkeypatch.setattr(lifecycle, "_version_state_path", lambda config_obj: state_path)
+    repo = _patch_release_state(monkeypatch)
     scheduled = []
 
     def fake_create_plugin_task(owner, plugin, coro, *, name=None):
@@ -648,17 +684,15 @@ async def test_finalize_successful_startup_version_seeds_without_announcement(
 
     await bot._finalize_successful_startup_version()
 
-    assert lifecycle._read_version_state(state_path) == {"version": "1.8.2"}
+    assert repo.state == ReleaseState(version="1.8.2")
     assert scheduled == []
 
 
 @pytest.mark.asyncio
 async def test_finalize_successful_startup_version_persists_and_schedules_change(
-    bot, monkeypatch, tmp_path
+    bot, monkeypatch
 ):
-    state_path = tmp_path / "envsbot_version_state.json"
-    lifecycle._write_version_state(state_path, {"version": "1.8.1"})
-    monkeypatch.setattr(lifecycle, "_version_state_path", lambda config_obj: state_path)
+    repo = _patch_release_state(monkeypatch, ReleaseState(version="1.8.1"))
     scheduled = []
 
     def fake_create_plugin_task(owner, plugin, coro, *, name=None):
@@ -674,10 +708,11 @@ async def test_finalize_successful_startup_version_persists_and_schedules_change
 
     await bot._finalize_successful_startup_version()
 
-    assert lifecycle._read_version_state(state_path) == {
-        "version": "1.8.2",
-        "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
-    }
+    assert repo.state == ReleaseState(
+        version="1.8.2",
+        pending_from="1.8.1",
+        pending_to="1.8.2",
+    )
     assert scheduled == [(bot, "_runtime", "version-change-announcement")]
 
 
@@ -726,15 +761,9 @@ async def test_send_version_change_notification_uses_update_target(
 
 @pytest.mark.asyncio
 async def test_combined_restart_announcement_prevents_duplicate_version_notice(
-    bot, monkeypatch, tmp_path
+    bot, monkeypatch
 ):
-    state_path = tmp_path / "envsbot_version_state.json"
-    lifecycle._write_version_state(state_path, {"version": "1.8.1"})
-    monkeypatch.setattr(
-        lifecycle,
-        "_version_state_path",
-        lambda config_obj: state_path,
-    )
+    repo = _patch_release_state(monkeypatch, ReleaseState(version="1.8.1"))
     scheduled = []
 
     def fake_create_plugin_task(owner, plugin, coro, *, name=None):
@@ -754,50 +783,48 @@ async def test_combined_restart_announcement_prevents_duplicate_version_notice(
 
     await bot._finalize_successful_startup_version()
 
-    assert lifecycle._read_version_state(state_path) == {"version": "1.8.2"}
+    assert repo.state == ReleaseState(version="1.8.2")
     assert scheduled == []
 
 
 @pytest.mark.asyncio
-async def test_failed_version_change_delivery_keeps_pending_state(bot, tmp_path):
-    state_path = tmp_path / "envsbot_version_state.json"
-    expected = {
-        "version": "1.8.2",
-        "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
-    }
-    lifecycle._write_version_state(state_path, expected)
+async def test_failed_version_change_delivery_keeps_pending_state(bot):
+    repo = FakeReleaseStateRepository(
+        ReleaseState(
+            version="1.8.2",
+            pending_from="1.8.1",
+            pending_to="1.8.2",
+        )
+    )
     bot._send_version_change_notification = AsyncMock(return_value=False)
 
     await bot._deliver_pending_version_announcement(
-        state_path,
+        repo,
         "1.8.1",
         "1.8.2",
     )
 
-    assert lifecycle._read_version_state(state_path) == expected
+    assert repo.state.pending_announcement == {"from": "1.8.1", "to": "1.8.2"}
 
 
 @pytest.mark.asyncio
-async def test_delivered_version_change_clears_persisted_pending_state(
-    bot, tmp_path
-):
-    state_path = tmp_path / "envsbot_version_state.json"
-    lifecycle._write_version_state(
-        state_path,
-        {
-            "version": "1.8.2",
-            "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
-        },
+async def test_delivered_version_change_clears_persisted_pending_state(bot):
+    repo = FakeReleaseStateRepository(
+        ReleaseState(
+            version="1.8.2",
+            pending_from="1.8.1",
+            pending_to="1.8.2",
+        )
     )
     bot._send_version_change_notification = AsyncMock(return_value=True)
 
     await bot._deliver_pending_version_announcement(
-        state_path,
+        repo,
         "1.8.1",
         "1.8.2",
     )
 
-    assert lifecycle._read_version_state(state_path) == {"version": "1.8.2"}
+    assert repo.state == ReleaseState(version="1.8.2")
 
 
 def test_main_copy_behavior(monkeypatch, tmp_path):

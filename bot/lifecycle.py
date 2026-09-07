@@ -10,13 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
+from envs_xmpp_core.release.state import ReleaseState, ReleaseStateSqlRepository
 from envs_xmpp_core.release.transitions import (
     merge_pending_version_transition,
     version_transition,
 )
+from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
 
 from utils.logging_helpers import kv
+from utils.release_state import read_legacy_version_state, release_state_repository
 from utils.time_utils import utc_now
 from utils.version import __version__, display_version, normalized_version
 
@@ -26,62 +28,6 @@ _DEFAULT_RESTART_NOTIFICATION_FILE = "data/envsbot_restart_notification.json"
 _LEGACY_RESTART_NOTIFICATION_FILE = "/tmp/envsbot_restart_notification.json"
 
 
-_VERSION_STATE_SCHEMA = 1
-
-def _read_version_state(path: str | Path) -> dict[str, Any]:
-    """Read the persisted last-successful-version state."""
-    state_path = Path(path)
-    try:
-        with state_path.open(encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except FileNotFoundError:
-        return {}
-
-    if not isinstance(payload, dict):
-        raise ValueError("version state must be a JSON object")
-    raw_version = payload.get("version")
-    version = normalized_version(str(raw_version)) if raw_version is not None else ""
-    if version == "unknown":
-        version = ""
-    pending = payload.get("pending_announcement")
-    normalized_pending: dict[str, str] | None = None
-    if isinstance(pending, dict):
-        previous = normalized_version(str(pending.get("from", "")))
-        current = normalized_version(str(pending.get("to", "")))
-        if previous != "unknown" and current != "unknown" and previous != current:
-            normalized_pending = {"from": previous, "to": current}
-    result: dict[str, Any] = {}
-    if version:
-        result["version"] = version
-    if normalized_pending is not None:
-        result["pending_announcement"] = normalized_pending
-    return result
-
-def _write_version_state(path: str | Path, state: dict[str, Any]) -> None:
-    """Atomically persist the last-successful-version state."""
-    state_path = Path(path)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = state_path.with_name(f".{state_path.name}.{os.getpid()}.tmp")
-    payload = {
-        "schema": _VERSION_STATE_SCHEMA,
-        "version": normalized_version(str(state.get("version") or __version__)),
-        "updated_at": utc_now().isoformat(),
-    }
-    pending = state.get("pending_announcement")
-    if isinstance(pending, dict):
-        payload["pending_announcement"] = {
-            "from": normalized_version(str(pending.get("from", ""))),
-            "to": normalized_version(str(pending.get("to", ""))),
-        }
-    try:
-        with tmp_path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, state_path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 def _version_notification_target(config_obj: Any) -> str:
     """Return the configured target for successful version-change announcements."""
@@ -94,8 +40,8 @@ def _version_notification_target(config_obj: Any) -> str:
             return value
     return ""
 
-def _version_state_path(config_obj: Any) -> Path:
-    """Return the persistent successful-version state path lazily."""
+def _legacy_version_state_path(config_obj: Any) -> Path:
+    """Return the pre-0.8.1 JSON release-state path for one-time migration."""
     from utils.runtime_paths import version_state_file
 
     return version_state_file(config_obj)
@@ -331,29 +277,24 @@ class LifecycleMixin:
             return False
     async def _clear_pending_version_announcement(
         self,
-        state_path: Path,
+        repository: ReleaseStateSqlRepository,
         previous_version: str,
         current_version: str,
     ) -> None:
         """Clear a delivered pending transition without clobbering newer state."""
         try:
-            state = await asyncio.to_thread(_read_version_state, state_path)
-            pending = state.get("pending_announcement")
-            if pending != {"from": previous_version, "to": current_version}:
-                return
-            state.pop("pending_announcement", None)
-            state["version"] = normalized_version(
-                str(state.get("version") or current_version)
+            await repository.clear_pending_if_matches(
+                previous_version,
+                current_version,
             )
-            await asyncio.to_thread(_write_version_state, state_path, state)
         except Exception:
             log.exception(
-                "[ADMIN] event=version_state status=clear_pending_failed path=%s",
-                state_path,
+                "[ADMIN] event=version_state status=clear_pending_failed storage=database"
             )
+
     async def _deliver_pending_version_announcement(
         self,
-        state_path: Path,
+        repository: ReleaseStateSqlRepository,
         previous_version: str,
         current_version: str,
     ) -> None:
@@ -364,79 +305,125 @@ class LifecycleMixin:
         ):
             return
         await self._clear_pending_version_announcement(
-            state_path,
+            repository,
             previous_version,
             current_version,
         )
+
+    async def _load_release_state_with_legacy_migration(
+        self,
+        repository: ReleaseStateSqlRepository,
+    ) -> ReleaseState:
+        """Load DB state and migrate the historical JSON file once when present."""
+        state = await repository.load()
+        if state.version is not None or state.pending_announcement is not None:
+            return state
+
+        try:
+            legacy_path = _legacy_version_state_path(getattr(self, "config", {}))
+        except Exception:
+            log.warning(
+                "[ADMIN] event=version_state status=legacy_path_failed",
+                exc_info=True,
+            )
+            return state
+
+        try:
+            legacy_state = await asyncio.to_thread(read_legacy_version_state, legacy_path)
+        except Exception:
+            log.warning(
+                "[ADMIN] event=version_state status=legacy_read_failed path=%s",
+                legacy_path,
+                exc_info=True,
+            )
+            return state
+        if legacy_state.version is None and legacy_state.pending_announcement is None:
+            return state
+
+        await repository.save(legacy_state)
+        try:
+            legacy_path.unlink(missing_ok=True)
+        except OSError:
+            log.warning(
+                "[ADMIN] event=version_state status=legacy_cleanup_failed path=%s",
+                legacy_path,
+                exc_info=True,
+            )
+        log.info(
+            "[ADMIN] event=version_state status=migrated path=%s version=%s",
+            legacy_path,
+            legacy_state.version or "unknown",
+        )
+        return legacy_state
+
     async def _finalize_successful_startup_version(self) -> None:
         """Persist the successful version and schedule any required announcement."""
         current_version = normalized_version(getattr(self, "version", __version__))
-        try:
-            state_path = _version_state_path(getattr(self, "config", {}))
-        except Exception:
+        repository = release_state_repository(self)
+        if not repository.available():
             log.warning(
-                "[ADMIN] event=version_state status=path_failed version=%s",
+                "[ADMIN] event=version_state status=unavailable version=%s",
                 current_version,
-                exc_info=True,
             )
             return
         try:
-            state = await asyncio.to_thread(_read_version_state, state_path)
+            await repository.setup()
+            state = await self._load_release_state_with_legacy_migration(repository)
         except Exception:
             log.warning(
-                "[ADMIN] event=version_state status=read_failed path=%s; "
+                "[ADMIN] event=version_state status=read_failed storage=database; "
                 "treating this as first successful startup",
-                state_path,
                 exc_info=True,
             )
-            state = {}
-        previous_version = str(state.get("version") or "")
+            state = ReleaseState()
+
+        previous_version = state.version or ""
         pending = _merge_pending_version_change(
             previous_version,
             current_version,
-            state.get("pending_announcement"),
+            state.pending_announcement,
         )
 
         restart_announced = getattr(self, "_restart_version_change_announced", None)
         if isinstance(pending, dict) and pending == restart_announced:
             pending = None
-        next_state: dict[str, Any] = {"version": current_version}
-        if isinstance(pending, dict):
-            next_state["pending_announcement"] = pending
+        next_state = ReleaseState(
+            version=current_version,
+            pending_from=pending.get("from") if isinstance(pending, dict) else None,
+            pending_to=pending.get("to") if isinstance(pending, dict) else None,
+        )
         try:
-            await asyncio.to_thread(_write_version_state, state_path, next_state)
+            await repository.save(next_state)
         except Exception:
             log.warning(
-                "[ADMIN] event=version_state status=write_failed path=%s version=%s",
-                state_path,
+                "[ADMIN] event=version_state status=write_failed storage=database version=%s",
                 current_version,
                 exc_info=True,
             )
             return
         if not isinstance(pending, dict):
             log.info(
-                "[ADMIN] event=version_state status=recorded path=%s version=%s",
-                state_path,
+                "[ADMIN] event=version_state status=recorded storage=database version=%s",
                 current_version,
             )
             return
         previous = str(pending["from"])
         current = str(pending["to"])
         log.info(
-            "[ADMIN] event=version_state status=pending path=%s "
+            "[ADMIN] event=version_state status=pending storage=database "
             "from_version=%s to_version=%s",
-            state_path,
             previous,
             current,
         )
 
         try:
             from utils.task_supervisor import create_plugin_task
+
             create_plugin_task(
                 self,
                 "_runtime",
                 self._deliver_pending_version_announcement(
-                    state_path,
+                    repository,
                     previous,
                     current,
                 ),
@@ -451,6 +438,7 @@ class LifecycleMixin:
                 previous,
                 current,
             )
+
     async def _create_startup_backup(self) -> None:
         """Create one optional managed backup during this bot process start."""
         if self._startup_backup_done:

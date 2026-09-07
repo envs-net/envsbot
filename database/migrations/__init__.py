@@ -14,6 +14,8 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from envs_xmpp_core.release.state import RELEASE_STATE_TABLE_SQL
+
 MigrationCallable = Callable[[object], Awaitable[None]]
 
 
@@ -200,6 +202,14 @@ async def _reminders(db) -> None:
         )
 
 
+async def _release_state(db) -> None:
+    """Create the shared successful-start release-state table."""
+    await db.write(
+        RELEASE_STATE_TABLE_SQL,
+        label="migration_release_state",
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "0001_initial_runtime_tables",
@@ -250,6 +260,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         "0010_reminders",
         "Create persistent reminder storage and indexes",
         _reminders,
+    ),
+    Migration(
+        "0011_release_state",
+        "Create shared successful-start release state",
+        _release_state,
     ),
 )
 

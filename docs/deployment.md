@@ -236,10 +236,12 @@ RESTART_NOTIFICATION_FILE = "/var/lib/envsbot/restart_notification.json"
 ```
 
 `RUNTIME_DATA_DIR` contains mutable support files (`vcard.py`, `chat_slang.csv`,
-slang review queues, profile hash markers and `envsbot_version_state.json`). The version-state file records the
-last successful startup version and any pending post-upgrade announcement. When it is unset, envsbot keeps the historical application-root
-location; setting it explicitly is required for a read-only hardened
-production checkout. The packaged `init_chat_slang.csv` is copied there automatically on
+slang review queues and profile hash markers). Successful-start release state is stored in the
+main SQLite database. Existing `envsbot_version_state.json` files are imported into that table
+once and then removed after a successful migration. When `RUNTIME_DATA_DIR` is unset, envsbot
+keeps the historical application-root location for the remaining support files; setting it
+explicitly is required for a read-only hardened production checkout. The packaged
+`init_chat_slang.csv` is copied there automatically on
 first startup. The default avatar is bundled with the Python package as well, so
 production deployments do not need `avatar.jpg` or `init_chat_slang.csv` copies
 in the application root. Configure a separate `AVATAR_PATH` only when using a

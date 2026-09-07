@@ -68,24 +68,25 @@ def test_restart_notification_paths_are_ordered_and_deduplicated(config_obj, exp
     assert lifecycle._restart_notification_paths(config_obj) == expected
 
 
-def test_version_state_round_trip(tmp_path):
+def test_legacy_version_state_reader_normalizes_existing_json(tmp_path):
     path = tmp_path / "envsbot_version_state.json"
-    lifecycle._write_version_state(
-        path,
-        {
-            "version": "v1.8.2",
-            "pending_announcement": {"from": "v1.8.1", "to": "v1.8.2"},
-        },
+    path.write_text(
+        '{"version":"v1.8.2","pending_announcement":'
+        '{"from":"v1.8.1","to":"v1.8.2"}}\n',
+        encoding="utf-8",
     )
 
-    assert lifecycle._read_version_state(path) == {
+    state = lifecycle.read_legacy_version_state(path)
+    assert state.as_mapping() == {
         "version": "1.8.2",
         "pending_announcement": {"from": "1.8.1", "to": "1.8.2"},
     }
 
 
-def test_version_state_missing_file_is_empty(tmp_path):
-    assert lifecycle._read_version_state(tmp_path / "missing.json") == {}
+def test_legacy_version_state_missing_file_is_empty(tmp_path):
+    assert lifecycle.read_legacy_version_state(
+        tmp_path / "missing.json"
+    ).as_mapping() == {}
 
 
 @pytest.mark.parametrize(

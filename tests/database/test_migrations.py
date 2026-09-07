@@ -72,6 +72,22 @@ async def test_outbox_origin_id_migration_backfills_existing_rows(tmp_db_path):
         await db.close()
 
 
+
+@pytest.mark.asyncio
+async def test_release_state_migration_creates_shared_table(tmp_db_path):
+    from database.manager import DatabaseManager
+
+    db = DatabaseManager(tmp_db_path, flush_interval=999)
+    await db.connect(start_background=False)
+    try:
+        rows = await db.fetch_all(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='release_state'"
+        )
+        assert [row["name"] for row in rows] == ["release_state"]
+    finally:
+        await db.close()
+
+
 def test_migration_checksum_and_catalog_fingerprint_are_stable_and_sensitive():
     migrations = available_migrations()
     checksums = [migration_checksum(item) for item in migrations]
