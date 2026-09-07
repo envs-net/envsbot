@@ -854,6 +854,7 @@ def _print_paths(
     for label, value in rows:
         print(f"  {label + ':':<{width + 1}}  {value}")
 
+
 def _install_plan(deployment: Deployment) -> None:
     _print_paths(deployment)
     print("\nInstall plan:")
@@ -863,6 +864,28 @@ def _install_plan(deployment: Deployment) -> None:
     print("  - create vcard.py from vcard_sample.py only when the configured vCard is missing")
     print("  - install a newly rendered systemd unit only when no unit exists and you confirm it")
     print("  - ask separately before starting the service")
+
+
+def _install_unit_if_missing(deployment: Deployment) -> None:
+    from envs_xmpp_ops.systemd import install_unit_if_missing
+
+    install_unit_if_missing(
+        unit=deployment.unit,
+        service=deployment.service,
+        render_unit=lambda: _envsbot(
+            deployment,
+            "systemd",
+            "render",
+            "--user",
+            deployment.service_user,
+            "--group",
+            deployment.service_group,
+            capture=True,
+        ).stdout,
+        service_exists=lambda: _systemctl_exists(deployment),
+        confirm=_confirm,
+        run_command=_run,
+    )
 
 
 def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyResult:
@@ -903,38 +926,7 @@ def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyRes
         deployment.service_group,
     )
 
-    if deployment.unit.exists() or _systemctl_exists(deployment):
-        print(f"KEEP existing systemd service file for {deployment.service}; it will not be replaced.")
-    elif _confirm(f"Install a new systemd unit at {deployment.unit}?"):
-        rendered = _envsbot(
-            deployment,
-            "systemd",
-            "render",
-            "--user",
-            deployment.service_user,
-            "--group",
-            deployment.service_group,
-            capture=True,
-        ).stdout
-        deployment.unit.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with deployment.unit.open("x", encoding="utf-8") as unit_file:
-                unit_file.write(rendered)
-        except FileExistsError:
-            print(f"KEEP existing {deployment.unit}; it appeared before installation completed.")
-        else:
-            deployment.unit.chmod(0o644)
-            print(f"CREATE {deployment.unit}")
-            if shutil.which("systemd-analyze"):
-                try:
-                    _run(["systemd-analyze", "verify", deployment.unit])
-                except DeployError:
-                    deployment.unit.unlink(missing_ok=True)
-                    print(f"REMOVE invalid newly created unit {deployment.unit}", file=sys.stderr)
-                    raise
-            _run(["systemctl", "daemon-reload"])
-    else:
-        print("SKIP systemd unit installation (operator choice)")
+    _install_unit_if_missing(deployment)
 
     return InstallApplyResult()
 
