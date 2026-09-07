@@ -204,7 +204,8 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]: ...
 ## Shared runtime health
 
 `utils.health` is the single collection layer for operator-facing runtime health.
-It creates a detached `HealthSnapshot` with isolated checks for rooms, tasks,
+It uses the shared `envs_xmpp_core.runtime.health` snapshot/collector primitives
+to create a detached `HealthSnapshot` with isolated checks for rooms, tasks,
 outbox, message-cache persistence, backups, database maintenance, watchdog,
 plugin load failures, IdleRPG public export and immediate alerts. `,status`,
 `,report`, `,doctor` and `AdminAlertManager` render or act on that same structured

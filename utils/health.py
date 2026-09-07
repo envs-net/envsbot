@@ -3,70 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
+
+from envs_xmpp_core.runtime.health import (
+    HealthCheck,
+    HealthSnapshot,
+    HealthStatus,
+    collect_health_snapshot as collect_shared_health_snapshot,
+)
 
 from utils.backups import backup_age_seconds
-from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
-
-HealthStatus = Literal["ok", "warning", "error", "unknown"]
-
-
-@dataclass(frozen=True)
-class HealthCheck:
-    """One privacy-safe health check with structured data for renderers."""
-
-    key: str
-    status: HealthStatus
-    summary: str
-    data: dict[str, Any] = field(default_factory=dict)
-    error: str | None = None
-
-    @property
-    def needs_attention(self) -> bool:
-        return self.status in {"warning", "error"}
-
-
-@dataclass(frozen=True)
-class HealthSnapshot:
-    """Detached point-in-time health view of the running bot."""
-
-    checked_at: str
-    checks: dict[str, HealthCheck]
-
-    def check(self, key: str) -> HealthCheck:
-        return self.checks.get(
-            key,
-            HealthCheck(key=key, status="unknown", summary="unavailable"),
-        )
-
-    @property
-    def needs_attention(self) -> bool:
-        return any(check.needs_attention for check in self.checks.values())
-
-    @property
-    def problem_keys(self) -> tuple[str, ...]:
-        return tuple(
-            key for key, check in self.checks.items() if check.needs_attention
-        )
-
 
 def _row_value(row: Any, key: str, default: Any = None) -> Any:
     try:
         return row[key]
     except (KeyError, TypeError, IndexError):
         return default
-
-
-async def _maybe_await(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 async def _rooms_check(bot: Any) -> HealthCheck:
@@ -406,24 +362,6 @@ async def _alerts_check(bot: Any) -> HealthCheck:
     )
 
 
-async def _safe_collect(key: str, collector: Any) -> HealthCheck:
-    try:
-        result = await _maybe_await(collector())
-        if isinstance(result, HealthCheck):
-            return result
-        raise TypeError(f"{key} collector returned {type(result).__name__}")
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        return HealthCheck(
-            key,
-            "error",
-            f"health check failed: {type(exc).__name__}",
-            {},
-            f"{type(exc).__name__}: {exc}",
-        )
-
-
 async def collect_health_snapshot(
     bot: Any,
     *,
@@ -451,10 +389,4 @@ async def collect_health_snapshot(
     if include_alert_manager:
         collectors.append(("alerts", lambda: _alerts_check(bot)))
 
-    checks: dict[str, HealthCheck] = {}
-    for key, collector in collectors:
-        checks[key] = await _safe_collect(key, collector)
-    return HealthSnapshot(
-        checked_at=utc_now().isoformat(timespec="seconds"),
-        checks=checks,
-    )
+    return await collect_shared_health_snapshot(collectors)
