@@ -18,14 +18,15 @@ from typing import Any
 
 from envs_xmpp_core.storage.archive import (
     UnsafeArchiveMember,
-    extract_zip_member,
     safe_zip_members,
 )
 from envs_xmpp_core.storage.backup import (
+    BackupArchiveEntrySpec,
     BackupArchiveError,
     BackupArchiveSource,
     build_backup_archive,
     read_backup_manifest,
+    stage_backup_archive,
     verify_backup_archive,
 )
 from envs_xmpp_core.storage.managed import (
@@ -724,23 +725,33 @@ def _stage_archive_entries(
     specs: list[tuple[str, Path]],
     stage_dir: Path,
 ) -> dict[str, Path]:
-    """Extract all live restore inputs before any target is changed."""
-    staged: dict[str, Path] = {}
-    with zipfile.ZipFile(archive_path) as archive:
-        members = _safe_members(archive)
-        for index, (entry, _target) in enumerate(specs):
-            if entry not in members:
-                raise BackupError(f"Backup archive is missing restore entry: {entry}")
-            target = stage_dir / f"{index:02d}-{Path(entry).name}"
-            extract_zip_member(
-                archive,
-                entry,
-                target,
-                mode=PRIVATE_FILE_MODE,
-                fsync=True,
-            )
-            staged[entry] = target
-    return staged
+    """Verify and stage all live restore inputs through the shared archive core."""
+    try:
+        staged = stage_backup_archive(
+            archive_path,
+            stage_dir,
+            entries=[
+                BackupArchiveEntrySpec(
+                    key=entry,
+                    member=entry,
+                    required=True,
+                    mode=PRIVATE_FILE_MODE,
+                )
+                for entry, _target in specs
+            ],
+            manifest_name=MANIFEST_NAME,
+            expected_fields={"app": "envsbot"},
+        )
+    except BackupArchiveError as exc:
+        raise BackupError(str(exc)) from exc
+
+    result: dict[str, Path] = {}
+    for entry, _target in specs:
+        source = staged.entries.get(entry)
+        if source is None:
+            raise BackupError(f"Backup archive is missing restore entry: {entry}")
+        result[entry] = source
+    return result
 
 
 def _replace_from_stage(source: Path, target: Path) -> None:
