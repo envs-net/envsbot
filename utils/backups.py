@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
-import json
 import logging
 import os
 import re
@@ -13,7 +11,6 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +20,13 @@ from envs_xmpp_core.storage.archive import (
     UnsafeArchiveMember,
     extract_zip_member,
     safe_zip_members,
-    zip_member_sha256,
+)
+from envs_xmpp_core.storage.backup import (
+    BackupArchiveError,
+    BackupArchiveSource,
+    build_backup_archive,
+    read_backup_manifest,
+    verify_backup_archive,
 )
 from envs_xmpp_core.storage.managed import (
     ManagedFile,
@@ -150,14 +153,6 @@ def backup_smoke_test_on_create() -> bool:
     return bool(config.get("backup_smoke_test_on_create", True))
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _archive_name(reason: str) -> str:
     timestamp = _now().strftime("%Y%m%d-%H%M%S-%f")
     return f"{BACKUP_PREFIX}-{timestamp}-{_safe_reason(reason)}.zip"
@@ -209,69 +204,24 @@ async def _create_database_snapshot(bot: Any, source_path: Path, target_path: Pa
         await asyncio.to_thread(shutil.copy2, source_path, target_path)
 
 
-def _write_file(
-    path: Path,
-    arcname: str,
-    archive: zipfile.ZipFile,
-    *,
-    source_path: Path | None = None,
-) -> dict[str, Any]:
-    """Compress and hash one file inside the backup worker thread."""
-    archive.write(path, arcname)
-    return {
-        "name": arcname,
-        "source": str(source_path or path),
-        "size": path.stat().st_size,
-        "sha256": _sha256(path),
-    }
-
-
 def _build_backup_archive(
-    tmp_path: Path,
     archive_path: Path,
-    directory: Path,
     manifest: dict[str, Any],
     source_items: list[tuple[str, Path, Path]],
 ) -> None:
-    """Build, verify and publish an archive outside the XMPP event loop."""
+    """Build and atomically publish an archive outside the XMPP event loop."""
+    sources = [
+        BackupArchiveSource(
+            name=arcname,
+            path=archive_source,
+            source=original_source,
+        )
+        for arcname, archive_source, original_source in source_items
+    ]
     try:
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for arcname, archive_source, original_source in source_items:
-                try:
-                    if not archive_source.exists():
-                        raise FileNotFoundError(original_source)
-                    item = _write_file(
-                        archive_source,
-                        arcname,
-                        archive,
-                        source_path=original_source,
-                    )
-                    manifest["files"].append(item)
-                except FileNotFoundError:
-                    manifest["missing"].append(
-                        {"name": arcname, "source": str(original_source)}
-                    )
-
-            archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2, sort_keys=True))
-
-        with zipfile.ZipFile(tmp_path) as archive:
-            if archive.testzip() is not None:
-                raise BackupError("new backup archive failed CRC verification")
-            if MANIFEST_NAME not in archive.namelist():
-                raise BackupError("new backup archive has no manifest")
-        with tmp_path.open("rb") as handle:
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, archive_path)
-        ensure_private_file(archive_path)
-        with suppress(OSError):
-            dir_fd = os.open(directory, os.O_DIRECTORY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        build_backup_archive(archive_path, sources=sources, manifest=manifest)
+    except BackupArchiveError as exc:
+        raise BackupError(str(exc)) from exc
 
 
 async def create_backup(
@@ -286,45 +236,30 @@ async def create_backup(
 
     db_path = _resolve_path(config.get("db", "bot.db"))
     archive_path = directory / _archive_name(reason)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{archive_path.name}.",
-        suffix=".tmp",
-        dir=directory,
-    )
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    os.chmod(tmp_path, PRIVATE_FILE_MODE)
     manifest: dict[str, Any] = {
+        "format": "envsbot-backup-v1",
         "app": "envsbot",
         "version": __version__,
         "created_at": _iso_now(),
         "reason": reason,
-        "files": [],
-        "missing": [],
     }
 
-    try:
-        with tempfile.TemporaryDirectory(prefix="envsbot-backup-") as tmpdir:
-            db_snapshot = Path(tmpdir) / "bot.db"
-            if db_path.exists():
-                await _create_database_snapshot(bot, db_path, db_snapshot)
+    with tempfile.TemporaryDirectory(prefix="envsbot-backup-") as tmpdir:
+        db_snapshot = Path(tmpdir) / "bot.db"
+        if db_path.exists():
+            await _create_database_snapshot(bot, db_path, db_snapshot)
 
-            archive_sources: list[tuple[str, Path, Path]] = []
-            for arcname, original_source in _source_items(db_path):
-                archive_source = db_snapshot if arcname == "bot.db" else original_source
-                archive_sources.append((arcname, archive_source, original_source))
+        archive_sources: list[tuple[str, Path, Path]] = []
+        for arcname, original_source in _source_items(db_path):
+            archive_source = db_snapshot if arcname == "bot.db" else original_source
+            archive_sources.append((arcname, archive_source, original_source))
 
-            await asyncio.to_thread(
-                _build_backup_archive,
-                tmp_path,
-                archive_path,
-                directory,
-                manifest,
-                archive_sources,
-            )
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        await asyncio.to_thread(
+            _build_backup_archive,
+            archive_path,
+            manifest,
+            archive_sources,
+        )
 
     should_verify = backup_smoke_test_on_create() if verify is None else bool(verify)
     if should_verify:
@@ -353,15 +288,13 @@ async def create_backup(
 
 def _read_manifest(path: Path) -> dict[str, Any]:
     try:
-        with zipfile.ZipFile(path) as archive:
-            with archive.open(MANIFEST_NAME) as handle:
-                data = json.load(handle)
-    except KeyError as exc:
-        raise BackupError(f"Backup archive has no {MANIFEST_NAME}: {path.name}") from exc
-    except Exception as exc:
+        data = read_backup_manifest(path, manifest_name=MANIFEST_NAME)
+    except BackupArchiveError as exc:
+        if f"no {MANIFEST_NAME}" in str(exc):
+            raise BackupError(f"Backup archive has no {MANIFEST_NAME}: {path.name}") from exc
         raise BackupError(f"Could not read backup manifest {path.name}: {exc}") from exc
 
-    if not isinstance(data, dict) or data.get("app") != "envsbot":
+    if data.get("app") != "envsbot":
         raise BackupError(f"Backup archive is not an EnvsBot backup: {path.name}")
     return data
 
@@ -1037,41 +970,21 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
     }
 
 
-def _archive_member_sha256(archive: zipfile.ZipFile, name: str) -> str:
-    """Hash one archive member without loading a large database into memory."""
-    return zip_member_sha256(archive, name)
-
-
 def verify_backup(path: Path) -> dict[str, Any]:
     """Verify a managed backup archive manifest and member checksums."""
     path = path.resolve()
     manifest = _read_manifest(path)
-    errors: list[str] = []
-    files = manifest.get("files", [])
-    with zipfile.ZipFile(path) as archive:
-        archive_test = archive.testzip()
-        if archive_test is not None:
-            errors.append(f"zip CRC failed for {archive_test}")
-        members = _safe_members(archive)
-        for item in files:
-            name = str(item.get("name") or "")
-            expected = str(item.get("sha256") or "")
-            if not name:
-                errors.append("manifest file without name")
-                continue
-            if name not in members:
-                errors.append(f"missing archive member: {name}")
-                continue
-            if expected:
-                digest = _archive_member_sha256(archive, name)
-                if digest != expected:
-                    errors.append(f"checksum mismatch: {name}")
+    verification = verify_backup_archive(
+        path,
+        manifest_name=MANIFEST_NAME,
+        expected_fields={"app": "envsbot"},
+    )
     return {
         "name": path.name,
-        "ok": not errors,
-        "errors": errors,
+        "ok": verification.ok,
+        "errors": list(verification.errors),
         "manifest": manifest,
-        "files": [str(item.get("name", "?")) for item in files],
+        "files": list(verification.files),
     }
 
 

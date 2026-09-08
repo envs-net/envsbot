@@ -98,6 +98,7 @@ async def test_create_backup_contains_runtime_files_and_manifest(backup_env):
         assert {"bot.db", "config.py", "vcard.py", "chat_slang.csv", "manifest.json"} <= names
         manifest = json.loads(zf.read("manifest.json"))
 
+    assert manifest["format"] == "envsbot-backup-v1"
     assert manifest["app"] == "envsbot"
     assert manifest["reason"] == "manual test"
     assert {item["name"] for item in manifest["files"]} >= {
@@ -478,7 +479,7 @@ async def test_create_backup_removes_temporary_archive_after_write_failure(
     def fail_write(*_args, **_kwargs):
         raise RuntimeError("archive write failed")
 
-    monkeypatch.setattr(backups, "_write_file", fail_write)
+    monkeypatch.setattr(backups, "build_backup_archive", fail_write)
     with pytest.raises(RuntimeError, match="archive write failed"):
         await backups.create_backup(bot, reason="failure", prune=False)
 
