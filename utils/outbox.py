@@ -10,8 +10,11 @@ import time
 import uuid
 from typing import Any
 
+from envs_xmpp_core.runtime.diagnostics import exception_summary
+from envs_xmpp_core.storage import OutboxCapacityError
+from envs_xmpp_core.storage.outbox import retry_delay_seconds
+
 from bot.room_state import JOINED_ROOMS
-from database.outbox import OutboxCapacityError
 from utils.performance import observe
 from utils.task_supervisor import (
     ExpectedTaskExit,
@@ -203,12 +206,13 @@ class PersistentOutbox:
             )
         except OutboxCapacityError as exc:
             self.capacity_rejections += 1
-            self.last_error = f"{type(exc).__name__}: {exc}"
+            summary = exception_summary(exc)
+            self.last_error = f"{type(exc).__name__}: {summary}"
             log.error("[OUTBOX] Queue capacity rejected message: %s", exc)
             alerts = getattr(self.bot, "alerts", None)
             report = getattr(alerts, "report_outbox_capacity", None)
             if callable(report):
-                await report(str(exc))
+                await report(summary)
             return None
         self.wakeup.set()
         return message_id
@@ -247,12 +251,11 @@ class PersistentOutbox:
 
     def _retry_delay(self, attempts: int) -> int:
         config = getattr(self.bot, "config", {}) or {}
-        initial = max(1, int(config.get("outbox_retry_initial_seconds", 30) or 30))
-        maximum = max(
-            initial,
-            int(config.get("outbox_retry_max_seconds", 1800) or 1800),
+        return retry_delay_seconds(
+            attempts,
+            initial=int(config.get("outbox_retry_initial_seconds", 30) or 30),
+            maximum=int(config.get("outbox_retry_max_seconds", 1800) or 1800),
         )
-        return min(maximum, initial * (2 ** max(0, int(attempts))))
 
     async def _ensure_notification_room_ready(
         self,
@@ -319,7 +322,8 @@ class PersistentOutbox:
                 raise RuntimeError("Slixmpp did not accept the stanza")
         except Exception as exc:
             self.failed_attempts += 1
-            self.last_error = f"{type(exc).__name__}: {exc}"
+            summary = exception_summary(exc)
+            self.last_error = f"{type(exc).__name__}: {summary}"
             dead = await store.mark_failed(
                 queued,
                 exc,
@@ -392,7 +396,8 @@ class PersistentOutbox:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    self.last_error = f"{type(exc).__name__}: {exc}"
+                    summary = exception_summary(exc)
+                    self.last_error = f"{type(exc).__name__}: {summary}"
                     log.exception("[OUTBOX] Worker iteration failed")
                 if processed:
                     await asyncio.sleep(0)

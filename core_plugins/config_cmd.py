@@ -18,6 +18,9 @@ from envs_xmpp_core.config.python_file import (
 from envs_xmpp_core.config.python_file import (
     assignment_ranges as _core_assignment_ranges,
 )
+from envs_xmpp_core.security import is_secret_key as _central_is_secret_key
+from envs_xmpp_core.security import redact_named as _central_redact_named
+from envs_xmpp_core.security import redact_value as _central_redact
 
 from utils.audit import audit_event
 from utils.backups import create_backup
@@ -43,9 +46,6 @@ from utils.config import (
 from utils.config.spec import sensitive_keys
 from utils.file_security import PRIVATE_FILE_MODE
 from utils.formatting import format_page, paginate_lines, parse_page_args
-from utils.redaction import is_secret_key as _central_is_secret_key
-from utils.redaction import redact_named as _central_redact_named
-from utils.redaction import redact_value as _central_redact
 from utils.room_features import clear_room_feature_caches
 
 PLUGIN_META = {

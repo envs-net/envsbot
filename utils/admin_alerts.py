@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
 from typing import Any
+
+from envs_xmpp_core.runtime.alerts import TransitionAlertState as AlertState
 
 from utils.admin_notify import notify_admin
 from utils.health import HealthSnapshot, collect_health_snapshot
@@ -15,14 +16,6 @@ from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
 
-
-@dataclass
-class AlertState:
-    active: bool = False
-    since: int = 0
-    last_notified_at: int = 0
-    summary: str = ""
-    fingerprint: str = ""
 
 
 class AdminAlertManager:

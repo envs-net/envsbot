@@ -1,8 +1,9 @@
 """Split module for core_plugins/rooms.py: state."""
 
+import asyncio
 import logging
 
-from envs_xmpp_core.xmpp.muc_join import join_muc_with_timeout as _core_join_muc_with_timeout
+from envs_xmpp_core.xmpp.muc_join import join_muc_confirmed
 from envs_xmpp_core.xmpp.stanza import (
     maybe_await_result as _maybe_await_result,
 )
@@ -33,6 +34,7 @@ _DIRECT_INVITE_NS = "jabber:x:conference"
 
 _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 _ROOM_JOIN_TIMEOUT_SECONDS = 30.0
+_ROOM_JOIN_EVENTS: dict[str, asyncio.Event] = {}
 
 
 def _jid_bare(value) -> str:
@@ -48,8 +50,28 @@ def _jid_bare(value) -> str:
         return str(value).split("/", 1)[0].lower()
 
 
+def _room_join_event(room_jid: str) -> asyncio.Event:
+    """Return the self-presence event used by one in-flight room join."""
+    event = _ROOM_JOIN_EVENTS.get(room_jid)
+    if event is None:
+        event = asyncio.Event()
+        _ROOM_JOIN_EVENTS[room_jid] = event
+    return event
+
+
+def _room_self_presence_confirmed(bot, room_jid: str) -> bool:
+    """Return whether runtime state contains the bot's confirmed presence."""
+    room_info = JOINED_ROOMS.get(room_jid)
+    if not isinstance(room_info, dict) or room_info.get("confirmed") is not True:
+        return False
+    # The detailed room state is written directly from authoritative self-
+    # presence. PresenceManager.joined_rooms is only a routing mirror and can
+    # legitimately lag behind it; _mark_room_joined() heals that mirror.
+    return bool(str(room_info.get("nick") or ""))
+
+
 async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
-    """Join one MUC without allowing an unavailable room to block forever."""
+    """Join one MUC and require the bot's own presence before success."""
 
     def log_cleanup_error(exc: Exception) -> None:
         log.debug(
@@ -58,17 +80,41 @@ async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
             exc_info=(type(exc), exc, exc.__traceback__),
         )
 
-    await _core_join_muc_with_timeout(
+    def clear_stale_state() -> None:
+        JOINED_ROOMS.pop(room_jid, None)
+        presence_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", None)
+        if isinstance(presence_rooms, dict):
+            presence_rooms.pop(room_jid, None)
+
+    result = await join_muc_confirmed(
         muc,
         room_jid,
         nick,
+        is_joined=lambda: _room_self_presence_confirmed(bot, room_jid),
         timeout=_ROOM_JOIN_TIMEOUT_SECONDS,
+        retries=1,
         join_kwargs={
             "pshow": bot.presence.status["show"],
             "pstatus": bot.presence.status["status"],
         },
+        event=_room_join_event(room_jid),
+        clear_state=clear_stale_state,
+        cleanup_on_failure=True,
         on_cleanup_error=log_cleanup_error,
     )
+    if result.joined:
+        if result.waiter_error is not None:
+            log.debug(
+                "[ROOMS] %s ended after self-presence for %s: %s",
+                result.api_name,
+                room_jid,
+                result.waiter_error,
+            )
+        return
+    error = result.error or TimeoutError(
+        f"No self-presence received within {_ROOM_JOIN_TIMEOUT_SECONDS:g}s"
+    )
+    raise error
 
 
 def _get_plugin_store(bot, plugin_name: str):
@@ -170,6 +216,7 @@ async def _leave_runtime_room(bot, room_jid: str) -> bool:
 
     JOINED_ROOMS.pop(room_jid, None)
     presence_rooms.pop(room_jid, None)
+    _ROOM_JOIN_EVENTS.pop(room_jid, None)
 
     if joined:
         broadcast = getattr(getattr(bot, "presence", None), "broadcast", None)

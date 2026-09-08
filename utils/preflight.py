@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from envs_xmpp_core.security import redact_text
+
 from database.manager import DatabaseManager
 from database.migrations import (
     available_migrations,
@@ -30,7 +32,6 @@ from utils.file_security import (
     sensitive_permission_targets,
 )
 from utils.plugin_metadata import validate_plugin_metadata
-from utils.redaction import redact_text
 
 log = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]

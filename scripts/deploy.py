@@ -12,7 +12,6 @@ import grp
 import json
 import os
 import pwd
-import shlex
 import shutil
 import subprocess
 import sys
@@ -74,21 +73,30 @@ class Deployment:
 
     @property
     def envsbot(self) -> Path:
-        return self.venv / "bin" / "envsbot"
+        from envs_xmpp_ops.layout import venv_binary
+
+        return venv_binary(self.venv, "envsbot")
 
     @property
     def pip(self) -> Path:
-        return self.venv / "bin" / "pip"
+        from envs_xmpp_ops.layout import venv_binary
+
+        return venv_binary(self.venv, "pip")
 
     @property
     def venv_python(self) -> Path:
-        return self.venv / "bin" / "python"
+        from envs_xmpp_ops.layout import venv_binary
+
+        return venv_binary(self.venv, "python")
 
     @property
     def environment(self) -> dict[str, str]:
-        env = os.environ.copy()
-        env["ENVSBOT_CONFIG"] = str(self.config)
-        return env
+        from envs_xmpp_ops.layout import deployment_environment
+
+        return deployment_environment(
+            config_environment="ENVSBOT_CONFIG",
+            config=self.config,
+        )
 
 
 def _project_root() -> Path:
@@ -118,45 +126,34 @@ def _systemd_property(service: str, prop: str) -> str:
 
 
 def _systemd_config_path(service: str) -> Path | None:
-    environment = _systemd_property(service, "Environment")
-    if not environment:
-        return None
-    try:
-        values = shlex.split(environment)
-    except ValueError:
-        values = environment.split()
-    for value in values:
-        if value.startswith("ENVSBOT_CONFIG="):
-            configured = value.split("=", 1)[1].strip()
-            if configured:
-                path = Path(configured).expanduser()
-                if not path.is_absolute():
-                    workdir = _systemd_property(service, "WorkingDirectory")
-                    base = Path(workdir).expanduser() if workdir else _project_root()
-                    path = base / path
-                return path.resolve()
-    return None
+    from envs_xmpp_ops.layout import resolve_environment_path, systemd_environment_value
+
+    configured = systemd_environment_value(
+        _systemd_property(service, "Environment"),
+        "ENVSBOT_CONFIG",
+    )
+    return resolve_environment_path(
+        configured,
+        working_directory=_systemd_property(service, "WorkingDirectory"),
+        fallback_directory=_project_root(),
+    )
 
 
 def _systemd_venv(service: str) -> Path | None:
-    exec_start = _systemd_property(service, "ExecStart")
-    marker = "path="
-    if marker not in exec_start:
-        return None
-    executable = exec_start.split(marker, 1)[1].split(";", 1)[0].strip()
-    path = Path(executable).expanduser()
-    if path.name == "envsbot" and path.parent.name == "bin":
-        return path.parent.parent.resolve()
-    return None
+    from envs_xmpp_ops.layout import systemd_venv
+
+    return systemd_venv(_systemd_property(service, "ExecStart"), "envsbot")
 
 
 def _default_service_account(service: str, prop: str, fallback: str) -> str:
-    env_name = f"ENVSBOT_SERVICE_{prop.upper()}"
-    configured = os.environ.get(env_name)
-    if configured:
-        return configured
-    discovered = _systemd_property(service, prop)
-    return discovered or fallback
+    from envs_xmpp_ops.layout import service_account
+
+    return service_account(
+        environment=os.environ,
+        environment_name=f"ENVSBOT_SERVICE_{prop.upper()}",
+        discovered=_systemd_property(service, prop),
+        fallback=fallback,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:

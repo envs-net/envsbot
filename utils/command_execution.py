@@ -9,11 +9,12 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from envs_xmpp_core.security import redact_text, redact_value
+
 from utils.command import Role
 from utils.config import config
 from utils.logging_helpers import kv
 from utils.performance import observe_group
-from utils.redaction import redact_text, redact_value
 
 log = logging.getLogger(__name__)
 

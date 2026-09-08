@@ -1,5 +1,10 @@
 """Split module for core_plugins/users.py: permissions."""
 
+from envs_xmpp_core.xmpp.occupants import (
+    find_occupant_by_jid,
+    occupant_is_admin_or_owner,
+)
+
 from utils.command import Role, role_from_int
 from utils.config import config
 
@@ -267,11 +272,9 @@ def _cached_room_affiliation_allows(jid: str, room_jid: str) -> bool:
     try:
         from bot.room_state import JOINED_ROOMS
         room_data = JOINED_ROOMS.get(room_jid, {}) or {}
-        for occupant in (room_data.get("nicks", {}) or {}).values():
-            occupant_jid = _parse_user_jid(occupant.get("jid"))
-            affiliation = str(occupant.get("affiliation") or "").lower()
-            if occupant_jid == jid and affiliation in {"admin", "owner"}:
-                return True
+        occupant = find_occupant_by_jid(room_data.get("nicks", {}) or {}, jid, room=room_jid)
+        if occupant is not None and occupant_is_admin_or_owner(occupant):
+            return True
     except Exception:
         log.debug("[USERS] Could not inspect cached room affiliations",
                   exc_info=True)

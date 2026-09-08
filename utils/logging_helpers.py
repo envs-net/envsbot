@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from utils.redaction import redact_value
+from envs_xmpp_core.security import redact_value
 
 
 def _format_value(value: Any) -> str:

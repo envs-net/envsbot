@@ -6,6 +6,8 @@ import logging
 from typing import Any
 
 import slixmpp
+from envs_xmpp_core.xmpp.messaging import is_muc_private_message
+from envs_xmpp_core.xmpp.occupants import find_occupant_by_nick
 
 from bot.context import CommandContext
 from bot.permissions import role_bypasses_rate_limit
@@ -51,7 +53,7 @@ class CommandDispatchMixin:
             nick = getattr(from_jid, "resource", None)
         except Exception:
             return False
-        return msg_type in ("chat", "normal") and bool(nick) and room in self._joined_room_jids()
+        return is_muc_private_message(msg_type, room, nick, self._joined_room_jids())
 
     def _get_message_room_and_nick(self, msg: Any) -> tuple[str | None, str | None]:
         """Resolve room and nick from a message if possible."""
@@ -80,10 +82,17 @@ class CommandDispatchMixin:
             from bot.room_state import JOINED_ROOMS
 
             room_data = JOINED_ROOMS.get(room, {}) or {} if room else {}
-            nick_data = (room_data.get("nicks", {}) or {}).get(nick, {}) or {}
-            jid = nick_data.get("jid")
-            if jid:
-                return jid
+            room_occupants = room_data.get("nicks", {}) or {}
+            occupant = find_occupant_by_nick(
+                room_occupants,
+                nick,
+                room=room or "",
+            )
+            if occupant is not None and occupant.jid:
+                # Preserve the historical full real-JID return value here;
+                # sender authorization still normalizes it to bare JID below.
+                source = room_occupants.get(occupant.nick, {}) or {}
+                return source.get("jid") or occupant.jid
         except Exception:
             log.debug("[BOT] Error getting JID from joined room state", exc_info=True)
         return None

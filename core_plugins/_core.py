@@ -14,6 +14,10 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from envs_xmpp_core.xmpp.occupants import (
+    find_occupant_by_nick,
+    occupant_is_admin_or_owner,
+)
 from slixmpp import JID
 
 from bot.room_state import JOINED_ROOMS
@@ -430,7 +434,6 @@ def paginate_items(
 # ------------------------------------------------------------------------
 
 _CONTROL_COMMANDS = {"on", "off", "status"}
-_ADMIN_AFFILIATIONS = {"admin", "owner"}
 
 
 def _room_and_nick_from_muc_pm(msg):
@@ -446,7 +449,14 @@ def _get_muc_occupant(room_jid: str, nick: str) -> dict | None:
     if not room_data:
         return None
 
-    return room_data.get("nicks", {}).get(nick)
+    normalized = find_occupant_by_nick(room_data.get("nicks", {}), nick, room=room_jid)
+    if normalized is None:
+        return None
+    # Keep the existing mutable mapping contract for plugin callers.
+    for cached_nick, info in (room_data.get("nicks", {}) or {}).items():
+        if str(cached_nick).casefold() == normalized.nick.casefold():
+            return info
+    return None
 
 
 async def is_room_moderator_or_admin(
@@ -463,8 +473,7 @@ async def is_room_moderator_or_admin(
     if not occupant:
         return False
 
-    affiliation = str(occupant.get("affiliation") or "").lower()
-    if affiliation in {"admin", "owner"}:
+    if occupant_is_admin_or_owner(occupant):
         return True
 
     real_jid = occupant.get("jid")
@@ -501,9 +510,7 @@ async def muc_pm_sender_can_manage_room(
     if not occupant:
         return False, room_jid, "⛔ Could not verify your room permissions."
 
-    affiliation = str(occupant.get("affiliation") or "").lower()
-
-    if affiliation in _ADMIN_AFFILIATIONS:
+    if occupant_is_admin_or_owner(occupant):
         return True, room_jid, None
 
     real_jid = occupant.get("jid")

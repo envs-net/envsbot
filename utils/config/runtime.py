@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from envs_xmpp_core.config.changes import config_value_changes
+from envs_xmpp_core.security import redact_named
 
 from utils.config.spec import (
     DUCK_FIELDS,
@@ -17,7 +18,6 @@ from utils.config.spec import (
 )
 from utils.http_user_agent import resolve_user_agent
 from utils.rate_limiter import TokenBucketRateLimiter
-from utils.redaction import redact_named
 
 log = logging.getLogger(__name__)
 

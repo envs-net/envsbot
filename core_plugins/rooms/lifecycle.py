@@ -22,6 +22,7 @@ from .invites import (
 from .presence import on_muc_presence
 from .state import (
     _LEAVING_ROOMS,
+    _ROOM_JOIN_EVENTS,
     JOINED_ROOMS,
     _jid_bare,
     _join_muc_with_timeout,
@@ -476,4 +477,5 @@ async def on_unload(bot):
 
     JOINED_ROOMS.clear()
     bot.presence.joined_rooms.clear()
+    _ROOM_JOIN_EVENTS.clear()
     _REJOIN_STATE.clear()

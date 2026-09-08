@@ -1,5 +1,6 @@
 import core_plugins.rooms as rooms
 import core_plugins.rooms.lifecycle as rooms_lifecycle
+import core_plugins.rooms.state as rooms_state
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import types
@@ -64,6 +65,7 @@ def cleanup_joined_rooms():
     rooms.JOINED_ROOMS.clear()
     rooms._LEAVING_ROOMS.clear()
     rooms_lifecycle._REJOIN_STATE.clear()
+    rooms_state._ROOM_JOIN_EVENTS.clear()
     yield
     rooms.JOINED_ROOMS.clear()
     rooms.JOINED_ROOMS.update(orig)
@@ -71,6 +73,7 @@ def cleanup_joined_rooms():
     rooms._LEAVING_ROOMS.update(orig_leaving)
     rooms_lifecycle._REJOIN_STATE.clear()
     rooms_lifecycle._REJOIN_STATE.update(orig_rejoin)
+    rooms_state._ROOM_JOIN_EVENTS.clear()
 
 
 @pytest.fixture
@@ -84,7 +87,12 @@ def fake_bot():
     bot.bot_plugins = MagicMock()
     bot.bot_plugins.cleanup_room_state = AsyncMock(return_value={})
     # plugin system
-    bot.plugin = {"xep_0045": MagicMock()}
+    muc = MagicMock()
+    # Explicitly model the legacy-only API by default. MagicMock would
+    # otherwise fabricate a callable join_muc_wait attribute that real
+    # Slixmpp plugins only expose when that API actually exists.
+    muc.join_muc_wait = None
+    bot.plugin = {"xep_0045": muc}
     # DB interface
     bot.db = MagicMock()
     bot.db.rooms = MagicMock()

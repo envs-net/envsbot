@@ -2,6 +2,11 @@
 
 import inspect
 
+from envs_xmpp_core.xmpp.occupants import (
+    find_occupant_by_jid,
+    occupant_is_admin_or_owner,
+)
+
 from utils.command import Role
 
 from .state import JOINED_ROOMS, _jid_bare, log
@@ -31,14 +36,8 @@ def _sender_has_room_affiliation(sender_jid: str, room_jid: str) -> bool:
     nicks = room_data.get("nicks") or {}
     if not isinstance(nicks, dict):
         return False
-    for occupant in tuple(nicks.values()):
-        if not isinstance(occupant, dict):
-            continue
-        occupant_jid = _jid_bare(occupant.get("jid"))
-        affiliation = str(occupant.get("affiliation") or "").lower()
-        if occupant_jid == sender_bare and affiliation in {"admin", "owner"}:
-            return True
-    return False
+    occupant = find_occupant_by_jid(nicks, sender_bare, room=room_jid)
+    return bool(occupant and occupant_is_admin_or_owner(occupant))
 
 
 async def _sender_can_manage_room_settings(bot, sender_jid: str, room_jid: str) -> bool:

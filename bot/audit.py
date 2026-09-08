@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from utils.redaction import redact_named, redact_value
+from envs_xmpp_core.security import redact_named, redact_value
 
 log = logging.getLogger(__name__)
 

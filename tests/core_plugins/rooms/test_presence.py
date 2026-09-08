@@ -148,6 +148,7 @@ async def test_autojoin_rooms_keeps_presence_mirror_when_join_event_wins_race(fa
             "affiliation": "admin",
             "role": "moderator",
             "nicks": {nick: {}},
+            "confirmed": True,
         }
 
     fake_bot.plugin["xep_0045"].join_muc = AsyncMock(side_effect=join_muc)

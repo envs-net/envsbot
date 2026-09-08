@@ -3,8 +3,10 @@
 import asyncio
 import inspect
 
+from envs_xmpp_core.xmpp.occupants import normalize_affiliation, normalize_role
+
 from .permissions import _sender_can_manage_room_settings
-from .state import _LEAVING_ROOMS, JOINED_ROOMS, _jid_bare, log
+from .state import _LEAVING_ROOMS, JOINED_ROOMS, _jid_bare, _room_join_event, log
 
 
 def _looks_like_room_jid(value: object) -> bool:
@@ -146,7 +148,8 @@ async def on_muc_presence(bot, pres):
             return
 
         # --- Else: presence update or join (available) ---
-        affiliation = affiliation if affiliation is not None else "unknown"
+        affiliation = normalize_affiliation(affiliation)
+        role = normalize_role(role)
         previous = nicks.get(nick, {}) if isinstance(nicks.get(nick, {}), dict) else {}
         resolved_jid = jid_bare or previous.get("jid")
         nicks[nick] = {
@@ -156,7 +159,7 @@ async def on_muc_presence(bot, pres):
             # breaks plugins that need to map messages back to registered users.
             "jid": resolved_jid,
             "affiliation": affiliation,
-            "role": role if role is not None else "unknown"
+            "role": role
         }
 
         # Update bot's own state in room_info if relevant. The detailed
@@ -166,10 +169,8 @@ async def on_muc_presence(bot, pres):
         # authoritative self-presence so missing state heals automatically.
         if jid_bare == bot.boundjid.bare:
             room_info["confirmed"] = True
-            if affiliation is not None:
-                room_info["affiliation"] = affiliation
-            if role is not None:
-                room_info["role"] = role
+            room_info["affiliation"] = affiliation
+            room_info["role"] = role
             if nick != room_info["nick"]:
                 room_info["nick"] = nick
             presence_rooms = getattr(
@@ -177,6 +178,7 @@ async def on_muc_presence(bot, pres):
             )
             if isinstance(presence_rooms, dict):
                 presence_rooms[room] = nick
+            _room_join_event(room).set()
 
         JOINED_ROOMS[room] = room_info
 

@@ -7,6 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 
 import slixmpp
+from envs_xmpp_core.xmpp.occupants import (
+    find_occupant_by_jid,
+    occupant_is_admin_or_owner,
+)
 
 from utils.command import Role, role_from_int
 
@@ -69,14 +73,9 @@ class PermissionMixin:
             if not room_info:
                 return db_role
             nicks = room_info.get("nicks", {})
-            for nick_info in tuple(nicks.values()):
-                try:
-                    if str(nick_info.get("jid")) == str(jid):
-                        affiliation = nick_info.get("affiliation", "")
-                        if affiliation in ("admin", "owner") and db_role > Role.MODERATOR:
-                            return Role.MODERATOR
-                except Exception as exc:
-                    log.debug("[BOT] Error checking room affiliation: %s", exc)
+            occupant = find_occupant_by_jid(nicks, jid, room=room)
+            if occupant is not None and occupant_is_admin_or_owner(occupant) and db_role > Role.MODERATOR:
+                return Role.MODERATOR
         except Exception:
             log.debug("[BOT] Could not inspect room presence state", exc_info=True)
         return db_role
