@@ -26,10 +26,14 @@ session starts or on plugin reload.
 
 import asyncio
 import hashlib
-import inspect
 import logging
 import os
 
+from envs_xmpp_core.xmpp.avatar import (
+    cache_xep0153_hash,
+    load_avatar_payload,
+    publish_xep0084_avatar,
+)
 from slixmpp.xmlstream import ET
 
 from bot.connection import session_is_ready
@@ -94,11 +98,6 @@ def _load_vcard_xml(path):
     namespace = load_python_namespace(path, module_name="_envsbot_runtime_vcard")
     return namespace["VCARD"]
 
-
-def _read_binary_file(path):
-    """Read a local binary file for an async caller."""
-    with open(path, "rb") as handle:
-        return handle.read()
 
 
 def write_hash(path, value):
@@ -237,126 +236,88 @@ async def update_vcard(bot):
 # -------------------------------------------------
 # AVATAR UPDATE
 # -------------------------------------------------
-async def _cache_xep0153_hash(bot, image_hash):
-    """Seed Slixmpp's XEP-0153 hash cache for outgoing presence.
-
-    The plugin's outgoing filter rewrites ``vcard_temp_update/photo`` from its
-    internal hash cache. Explicitly seeding the cache removes a startup race
-    between profile loading and the plugin's own session-start vCard lookup.
-    """
-    try:
-        plugin = bot["xep_0153"]
-        api = getattr(plugin, "api", None)
-        if api is None:
-            return False
-        setter = api["set_hash"]
-        result = setter(bot.boundjid, args=image_hash)
-        if inspect.isawaitable(result):
-            result = await result
-        return result is not False
-    except Exception:
-        log.debug(
-            "[_REG_PROFILE] Could not seed XEP-0153 avatar hash cache",
-            exc_info=True,
-        )
-        return False
-
-
 async def update_avatar(bot):
+    """Publish the configured avatar through modern and legacy XMPP paths.
+
+    XEP-0084 data/metadata and the XEP-0054/XEP-0153 compatibility path are
+    attempted independently.  The persisted v2 marker is written only after
+    both network publications succeed, so a partial server-side update is
+    retried on the next profile refresh.
     """
-    Publish the bot's avatar using XMPP avatar protocols.
-
-    Parameters
-    ----------
-    bot : Bot
-        Instance of the Slixmpp-based bot.
-
-    Process
-    -------
-    1. Load the avatar file defined in the configuration.
-    2. Calculate the SHA1 hash of the image.
-    3. Compare the hash with the stored avatar hash.
-    4. If unchanged, skip publishing.
-    5. Otherwise publish the avatar using XEP-0084.
-
-    Avatar Requirements
-    -------------------
-    - Supported formats: PNG or JPEG
-    - The image is read as binary data and sent directly
-      through the Slixmpp XEP-0084 helper function.
-
-    Notes
-    -----
-    The avatar is distributed via Personal Eventing Protocol
-    (XEP-0163) so that clients subscribed to the user will
-    automatically receive avatar updates.
-    """
-
     if not session_is_ready(bot):
         log.warning("[_REG_PROFILE] Avatar update skipped: XMPP session is not ready")
         return
 
     avatar_path = config.get("avatar")
     avatar_type = config.get("avatar_type")
-
     if not avatar_path:
         return
 
     try:
-        try:
-            resolved_avatar = resolve_bundled_asset(str(avatar_path))
-            avatar = await asyncio.to_thread(_read_binary_file, resolved_avatar)
-        except FileNotFoundError:
-            log.warning("[_REG_PROFILE]🟡️ Avatar file not found")
-            return
+        resolved_avatar = resolve_bundled_asset(str(avatar_path))
+        payload = await asyncio.to_thread(
+            load_avatar_payload,
+            resolved_avatar,
+            media_type=avatar_type,
+        )
+    except FileNotFoundError:
+        log.warning("[_REG_PROFILE]🟡️ Avatar file not found")
+        return
+    except (OSError, ValueError) as exc:
+        log.error("[_REG_PROFILE]🔴 Invalid avatar: %s", exc)
+        return
 
-        image_hash = sha1(avatar)
-        bot.avatar_hash = image_hash
+    image_hash = payload.sha1
+    new_hash = f"v2:{image_hash}"
+    stored_hash = await asyncio.to_thread(read_hash, AVATAR_HASH_FILE)
 
-        # v2 marker forces one republish after this change, even if the old
-        # avatar_hash.asc already contains the raw SHA1 from the XEP-0084-only
-        # code.
-        new_hash = f"v2:{image_hash}"
-        stored_hash = await asyncio.to_thread(read_hash, AVATAR_HASH_FILE)
-
-        if stored_hash == new_hash:
-            log.debug("[_REG_PROFILE] Avatar unchanged — skipping upload")
-            await _cache_xep0153_hash(bot, image_hash)
+    if stored_hash == new_hash:
+        log.debug("[_REG_PROFILE] Avatar unchanged — skipping upload")
+        if await cache_xep0153_hash(bot, image_hash):
+            bot.avatar_hash = image_hash
             if hasattr(bot, "presence"):
                 bot.presence.broadcast()
-            return
+        else:
+            log.debug("[_REG_PROFILE] Could not seed XEP-0153 avatar hash cache")
+        return
 
-        if avatar_type not in ("image/png", "image/jpeg"):
-            log.error("[_REG_PROFILE]🔴 Avatar must be PNG or JPEG")
-            return
+    xep0084_ok = False
+    try:
+        await publish_xep0084_avatar(bot, payload)
+        xep0084_ok = True
+    except Exception as exc:  # Slixmpp may expose transport/IQ errors by plugin version.
+        log.warning("[_REG_PROFILE]🟡 XEP-0084 avatar publish failed: %s", exc)
 
-        # XEP-0084 / PEP avatar for modern clients.
-        pubsub = bot["xep_0084"]
-        await pubsub.publish_avatar(avatar)
-        await pubsub.publish_avatar_metadata([
-            {
-                "id": image_hash,
-                "type": avatar_type,
-                "bytes": len(avatar),
-            }
-        ])
-
-        # XEP-0153 / vCard-based avatar for clients and MUC views
-        # that still rely on vCard PHOTO/BINVAL + presence hash.
+    xep0153_ok = False
+    try:
+        # Slixmpp's XEP-0153 helper updates PHOTO/BINVAL in the existing
+        # XEP-0054 vCard, preserving the configured profile fields.
         await bot["xep_0153"].set_avatar(
             jid=bot.boundjid.bare,
-            avatar=avatar,
-            mtype=avatar_type,
+            avatar=payload.data,
+            mtype=payload.media_type,
         )
-        await _cache_xep0153_hash(bot, image_hash)
+        xep0153_ok = True
+    except Exception as exc:  # Slixmpp may expose transport/IQ errors by plugin version.
+        log.warning("[_REG_PROFILE]🟡 XEP-0054/XEP-0153 avatar publish failed: %s", exc)
 
+    if xep0153_ok:
+        if await cache_xep0153_hash(bot, image_hash):
+            bot.avatar_hash = image_hash
+            if hasattr(bot, "presence"):
+                bot.presence.broadcast()
+        else:
+            log.debug("[_REG_PROFILE] Could not seed XEP-0153 avatar hash cache")
+
+    if xep0084_ok and xep0153_ok:
         await asyncio.to_thread(write_hash, AVATAR_HASH_FILE, new_hash)
-        if hasattr(bot, "presence"):
-            bot.presence.broadcast()
         log.info("[_REG_PROFILE]✅ Avatar updated")
-
-    except Exception as e:
-        log.error(f"[_REG_PROFILE]🔴 Avatar update failed: {e}")
+    elif xep0084_ok or xep0153_ok:
+        log.warning(
+            "[_REG_PROFILE]🟡 Avatar updated only partially; publication will be retried"
+        )
+    else:
+        log.error("[_REG_PROFILE]🔴 Avatar update failed on all XMPP publication paths")
 
 
 # -------------------------------------------------

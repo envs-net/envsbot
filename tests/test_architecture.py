@@ -402,7 +402,7 @@ def test_profile_acronym_and_restart_file_io_stays_off_event_loop():
     targets = {
         "core_plugins/_reg_profile.py": {
             "update_vcard": {"_load_vcard_xml", "read_hash", "write_hash", "open", "exists"},
-            "update_avatar": {"_read_binary_file", "read_hash", "write_hash", "open", "exists"},
+            "update_avatar": {"load_avatar_payload", "read_hash", "write_hash", "open", "exists"},
         },
         "plugins/info.py": {
             "acronyms_cmd": {"_lookup_acronym_descriptions", "open", "exists"},

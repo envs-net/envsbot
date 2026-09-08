@@ -1,5 +1,7 @@
 import logging
 
+from envs_xmpp_core.xmpp.avatar import set_presence_avatar_hash
+
 # === set up logging ===
 log = logging.getLogger(__name__)
 
@@ -53,16 +55,6 @@ class PresenceManager:
             return None
         return str(avatar_hash)
 
-    @staticmethod
-    def _set_avatar_hash(presence, avatar_hash):
-        """Set one XEP-0153 avatar payload on a stream-bound presence.
-
-        XEP-0153 registers ``vcard_temp_update`` as a stanza plugin. Using the
-        plugin interface lets Slixmpp's outgoing filter update the same XML
-        element instead of appending a second ``<x/>`` payload.
-        """
-        presence["vcard_temp_update"]["photo"] = avatar_hash
-
     def _send_presence(self, pto=None):
         """Create and send one stream-bound presence stanza.
 
@@ -95,7 +87,7 @@ class PresenceManager:
 
         presence = self.bot.make_presence(**kwargs)
         if avatar_hash:
-            self._set_avatar_hash(presence, avatar_hash)
+            set_presence_avatar_hash(presence, avatar_hash)
 
         if getattr(presence, "stream", None) is None:
             log.warning(

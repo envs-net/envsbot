@@ -1,5 +1,4 @@
 import pytest
-import io
 import types
 import builtins
 
@@ -293,6 +292,7 @@ async def test_cache_xep0153_hash_supports_async_api_and_missing_api():
         bare="bot@example.org",
         full="bot@example.org/envsbot",
     )
+
     class AvatarBot(dict):
         def __init__(self, plugins):
             super().__init__(plugins)
@@ -302,231 +302,258 @@ async def test_cache_xep0153_hash_supports_async_api_and_missing_api():
         "xep_0153": types.SimpleNamespace(api={"set_hash": set_hash}),
     })
 
-    assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is True
+    assert await _reg_profile.cache_xep0153_hash(bot, "abc123") is True
     assert calls == [(boundjid, "abc123")]
 
-    sync_calls = []
-
-    def set_hash_sync(jid, *, args):
-        sync_calls.append((jid, args))
-        return None
-
-    bot["xep_0153"] = types.SimpleNamespace(
-        api={"set_hash": set_hash_sync},
-    )
-    assert await _reg_profile._cache_xep0153_hash(bot, "def456") is True
-    assert sync_calls == [(boundjid, "def456")]
-
-    async def reject_hash(_jid, *, args):
-        assert args == "rejected"
-        return False
-
-    bot["xep_0153"] = types.SimpleNamespace(
-        api={"set_hash": reject_hash},
-    )
-    assert await _reg_profile._cache_xep0153_hash(bot, "rejected") is False
-
     bot["xep_0153"] = types.SimpleNamespace()
-    assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is False
+    assert await _reg_profile.cache_xep0153_hash(bot, "abc123") is False
 
-    class BrokenAPI:
-        def __getitem__(self, key):
-            raise KeyError(key)
 
-    bot["xep_0153"] = types.SimpleNamespace(api=BrokenAPI())
-    assert await _reg_profile._cache_xep0153_hash(bot, "abc123") is False
+class _AvatarBot(dict):
+    def __init__(self, plugins):
+        super().__init__(plugins)
+        self.boundjid = types.SimpleNamespace(bare="bot@example.org")
+        self.avatar_hash = None
+        self.presence_calls = 0
+        self.presence = types.SimpleNamespace(broadcast=self._broadcast)
+
+    def _broadcast(self):
+        self.presence_calls += 1
 
 
 @pytest.mark.asyncio
-async def test_update_avatar_all_paths(monkeypatch, tmp_path):
-    # Cover avatar_path missing, not exists, bad type, unchanged,
-    # error, success
+async def test_update_avatar_unchanged_seeds_hash_and_broadcasts(monkeypatch):
+    payload = types.SimpleNamespace(
+        data=b"avatar-bytes",
+        media_type="image/jpeg",
+        sha1="hash1",
+    )
+    bot = _AvatarBot({"xep_0153": types.SimpleNamespace()})
+    published = []
 
-    class AvatarBot(dict):
-        def __init__(self, plugins):
-            super().__init__(plugins)
-            self.boundjid = types.SimpleNamespace(bare="bot@example.org")
-
-        def __eq__(self, other):
-            return (
-                dict.__eq__(self, other)
-                and getattr(other, "boundjid", None) == self.boundjid
-            )
-
-    async def noop_publish_avatar(data):
-        return None
-
-    async def noop_publish_avatar_metadata(meta):
-        return None
-
-    async def noop_set_avatar(**kwargs):
-        return None
-
-    bot = AvatarBot({
-        "xep_0084": types.SimpleNamespace(
-            publish_avatar=noop_publish_avatar,
-            publish_avatar_metadata=noop_publish_avatar_metadata,
-        ),
-        "xep_0153": types.SimpleNamespace(
-            set_avatar=noop_set_avatar,
-        ),
-    })
-
-    # No avatar_path
-    monkeypatch.setattr(_reg_profile, "config", {})  # config with nothing
-    await _reg_profile.update_avatar(bot)
-
-    # Not exists
     monkeypatch.setattr(
         _reg_profile,
         "config",
-        {"avatar": "missing.png", "avatar_type": "image/png"},
+        {"avatar": "avatar.jpg", "avatar_type": "image/jpeg"},
     )
-    monkeypatch.setattr(_reg_profile.os.path, "exists", lambda p: False)
+    monkeypatch.setattr(_reg_profile, "resolve_bundled_asset", lambda path: path)
     monkeypatch.setattr(
         _reg_profile,
-        "log",
-        types.SimpleNamespace(warning=lambda m: None),
+        "load_avatar_payload",
+        lambda path, *, media_type: payload,
     )
-
-    await _reg_profile.update_avatar(bot)
-
-    # ----
-    # Our all-modes open mock:
-    class DummyFile(io.BytesIO):
-        def __init__(self, *a, **k):
-            super().__init__(b"bytes")
-            self._written = []
-
-        def write(self, val):
-            # accept str or bytes for simplicity, track writes
-            self._written.append(val)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            pass
-
-    def open_mock(path, mode="r", *a, **k):
-        if "b" in mode:
-            return DummyFile()
-
-        if "w" in mode:
-            # file opened for writing the hash: accept write(str)
-            class DummyW:
-                def __init__(self):
-                    self._written = []
-
-                def write(self, val):
-                    self._written.append(val)
-
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *a):
-                    pass
-
-            return DummyW()
-
-        raise RuntimeError("unexpected open mode %r" % mode)
-
-    monkeypatch.setattr(_reg_profile.os.path, "exists", lambda p: True)
-    monkeypatch.setattr(builtins, "open", open_mock)
-    monkeypatch.setattr(_reg_profile, "sha1", lambda d: "hash1")
-    monkeypatch.setattr(_reg_profile, "read_hash", lambda p: "v2:hash1")
-    cached_hashes = []
+    monkeypatch.setattr(_reg_profile, "read_hash", lambda path: "v2:hash1")
 
     async def cache_hash(current_bot, image_hash):
-        cached_hashes.append((current_bot, image_hash))
+        assert current_bot is bot
+        assert image_hash == "hash1"
         return True
 
-    monkeypatch.setattr(_reg_profile, "_cache_xep0153_hash", cache_hash)
-    monkeypatch.setattr(
-        _reg_profile,
-        "log",
-        types.SimpleNamespace(
-            info=lambda m: None,
-            debug=lambda m: None,
-            error=lambda m: None,
-        ),
-    )
+    async def publish(*args, **kwargs):
+        published.append((args, kwargs))
 
-    # Exists, unchanged
-    await _reg_profile.update_avatar(bot)
-    assert cached_hashes[-1] == (bot, "hash1")
-
-    # Exists, bad type
-    monkeypatch.setattr(_reg_profile, "read_hash", lambda p: "different")
-    monkeypatch.setattr(
-        _reg_profile,
-        "config",
-        {"avatar": "avatar.png", "avatar_type": "bad/image"},
-    )
+    monkeypatch.setattr(_reg_profile, "cache_xep0153_hash", cache_hash)
+    monkeypatch.setattr(_reg_profile, "publish_xep0084_avatar", publish)
 
     await _reg_profile.update_avatar(bot)
 
-    # Exists, good type, happy path
+    assert published == []
+    assert bot.avatar_hash == "hash1"
+    assert bot.presence_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_update_avatar_happy_path_uses_shared_payload(monkeypatch):
+    payload = types.SimpleNamespace(
+        data=b"avatar-bytes",
+        media_type="image/png",
+        sha1="newhash",
+    )
+    xep0084_calls = []
+    xep0153_calls = []
+    writes = []
+
+    async def set_avatar(**kwargs):
+        xep0153_calls.append(kwargs)
+
+    bot = _AvatarBot({
+        "xep_0153": types.SimpleNamespace(set_avatar=set_avatar),
+    })
+
     monkeypatch.setattr(
         _reg_profile,
         "config",
         {"avatar": "avatar.png", "avatar_type": "image/png"},
     )
-    monkeypatch.setattr(_reg_profile, "sha1", lambda d: "newhash")
-    monkeypatch.setattr(_reg_profile, "read_hash", lambda p: "oldhash")
-
-    wrote = []
+    monkeypatch.setattr(_reg_profile, "resolve_bundled_asset", lambda path: path)
+    monkeypatch.setattr(
+        _reg_profile,
+        "load_avatar_payload",
+        lambda path, *, media_type: payload,
+    )
+    monkeypatch.setattr(_reg_profile, "read_hash", lambda path: "oldhash")
     monkeypatch.setattr(
         _reg_profile,
         "write_hash",
-        lambda path, value: wrote.append((path, value)),
+        lambda path, value: writes.append((path, value)),
     )
 
-    avatar_published = []
-    metadata_published = []
+    async def publish(current_bot, current_payload):
+        xep0084_calls.append((current_bot, current_payload))
+
+    async def cache_hash(current_bot, image_hash):
+        assert current_bot is bot
+        assert image_hash == "newhash"
+        return True
+
+    monkeypatch.setattr(_reg_profile, "publish_xep0084_avatar", publish)
+    monkeypatch.setattr(_reg_profile, "cache_xep0153_hash", cache_hash)
+
+    await _reg_profile.update_avatar(bot)
+
+    assert xep0084_calls == [(bot, payload)]
+    assert xep0153_calls == [
+        {
+            "jid": "bot@example.org",
+            "avatar": b"avatar-bytes",
+            "mtype": "image/png",
+        }
+    ]
+    assert writes == [(_reg_profile.AVATAR_HASH_FILE, "v2:newhash")]
+    assert bot.avatar_hash == "newhash"
+    assert bot.presence_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_update_avatar_xep0084_failure_does_not_block_legacy_path(monkeypatch):
+    payload = types.SimpleNamespace(
+        data=b"avatar-bytes",
+        media_type="image/jpeg",
+        sha1="newhash",
+    )
     xep0153_calls = []
-
-    async def publish_avatar(data):
-        avatar_published.append(data)
-
-    async def publish_avatar_metadata(meta):
-        metadata_published.append(meta)
+    writes = []
 
     async def set_avatar(**kwargs):
         xep0153_calls.append(kwargs)
 
-    bot2 = AvatarBot({
-        "xep_0084": types.SimpleNamespace(
-            publish_avatar=publish_avatar,
-            publish_avatar_metadata=publish_avatar_metadata,
-        ),
-        "xep_0153": types.SimpleNamespace(
-            set_avatar=set_avatar,
-        ),
+    bot = _AvatarBot({
+        "xep_0153": types.SimpleNamespace(set_avatar=set_avatar),
     })
 
-    await _reg_profile.update_avatar(bot2)
+    monkeypatch.setattr(
+        _reg_profile,
+        "config",
+        {"avatar": "avatar.jpg", "avatar_type": "image/jpeg"},
+    )
+    monkeypatch.setattr(_reg_profile, "resolve_bundled_asset", lambda path: path)
+    monkeypatch.setattr(
+        _reg_profile,
+        "load_avatar_payload",
+        lambda path, *, media_type: payload,
+    )
+    monkeypatch.setattr(_reg_profile, "read_hash", lambda path: "oldhash")
+    monkeypatch.setattr(
+        _reg_profile,
+        "write_hash",
+        lambda path, value: writes.append((path, value)),
+    )
 
-    assert avatar_published == [b"bytes"]
-    assert metadata_published == [
-        [
-            {
-                "id": "newhash",
-                "type": "image/png",
-                "bytes": len(b"bytes"),
-            }
-        ]
-    ]
-    assert xep0153_calls == [
-        {
-            "jid": "bot@example.org",
-            "avatar": b"bytes",
-            "mtype": "image/png",
-        }
-    ]
-    assert wrote
-    assert wrote[0][1] == "v2:newhash"
-    assert cached_hashes[-1] == (bot2, "newhash")
+    async def fail_modern(_bot, _payload):
+        raise RuntimeError("pep unavailable")
+
+    async def cache_hash(_bot, _image_hash):
+        return True
+
+    monkeypatch.setattr(_reg_profile, "publish_xep0084_avatar", fail_modern)
+    monkeypatch.setattr(_reg_profile, "cache_xep0153_hash", cache_hash)
+
+    await _reg_profile.update_avatar(bot)
+
+    assert len(xep0153_calls) == 1
+    assert bot.avatar_hash == "newhash"
+    assert bot.presence_calls == 1
+    assert writes == []
+
+
+@pytest.mark.asyncio
+async def test_update_avatar_does_not_advertise_hash_when_cache_seed_fails(monkeypatch):
+    payload = types.SimpleNamespace(
+        data=b"avatar-bytes",
+        media_type="image/png",
+        sha1="newhash",
+    )
+
+    async def set_avatar(**_kwargs):
+        return None
+
+    bot = _AvatarBot({
+        "xep_0153": types.SimpleNamespace(set_avatar=set_avatar),
+    })
+
+    monkeypatch.setattr(
+        _reg_profile,
+        "config",
+        {"avatar": "avatar.png", "avatar_type": "image/png"},
+    )
+    monkeypatch.setattr(_reg_profile, "resolve_bundled_asset", lambda path: path)
+    monkeypatch.setattr(
+        _reg_profile,
+        "load_avatar_payload",
+        lambda path, *, media_type: payload,
+    )
+    monkeypatch.setattr(_reg_profile, "read_hash", lambda path: "oldhash")
+    monkeypatch.setattr(_reg_profile, "write_hash", lambda path, value: None)
+
+    async def publish(_bot, _payload):
+        return None
+
+    async def reject_cache(_bot, _image_hash):
+        return False
+
+    monkeypatch.setattr(_reg_profile, "publish_xep0084_avatar", publish)
+    monkeypatch.setattr(_reg_profile, "cache_xep0153_hash", reject_cache)
+
+    await _reg_profile.update_avatar(bot)
+
+    assert bot.avatar_hash is None
+    assert bot.presence_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_update_avatar_handles_missing_and_invalid_avatar(monkeypatch, tmp_path):
+    bot = _AvatarBot({})
+
+    monkeypatch.setattr(_reg_profile, "config", {})
+    await _reg_profile.update_avatar(bot)
+
+    monkeypatch.setattr(
+        _reg_profile,
+        "config",
+        {"avatar": "missing.png", "avatar_type": "image/png"},
+    )
+
+    def missing(_path):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(_reg_profile, "resolve_bundled_asset", missing)
+    await _reg_profile.update_avatar(bot)
+
+    avatar = tmp_path / "avatar.webp"
+    avatar.write_bytes(b"webp")
+    monkeypatch.setattr(
+        _reg_profile,
+        "config",
+        {"avatar": str(avatar), "avatar_type": "image/webp"},
+    )
+    monkeypatch.setattr(_reg_profile, "resolve_bundled_asset", lambda path: path)
+
+    def invalid(_path, *, media_type):
+        assert media_type == "image/webp"
+        raise ValueError("avatar must use image/png or image/jpeg")
+
+    monkeypatch.setattr(_reg_profile, "load_avatar_payload", invalid)
+    await _reg_profile.update_avatar(bot)
 
 
 @pytest.mark.asyncio
