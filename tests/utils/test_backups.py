@@ -281,11 +281,15 @@ async def test_restore_uses_full_runtime_shutdown_before_publishing_files(backup
         events.append("shutdown")
         await base_bot.db.close()
 
-    original_apply = backups._apply_staged_entries
+    original_replace = backups._replace_from_stage
+    publish_seen = False
 
-    def tracked_apply(staged, specs):
-        events.append("apply")
-        return original_apply(staged, specs)
+    def tracked_replace(source, target):
+        nonlocal publish_seen
+        if not publish_seen:
+            events.append("apply")
+            publish_seen = True
+        return original_replace(source, target)
 
     bot = SimpleNamespace(
         db=base_bot.db,
@@ -293,7 +297,7 @@ async def test_restore_uses_full_runtime_shutdown_before_publishing_files(backup
         session_ready=SimpleNamespace(clear=lambda: events.append("session-clear")),
         shutdown_runtime=shutdown_runtime,
     )
-    monkeypatch.setattr(backups, "_apply_staged_entries", tracked_apply)
+    monkeypatch.setattr(backups, "_replace_from_stage", tracked_replace)
 
     result = await backups.restore_backup(bot, archive)
 
@@ -351,8 +355,8 @@ async def test_restore_refuses_to_publish_files_when_runtime_shutdown_is_partial
     archive = await backups.create_backup(base_bot, reason="partial shutdown")
     _write_sqlite_value(backup_env.db_path, "current")
 
-    tracked_apply = MagicMock(wraps=backups._apply_staged_entries)
-    monkeypatch.setattr(backups, "_apply_staged_entries", tracked_apply)
+    tracked_replace = MagicMock(wraps=backups._replace_from_stage)
+    monkeypatch.setattr(backups, "_replace_from_stage", tracked_replace)
     bot = SimpleNamespace(
         db=base_bot.db,
         accepting_commands=True,
@@ -365,7 +369,7 @@ async def test_restore_refuses_to_publish_files_when_runtime_shutdown_is_partial
     ):
         await backups.restore_backup(bot, archive)
 
-    tracked_apply.assert_not_called()
+    tracked_replace.assert_not_called()
     assert _read_sqlite_value(backup_env.db_path) == "current"
     assert bot.accepting_commands is False
 

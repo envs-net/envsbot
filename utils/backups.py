@@ -34,6 +34,12 @@ from envs_xmpp_core.storage.managed import (
     resolve_managed_file,
     select_managed_files_for_prune,
 )
+from envs_xmpp_core.storage.restore import (
+    RestoreFileSpec,
+    RestoreTransactionError,
+    replace_restore_file,
+    run_restore_transaction,
+)
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
 
 from utils.config import config
@@ -738,75 +744,20 @@ def _stage_archive_entries(
 
 
 def _replace_from_stage(source: Path, target: Path) -> None:
-    """Atomically replace one live target from a staged restore file."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-            os.chmod(tmp_path, PRIVATE_FILE_MODE)
-            with source.open("rb") as handle:
-                shutil.copyfileobj(handle, tmp)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        os.replace(tmp_path, target)
-        ensure_private_file(target)
-    except Exception:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
-        raise
+    """Atomically publish one staged restore file through the shared core."""
+    replace_restore_file(
+        RestoreFileSpec(
+            name=target.name,
+            source=source,
+            target=target,
+            mode=PRIVATE_FILE_MODE,
+        )
+    )
 
 
-def _apply_staged_entries(
-    staged: dict[str, Path],
-    specs: list[tuple[str, Path]],
-) -> list[str]:
-    """Publish all staged live restore entries in target order."""
-    restored: list[str] = []
-    for entry, target in specs:
-        _replace_from_stage(staged[entry], target)
-        restored.append(entry)
-    return restored
-
-
-def _rollback_staged_entries(
-    staged_by_target: dict[Path, Path],
-    specs: list[tuple[str, Path]],
-    original_exists: dict[Path, bool],
-) -> None:
-    """Restore exact pre-restore target contents after a failed live restore."""
-    for _entry, target in specs:
-        if original_exists.get(target, False):
-            source = staged_by_target.get(target)
-            if source is None:
-                raise BackupError(f"Rollback stage is missing target: {target}")
-            _replace_from_stage(source, target)
-        else:
-            target.unlink(missing_ok=True)
-
-
-def _stage_live_targets(
-    specs: list[tuple[str, Path]],
-    stage_root: Path,
-) -> tuple[dict[Path, Path], dict[Path, bool]]:
-    """Snapshot closed live targets for exact rollback immediately before restore."""
-    staged_by_target: dict[Path, Path] = {}
-    original_exists: dict[Path, bool] = {}
-    for index, (_entry, target) in enumerate(specs):
-        exists = target.exists()
-        original_exists[target] = exists
-        if not exists:
-            continue
-        if not target.is_file():
-            raise BackupError(f"Restore target is not a regular file: {target}")
-        staged = stage_root / f"{index:03d}-{target.name}"
-        with target.open("rb") as source, staged.open("wb") as handle:
-            shutil.copyfileobj(source, handle)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(staged, PRIVATE_FILE_MODE)
-        staged_by_target[target] = staged
-    return staged_by_target, original_exists
+def _publish_restore_spec(spec: RestoreFileSpec) -> None:
+    """Compatibility adapter retaining envsbot's restore publish hook."""
+    _replace_from_stage(spec.source, spec.target)
 
 
 async def _close_database(bot: Any) -> bool:
@@ -896,61 +847,55 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
                 f"{errors or 'unknown error'}"
             )
 
-        try:
-            await _quiesce_runtime_for_restore(bot)
-        except Exception as quiesce_error:
-            raise RestoreRuntimeQuiescedError(
-                "Could not safely quiesce the bot before restore; a process "
-                f"restart is required: {quiesce_error}"
-            ) from quiesce_error
-
-        # shutdown_runtime() flushes and closes mutable state. Snapshot the exact
-        # closed files now, rather than relying only on the earlier safety backup,
-        # so rollback cannot lose writes made between that backup and shutdown.
-        try:
-            rollback_by_target, original_exists = await asyncio.to_thread(
-                _stage_live_targets,
-                restore_specs,
-                rollback_stage,
+        transaction_specs = [
+            RestoreFileSpec(
+                name=entry,
+                source=staged_restore[entry],
+                target=target,
+                mode=PRIVATE_FILE_MODE,
             )
-        except Exception as rollback_stage_error:
-            raise RestoreRuntimeQuiescedError(
-                "Could not stage the quiesced runtime for rollback; no restore "
-                "files were published and a process restart is required: "
-                f"{rollback_stage_error}"
-            ) from rollback_stage_error
-
-        restored: list[str] = []
+            for entry, target in restore_specs
+        ]
         try:
-            restored = await asyncio.to_thread(
-                _apply_staged_entries,
-                staged_restore,
-                restore_specs,
+            transaction = await run_restore_transaction(
+                transaction_specs,
+                rollback_directory=rollback_stage,
+                prepare=lambda: _quiesce_runtime_for_restore(bot),
+                replace_file=_publish_restore_spec,
             )
-        except Exception as restore_error:
-            rollback_error: Exception | None = None
-            try:
-                await asyncio.to_thread(
-                    _rollback_staged_entries,
-                    rollback_by_target,
-                    restore_specs,
-                    original_exists,
-                )
-            except Exception as exc:
-                rollback_error = exc
-
-            if rollback_error is not None:
+        except RestoreTransactionError as exc:
+            if exc.rollback_attempted:
+                if exc.rollback_errors or exc.recovery_errors:
+                    details = "; ".join(
+                        str(item)
+                        for item in (*exc.rollback_errors, *exc.recovery_errors)
+                    )
+                    raise RestoreRuntimeQuiescedError(
+                        "Restore failed and automatic rollback also failed; "
+                        f"safety backup {safety_backup.name} was preserved. "
+                        "The bot must restart before any further operation. "
+                        f"Restore error: {exc.cause}; rollback error: {details}"
+                    ) from exc
                 raise RestoreRuntimeQuiescedError(
-                    "Restore failed and automatic rollback also failed; "
-                    f"safety backup {safety_backup.name} was preserved. "
-                    "The bot must restart before any further operation. "
-                    f"Restore error: {restore_error}; rollback error: {rollback_error}"
-                ) from restore_error
-            raise RestoreRuntimeQuiescedError(
-                "Restore failed; exact pre-restore runtime files were rolled back. "
-                f"Safety backup {safety_backup.name} was preserved. The bot must "
-                f"restart before any further operation: {restore_error}"
-            ) from restore_error
+                    "Restore failed; exact pre-restore runtime files were rolled back. "
+                    f"Safety backup {safety_backup.name} was preserved. The bot must "
+                    f"restart before any further operation: {exc.cause}"
+                ) from exc
+
+            if exc.phase == "prepare":
+                message = (
+                    "Could not safely quiesce the bot before restore; a process "
+                    f"restart is required: {exc.cause}"
+                )
+            else:
+                message = (
+                    "Could not stage the quiesced runtime for rollback; no restore "
+                    "files were published and a process restart is required: "
+                    f"{exc.cause}"
+                )
+            raise RestoreRuntimeQuiescedError(message) from exc
+
+        restored = list(transaction.restored)
 
     try:
         await asyncio.to_thread(prune_old_backups)
