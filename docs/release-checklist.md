@@ -188,13 +188,29 @@ findings that have been reviewed and are clearly false positives.
 
 Update the version in `utils/version.py` if needed. The package metadata in
 `pyproject.toml` reads the same value dynamically, so no second version field
-needs to be maintained. Then create and push the tag:
+needs to be maintained. Make sure the reviewed release candidate has been merged into `main`, then
+create the tag from that release commit:
 
 ```bash
+git checkout main
+git pull --ff-only
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin main
 git push origin vX.Y.Z
 ```
 
-After pushing, verify that the release page shows the new tag and update the
-release notes before announcing the release.
+Pushing a `vX.Y.Z` tag starts `.github/workflows/release.yml`. The workflow tests
+Python 3.12 and 3.13, rejects a tag that does not exactly match
+`utils/version.py`, builds sdist/wheel distributions, runs `twine check`,
+smoke-tests the wheel, and publishes to PyPI through the `pypi` GitHub
+environment using Trusted Publishing/OIDC. No long-lived PyPI token should be
+stored in repository secrets.
+
+For the first PyPI release, configure a Pending Trusted Publisher for project
+`envsbot` with owner `envs-net`, repository `envsbot`, workflow
+`release.yml`, and environment `pypi` before pushing the tag. For later releases,
+verify that the existing Trusted Publisher still matches those values.
+
+After pushing, verify that the GitHub release workflow completed, that the
+release page shows the new tag, and that the matching `envsbot` version is
+available from PyPI before announcing the release.

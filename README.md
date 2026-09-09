@@ -71,6 +71,27 @@ complete safety model and supported environment overrides.
 The command-by-command installation/update instructions below remain fully
 supported.
 
+### PyPI installation
+
+EnvsBot is also published as the `envsbot` package on PyPI. For local testing,
+development environments, or non-systemd installs, a normal virtualenv install is
+enough:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install envsbot
+python -m pip show envsbot
+```
+
+The PyPI package contains the application code, `config_sample.py`,
+`vcard_sample.py`, and bundled read-only runtime assets. It does not create
+`/etc/envsbot`, `/var/lib/envsbot`, a systemd unit, or operator configuration.
+When running directly from a wheel, provide an absolute `ENVSBOT_CONFIG` path
+and configure writable runtime/database paths outside site-packages. For
+production envs.net-style deployments, the tagged Git checkout plus
+`./scripts/deploy.sh` remains the recommended path.
 
 Requires **Python 3.12+**.
 

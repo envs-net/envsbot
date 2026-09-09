@@ -17,7 +17,7 @@ authors = [
 license = "GPL-3.0-only"
 
 dependencies = [
-    "envs-xmpp>=0.11.0,<0.12",
+    "envs-xmpp>=1.0.0,<2.0",
     "aiosqlite>=0.20,<1",
     "aiohttp>=3.14.3,<4",
     "beautifulsoup4>=4.12.3,<5",
@@ -38,7 +38,7 @@ keywords = [
 ]
 
 classifiers = [
-    "Development Status :: 5 - Stable",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "Topic :: Communications :: Chat",
@@ -49,6 +49,11 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: OS Independent",
 ]
+
+[project.urls]
+Homepage = "https://github.com/envs-net/envsbot"
+Repository = "https://github.com/envs-net/envsbot"
+Issues = "https://github.com/envs-net/envsbot/issues"
 
 [project.scripts]
 envsbot = "envsbot:cli"

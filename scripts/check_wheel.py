@@ -40,6 +40,20 @@ def main() -> int:
                 print(f"Wheel asset differs from canonical bundled source: {name}", file=sys.stderr)
                 return 1
 
+        for sample in ("config_sample.py", "vcard_sample.py"):
+            if sample not in names:
+                print(f"Wheel is missing operator sample: {sample}", file=sys.stderr)
+                return 1
+
+        entry_points = next((name for name in names if name.endswith(".dist-info/entry_points.txt")), None)
+        if entry_points is None:
+            print("Wheel is missing entry_points.txt", file=sys.stderr)
+            return 1
+        entry_text = archive.read(entry_points).decode("utf-8")
+        if "envsbot = envsbot:cli" not in entry_text:
+            print("Wheel is missing the envsbot console entry point", file=sys.stderr)
+            return 1
+
     with tempfile.TemporaryDirectory(prefix="envsbot-wheel-") as temp_name:
         temp = Path(temp_name)
         env_dir = temp / "venv"
