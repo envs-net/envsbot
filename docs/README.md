@@ -15,6 +15,7 @@ This directory contains the operator and command documentation for EnvsBot.
 - [`idlerpg.md`](idlerpg.md) - IdleRPG game commands, configuration and diagnostics
 - [`plugin-development.md`](plugin-development.md) - plugin structure, hooks, stores, grants and diagnostics
 - [`release-checklist.md`](release-checklist.md) - release preparation and tagging checklist
+- [`production-observation.md`](production-observation.md) - 0/24/48/72-hour post-release production observation checklist
 
 Operational notes:
 

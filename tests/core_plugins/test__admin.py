@@ -313,6 +313,7 @@ async def test_bot_status_full_omits_healthy_rooms_and_includes_plugin_details(m
     assert reply_lines.index("├─ Latest release: v1.4.0") == (
         reply_lines.index("├─ Version: v1.3.0") + 1
     )
+    assert f"envs-xmpp: {_admin.envs_xmpp_version}" in reply
     assert "Page count: 1" in reply
     assert "Page size: 1" in reply
     assert "Freelist pages: 1" in reply

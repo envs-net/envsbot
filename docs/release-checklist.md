@@ -214,3 +214,6 @@ verify that the existing Trusted Publisher still matches those values.
 After pushing, verify that the GitHub release workflow completed, that the
 release page shows the new tag, and that the matching `envsbot` version is
 available from PyPI before announcing the release.
+## Post-release observation
+
+After the immediate smoke check, follow the structured [72-hour production observation checklist](production-observation.md). Record the baseline immediately after deployment, then repeat the health/task/outbox checks at approximately 24, 48 and 72 hours before treating a major runtime change as fully production-proven.

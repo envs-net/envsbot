@@ -315,6 +315,12 @@ def cli(argv: list[str] | None = None) -> int:
 
     arguments = list(sys.argv[1:] if argv is None else argv)
 
+    if arguments in (["--version"], ["-V"]):
+        from envs_xmpp_core import __version__ as envs_xmpp_version
+
+        print(f"envsbot {__version__} (envs-xmpp {envs_xmpp_version})")
+        return 0
+
     if arguments[:1] == ["db"]:
         from utils.database_cli import (
             database_backup,

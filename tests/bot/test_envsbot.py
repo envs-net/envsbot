@@ -1854,6 +1854,26 @@ def test_copy_initial_chat_slang_uses_configured_runtime_dir(tmp_path, monkeypat
     assert (runtime_dir / "chat_slang.csv").read_text(encoding="utf-8") == "hello,world\n"
 
 
+def test_cli_version_is_side_effect_free(monkeypatch, capsys):
+    copy_defaults = MagicMock()
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", copy_defaults)
+
+    assert envsbot.cli(["--version"]) == 0
+    output = capsys.readouterr().out.strip()
+    assert output.startswith("envsbot ")
+    assert "(envs-xmpp " in output
+    copy_defaults.assert_not_called()
+
+
+def test_cli_short_version_is_supported(monkeypatch, capsys):
+    copy_defaults = MagicMock()
+    monkeypatch.setattr(envsbot, "copy_initial_chat_slang", copy_defaults)
+
+    assert envsbot.cli(["-V"]) == 0
+    assert capsys.readouterr().out.startswith("envsbot ")
+    copy_defaults.assert_not_called()
+
+
 def test_cli_runs_main_and_handles_keyboard_interrupt(monkeypatch):
     calls = []
 

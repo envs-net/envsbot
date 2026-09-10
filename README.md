@@ -1,4 +1,11 @@
-# EnvsBot - Modular XMPP Bot Framework - [![Build Status](https://drone.envs.net/api/badges/envs/envsbot/status.svg)](https://drone.envs.net/envs/envsbot)
+# EnvsBot - Modular XMPP Bot Framework
+
+[![PyPI](https://img.shields.io/pypi/v/envsbot.svg)](https://pypi.org/project/envsbot/)
+[![Python](https://img.shields.io/pypi/pyversions/envsbot.svg)](https://pypi.org/project/envsbot/)
+[![Quality](https://github.com/envs-net/envsbot/actions/workflows/quality.yml/badge.svg)](https://github.com/envs-net/envsbot/actions/workflows/quality.yml)
+[![Release](https://github.com/envs-net/envsbot/actions/workflows/release.yml/badge.svg)](https://github.com/envs-net/envsbot/actions/workflows/release.yml)
+[![Drone](https://drone.envs.net/api/badges/envs/envsbot/status.svg)](https://drone.envs.net/envs/envsbot)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
 EnvsBot is a modular XMPP bot for rooms and direct chats, built with Python and slixmpp.
 It provides a plugin-based command framework, room-specific feature toggles, user/role management, SQLite persistence, generated command documentation, vCard/avatar publishing, and a growing set of utility, community and fun plugins.
@@ -94,6 +101,16 @@ production envs.net-style deployments, the tagged Git checkout plus
 `./scripts/deploy.sh` remains the recommended path.
 
 Requires **Python 3.12+**.
+
+Verify the installed application and shared core without starting XMPP:
+
+```bash
+envsbot --version
+# envsbot 2.0.0 (envs-xmpp 1.0.0)
+```
+
+For a structured 72-hour post-release observation checklist, see
+[`docs/production-observation.md`](docs/production-observation.md).
 
 For production installations, use the **latest tagged release** instead of the
 `main` branch. The `main` branch is the active development branch and may contain

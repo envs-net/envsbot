@@ -22,6 +22,7 @@ from importlib import metadata
 from pathlib import Path
 
 import psutil
+from envs_xmpp_core import __version__ as envs_xmpp_version
 from envs_xmpp_core.formatting import format_bytes, format_duration
 
 from bot.lifecycle import _restart_notification_paths
@@ -202,6 +203,7 @@ def _runtime_status_lines() -> list[str]:
     """Return Python and process runtime status lines."""
     lines = [
         f"Python: {platform.python_version()}",
+        f"envs-xmpp: {envs_xmpp_version}",
         f"slixmpp: {_package_version('slixmpp')}",
     ]
 

@@ -85,6 +85,18 @@ print("Wheel asset smoke test passed.")
 """
         subprocess.run([str(python), "-c", code], cwd=temp, check=True)
 
+        executable = env_dir / ("Scripts/envsbot.exe" if os.name == "nt" else "bin/envsbot")
+        result = subprocess.run(
+            [str(executable), "--version"],
+            cwd=temp,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip().startswith("envsbot ") or "(envs-xmpp " not in result.stdout:
+            print(f"Unexpected envsbot --version output: {result.stdout!r}", file=sys.stderr)
+            return 1
+
     print(f"Wheel smoke test passed: {wheel.name}")
     return 0
 

@@ -52,6 +52,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/envs-net/envsbot"
+Documentation = "https://github.com/envs-net/envsbot/blob/main/docs/README.md"
 Repository = "https://github.com/envs-net/envsbot"
 Issues = "https://github.com/envs-net/envsbot/issues"
 
