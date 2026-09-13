@@ -106,7 +106,7 @@ Verify the installed application and shared core without starting XMPP:
 
 ```bash
 envsbot --version
-# envsbot 2.0.0 (envs-xmpp 1.0.0)
+# envsbot 2.0.0 (envs-xmpp 1.1.0)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -336,7 +336,7 @@ Examples assume the default command prefix `,`.
 | `,help <plugin>` | Show focused help for one plugin |
 | `,help ,<command>` | Show focused help for one command |
 | `,bot status [full]` / `,status [full]` | Show compact bot/runtime/XMPP/database health; `full` adds room, plugin, task and cache diagnostics |
-| `,tasks [full] [plugin <name>] [status]` | Show supervised background task status |
+| `,tasks [all/full/failed/stale/restarting/restarted/problems] [scope <name>]` | Show shared task health, scopes, watchdog state, and filtered diagnostics |
 | `,bot version` / `,version` | Show the running bot version and latest checked release |
 | `,bot checkupdate` / `,checkupdate` / `,updatecheck` | Check GitHub releases for a newer version |
 | `,config show [all/page/last]` | Show redacted runtime configuration |
@@ -356,7 +356,7 @@ Examples assume the default command prefix `,`.
 | `,plugins load <name>` | Load a plugin at runtime |
 | `,plugins unload <name>` | Unload an optional plugin at runtime |
 | `,plugins reload <name>` | Reload a plugin at runtime |
-| `,rooms list [all/page/last]` | List known rooms |
+| `,rooms list [joined/offline/problems] [all/page/last]` | List known MUCs with shared health/filter semantics; `dm`/`contacts` lists direct contacts |
 | `,rooms add <room_jid> <nick> [autojoin]` | Add a room to the database |
 | `,rooms join <room_jid> [nick]` | Join a room immediately |
 | `,rooms invite list [all/page/last]` | List pending room invites |
@@ -514,7 +514,7 @@ Restore is owner-only. Before changing runtime files, envsbot fully verifies the
 
 ## SQLite Maintenance
 
-Use `,bot status` for a compact safe online database and operational health check. Use `,bot status full` for additional SQLite page details, detected room problems, plugin details, bounded-cache diagnostics, and the same compact supervised-task inventory as `,tasks all`. The task section is deliberately last because it is usually the longest. Healthy rooms are not enumerated there; use `,rooms list all` for the complete MUC inventory. Use `,tasks full all` when per-task timestamps, restart counters and circuit details are needed.
+Use `,bot status` for a compact safe online database and operational health check. Use `,bot status full` for additional SQLite page details, detected room problems, plugin details, bounded-cache diagnostics, a task-health summary, and only task entries that currently need attention. Healthy rooms and the complete task inventory are intentionally not expanded there; use `,rooms list all` and `,tasks all` for those inventories. Use `,tasks full all` when relative plus absolute timestamps, restart counters and circuit details are needed. `,tasks problems`, `,tasks stale`, and `,rooms list problems` provide focused operator views without the full inventory.
 
 Do **not** run `VACUUM` from inside the live bot process. Stop the bot first and perform maintenance manually:
 

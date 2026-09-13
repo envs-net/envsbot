@@ -22,18 +22,20 @@ Show supervised background task status.
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `admin`<br>
-Usage: `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last] | ,tasks restart <plugin>`
+Usage: `,tasks [all|full|failed|stale|restarting|restarted|problems|running|done|cancelled] [scope|plugin <name>] [<page>|last] | ,tasks show <scope>/<task> | ,tasks restart <plugin>`
 
 Aliases: `,bot tasks`
 
 #### Subcommands
 
-- `,tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]`
-  - Description: List supervised tasks with optional detail, plugin and status filters.
+- `,tasks [all|full|failed|stale|restarting|restarted|problems] [scope <name>] [<page>|last]`
+  - Description: Show a health overview or filtered supervised-task inventory.
   - Examples:
-    - `,tasks` — Show a compact overview of supervised tasks.
-    - `,tasks plugin rss` — Show only tasks owned by the RSS plugin.
-    - `,tasks failed` — Show only failed background tasks.
+    - `,tasks` — Show task health, scopes and watchdog state.
+    - `,tasks all` — Show the complete compact task inventory.
+    - `,tasks problems` — Show only tasks needing attention.
+    - `,tasks scope rss` — Show tasks owned by the RSS scope.
+    - `,tasks show rss/feed-checker` — Show full detail for one task.
 
 - `,tasks restart <plugin>`
   - Description: Cancel and restart supervised tasks owned by one plugin.

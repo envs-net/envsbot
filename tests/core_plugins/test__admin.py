@@ -659,9 +659,9 @@ def test_detail_line_helpers(monkeypatch):
         "Task supervisor is not available."
     ]
     empty_supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [])
-    assert _admin._task_status_lines(types.SimpleNamespace(tasks=empty_supervisor)) == [
-        "No supervised tasks found."
-    ]
+    empty_lines = _admin._task_status_lines(types.SimpleNamespace(tasks=empty_supervisor))
+    assert empty_lines[0] == "✅ Overall: healthy"
+    assert "Complete inventory: ,tasks all" in empty_lines
     task = types.SimpleNamespace(
         plugin="rss",
         name="feed",
@@ -677,10 +677,13 @@ def test_detail_line_helpers(monkeypatch):
         next_restart_at=None,
     )
     supervisor = types.SimpleNamespace(snapshot=lambda include_done=True: [task])
-    assert _admin._task_status_lines(types.SimpleNamespace(tasks=supervisor)) == [
-        "Summary: ✅ 0 services running · 0 one-shots running · ℹ️ 0 one-shots completed · 🔴 1 failed",
-        "• rss/feed — 🔴 failed | kind=service | circuit=open | error=boom",
-    ]
+    task_lines = _admin._task_status_lines(types.SimpleNamespace(tasks=supervisor))
+    task_text = "\n".join(task_lines)
+    assert "⚠️ Overall: attention needed" in task_text
+    assert "Failed: 1" in task_text
+    assert "Open circuits: 1" in task_text
+    assert "❌ rss/feed" in task_text
+    assert "last error: boom" in task_text
 
 
 def test_room_problem_lines_are_limited_and_point_to_rooms_list_all():

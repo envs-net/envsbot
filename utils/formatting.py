@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 
-from envs_xmpp_core.pagination import paginate
+from envs_xmpp_core.pagination import (
+    PageRequest,
+    paginate,
+    parse_page_request,
+)
+from envs_xmpp_core.pagination import (
+    format_page as core_format_page,
+)
 
 from utils.config import config
 
 DEFAULT_PAGINATION = config.get("default_pagination", "all")
-
-
-@dataclass(frozen=True)
-class PageRequest:
-    """Parsed pagination request."""
-
-    page: int = 1
-    all: bool = False
-    page_size: int | None = None
 
 
 def _positive_int(value: object) -> int | None:
@@ -59,29 +56,12 @@ def page_size_for(default: int, page_request: PageRequest | None = None) -> int:
 
 
 def parse_page_args(args: Sequence[str], *, default_page: int = 1) -> PageRequest:
-    """Parse optional ``all|last|<page>`` pagination arguments.
-
-    Unknown values fall back to the default page so existing commands remain
-    forgiving.  Command-specific arguments should be stripped before calling
-    this helper.  When no paging argument is supplied, the configured
-    ``DEFAULT_PAGINATION`` setting decides whether to show all items or use a
-    configured default page size.
-    """
-    if not args:
-        return default_page_request(default_page=default_page)
-
-    value = str(args[0]).strip().lower()
-    if value == "all":
-        return PageRequest(page=1, all=True)
-    if value == "last":
-        return PageRequest(page=-1, all=False)
-
-    try:
-        page = int(value)
-    except (TypeError, ValueError):
-        page = default_page
-
-    return PageRequest(page=max(page, 1), all=False)
+    """Parse optional ``all|last|<page>`` pagination arguments."""
+    default = default_page_request(default_page=default_page)
+    request, remaining = parse_page_request(args, default=default)
+    if remaining:
+        return PageRequest(page=max(1, int(default_page)), all=False)
+    return request
 
 
 def paginate_lines(
@@ -108,31 +88,19 @@ def format_page(
     page_request: PageRequest | None = None,
     page_size: int = 10,
     command_hint: str | None = None,
+    preamble: Sequence[str] | Iterable[str] = (),
 ) -> list[str]:
-    """Format a title and a possibly paginated list of lines."""
-    page_request = page_request or PageRequest()
-    materialized = list(lines)
-
-    if page_request.all:
-        result = [title]
-        if materialized:
-            result.extend(materialized)
-        else:
-            result.append("—")
-        return result
-
-    page_size = page_size_for(page_size, page_request)
-    page_lines, page, total_pages = paginate_lines(
-        materialized,
-        page=page_request.page,
-        page_size=page_size,
+    """Format a title and a possibly paginated list using the shared core."""
+    request = page_request or PageRequest()
+    effective_size = page_size_for(page_size, request)
+    return core_format_page(
+        title,
+        lines,
+        page_request=request,
+        page_size=effective_size,
+        command_hint=command_hint,
+        preamble=preamble,
     )
-    suffix = f" (page {page}/{total_pages})" if total_pages > 1 else ""
-    result = [title + suffix]
-    result.extend(page_lines or ["—"])
-    if total_pages > 1 and command_hint:
-        result.append(f"Use {command_hint} <page|last|all> for more.")
-    return result
 
 
 def bool_label(value: bool) -> str:

@@ -167,7 +167,7 @@ List MUC rooms or direct XMPP contacts.
 Role: `admin`<br>
 Context: `private chat / MUC PM`<br>
 Category: `rooms`<br>
-Usage: `,rooms list [muc|dm|1:1|direct|contacts] [<page>|last|all]`
+Usage: `,rooms list [muc|dm|1:1|direct|contacts] [joined|offline|problems] [<page>|last|all]`
 
 Aliases: `,room list`
 
@@ -177,6 +177,8 @@ Examples:
 - `,rooms list all` — List MUC rooms or direct XMPP contacts.
 - `,rooms list dm` — List MUC rooms or direct XMPP contacts.
 - `,rooms list 1:1 all` — List MUC rooms or direct XMPP contacts.
+- `,rooms list joined` — List MUC rooms or direct XMPP contacts.
+- `,rooms list problems` — List MUC rooms or direct XMPP contacts.
 - `,rooms list direct` — List MUC rooms or direct XMPP contacts.
 - `,rooms list contacts all` — List MUC rooms or direct XMPP contacts.
 

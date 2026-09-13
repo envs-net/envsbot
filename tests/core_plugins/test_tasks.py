@@ -13,8 +13,13 @@ class Supervisor:
         self._tasks = tasks
 
     def snapshot(self, *, include_done=True):
-        assert include_done is True
-        return list(self._tasks)
+        if include_done:
+            return list(self._tasks)
+        return [task for task in self._tasks if task.status != "done"]
+
+    def stale_tasks(self, *, max_age_seconds):
+        del max_age_seconds
+        return []
 
 
 @pytest.fixture
@@ -28,6 +33,7 @@ def bot():
     bot.reply = MagicMock()
     bot.reply_warn = MagicMock()
     bot.reply_usage = MagicMock()
+    bot.watchdog = None
     bot.tasks = Supervisor([
         TaskInfo(
             plugin="rss",
@@ -63,31 +69,50 @@ def bot():
 
 
 @pytest.mark.asyncio
-async def test_tasks_default_lists_summary_and_compact_lines(bot, msg):
+async def test_tasks_default_is_health_first_overview(bot, msg):
     await tasks_plugin.tasks_command(bot, "admin@example.org", "admin", [], msg, False)
 
     reply = bot.reply.call_args.args[1]
-    assert reply[0] == "🧵 Background tasks"
+    assert reply[0] == "🧵 Background Tasks"
     text = "\n".join(reply)
-    assert "1 services running" in text
-    assert "1 one-shots completed" in text
-    assert "1 failed" in text
-    assert any("rss/feed-loop" in line and "running" in line for line in reply)
-    assert any("birthday_notify/birthday-loop" in line and "failed" in line for line in reply)
+    assert "Services: 1 running" in text
+    assert "One-shots: 0 running · 1 completed" in text
+    assert "Failed: 1" in text
+    assert "📦 Scopes" in text
+    assert "rss: 1 active" in text
+    assert "⚠️ Problems" in text
+    assert "birthday_notify/birthday-loop" in text
+    assert "rss/feed-loop" not in text
 
 
 @pytest.mark.asyncio
-async def test_tasks_full_includes_details(bot, msg):
+async def test_tasks_all_lists_complete_compact_inventory(bot, msg):
+    await tasks_plugin.tasks_command(bot, "admin@example.org", "admin", ["all"], msg, False)
+
+    reply = bot.reply.call_args.args[1]
+    text = "\n".join(reply)
+    assert reply[0] == "🧵 Background Tasks"
+    assert "rss/feed-loop" in text
+    assert "xkcd/index-update" in text
+    assert "birthday_notify/birthday-loop" in text
+    assert "status =" not in text
+
+
+@pytest.mark.asyncio
+async def test_tasks_full_includes_readable_details(bot, msg):
     await tasks_plugin.tasks_command(bot, "admin@example.org", "admin", ["full"], msg, False)
 
     reply = bot.reply.call_args.args[1]
-    assert any("status = running" in line for line in reply)
-    assert any("created_at = 2026-06-22T10:00:00+00:00" in line for line in reply)
-    assert any("last_error = RuntimeError: boom" in line for line in reply)
+    text = "\n".join(reply)
+    assert "rss/feed-loop" in text
+    assert "status: running" in text
+    assert "created:" in text
+    assert "2026-06-22T10:00:00+00:00" in text
+    assert "last error: RuntimeError: boom" in text
 
 
 @pytest.mark.asyncio
-async def test_tasks_filters_by_plugin_and_status(bot, msg):
+async def test_tasks_filters_by_scope_and_status(bot, msg):
     await tasks_plugin.tasks_command(
         bot,
         "admin@example.org",
@@ -98,15 +123,31 @@ async def test_tasks_filters_by_plugin_and_status(bot, msg):
     )
 
     reply = bot.reply.call_args.args[1]
-    assert reply[0] == "🧵 Background tasks — plugin=birthday_notify — status=failed"
+    assert reply[0] == "🧵 Background Tasks — scope=birthday_notify — failed"
     assert any("birthday_notify/birthday-loop" in line for line in reply)
     assert not any("rss/feed-loop" in line for line in reply)
 
 
 @pytest.mark.asyncio
+async def test_tasks_show_selects_one_task_with_full_detail(bot, msg):
+    await tasks_plugin.tasks_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["show", "rss/feed-loop"],
+        msg,
+        False,
+    )
+    reply = bot.reply.call_args.args[1]
+    text = "\n".join(reply)
+    assert "rss/feed-loop" in text
+    assert "status: running" in text
+    assert "birthday_notify/birthday-loop" not in text
+
+
+@pytest.mark.asyncio
 async def test_tasks_missing_plugin_name_shows_usage(bot, msg):
     await tasks_plugin.tasks_command(bot, "admin@example.org", "admin", ["plugin"], msg, False)
-
     bot.reply_usage.assert_called_once()
 
 
@@ -117,7 +158,6 @@ async def test_tasks_without_supervisor_warns(msg):
     bot.tasks = None
 
     await tasks_plugin.tasks_command(bot, "admin@example.org", "admin", [], msg, False)
-
     bot.reply_warn.assert_called_once()
 
 
@@ -140,6 +180,7 @@ async def test_tasks_restart_delegates_to_plugin_manager(msg):
     bot.bot_plugins.restart_tasks.assert_awaited_once_with("rss")
     assert "Cancelled before restart: 2" in bot.reply.call_args.args[1]
 
+
 @pytest.mark.asyncio
 async def test_tasks_stale_command_lists_stale_tasks(msg):
     stale = [
@@ -152,6 +193,7 @@ async def test_tasks_stale_command_lists_stale_tasks(msg):
             cancelled=False,
             last_error=None,
             heartbeat_at="2026-06-22T09:00:00+00:00",
+            kind="service",
         )
     ]
     bot = MagicMock()
@@ -161,7 +203,9 @@ async def test_tasks_stale_command_lists_stale_tasks(msg):
 
     await tasks_plugin.tasks_stale_command(bot, "admin@example.org", "admin", [], msg, False)
 
-    bot.tasks.stale_tasks.assert_called_once()
+    bot.tasks.stale_tasks.assert_called()
     reply = bot.reply.call_args.args[1]
-    assert reply[0].startswith("🧵 Stale background tasks")
-    assert any("rss/feed-loop" in line for line in reply)
+    assert reply[0] == "🧵 Background Tasks — stale"
+    text = "\n".join(reply)
+    assert "rss/feed-loop" in text
+    assert "stale" in text

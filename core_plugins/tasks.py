@@ -2,31 +2,26 @@
 
 from __future__ import annotations
 
+from envs_xmpp_core.presentation import (
+    TaskListRequest,
+    filter_task_views,
+    normalize_tasks,
+    parse_task_list_request,
+    render_task_entry,
+    render_task_summary,
+    render_watchdog_lines,
+)
+
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand
 from utils.config import config
-from utils.formatting import PageRequest, format_page, parse_page_args
-from utils.task_display import render_task_lines
-from utils.task_supervisor import TaskInfo
+from utils.formatting import format_page
 
 PLUGIN_META = {
     "name": "tasks",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Inspect supervised background tasks.",
     "category": "core",
-}
-
-_STATUS_ALIASES = {
-    "run": "running",
-    "running": "running",
-    "failed": "failed",
-    "fail": "failed",
-    "error": "failed",
-    "errors": "failed",
-    "cancelled": "cancelled",
-    "canceled": "cancelled",
-    "done": "done",
-    "finished": "done",
 }
 
 
@@ -34,42 +29,32 @@ def _prefix() -> str:
     return str(config.get("prefix", ",") or ",")
 
 
-def _filter_tasks(tasks: list[TaskInfo], *, plugin: str | None, status: str | None) -> list[TaskInfo]:
-    """Filter tasks by plugin and/or status."""
-    filtered = tasks
-    if plugin:
-        needle = plugin.lower()
-        filtered = [task for task in filtered if task.plugin.lower() == needle]
-    if status:
-        filtered = [task for task in filtered if task.status == status]
-    return filtered
+def _stale_after() -> float:
+    try:
+        return float(config.get("task_stale_after_seconds", 3600) or 3600)
+    except (TypeError, ValueError):
+        return 3600.0
 
 
-def _parse_task_args(args: list[str]) -> tuple[bool, str | None, str | None, PageRequest, str | None]:
-    """Parse tasks command arguments.
+def _stale_ids(supervisor) -> set[tuple[str, str]]:
+    stale_getter = getattr(supervisor, "stale_tasks", None)
+    if not callable(stale_getter):
+        return set()
+    return {
+        (task.plugin, task.name)
+        for task in stale_getter(max_age_seconds=_stale_after())
+    }
 
-    Returns ``(full, plugin, status, page_request, error)``.
-    """
-    remaining = list(args)
-    full = False
-    plugin = None
-    status = None
 
-    if remaining and remaining[0].lower() in {"full", "details", "all-details"}:
-        full = True
-        remaining.pop(0)
-
-    if remaining and remaining[0].lower() == "plugin":
-        remaining.pop(0)
-        if not remaining:
-            return full, plugin, status, PageRequest(), "missing plugin name"
-        plugin = remaining.pop(0)
-
-    if remaining and remaining[0].lower() in _STATUS_ALIASES:
-        status = _STATUS_ALIASES[remaining.pop(0).lower()]
-
-    page_request = parse_page_args(remaining)
-    return full, plugin, status, page_request, None
+def _task_title(request: TaskListRequest) -> str:
+    parts = ["🧵 Background Tasks"]
+    if request.scope:
+        parts.append(f"scope={request.scope}")
+    if request.mode not in {"overview", "inventory"}:
+        parts.append(request.mode)
+    if request.full:
+        parts.append("full")
+    return " — ".join(parts)
 
 
 @command(
@@ -77,16 +62,22 @@ def _parse_task_args(args: list[str]) -> tuple[bool, str | None, str | None, Pag
     role=Role.ADMIN,
     aliases=["bot tasks"],
     short="Show supervised background task status.",
-    usage="{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last] | {prefix}tasks restart <plugin>",
+    usage=(
+        "{prefix}tasks [all|full|failed|stale|restarting|restarted|problems|running|done|cancelled] "
+        "[scope|plugin <name>] [<page>|last] | {prefix}tasks show <scope>/<task> | "
+        "{prefix}tasks restart <plugin>"
+    ),
     subcommands=[
         help_subcommand(
             "<list>",
-            "{prefix}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]",
-            "List supervised tasks with optional detail, plugin and status filters.",
+            "{prefix}tasks [all|full|failed|stale|restarting|restarted|problems] [scope <name>] [<page>|last]",
+            "Show a health overview or filtered supervised-task inventory.",
             examples=[
-                help_example("{prefix}tasks", "Show a compact overview of supervised tasks."),
-                help_example("{prefix}tasks plugin rss", "Show only tasks owned by the RSS plugin."),
-                help_example("{prefix}tasks failed", "Show only failed background tasks."),
+                help_example("{prefix}tasks", "Show task health, scopes and watchdog state."),
+                help_example("{prefix}tasks all", "Show the complete compact task inventory."),
+                help_example("{prefix}tasks problems", "Show only tasks needing attention."),
+                help_example("{prefix}tasks scope rss", "Show tasks owned by the RSS scope."),
+                help_example("{prefix}tasks show rss/feed-checker", "Show full detail for one task."),
             ],
         ),
         help_subcommand(
@@ -98,9 +89,11 @@ def _parse_task_args(args: list[str]) -> tuple[bool, str | None, str | None, Pag
     ],
     examples=[
         "{prefix}tasks",
+        "{prefix}tasks all",
         "{prefix}tasks full",
-        "{prefix}tasks plugin rss",
-        "{prefix}tasks failed",
+        "{prefix}tasks problems",
+        "{prefix}tasks scope rss",
+        "{prefix}tasks show rss/feed-checker",
         "{prefix}tasks restart rss",
     ],
     category="admin",
@@ -127,29 +120,63 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
         bot.reply_warn(msg, "Task supervisor is not available.")
         return
 
-    full, plugin, status, page_request, error = _parse_task_args(args)
-    if error:
-        bot.reply_usage(msg, f"{_prefix()}tasks [full] [plugin <name>] [running|failed|cancelled|done] [all|page|last]")
+    request = parse_task_list_request(args or [])
+    if request.error:
+        bot.reply_usage(
+            msg,
+            f"{_prefix()}tasks [all|full|failed|stale|restarting|restarted|problems|running|done|cancelled] "
+            "[scope|plugin <name>] [<page>|last]",
+        )
         return
 
-    tasks = supervisor.snapshot(include_done=True)
-    filtered = _filter_tasks(tasks, plugin=plugin, status=status)
-    title_parts = ["🧵 Background tasks"]
-    if plugin:
-        title_parts.append(f"plugin={plugin}")
-    if status:
-        title_parts.append(f"status={status}")
+    stale_ids = _stale_ids(supervisor)
+    if request.mode == "stale":
+        stale_getter = getattr(supervisor, "stale_tasks", None)
+        stale_tasks = list(stale_getter(max_age_seconds=_stale_after())) if callable(stale_getter) else []
+        views = normalize_tasks(
+            stale_tasks,
+            stale_ids={(task.plugin, task.name) for task in stale_tasks},
+        )
+    else:
+        tasks = list(supervisor.snapshot(include_done=True))
+        views = normalize_tasks(tasks, stale_ids=stale_ids)
 
-    lines = render_task_lines(filtered, full=full)
-    page_size = 20 if full else 12
-    reply = format_page(
-        " — ".join(title_parts),
-        lines,
-        page_request=page_request,
-        page_size=page_size,
-        command_hint=f"{_prefix()}tasks",
+    if request.mode == "overview":
+        lines = [_task_title(request), "", *render_task_summary(views)]
+        problems = filter_task_views(views, TaskListRequest(mode="problems"))
+        if problems:
+            lines.extend(["", "⚠️ Problems"])
+            lines.extend(render_task_entry(view, full=False) for view in problems[:5])
+        watchdog = getattr(bot, "watchdog", None)
+        runtime_state = getattr(watchdog, "runtime_state", None)
+        if callable(runtime_state):
+            lines.extend(["", "🐕 Runtime Watchdog", *render_watchdog_lines(runtime_state())])
+        bot.reply(msg, lines)
+        return
+
+    filtered = filter_task_views(views, request)
+    if request.mode == "show" and not filtered:
+        bot.reply_warn(msg, f"Task not found: {request.show}")
+        return
+
+    entries = [render_task_entry(view, full=request.full or request.mode == "show") for view in filtered]
+    if not entries:
+        entries = [
+            "✅ No background tasks match this view."
+            if request.mode in {"failed", "stale", "restarting", "problems"}
+            else "No supervised tasks found."
+        ]
+
+    bot.reply(
+        msg,
+        format_page(
+            _task_title(request),
+            entries,
+            page_request=request.page,
+            page_size=5 if request.full else 10,
+            command_hint=f"{_prefix()}tasks",
+        ),
     )
-    bot.reply(msg, reply)
 
 
 @command(
@@ -158,16 +185,12 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
     aliases=["task list"],
     short="Show supervised background tasks.",
     usage="{prefix}tasks list [all|page|last]",
-    examples=[
-        "{prefix}tasks list",
-        "{prefix}tasks list all",
-    ],
+    examples=["{prefix}tasks list", "{prefix}tasks list all"],
     category="admin",
     context="private recommended",
 )
 async def tasks_list_command(bot, sender, nick, args, msg, is_room):
-    """Show supervised background tasks."""
-    await tasks_command(bot, sender, nick, args, msg, is_room)
+    await tasks_command(bot, sender, nick, ["list", *(args or [])], msg, is_room)
 
 
 @command(
@@ -181,7 +204,6 @@ async def tasks_list_command(bot, sender, nick, args, msg, is_room):
     context="private recommended",
 )
 async def tasks_failed_command(bot, sender, nick, args, msg, is_room):
-    """Show failed supervised background tasks."""
     await tasks_command(bot, sender, nick, ["failed", *(args or [])], msg, is_room)
 
 
@@ -196,27 +218,4 @@ async def tasks_failed_command(bot, sender, nick, args, msg, is_room):
     context="private recommended",
 )
 async def tasks_stale_command(bot, sender, nick, args, msg, is_room):
-    """Show supervised tasks with stale heartbeats."""
-    supervisor = getattr(bot, "tasks", None)
-    if supervisor is None:
-        bot.reply_warn(msg, "Task supervisor is not available.")
-        return
-    stale_getter = getattr(supervisor, "stale_tasks", None)
-    if not callable(stale_getter):
-        bot.reply_warn(msg, "Task stale detection is not available.")
-        return
-    try:
-        max_age = float(config.get("task_stale_after_seconds", 3600) or 3600)
-    except Exception:
-        max_age = 3600.0
-    stale = stale_getter(max_age_seconds=max_age)
-    page_request = parse_page_args(args or [])
-    lines = render_task_lines(list(stale), full=False)
-    reply = format_page(
-        f"🧵 Stale background tasks (> {int(max_age)}s)",
-        lines,
-        page_request=page_request,
-        page_size=12,
-        command_hint=f"{_prefix()}tasks stale",
-    )
-    bot.reply(msg, reply)
+    await tasks_command(bot, sender, nick, ["stale", *(args or [])], msg, is_room)

@@ -2,6 +2,14 @@
 
 import asyncio
 
+from envs_xmpp_core.presentation import (
+    RoomView,
+    filter_room_views,
+    parse_room_list_request,
+    render_room_entry,
+    room_summary,
+)
+
 from bot.room_state import direct_roster_contacts
 from utils.audit import audit_event
 from utils.command import Role, command
@@ -32,8 +40,8 @@ _ROOM_LIST_DM_SCOPES = {"dm", "1:1", "direct", "contacts"}
 
 
 def _parse_rooms_list_args(args):
-    """Return ``(scope, page_request)`` or ``None`` for invalid arguments."""
-    remaining = [str(value).strip() for value in args]
+    """Return ``(scope, room_request)`` or ``None`` for invalid arguments."""
+    remaining = [str(value).strip() for value in args if str(value).strip()]
     scope = "muc"
     if remaining and remaining[0].lower() in _ROOM_LIST_MUC_SCOPES:
         remaining.pop(0)
@@ -41,14 +49,20 @@ def _parse_rooms_list_args(args):
         scope = "dm"
         remaining.pop(0)
 
-    if len(remaining) > 1:
-        return None
-    if remaining and remaining[0].lower() not in {"all", "last"}:
-        try:
-            int(remaining[0])
-        except ValueError:
+    if scope == "dm":
+        if len(remaining) > 1:
             return None
-    return scope, parse_page_args(remaining)
+        if remaining and remaining[0].lower() not in {"all", "last"}:
+            try:
+                int(remaining[0])
+            except ValueError:
+                return None
+        return scope, None, parse_page_args(remaining)
+
+    request = parse_room_list_request(remaining)
+    if request.error:
+        return None
+    return scope, request, request.page
 
 
 def _runtime_rooms(bot) -> dict[str, dict]:
@@ -64,33 +78,53 @@ def _runtime_rooms(bot) -> dict[str, dict]:
     return result
 
 
-def _muc_room_lines(bot, rows) -> tuple[list[str], int, int, int]:
-    """Build a compact union of stored and currently joined MUCs."""
+def _muc_room_views(bot, rows) -> list[RoomView]:
+    """Build normalized room views from stored and runtime state."""
     stored = {
         str(room): {"nick": nick, "autojoin": bool(autojoin), "status": status}
         for room, nick, autojoin, status in rows
     }
     runtime = _runtime_rooms(bot)
-    lines = []
+    views: list[RoomView] = []
     for room in sorted(set(stored) | set(runtime), key=str.casefold):
         saved = stored.get(room, {})
         live = runtime.get(room)
         values = live or {}
-        fields = [
+        details = [
+            "joined" if live is not None else "not joined",
             f"nick={values.get('nick') or saved.get('nick') or 'unknown'}",
             f"autojoin={'yes' if saved.get('autojoin', values.get('autojoin', False)) else 'no'}",
         ]
         if live and values.get("affiliation"):
-            fields.append(f"affiliation={values['affiliation']}")
+            details.append(f"affiliation={values['affiliation']}")
         if live and values.get("role"):
-            fields.append(f"role={values['role']}")
+            details.append(f"role={values['role']}")
         if room not in stored:
-            fields.append("stored=no")
+            details.append("stored=no")
         status = values.get("status", saved.get("status"))
         if status not in (None, "", "{}"):
-            fields.append(f"status={status}")
-        lines.append(f"• {'✅' if live is not None else '⚪'} {room} | " + " | ".join(fields))
-    return lines, len(set(stored) | set(runtime)), len(stored), len(runtime)
+            details.append(f"status={status}")
+        views.append(
+            RoomView(
+                jid=room,
+                joined=live is not None,
+                details=tuple(details),
+                expected_joined=bool(saved.get("autojoin", False)),
+                configured=room in stored,
+            )
+        )
+    return views
+
+
+def _muc_room_lines(bot, rows) -> tuple[list[str], int, int, int]:
+    """Compatibility wrapper returning rendered room rows and counts."""
+    views = _muc_room_views(bot, rows)
+    return (
+        [render_room_entry(view) for view in views],
+        len(views),
+        sum(view.configured for view in views),
+        sum(view.joined for view in views),
+    )
 
 
 def _roster_value(item, key: str, default=None):
@@ -569,12 +603,14 @@ async def rooms_delete(bot, sender_jid, nick, args, msg, is_room):
     role=Role.ADMIN,
     aliases=["room list"],
     short="List MUC rooms or direct XMPP contacts.",
-    usage="{prefix}rooms list [muc|dm|1:1|direct|contacts] [<page>|last|all]",
+    usage="{prefix}rooms list [muc|dm|1:1|direct|contacts] [joined|offline|problems] [<page>|last|all]",
     examples=[
         "{prefix}rooms list",
         "{prefix}rooms list all",
         "{prefix}rooms list dm",
         "{prefix}rooms list 1:1 all",
+        "{prefix}rooms list joined",
+        "{prefix}rooms list problems",
         "{prefix}rooms list direct",
         "{prefix}rooms list contacts all",
     ],
@@ -589,11 +625,11 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
             msg,
             (
                 f"{bot.prefix}rooms list "
-                "[muc|dm|1:1|direct|contacts] [<page>|last|all]"
+                "[muc|dm|1:1|direct|contacts] [joined|offline|problems] [<page>|last|all]"
             ),
         )
         return
-    scope, page = parsed
+    scope, room_request, page = parsed
 
     if scope == "dm":
         try:
@@ -620,26 +656,27 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
         command_hint = f"{bot.prefix}rooms list dm"
     else:
         rows = await bot.db.rooms.list()
-        room_lines, total_count, stored_count, joined_count = _muc_room_lines(bot, rows)
-        details = [
-            f"MUC rooms ({total_count}): stored={stored_count} | joined={joined_count}",
-            "Legend: ✅ joined | ⚪ not joined",
+        all_views = _muc_room_views(bot, rows)
+        room_views = filter_room_views(all_views, room_request)
+        details = [render_room_entry(view) for view in room_views]
+        preamble = [
+            room_summary(all_views),
+            "Legend: 🟢 joined · 🟠 attention · 🔴 unavailable · ⚪ not joined",
         ]
-        if room_lines:
-            details.extend(room_lines)
-        else:
-            details.append("• none")
-        title = "📋 Rooms"
+        if room_request.filter != "all":
+            preamble.append(f"View: {room_request.filter} · {len(room_views)} match(es)")
+        title = "📋 Rooms" + (f" — {room_request.filter}" if room_request.filter != "all" else "")
         command_hint = f"{bot.prefix}rooms list"
 
     bot.reply(
         msg,
         format_page(
             title,
-            details,
+            details if details else (["No rooms match this view."] if scope == "muc" else ["• none"]),
             page_request=page,
             page_size=12,
             command_hint=command_hint,
+            preamble=preamble if scope == "muc" else (),
         ),
     )
 

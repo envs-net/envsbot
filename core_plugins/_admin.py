@@ -24,6 +24,15 @@ from pathlib import Path
 import psutil
 from envs_xmpp_core import __version__ as envs_xmpp_version
 from envs_xmpp_core.formatting import format_bytes, format_duration
+from envs_xmpp_core.presentation import (
+    StatusSection,
+    TaskListRequest,
+    filter_task_views,
+    normalize_tasks,
+    render_status_section,
+    render_task_entry,
+    render_task_summary,
+)
 
 from bot.lifecycle import _restart_notification_paths
 from bot.room_state import direct_roster_contacts
@@ -34,7 +43,6 @@ from utils.config import config
 from utils.file_security import PRIVATE_FILE_MODE
 from utils.health import HealthSnapshot, collect_health_snapshot
 from utils.runtime_paths import vcard_file
-from utils.task_display import render_task_lines
 from utils.task_supervisor import create_resilient_plugin_task
 from utils.time_utils import ensure_utc, utc_now
 from utils.updatecheck import check_for_updates_once, version_check_worker
@@ -91,13 +99,14 @@ _STATUS_SECTION_ICONS = {
 
 
 def _section(title: str, lines: list[str]) -> list[str]:
-    """Format one visually structured status section."""
-    icon = _STATUS_SECTION_ICONS.get(title, "•")
-    body = []
-    for index, line in enumerate(lines):
-        marker = "└─" if index == len(lines) - 1 else "├─"
-        body.append(f"{marker} {line}")
-    return [f"{icon} {title}:", *body, ""]
+    """Format one visually structured status section via envs-xmpp."""
+    return render_status_section(
+        StatusSection.from_lines(
+            title,
+            lines,
+            icon=_STATUS_SECTION_ICONS.get(title, "•"),
+        )
+    )
 
 
 def _package_version(package: str) -> str:
@@ -661,12 +670,30 @@ def _timestamp_age(value: str | None) -> str:
 
 
 def _task_status_lines(bot) -> list[str]:
-    """Return the same compact supervised-task inventory as ``tasks all``."""
+    """Return task health plus only entries needing operator attention."""
     supervisor = getattr(bot, "tasks", None)
     if supervisor is None:
         return ["Task supervisor is not available."]
-    tasks = supervisor.snapshot(include_done=True)
-    return [line for line in render_task_lines(tasks, full=False) if line]
+    try:
+        stale_after = float(config.get("task_stale_after_seconds", 3600) or 3600)
+    except (TypeError, ValueError):
+        stale_after = 3600.0
+    stale_getter = getattr(supervisor, "stale_tasks", None)
+    stale_ids: set[tuple[str, str]] = set()
+    if callable(stale_getter):
+        stale_ids = {
+            (task.plugin, task.name)
+            for task in stale_getter(max_age_seconds=stale_after)
+        }
+    views = normalize_tasks(supervisor.snapshot(include_done=True), stale_ids=stale_ids)
+    lines = render_task_summary(views, tree=False, include_scopes=False)
+    problems = filter_task_views(views, TaskListRequest(mode="problems"))
+    if problems:
+        lines.extend(["", "Attention:"])
+        lines.extend(render_task_entry(view, full=False) for view in problems)
+    else:
+        lines.extend(["", f"Complete inventory: {config.get('prefix', ',')}tasks all"])
+    return lines
 
 
 async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
