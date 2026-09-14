@@ -106,6 +106,9 @@ against the installed paths before tagging:
 ./scripts/deploy.sh update --dry-run
 ```
 
+Confirm `deploy.sh check` reports no runtime dependency drift from the reviewed
+Python constraint snapshot.
+
 `status` and `check` must resolve the expected application, virtualenv, config,
 service account, database and unit paths. The update dry-run must select only a
 stable release-tag workflow and must not stop the service or change files.

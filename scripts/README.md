@@ -29,6 +29,10 @@ commands, integration markers and coverage thresholds are declared under
 `[tool.envs-xmpp.quality]` and `[tool.envs-xmpp.testing]` in `pyproject.toml`;
 the runner implementation lives in `envs-xmpp`. The project-validation stage also runs the shared-core release audit, so dependency metadata, constraints and the deployment bootstrap cannot silently drift to different envs-xmpp versions.
 
+`deploy.sh status` also reports runtime dependency drift against the matching
+Python constraint snapshot. `deploy.sh check` treats any missing, unpinned or
+version-mismatched runtime dependency as an operator-visible failure.
+
 ## Which helper should I use?
 
 For normal installation, upgrades, systemd validation, and path discovery, start with [`deploy.sh`](../docs/deployment.md).

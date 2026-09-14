@@ -643,6 +643,7 @@ def test_deploy_check_succeeds_when_effective_service_matches(
         lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout="", stderr=""),
     )
     monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
+    monkeypatch.setattr(deploy, "_check_dependency_drift", lambda _deployment: None)
 
     result = deploy.check(deployment)
     output = capsys.readouterr().out
@@ -1042,3 +1043,39 @@ def test_deployment_uses_shared_target_base():
     from envs_xmpp_ops.deploy import DeploymentTarget
 
     assert issubclass(deploy.Deployment, DeploymentTarget)
+
+
+class _FakeDependencyReport:
+    def __init__(self, ok: bool, details: tuple[str, ...] = ()):
+        self.ok = ok
+        self._details = details
+
+    def summary(self) -> str:
+        return "clean (4 runtime dependencies match constraints)" if self.ok else "DRIFT (1/4 runtime dependencies differ)"
+
+    def details(self) -> tuple[str, ...]:
+        return self._details
+
+
+def test_dependency_drift_check_accepts_matching_runtime(monkeypatch, tmp_path, capsys):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(deploy, "_dependency_drift", lambda _deployment: _FakeDependencyReport(True))
+
+    deploy._check_dependency_drift(deployment)
+
+    assert "OK  dependency drift: clean" in capsys.readouterr().out
+
+
+def test_dependency_drift_check_rejects_version_drift(monkeypatch, tmp_path):
+    deployment = _current_deployment(tmp_path)
+    monkeypatch.setattr(
+        deploy,
+        "_dependency_drift",
+        lambda _deployment: _FakeDependencyReport(
+            False,
+            ("slixmpp: installed 1.14.1, expected 1.17.0",),
+        ),
+    )
+
+    with pytest.raises(deploy.DeployError, match=r"slixmpp: installed 1\.14\.1, expected 1\.17\.0"):
+        deploy._check_dependency_drift(deployment)
