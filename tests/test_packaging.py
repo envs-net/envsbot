@@ -203,6 +203,7 @@ def test_shared_quality_profile_covers_all_runtime_roots():
     assert [check["name"] for check in quality["project-checks"]] == [
         "Command documentation",
         "Generated configuration sample",
+        "Shared-core release audit",
     ]
 
 

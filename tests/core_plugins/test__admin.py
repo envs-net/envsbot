@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import core_plugins._admin as _admin
+from envs_xmpp_core.runtime import SessionLifecycleSnapshot
 
 import pytest_asyncio
 
@@ -951,3 +952,30 @@ async def test_graceful_command_shutdown_sets_clean_exit_code(fake_bot):
     assert fake_bot._requested_exit_code == 0
     fake_bot.disconnect.assert_called_once()
     fake_bot.shutdown_runtime.assert_awaited_once()
+
+
+def test_xmpp_status_lines_include_session_lifecycle_telemetry(monkeypatch, tmp_path):
+    monkeypatch.setattr(_admin, "vcard_file", lambda cfg: tmp_path / "vcard.xml")
+    snapshot = SessionLifecycleSnapshot(
+        generation=3,
+        reconnect_count=2,
+        state="reconnecting",
+        phase="backoff",
+        session_started_at="2026-09-14T05:00:00+00:00",
+        last_ready_at="2026-09-14T04:59:58+00:00",
+        last_disconnect_at="2026-09-14T05:01:00+00:00",
+        last_disconnect_reason="transport lost",
+        last_error=None,
+        startup_duration_seconds=2.0,
+        phase_age_seconds=4.0,
+        session_age_seconds=64.0,
+    )
+    bot = types.SimpleNamespace(
+        avatar_hash=None,
+        session_lifecycle=types.SimpleNamespace(snapshot=lambda: snapshot),
+        client_roster={},
+    )
+    lines = _admin._xmpp_status_lines(bot, (), (), full=True)
+    assert "Session: reconnecting · generation 3 · reconnects 2" in lines
+    assert "Session phase: backoff · age 4s" in lines
+    assert any("Last disconnect: transport lost" in line for line in lines)

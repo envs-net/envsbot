@@ -70,6 +70,7 @@ def reset_globals(monkeypatch):
     backup = dict(birthday_notify.ANNOUNCED_TODAY)
     birthday_notify.ANNOUNCED_TODAY.clear()
     birthday_notify.JOINED_ROOMS.clear()
+    monkeypatch.setattr(birthday_notify, "JOIN_STABILITY_DELAY_SECONDS", 0)
     if hasattr(birthday_notify, "_BIRTHDAY_CHECK_TASK"):
         birthday_notify._BIRTHDAY_CHECK_TASK = None
     yield
@@ -84,10 +85,11 @@ def bot(monkeypatch):
     # Patch get_profile to always return a fixed birthday unless set per test
     default_bday = "1995-05-13"
 
-    async def get_profile(bot_instance, msg, jid):
+    async def get_profile(bot_instance, msg, jid, *, raise_on_error=False):
+        del msg, jid, raise_on_error
         # Optionally add ._test_vcard_bday to bot to override
         b = getattr(bot_instance, "_test_vcard_bday", default_bday)
-        return {'BDAY': b}
+        return {"BDAY": b}
     monkeypatch.setattr(birthday_notify, "get_profile", get_profile)
     # Patch handle_room_toggle_command to no-op (simulate always False)
     async def handle_room_toggle_command(*a, **k): return False
@@ -507,6 +509,9 @@ async def test_on_muc_presence_branches(monkeypatch, bot):
         "_is_enabled_for_room",
         AsyncMock(return_value=True),
     )
+    birthday_notify.JOINED_ROOMS[FakeFrom.bare] = {
+        "nicks": {"Alice": {"jid": "alice@example.org"}}
+    }
     await birthday_notify.on_muc_presence(bot, presence())
     assert checked == [("alice@example.org", "Alice", FakeFrom.bare)]
 
@@ -516,6 +521,36 @@ async def test_on_muc_presence_branches(monkeypatch, bot):
         AsyncMock(side_effect=RuntimeError("boom")),
     )
     await birthday_notify.on_muc_presence(bot, presence())
+
+@pytest.mark.asyncio
+async def test_on_muc_presence_skips_lookup_when_occupant_leaves_during_grace(monkeypatch, bot):
+    class FakeFrom:
+        bare = "room@conference.example.org"
+        resource = "Spammer"
+
+    class FakeJid:
+        bare = "spammer@example.org"
+
+    class FakeMuc:
+        def get(self, key, default=None):
+            return FakeJid() if key == "jid" else default
+
+    pres = {"type": "available", "from": FakeFrom(), "muc": FakeMuc()}
+    birthday_notify.JOINED_ROOMS[FakeFrom.bare] = {
+        "nicks": {"Spammer": {"jid": FakeJid.bare}}
+    }
+    check = AsyncMock()
+    monkeypatch.setattr(birthday_notify, "_check_user_birthday", check)
+    monkeypatch.setattr(birthday_notify, "JOIN_STABILITY_DELAY_SECONDS", 2.0)
+
+    async def leave_during_grace(_delay):
+        birthday_notify.JOINED_ROOMS[FakeFrom.bare]["nicks"].pop("Spammer", None)
+
+    monkeypatch.setattr(birthday_notify.asyncio, "sleep", leave_during_grace)
+    await birthday_notify.on_muc_presence(bot, pres)
+
+    check.assert_not_awaited()
+
 
 
 @pytest.mark.asyncio
@@ -587,3 +622,32 @@ async def test_cleanup_room_state_removes_memory_and_persisted_announcements():
         "announced_dates_by_room",
         {"other@conf": "2026-08-12"},
     )
+
+
+@pytest.mark.asyncio
+async def test_birthday_vcard_lookup_requests_strict_error_propagation(monkeypatch, bot):
+    seen = {}
+
+    async def profile(_bot, _msg, _jid, *, raise_on_error=False):
+        seen["raise_on_error"] = raise_on_error
+        raise RuntimeError("temporary lookup failure")
+
+    monkeypatch.setattr(birthday_notify, "get_profile", profile)
+    assert await birthday_notify._get_birthday_from_vcard(bot, "room@conf", "Nick") == (False, None)
+    assert seen == {"raise_on_error": True}
+
+
+@pytest.mark.asyncio
+async def test_failed_live_birthday_lookup_does_not_create_negative_cache(monkeypatch, bot):
+    monkeypatch.setattr(
+        birthday_notify,
+        "_get_birthday_from_vcard",
+        AsyncMock(return_value=(False, None)),
+    )
+
+    assert await birthday_notify._get_birthday_cached_or_live(
+        bot, "room@conf", "jid-failed", "Nick"
+    ) is None
+
+    store = bot.db.users.plugin("birthday_notify")
+    assert "cached_bday" not in store.data.get("jid-failed", {})

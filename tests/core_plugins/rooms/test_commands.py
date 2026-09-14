@@ -296,7 +296,7 @@ async def test_on_load_missing_dependencies_and_normal_startup(fake_bot):
     fake_bot._reload_rooms = None
     with patch("core_plugins.rooms.lifecycle.autojoin_rooms", AsyncMock()) as autojoin:
         await rooms.on_load(fake_bot)
-        autojoin.assert_awaited_once_with(fake_bot)
+        autojoin.assert_not_awaited()
 
 
 @pytest.mark.asyncio

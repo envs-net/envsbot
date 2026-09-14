@@ -192,3 +192,25 @@ async def test_missing_backup_is_ok_when_all_managed_backups_are_disabled(monkey
     assert backup.summary == "managed backups disabled"
     assert backup.data["managed_backup_expected"] is False
     assert backup.data["too_old"] is False
+
+
+@pytest.mark.asyncio
+async def test_room_health_reports_runtime_only_rooms_from_shared_inventory(monkeypatch):
+    monkeypatch.setattr("bot.room_state.JOINED_ROOMS", {"runtime@conf": {}})
+    bot = SimpleNamespace(
+        presence=SimpleNamespace(joined_rooms={}),
+        db=SimpleNamespace(
+            rooms=SimpleNamespace(list=AsyncMock(return_value=[])),
+            outbox=None,
+        ),
+        tasks=None,
+        outbox=None,
+        message_cache=None,
+        watchdog=None,
+        bot_plugins=None,
+        alerts=None,
+        config={},
+    )
+
+    snapshot = await collect_health_snapshot(bot, include_alert_manager=False)
+    assert snapshot.check("rooms").data["runtime_only_rooms"] == ("runtime@conf",)

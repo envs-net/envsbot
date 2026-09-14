@@ -168,6 +168,11 @@ command = ["python", "scripts/check_command_docs.py"]
 name = "Generated configuration sample"
 command = ["python", "scripts/generate_config_sample.py", "--check"]
 
+
+[[tool.envs-xmpp.quality.project-checks]]
+name = "Shared-core release audit"
+command = ["python", "-m", "envs_xmpp_ops.release_audit"]
+
 [tool.envs-xmpp.testing]
 coverage-source = "."
 coverage-report = "term"

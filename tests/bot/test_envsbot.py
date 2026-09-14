@@ -1445,6 +1445,7 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     bot.bot_plugins = types.SimpleNamespace(
         load_all=AsyncMock(side_effect=lambda: calls.append("load_all")),
         call_on_ready=AsyncMock(side_effect=lambda: calls.append("ready")),
+        call_on_session_ready=AsyncMock(side_effect=lambda: calls.append("session_ready")),
     )
     bot._create_startup_backup = AsyncMock(side_effect=lambda: calls.append("backup"))
 
@@ -1489,6 +1490,7 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
         "alerts",
         "watchdog",
         "backup-scheduler",
+        "session_ready",
         "restart",
         "systemd-ready",
         "version-state",
@@ -1496,13 +1498,66 @@ async def test_on_start_runs_startup_sequence(monkeypatch, bot):
     assert bot.roster.auto_subscribe is True
     assert [phase.name for phase in bot._last_startup_phases] == [
         "transport",
+        "process",
+        "readiness",
+    ]
+    assert [phase.name for phase in bot._last_process_startup_phases] == [
         "storage",
         "plugins",
         "monitoring",
-        "readiness",
     ]
     assert all(phase.status == "ok" for phase in bot._last_startup_phases)
+    assert all(phase.status == "ok" for phase in bot._last_process_startup_phases)
     assert all(phase.duration_seconds >= 0 for phase in bot._last_startup_phases)
+
+
+@pytest.mark.asyncio
+async def test_second_session_start_reuses_process_runtime(monkeypatch, bot):
+    monkeypatch.setattr(
+        envsbot.Bot,
+        "__getitem__",
+        lambda self, key: types.SimpleNamespace(add_feature=lambda feature: None),
+        raising=False,
+    )
+    bot.presence = types.SimpleNamespace(broadcast=lambda: None, joined_rooms={})
+    bot.get_roster = AsyncMock()
+    bot.db = types.SimpleNamespace(connect=AsyncMock(), message_cache=object())
+    bot.message_cache = types.SimpleNamespace(start=AsyncMock())
+    bot.bot_plugins = types.SimpleNamespace(
+        load_all=AsyncMock(),
+        call_on_ready=AsyncMock(),
+        call_on_session_ready=AsyncMock(),
+        plugins={},
+        failed_plugins={},
+    )
+    bot._create_startup_backup = AsyncMock()
+    bot._send_restart_notification = AsyncMock()
+    bot._finalize_successful_startup_version = AsyncMock()
+    bot.alerts = types.SimpleNamespace(start=AsyncMock())
+    bot.watchdog = types.SimpleNamespace(start=AsyncMock(), notify_ready=MagicMock())
+    monkeypatch.setattr("utils.backups.start_periodic_backup_worker", lambda owner: None)
+    bot.roster = types.SimpleNamespace(auto_subscribe=False)
+
+    await envsbot.Bot.on_start(bot, object())
+    envsbot.Bot.on_session_end(bot, "transport lost")
+    await envsbot.Bot.on_start(bot, object())
+
+    assert bot.db.connect.await_count == 1
+    assert bot.message_cache.start.await_count == 1
+    assert bot.bot_plugins.load_all.await_count == 1
+    assert bot.bot_plugins.call_on_ready.await_count == 1
+    assert bot.bot_plugins.call_on_session_ready.await_count == 2
+    assert bot.alerts.start.await_count == 1
+    assert bot.watchdog.start.await_count == 1
+    assert bot._create_startup_backup.await_count == 1
+    assert bot._finalize_successful_startup_version.await_count == 1
+    assert bot.get_roster.await_count == 2
+    assert bot._send_restart_notification.await_count == 2
+    session = bot.session_lifecycle.snapshot()
+    assert session.generation == 2
+    assert session.reconnect_count == 1
+    assert session.state == "ready"
+    assert bot._last_startup_phases[1].status == "skipped"
 
 
 @pytest.mark.asyncio
@@ -1533,9 +1588,11 @@ async def test_on_start_failure_closes_routing_and_requests_process_restart(monk
     bot.shutdown_runtime.assert_awaited_once_with()
     assert [phase.name for phase in bot._last_startup_phases] == [
         "transport",
-        "storage",
+        "process",
     ]
     assert bot._last_startup_phases[-1].status == "failed"
+    assert [phase.name for phase in bot._last_process_startup_phases] == ["storage"]
+    assert bot._last_process_startup_phases[-1].status == "failed"
 
 
 def test_on_session_end_marks_transport_unavailable(bot):
@@ -2023,3 +2080,133 @@ def test_cli_db_schema_dispatches_fingerprint_command(monkeypatch, capsys):
 
     assert envsbot.cli(["db", "schema"]) == 0
     assert "Schema match:      yes" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_new_session_start_cancels_stale_generation_before_process_init(monkeypatch, bot):
+    """A newer session_start must retire an older transport startup cleanly."""
+    monkeypatch.setattr(
+        envsbot.Bot,
+        "__getitem__",
+        lambda self, key: types.SimpleNamespace(add_feature=lambda feature: None),
+        raising=False,
+    )
+    bot.presence = types.SimpleNamespace(broadcast=lambda: None, joined_rooms={})
+    first_roster_started = asyncio.Event()
+    roster_calls = 0
+
+    async def get_roster():
+        nonlocal roster_calls
+        roster_calls += 1
+        if roster_calls == 1:
+            first_roster_started.set()
+            await asyncio.Event().wait()
+
+    bot.get_roster = AsyncMock(side_effect=get_roster)
+    bot.db = types.SimpleNamespace(connect=AsyncMock(), message_cache=object())
+    bot.message_cache = types.SimpleNamespace(start=AsyncMock())
+    bot.bot_plugins = types.SimpleNamespace(
+        load_all=AsyncMock(),
+        call_on_ready=AsyncMock(),
+        plugins={},
+        failed_plugins={},
+    )
+    bot._create_startup_backup = AsyncMock()
+    bot._send_restart_notification = AsyncMock()
+    bot._finalize_successful_startup_version = AsyncMock()
+    bot.alerts = types.SimpleNamespace(start=AsyncMock())
+    bot.watchdog = types.SimpleNamespace(start=AsyncMock(), notify_ready=MagicMock())
+    monkeypatch.setattr("utils.backups.start_periodic_backup_worker", lambda owner: None)
+    bot.roster = types.SimpleNamespace(auto_subscribe=False)
+
+    old_startup = asyncio.create_task(envsbot.Bot.on_start(bot, object()))
+    await first_roster_started.wait()
+    new_startup = asyncio.create_task(envsbot.Bot.on_start(bot, object()))
+    await new_startup
+
+    assert old_startup.cancelled()
+    assert roster_calls == 2
+    assert bot.db.connect.await_count == 1
+    assert bot.bot_plugins.load_all.await_count == 1
+    assert bot._create_startup_backup.await_count == 1
+    session = bot.session_lifecycle.snapshot()
+    assert session.generation == 2
+    assert session.reconnect_count == 1
+    assert session.state == "ready"
+    assert bot._session_start_task is None
+
+
+@pytest.mark.asyncio
+async def test_session_replacement_does_not_cancel_process_initialization(monkeypatch, bot):
+    """Process-lifetime startup survives cancellation of an obsolete XMPP session."""
+    monkeypatch.setattr(
+        envsbot.Bot,
+        "__getitem__",
+        lambda self, key: types.SimpleNamespace(add_feature=lambda feature: None),
+        raising=False,
+    )
+    bot.presence = types.SimpleNamespace(broadcast=lambda: None, joined_rooms={})
+    bot.get_roster = AsyncMock()
+    process_started = asyncio.Event()
+    release_process = asyncio.Event()
+
+    async def connect_db():
+        process_started.set()
+        await release_process.wait()
+
+    bot.db = types.SimpleNamespace(connect=AsyncMock(side_effect=connect_db), message_cache=object())
+    bot.message_cache = types.SimpleNamespace(start=AsyncMock())
+    bot.bot_plugins = types.SimpleNamespace(
+        load_all=AsyncMock(),
+        call_on_ready=AsyncMock(),
+        plugins={},
+        failed_plugins={},
+    )
+    bot._create_startup_backup = AsyncMock()
+    bot._send_restart_notification = AsyncMock()
+    bot._finalize_successful_startup_version = AsyncMock()
+    bot.alerts = types.SimpleNamespace(start=AsyncMock())
+    bot.watchdog = types.SimpleNamespace(start=AsyncMock(), notify_ready=MagicMock())
+    monkeypatch.setattr("utils.backups.start_periodic_backup_worker", lambda owner: None)
+    bot.roster = types.SimpleNamespace(auto_subscribe=False)
+
+    stale = asyncio.create_task(envsbot.Bot.on_start(bot, object()))
+    await asyncio.wait_for(process_started.wait(), timeout=1)
+    current = asyncio.create_task(envsbot.Bot.on_start(bot, object()))
+    await asyncio.sleep(0)
+    release_process.set()
+    await asyncio.wait_for(current, timeout=1)
+
+    assert stale.cancelled()
+    assert bot.db.connect.await_count == 1
+    assert bot.bot_plugins.load_all.await_count == 1
+    assert bot._process_startup_complete is True
+    assert bot._process_startup_task is None
+    assert bot.session_lifecycle.snapshot().generation == 2
+    assert bot.session_lifecycle.snapshot().state == "ready"
+
+
+@pytest.mark.asyncio
+async def test_late_completion_from_old_session_generation_is_rejected(bot):
+    """A late callback from an obsolete XMPP generation cannot complete a phase."""
+    first_generation = bot.session_lifecycle.begin()
+    operation_started = asyncio.Event()
+    release_operation = asyncio.Event()
+
+    async def slow_operation():
+        operation_started.set()
+        await release_operation.wait()
+        return "late-result"
+
+    stale_phase = asyncio.create_task(
+        envsbot.Bot._run_session_phase(bot, first_generation, "transport", slow_operation)
+    )
+    await asyncio.wait_for(operation_started.wait(), timeout=1)
+    second_generation = bot.session_lifecycle.begin()
+    assert second_generation == first_generation + 1
+    release_operation.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await stale_phase
+    assert bot.session_lifecycle.snapshot().generation == second_generation
+    assert bot.session_lifecycle.snapshot().state == "starting"

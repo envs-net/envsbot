@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +28,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from _envs_xmpp_bootstrap import ensure_envs_xmpp  # noqa: E402
+from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
 
 # ``deploy.sh`` executes this file directly, so Python otherwise puts only the
 # ``scripts/`` directory on ``sys.path``.  Add the checkout root before loading
@@ -59,44 +59,16 @@ class UserCancelled(DeployError):
     """Raised when an interactive action is declined."""
 
 
-@dataclass(frozen=True)
-class Deployment:
-    root: Path
-    venv: Path
-    config: Path
-    service: str
-    service_user: str
-    service_group: str
-    unit: Path
-    python: str
-    dry_run: bool = False
+class Deployment(DeploymentTarget):
+    """envsbot deployment target with project-specific executable/env."""
 
     @property
     def envsbot(self) -> Path:
-        from envs_xmpp_ops.layout import venv_binary
-
-        return venv_binary(self.venv, "envsbot")
-
-    @property
-    def pip(self) -> Path:
-        from envs_xmpp_ops.layout import venv_binary
-
-        return venv_binary(self.venv, "pip")
-
-    @property
-    def venv_python(self) -> Path:
-        from envs_xmpp_ops.layout import venv_binary
-
-        return venv_binary(self.venv, "python")
+        return self.binary("envsbot")
 
     @property
     def environment(self) -> dict[str, str]:
-        from envs_xmpp_ops.layout import deployment_environment
-
-        return deployment_environment(
-            config_environment="ENVSBOT_CONFIG",
-            config=self.config,
-        )
+        return self.environment_for("ENVSBOT_CONFIG")
 
 
 def _project_root() -> Path:
@@ -659,8 +631,10 @@ def _is_stable_release_tag(tag: str) -> bool:
 
 
 def _latest_tag(deployment: Deployment) -> str:
+    from envs_xmpp_ops.git import stable_release_tags
+
     result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
-    tags = [line.strip() for line in result.stdout.splitlines() if _is_stable_release_tag(line.strip())]
+    tags = stable_release_tags([line.strip() for line in result.stdout.splitlines()])
     if not tags:
         raise DeployError("no stable Git release tags (vX.Y.Z) found")
     return tags[0]

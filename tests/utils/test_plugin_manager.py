@@ -645,6 +645,58 @@ async def test_call_on_ready_records_failures_and_blocks_dependents():
 
 
 @pytest.mark.asyncio
+async def test_call_on_session_ready_runs_only_session_hooks():
+    bot = FakeBot()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+    calls = []
+    process_only = make_fake_plugin(meta={"name": "process", "requires": []})
+    session = make_fake_plugin(meta={"name": "session", "requires": ["process"]})
+
+    async def process_ready(_bot):
+        calls.append("process-ready")
+
+    async def session_ready(_bot):
+        calls.append("session-ready")
+
+    process_only.on_ready = process_ready
+    session.on_session_ready = session_ready
+    pm.plugins = {"process": process_only, "session": session}
+    pm.meta = {
+        "process": {"name": "process", "requires": []},
+        "session": {"name": "session", "requires": ["process"]},
+    }
+
+    await pm.call_on_session_ready()
+
+    assert calls == ["session-ready"]
+
+
+@pytest.mark.asyncio
+async def test_call_on_session_ready_records_failure_without_recalling_on_ready():
+    bot = FakeBot()
+    pm = PluginManager(bot, package="fakepkg", core_package=None)
+    calls = []
+    mod = make_fake_plugin(meta={"name": "session", "requires": []})
+
+    async def on_ready(_bot):
+        calls.append("on-ready")
+
+    async def on_session_ready(_bot):
+        calls.append("session-ready")
+        raise RuntimeError("session refresh failed")
+
+    mod.on_ready = on_ready
+    mod.on_session_ready = on_session_ready
+    pm.plugins = {"session": mod}
+    pm.meta = {"session": {"name": "session", "requires": []}}
+
+    await pm.call_on_session_ready()
+
+    assert calls == ["session-ready"]
+    assert pm.failed_plugins["session"] == "on_session_ready: RuntimeError: session refresh failed"
+
+
+@pytest.mark.asyncio
 async def test_unload_all_runs_hooks_in_reverse_dependency_order(monkeypatch):
     pm = PluginManager(FakeBot(), package="fakepkg", core_package=None)
     calls = []

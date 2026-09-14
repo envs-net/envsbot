@@ -217,3 +217,16 @@ available from PyPI before announcing the release.
 ## Post-release observation
 
 After the immediate smoke check, follow the structured [72-hour production observation checklist](production-observation.md). Record the baseline immediately after deployment, then repeat the health/task/outbox checks at approximately 24, 48 and 72 hours before treating a major runtime change as fully production-proven.
+
+## Shared-core release audit
+
+Before the next version bump/release candidate:
+
+- release or otherwise make the intended `envs-xmpp` version available first;
+- verify `requirements.txt`, `pyproject.toml`, both constraint snapshots and
+  `scripts/_envs_xmpp_bootstrap.py` agree on the intended shared-core floor/pin;
+- run the complete envs-xmpp quality gate before the envsbot gate;
+- keep the envsbot package version unchanged during feature development and
+  bump it only when the release contents are frozen;
+- run `git diff --check`, the generated command/config checks, wheel smoke test
+  and dependency audit before tagging.

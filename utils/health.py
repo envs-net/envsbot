@@ -11,7 +11,8 @@ from envs_xmpp_core.runtime.health import (
     HealthCheck,
     HealthSnapshot,
     HealthStatus,
-    analyze_task_snapshot,
+    analyze_room_join_state,
+    supervisor_task_health_state,
     watchdog_health_state,
 )
 from envs_xmpp_core.runtime.health import (
@@ -62,11 +63,16 @@ async def _rooms_check(bot: Any) -> HealthCheck:
         for row in rows
         if not bool(_row_value(row, "autojoin", True)) and _row_value(row, "room_jid")
     }
-    missing = tuple(sorted(autojoin - joined))
+    room_state = analyze_room_join_state(
+        configured=autojoin | manual,
+        expected=autojoin,
+        joined=joined,
+    )
+    missing = room_state.missing_expected
     status: HealthStatus = "warning" if missing else "ok"
     summary = (
-        f"{len(autojoin) - len(missing)}/{len(autojoin)} autojoin rooms joined"
-        if autojoin
+        f"{room_state.expected_joined}/{len(room_state.expected_rooms)} autojoin rooms joined"
+        if room_state.expected_rooms
         else "no autojoin rooms configured"
     )
     return HealthCheck(
@@ -74,13 +80,14 @@ async def _rooms_check(bot: Any) -> HealthCheck:
         status,
         summary,
         {
-            "joined": len(joined),
-            "autojoin_total": len(autojoin),
-            "autojoin_joined": len(autojoin) - len(missing),
+            "joined": len(room_state.joined_rooms),
+            "autojoin_total": len(room_state.expected_rooms),
+            "autojoin_joined": room_state.expected_joined,
             "manual_total": len(manual),
             "missing": missing,
-            "autojoin_rooms": tuple(sorted(autojoin)),
-            "joined_rooms": tuple(sorted(joined)),
+            "autojoin_rooms": room_state.expected_rooms,
+            "joined_rooms": room_state.joined_rooms,
+            "runtime_only_rooms": room_state.runtime_only,
         },
     )
 
@@ -90,9 +97,10 @@ async def _tasks_check(bot: Any) -> HealthCheck:
     if supervisor is None:
         return HealthCheck("tasks", "unknown", "task supervisor unavailable")
 
-    snapshot_getter = getattr(supervisor, "snapshot", None)
-    tasks = list(snapshot_getter(include_done=True)) if callable(snapshot_getter) else []
-    diagnostics = analyze_task_snapshot(tasks)
+    diagnostics = supervisor_task_health_state(supervisor, include_done=True)
+    if diagnostics is None:
+        return HealthCheck("tasks", "unknown", "task supervisor snapshot unavailable")
+    tasks = diagnostics.tasks
 
     details = getattr(supervisor, "summary_by_kind", None)
     if callable(details):

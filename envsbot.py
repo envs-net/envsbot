@@ -16,6 +16,7 @@ import signal
 from pathlib import Path
 
 import slixmpp
+from envs_xmpp_core.runtime.session import SessionLifecycleState
 
 from bot.audit import AuditMixin
 from bot.connection import (
@@ -160,7 +161,13 @@ class Bot(
         self._shutdown_complete = False
         self._shutdown_clean = False
         self._last_startup_phases = ()
+        self._last_process_startup_phases = ()
         self._last_shutdown_phases = ()
+        self._process_startup_lock = asyncio.Lock()
+        self._process_startup_complete = False
+        self._process_startup_task: asyncio.Task | None = None
+        self._session_start_task: asyncio.Task | None = None
+        self.session_lifecycle = SessionLifecycleState()
         # Unexpected disconnects should be restarted by Restart=on-failure.
         self._requested_exit_code = 1
         # Message routing stays closed until LifecycleMixin.on_start() has

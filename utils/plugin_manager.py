@@ -1287,6 +1287,56 @@ class PluginManager:
         finally:
             self._ready = True
 
+    @_serialized_lifecycle
+    async def call_on_session_ready(self) -> None:
+        """Run optional hooks that must be refreshed for every XMPP session.
+
+        Process-lifetime ``on_ready`` hooks remain one-time initialization.
+        Plugins that need transport/session refresh (for example MUC rejoin or
+        avatar presence publication) opt in with ``on_session_ready(bot)``.
+        """
+        try:
+            order = self._loaded_dependency_order()
+        except Exception:
+            log.exception("[PLUGIN] invalid dependency graph before on_session_ready")
+            order = list(self.plugins)
+
+        session_failures: set[str] = set()
+        for name in order:
+            module = self.plugins.get(name)
+            if module is None:
+                continue
+            blocked_by = sorted(
+                dep
+                for dep in self.meta.get(name, {}).get("requires", [])
+                if dep in session_failures or dep in self.failed_plugins
+            )
+            if blocked_by:
+                detail = (
+                    "on_session_ready blocked by failed dependency: "
+                    + ", ".join(blocked_by)
+                )
+                self.failed_plugins[name] = detail
+                session_failures.add(name)
+                log.error("[PLUGIN] 🔴 %s: %s", name, detail)
+                continue
+
+            hook = getattr(module, "on_session_ready", None)
+            if hook is None:
+                continue
+            try:
+                log.debug("[PLUGIN] calling on_session_ready: %s", name)
+                await self._run_hook(hook)
+            except Exception as exc:
+                detail = f"on_session_ready: {type(exc).__name__}: {exc}"
+                self.failed_plugins[name] = detail
+                session_failures.add(name)
+                log.exception("[PLUGIN] 🔴 on_session_ready failed: %s", name)
+            else:
+                existing = str(self.failed_plugins.get(name, ""))
+                if existing.startswith("on_session_ready:"):
+                    self.failed_plugins.pop(name, None)
+
     # --------------------------------------------------
     # COMMAND REGISTRATION
     # --------------------------------------------------

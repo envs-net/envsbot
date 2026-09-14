@@ -584,3 +584,24 @@ async def test_rooms_sync_joins_autojoin_rooms_concurrently_and_reports_failures
 def test_room_join_commands_allow_bounded_join_timeout_to_finish():
     assert rooms.rooms_join._command_timeout_seconds == 45.0
     assert rooms.rooms_sync._command_timeout_seconds == 45.0
+
+
+@pytest.mark.asyncio
+async def test_on_session_ready_reconciles_rooms_immediately(monkeypatch, fake_bot):
+    summary = {
+        "configured": 2,
+        "healthy": 1,
+        "rejoined": 1,
+        "failed": 0,
+        "deferred": 0,
+        "intentional": 0,
+    }
+    reconcile = AsyncMock(return_value=summary)
+    start_health = MagicMock(return_value=object())
+    monkeypatch.setattr(rooms_lifecycle, "reconcile_autojoin_rooms", reconcile)
+    monkeypatch.setattr(rooms_lifecycle, "start_room_join_health_task", start_health)
+
+    await rooms_lifecycle.on_session_ready(fake_bot)
+
+    reconcile.assert_awaited_once_with(fake_bot)
+    start_health.assert_called_once_with(fake_bot)

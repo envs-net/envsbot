@@ -141,6 +141,11 @@ class LifecycleMixin:
     get_roster: Any
     __getitem__: Any
     _startup_backup_done: bool
+    _process_startup_complete: bool
+    _process_startup_lock: asyncio.Lock
+    _process_startup_task: asyncio.Task | None
+    _session_start_task: asyncio.Task | None
+    session_lifecycle: Any
     connection_start_time: datetime | None
     version: str
     tasks: Any
@@ -486,6 +491,128 @@ class LifecycleMixin:
             fields,
         )
 
+    def _observe_process_startup_phase(
+        self,
+        result: LifecyclePhaseResult,
+        error: Exception | None,
+    ) -> None:
+        """Log one process-lifetime initialization phase."""
+        fields = kv(
+            status=result.status,
+            duration_ms=round(result.duration_seconds * 1000, 1),
+        )
+        if error is not None:
+            log.exception(
+                "[LIFECYCLE] event=process_startup phase=%s %s",
+                result.name,
+                fields,
+            )
+            return
+        log.info(
+            "[LIFECYCLE] event=process_startup phase=%s %s",
+            result.name,
+            fields,
+        )
+
+    async def _initialize_process_runtime(self) -> bool:
+        """Perform the single process-lifetime initialization transaction."""
+        async with self._process_startup_lock:
+            if self._process_startup_complete:
+                return False
+            runner = LifecyclePhaseRunner(observer=self._observe_process_startup_phase)
+            self._last_process_startup_phases = runner.results
+            try:
+                await runner.run_all(
+                    (
+                        ("storage", self._startup_storage),
+                        ("plugins", self._startup_plugins),
+                        ("monitoring", self._startup_monitoring),
+                    )
+                )
+            finally:
+                self._last_process_startup_phases = runner.results
+            self._process_startup_complete = True
+            return True
+
+    def _process_startup_done(self, task: asyncio.Task) -> None:
+        """Clear the shared process-startup task and consume orphaned errors."""
+        if getattr(self, "_process_startup_task", None) is task:
+            self._process_startup_task = None
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except asyncio.CancelledError:
+            return
+        if error is not None:
+            log.error("[LIFECYCLE] process startup task failed outside session owner: %s", error)
+
+    async def _ensure_process_runtime(self) -> bool:
+        """Initialize process services once, surviving session-task replacement."""
+        if self._process_startup_complete:
+            return False
+        task = getattr(self, "_process_startup_task", None)
+        if task is None or task.done():
+            task = asyncio.get_running_loop().create_task(
+                self._initialize_process_runtime(),
+                name="envsbot-process-startup",
+            )
+            self._process_startup_task = task
+            task.add_done_callback(self._process_startup_done)
+        try:
+            return bool(await asyncio.shield(task))
+        finally:
+            if task.done() and getattr(self, "_process_startup_task", None) is task:
+                self._process_startup_task = None
+
+    async def _cancel_process_startup(self) -> None:
+        """Cancel process initialization only during final process shutdown."""
+        task = getattr(self, "_process_startup_task", None)
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if getattr(self, "_process_startup_task", None) is task:
+                self._process_startup_task = None
+
+    async def _cancel_incomplete_session_start(
+        self,
+        reason: str,
+        *,
+        exclude: asyncio.Task | None = None,
+    ) -> bool:
+        """Cancel an obsolete session_start lifecycle before replacing it."""
+        task = getattr(self, "_session_start_task", None)
+        if task is None or task is exclude or task.done():
+            return False
+        log.warning("[XMPP] Cancelling incomplete session startup before %s", reason)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if getattr(self, "_session_start_task", None) is task:
+                self._session_start_task = None
+        return True
+
+    async def _run_session_phase(self, generation: int, name: str, operation):
+        """Run one session phase and reject completion from stale generations."""
+        if not self.session_lifecycle.begin_phase(generation, name):
+            raise asyncio.CancelledError
+        result = await operation()
+        if not self.session_lifecycle.is_current(generation):
+            raise asyncio.CancelledError
+        return result
+
+    async def _startup_process_runtime_phase(self) -> tuple[str, dict[str, object]]:
+        initialized = await self._ensure_process_runtime()
+        return ("ok" if initialized else "skipped"), {"initialized": initialized}
+
     async def _startup_transport(self) -> None:
         """Advertise transport features, publish presence and fetch the roster."""
         try:
@@ -521,7 +648,10 @@ class LifecycleMixin:
         backups_mod.start_periodic_backup_worker(self)
 
     async def _startup_publish_ready(self) -> None:
-        """Publish final readiness only after restart notification ordering is safe."""
+        """Refresh session-scoped plugin state, then publish final readiness."""
+        session_ready_hooks = getattr(self.bot_plugins, "call_on_session_ready", None)
+        if callable(session_ready_hooks):
+            await session_ready_hooks()
         self.presence.broadcast()
         self.roster.auto_subscribe = True
         # Keep autonomous plugin workers behind the restart-complete stanza.
@@ -584,8 +714,16 @@ class LifecycleMixin:
         else:
             log.info("[BOT] ✅ Bot started successfully")
         return failed_count == 0
-    async def on_start(self, event: Any) -> None:
-        """Handle slixmpp session_start and expose readiness only after startup."""
+    async def _prepare_session_start(self, event: Any) -> tuple[asyncio.Task | None, int]:
+        """Reset session-scoped routing and allocate a new generation."""
+        del event
+        current_task = asyncio.current_task()
+        await self._cancel_incomplete_session_start(
+            "new session_start",
+            exclude=current_task,
+        )
+        self._session_start_task = current_task
+        generation = self.session_lifecycle.begin()
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
             session_ready.set()
@@ -594,33 +732,80 @@ class LifecycleMixin:
             runtime_ready.clear()
         self.accepting_commands = False
         self.connection_start_time = utc_now()
+        return current_task, generation
+
+    def _session_startup_phases(self, generation: int):
+        """Return the ordered phases for one XMPP session generation."""
+        return (
+            (
+                "transport",
+                lambda: self._run_session_phase(generation, "transport", self._startup_transport),
+            ),
+            (
+                "process",
+                lambda: self._run_session_phase(
+                    generation,
+                    "process",
+                    self._startup_process_runtime_phase,
+                ),
+            ),
+            (
+                "readiness",
+                lambda: self._run_session_phase(
+                    generation,
+                    "readiness",
+                    self._startup_publish_ready,
+                ),
+            ),
+        )
+
+    async def _complete_session_start(
+        self,
+        generation: int,
+        results: tuple[LifecyclePhaseResult, ...],
+    ) -> None:
+        """Record successful session readiness and one-time version state."""
+        self.session_lifecycle.mark_ready(generation)
+        startup_healthy = self._log_startup_complete()
+        process_initialized = any(
+            result.name == "process" and bool(result.details.get("initialized"))
+            for result in results
+        )
+        if startup_healthy and process_initialized:
+            await self._finalize_successful_startup_version()
+        elif not startup_healthy and process_initialized:
+            log.info(
+                "[ADMIN] event=version_state status=deferred reason=degraded_startup"
+            )
+
+    async def on_start(self, event: Any) -> None:
+        """Handle one XMPP session generation on top of process-lifetime runtime."""
+        current_task, generation = await self._prepare_session_start(event)
         runner = LifecyclePhaseRunner(observer=self._observe_startup_phase)
         self._last_startup_phases = runner.results
-        phases = (
-            ("transport", self._startup_transport),
-            ("storage", self._startup_storage),
-            ("plugins", self._startup_plugins),
-            ("monitoring", self._startup_monitoring),
-            ("readiness", self._startup_publish_ready),
-        )
         try:
-            await runner.run_all(phases)
+            results = await runner.run_all(self._session_startup_phases(generation))
             self._last_startup_phases = runner.results
-            startup_healthy = self._log_startup_complete()
-            if startup_healthy:
-                await self._finalize_successful_startup_version()
-            else:
-                log.info(
-                    "[ADMIN] event=version_state status=deferred "
-                    "reason=degraded_startup"
-                )
-        except Exception:
+            await self._complete_session_start(generation, results)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             self._last_startup_phases = runner.results
-            log.exception("[BOT] event=startup status=failed")
+            self.session_lifecycle.mark_failed(generation, exc)
+            log.exception("[BOT] event=startup status=failed generation=%d", generation)
             await self._handle_startup_failure()
             raise
+        finally:
+            if getattr(self, "_session_start_task", None) is current_task:
+                self._session_start_task = None
+
     def on_session_end(self, event: Any) -> None:
-        """Stop new outbound work as soon as the XMPP session ends."""
+        """Stop session-scoped routing without tearing down process services."""
+        reason = str(event or "session_end")
+        task = getattr(self, "_session_start_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        self.session_lifecycle.mark_disconnected(reason)
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
             session_ready.clear()
@@ -628,6 +813,7 @@ class LifecycleMixin:
         if runtime_ready is not None:
             runtime_ready.clear()
         self.accepting_commands = False
+
     async def shutdown_runtime(self) -> bool:
         """Run the ordered shutdown once and report whether it was fully clean."""
         lock = getattr(self, "_shutdown_lock", None)
@@ -798,6 +984,7 @@ class LifecycleMixin:
         """Best-effort ordered shutdown of runtime workers and persistence."""
         log.info("[LIFECYCLE] event=shutdown phase=start status=begin")
         self._mark_runtime_stopping()
+        await self._cancel_process_startup()
         phases = (
             ("alerts", self._shutdown_alerts),
             ("watchdog", self._shutdown_watchdog),

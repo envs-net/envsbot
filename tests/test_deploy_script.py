@@ -1036,3 +1036,9 @@ def test_git_helper_forwards_nonchecking_mode(tmp_path, monkeypatch):
     assert result.returncode == 1
     assert observed["args"] == ["git", "rev-parse", "--verify", "missing"]
     assert observed["check"] is False
+
+
+def test_deployment_uses_shared_target_base():
+    from envs_xmpp_ops.deploy import DeploymentTarget
+
+    assert issubclass(deploy.Deployment, DeploymentTarget)

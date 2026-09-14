@@ -123,21 +123,30 @@ Main responsibilities:
 
 ### `bot.lifecycle`
 
-Lifecycle code handles startup, restart notifications, startup backups, the
-supervised periodic-backup scheduler and shutdown cleanup.
+Lifecycle code deliberately separates **process lifetime** initialization from
+**XMPP session lifetime** work. Persistent stores, plugin loading/`on_ready`,
+startup backup creation and monitoring are initialized once per process. Every
+`session_start` gets a new session generation and reruns only transport/session
+work plus `on_session_ready` hooks before routing is opened again.
 
 Main responsibilities:
 
-- ready/startup sequence
-- optional startup backup
+- one-time process runtime initialization (storage, plugins, backup, monitoring)
+- per-session generation allocation and stale-generation cancellation
+- transport/roster/presence refresh for every XMPP session
+- plugin `on_session_ready` hooks for reconnect-sensitive state
+- restart notification delivery and final runtime-ready gate
 - supervised periodic managed-backup scheduler
-- plugin ready hooks
-- restart notification delivery
 - accepting-command shutdown gate
-- supervised task cancellation
-- plugin unload timeout
+- supervised task cancellation and plugin unload timeout
 - shared message-cache flush before database close
 - idempotent database flush and close
+
+The process-initialization task is shielded from cancellation when an obsolete
+XMPP `session_start` is replaced, so a reconnect cannot partially tear down
+process-owned database/plugin state. Session phases check their generation both
+before and after awaited work; late completions from an older stream therefore
+cannot publish readiness or mutate session state for the newer connection.
 
 Startup and shutdown are intentionally implemented as small ordered phase
 orchestrators. Each phase records a `LifecyclePhaseResult` with status and
@@ -195,11 +204,18 @@ Plugins can expose optional hooks:
 ```python
 async def on_load(bot): ...
 async def on_ready(bot): ...
+async def on_session_ready(bot): ...
 async def on_unload(bot): ...
 async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]: ...
 async def get_runtime_state(bot, room_jid: str | None = None) -> dict: ...
 async def doctor(bot, room_jid: str | None = None) -> list[str]: ...
 ```
+
+`on_ready` is process-scoped and is called once after plugins are loaded.
+`on_session_ready` is session-scoped and runs after every successful XMPP
+session establishment, including reconnects. Profile/presence publication and
+room reconciliation belong in the latter; persistent database initialization
+and long-lived worker creation belong in the former.
 
 ## Shared runtime health
 
@@ -391,3 +407,14 @@ names, daily counters and success/failure totals, but no sender JIDs, message
 bodies or command arguments. Operational settings shared by defaults, runtime
 reload and validation are declared in `utils.config.spec` to reduce duplicated
 configuration plumbing.
+
+### Deployment and health ownership
+
+The deployment frontend subclasses `envs_xmpp_ops.deploy.DeploymentTarget` for
+its envsbot-specific executable and config environment.  Generic Git, systemd,
+virtualenv and update transactions stay in `envs_xmpp_ops`; local wrappers are
+kept only as project policy/test seams.
+
+`utils.health` now consumes the shared room-join and task-supervisor health
+normalizers.  envsbot continues to own severity thresholds and checks that are
+specific to its plugin, backup, outbox, message-cache and IdleRPG behavior.

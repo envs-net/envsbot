@@ -392,27 +392,17 @@ async def on_load(bot):
 
 
 async def on_ready(bot):
-    """
-    Sets the timezone of the bot in the PluginRuntimeStore(GLOBAL)
-    if the bot is fully set up.
-
-    Parameters
-    ----------
-    bot : Bot
-        The main bot instance.
-    """
-    # Network profile publication belongs in the readiness phase, after all
-    # plugins are loaded and while the XMPP session is known to be established.
-    await setup_profile(bot)
-
-    # Set timezone on startup from config file
+    """Persist process-lifetime profile settings after storage is ready."""
     store = bot.db.users.plugin("vcard")
-    await store.set(str(bot.boundjid.bare), "TIMEZONE", config.get("timezone",
-                                                                   "UTC"))
+    await store.set(
+        str(bot.boundjid.bare),
+        "TIMEZONE",
+        config.get("timezone", "UTC"),
+    )
 
-    # Rooms are usually joined after this plugin's on_load hook has already
-    # published the avatar. Re-broadcast here so every joined MUC receives a
-    # directed XEP-0153 presence hash too. That makes the avatar visible to
-    # participants who do not have the bot as a roster contact.
+
+async def on_session_ready(bot):
+    """Republish identity and avatar presence for each XMPP session."""
+    await setup_profile(bot)
     if hasattr(bot, "presence"):
         bot.presence.broadcast()

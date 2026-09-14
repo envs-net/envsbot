@@ -679,6 +679,7 @@ async def test_on_load_and_on_ready(monkeypatch):
 
         boundjid = type("Jid", (), {"bare": "jidval"})()
         db = types.SimpleNamespace(users=DummyUsers())
+        presence = types.SimpleNamespace(broadcast=lambda: called.append("broadcast"))
 
     async def fake_setup_profile(bot):
         called.append("setup_profile")
@@ -698,8 +699,12 @@ async def test_on_load_and_on_ready(monkeypatch):
 
     await _reg_profile.on_ready(Bot())
 
-    assert "setup_profile" in called
+    assert "setup_profile" not in called
     assert any(isinstance(x, tuple) and x[1] == "TIMEZONE" for x in called)
+
+    await _reg_profile.on_session_ready(Bot())
+    assert "setup_profile" in called
+    assert "broadcast" in called
 
 
 def _awaitable(val):

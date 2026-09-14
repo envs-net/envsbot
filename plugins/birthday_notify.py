@@ -83,6 +83,10 @@ INITIAL_SCAN_DELAY_SECONDS = int(config.get("birthday_initial_scan_delay_seconds
 # Check whether a new day has started. The full room scan only runs once per
 # day.
 CHECK_LOOP_INTERVAL_SECONDS = int(config.get("birthday_check_interval_seconds", 60 * 60) or (60 * 60))
+# Join-triggered birthday lookups are intentionally delayed very slightly.
+# This avoids racing a rapid leave/kick with an XEP-0054 IQ for an occupant
+# that no longer exists by the time the server receives the request.
+JOIN_STABILITY_DELAY_SECONDS = 2.0
 
 
 def _today() -> datetime.date:
@@ -355,7 +359,12 @@ async def _get_birthday_from_vcard(bot, room_jid, nick: str):
             mbody="",
         )
 
-        profile = await get_profile(bot, lookup_msg, f"{room_jid}/{nick}")
+        profile = await get_profile(
+            bot,
+            lookup_msg,
+            f"{room_jid}/{nick}",
+            raise_on_error=True,
+        )
         birthday = profile.get("BDAY")
         return True, _normalize_bday_value(birthday)
 
@@ -604,8 +613,32 @@ async def _birthday_check_loop(
 # EVENT HANDLERS
 # ============================================================================
 
+def _joined_occupant_is_current(room_jid, nick: str, user_jid: str) -> bool:
+    """Return whether the same real JID is still present under ``nick``."""
+    room_key = str(room_jid).split("/", 1)[0].strip().casefold()
+    room_data = None
+    for known_room, candidate in JOINED_ROOMS.items():
+        if str(known_room).split("/", 1)[0].strip().casefold() == room_key:
+            room_data = candidate
+            break
+    if not isinstance(room_data, dict):
+        return False
+    nicks = room_data.get("nicks")
+    if not isinstance(nicks, dict):
+        return False
+    info = nicks.get(nick)
+    if not isinstance(info, dict):
+        return False
+    current_jid = info.get("jid")
+    if not current_jid:
+        return True
+    current_bare = str(current_jid).split("/", 1)[0].strip().casefold()
+    expected_bare = str(user_jid).split("/", 1)[0].strip().casefold()
+    return current_bare == expected_bare
+
+
 async def on_muc_presence(bot, pres):
-    """Called when someone joins a MUC room."""
+    """Check a stable new MUC occupant for a birthday."""
     try:
         if pres["type"] == "unavailable":
             return
@@ -619,9 +652,24 @@ async def on_muc_presence(bot, pres):
 
         user_jid_str = str(jid.bare)
 
-        enabled = await _is_enabled_for_room(bot, "birthday_notify",
-                                             "birthday_notify", str(room_jid))
+        enabled = await _is_enabled_for_room(
+            bot,
+            "birthday_notify",
+            "birthday_notify",
+            str(room_jid),
+        )
         if not enabled:
+            return
+
+        if JOIN_STABILITY_DELAY_SECONDS > 0:
+            await asyncio.sleep(JOIN_STABILITY_DELAY_SECONDS)
+        if not _joined_occupant_is_current(room_jid, nick, user_jid_str):
+            log.debug(
+                "[BIRTHDAY] Skipping join-triggered vCard lookup for %s in %s: "
+                "occupant left or changed during join stability delay",
+                nick,
+                room_jid,
+            )
             return
 
         await _check_user_birthday(bot, user_jid_str, nick, room_jid)

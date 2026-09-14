@@ -1,5 +1,6 @@
 """Split module for core_plugins/users.py: permissions."""
 
+from envs_xmpp_core.xmpp import AffiliationQueryOptions, query_muc_affiliation
 from envs_xmpp_core.xmpp.occupants import (
     find_occupant_by_jid,
     occupant_is_admin_or_owner,
@@ -8,7 +9,7 @@ from envs_xmpp_core.xmpp.occupants import (
 from utils.command import Role, role_from_int
 from utils.config import config
 
-from .lookup import _maybe_await, _parse_user_jid, _plugin_name, _valid_plugin_names, find_users_by_nick_safe
+from .lookup import _parse_user_jid, _plugin_name, _valid_plugin_names, find_users_by_nick_safe
 from .roles import (
     ASSIGNABLE_ROLES,
     GRANTABLE_PLUGINS,
@@ -230,16 +231,26 @@ def _normalize_affiliation_result(result) -> set[str]:
 
 
 async def _query_affiliation_jids(bot, room_jid: str, affiliation: str) -> set[str]:
-    """Query a room's MUC owner/admin affiliation list."""
+    """Query a room affiliation through the shared bounded IQ helper."""
     plugin_map = getattr(bot, "plugin", {}) or {}
     get_plugin = getattr(plugin_map, "get", None)
     muc = get_plugin("xep_0045", None) if callable(get_plugin) else None
-    method = getattr(muc, "get_affiliation_list", None)
-    if not callable(method):
-        raise RuntimeError("XEP-0045 get_affiliation_list is unavailable")
+    if muc is None:
+        raise RuntimeError("XEP-0045 plugin is unavailable")
 
-    result = await _maybe_await(method(room_jid, affiliation))
-    return _normalize_affiliation_result(result)
+    result = await query_muc_affiliation(
+        muc,
+        room_jid,
+        affiliation,
+        options=AffiliationQueryOptions(
+            timeout_seconds=10.0,
+            attempts=2,
+            retry_delay_seconds=1.0,
+        ),
+    )
+    if not result.ok:
+        raise RuntimeError(result.summary)
+    return _normalize_affiliation_result(result.items)
 
 
 async def _live_room_affiliation_allows(bot, jid: str, room_jid: str) -> bool | None:

@@ -29,6 +29,7 @@ from envs_xmpp_core.presentation import (
     TaskListRequest,
     filter_task_views,
     normalize_tasks,
+    render_session_lifecycle_lines,
     render_status_section,
     render_task_entry,
     render_task_summary,
@@ -262,8 +263,10 @@ def _xmpp_status_lines(
     bot,
     room_snapshot: tuple[tuple[str, dict], ...],
     stored_rooms=(),
+    *,
+    full: bool = False,
 ) -> list[str]:
-    """Return XMPP-related status lines."""
+    """Return XMPP-related status lines including shared session telemetry."""
     joined_rooms = len(room_snapshot)
     direct_contacts = _direct_contact_count(bot, stored_rooms)
     muc_label = f"{joined_rooms} joined MUC{'s' if joined_rooms != 1 else ''}"
@@ -279,12 +282,17 @@ def _xmpp_status_lines(
     avatar_hash = getattr(bot, "avatar_hash", None)
     vcard_path = vcard_file(config)
 
-    return [
+    lines = [
         f"Rooms: {muc_label} · {direct_label}",
         f"Occupants: {occupants} tracked",
         f"Avatar: {'published' if avatar_hash else 'missing'}",
         f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
     ]
+    lifecycle = getattr(bot, "session_lifecycle", None)
+    snapshot = getattr(lifecycle, "snapshot", None)
+    if callable(snapshot):
+        lines.extend(render_session_lifecycle_lines(snapshot(), full=full))
+    return lines
 
 
 def _task_summary_line(bot) -> str:
@@ -707,7 +715,7 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     lines.extend(_section("Core", _core_status_lines(bot)))
     lines.extend(_section("Runtime", _runtime_status_lines()))
     lines.extend(
-        _section("XMPP", _xmpp_status_lines(bot, room_snapshot, stored_rooms))
+        _section("XMPP", _xmpp_status_lines(bot, room_snapshot, stored_rooms, full=full))
     )
 
     plugin_lines = _plugin_status_lines(bot, include_task_summary=not full)

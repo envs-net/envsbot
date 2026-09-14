@@ -11,6 +11,7 @@ from utils.task_supervisor import (
     create_plugin_task,
     create_resilient_plugin_task,
     sleep_with_heartbeat,
+    wait_for_runtime_ready,
 )
 
 from .invites import (
@@ -321,6 +322,11 @@ async def room_join_health_loop(bot) -> None:
             _ROOM_HEALTH_TASK_NAME,
             _ROOM_HEALTH_CHECK_INTERVAL_SECONDS,
         )
+        await wait_for_runtime_ready(
+            bot,
+            plugin="rooms",
+            name=_ROOM_HEALTH_TASK_NAME,
+        )
         try:
             summary = await reconcile_autojoin_rooms(bot)
         except asyncio.CancelledError:
@@ -364,9 +370,27 @@ async def restart_tasks(bot):
 
 
 async def on_ready(bot):
-    """Load pending invites and start automatic room membership repair."""
+    """Load pending invites and start process-lifetime room health repair."""
     await load_pending_room_invites(bot)
     await cleanup_expired_room_invites(bot)
+    start_room_join_health_task(bot)
+
+
+async def on_session_ready(bot):
+    """Immediately reconcile configured room membership after reconnect."""
+    summary = await reconcile_autojoin_rooms(bot)
+    missing = summary["rejoined"] + summary["failed"] + summary["deferred"]
+    if missing:
+        log.info(
+            "[ROOMS] Session reconcile: configured=%d healthy=%d rejoined=%d "
+            "failed=%d deferred=%d intentional=%d",
+            summary["configured"],
+            summary["healthy"],
+            summary["rejoined"],
+            summary["failed"],
+            summary["deferred"],
+            summary["intentional"],
+        )
     start_room_join_health_task(bot)
 
 
@@ -445,7 +469,10 @@ async def on_load(bot):
                         exc_info=True,
                     )
     else:
-        await autojoin_rooms(bot)
+        # Initial room joins are session-scoped.  Keeping them out of on_load
+        # lets process initialization survive an XMPP generation replacement
+        # without issuing stale MUC join requests on the old transport.
+        log.debug("[ROOMS] Initial autojoin deferred until on_session_ready")
 
 
 async def on_unload(bot):
