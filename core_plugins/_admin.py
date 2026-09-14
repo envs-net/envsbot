@@ -145,15 +145,15 @@ def _connection_line(bot) -> str:
     """Return XMPP connection uptime."""
     connection_start = getattr(bot, "connection_start_time", None)
     if not connection_start:
-        return "Connection: unknown"
+        return "Connection uptime: unknown"
     try:
         if connection_start.tzinfo is None:
             connection_start = connection_start.astimezone()
         uptime = utc_now() - connection_start.astimezone(UTC)
-        return f"Connection: {human_time(uptime.total_seconds())}"
+        return f"Connection uptime: {human_time(uptime.total_seconds())}"
     except Exception:
         log.debug("[ADMIN] Could not calculate connection uptime", exc_info=True)
-        return "Connection: unknown"
+        return "Connection uptime: unknown"
 
 
 def _command_counts() -> tuple[int, int]:
@@ -259,6 +259,26 @@ def _direct_contact_count(bot, stored_rooms=()) -> int | None:
         return None
 
 
+def _xmpp_connection_line(bot) -> str:
+    """Return the effective XMPP endpoint using the common status wording."""
+    boundjid = getattr(bot, "boundjid", None)
+    bare = str(getattr(boundjid, "bare", "") or "")
+    jid_domain = bare.rsplit("@", 1)[1] if "@" in bare else None
+    host = (
+        config.get("host")
+        or getattr(boundjid, "domain", None)
+        or getattr(boundjid, "host", None)
+        or jid_domain
+        or "JID domain"
+    )
+    try:
+        port = int(config.get("port", 5222) or 5222)
+    except (TypeError, ValueError):
+        port = 5222
+    mode = "direct TLS" if bool(config.get("direct_tls", False)) else "STARTTLS"
+    return f"Connection: {host}:{port} ({mode})"
+
+
 def _xmpp_status_lines(
     bot,
     room_snapshot: tuple[tuple[str, dict], ...],
@@ -283,6 +303,7 @@ def _xmpp_status_lines(
     vcard_path = vcard_file(config)
 
     lines = [
+        _xmpp_connection_line(bot),
         f"Rooms: {muc_label} · {direct_label}",
         f"Occupants: {occupants} tracked",
         f"Avatar: {'published' if avatar_hash else 'missing'}",
@@ -358,6 +379,33 @@ def _alert_runtime_state(bot) -> dict:
         return {}
 
 
+def _compact_task_health_lines(bot) -> list[str]:
+    """Return the shared compact task lines used by both bot status views."""
+    supervisor = getattr(bot, "tasks", None)
+    if supervisor is None:
+        return ["Services: unavailable", "One-shots: unavailable", "Restarting: unavailable"]
+
+    stale_ids: set[tuple[str, str]] = set()
+    stale_getter = getattr(supervisor, "stale_tasks", None)
+    if callable(stale_getter):
+        try:
+            stale_after = float(config.get("task_stale_after_seconds", 3600) or 3600)
+            stale_ids = {
+                (task.plugin, task.name)
+                for task in stale_getter(max_age_seconds=stale_after)
+            }
+        except Exception:
+            log.debug("[ADMIN] Could not collect stale task state", exc_info=True)
+
+    try:
+        views = normalize_tasks(supervisor.snapshot(include_done=True), stale_ids=stale_ids)
+        summary = render_task_summary(views, tree=False, include_scopes=False)
+        return summary[1:4]
+    except Exception:
+        log.debug("[ADMIN] Could not collect compact task health", exc_info=True)
+        return ["Services: unavailable", "One-shots: unavailable", "Restarting: unavailable"]
+
+
 async def _health_status_lines(
     bot,
     health: HealthSnapshot | None = None,
@@ -400,7 +448,7 @@ async def _health_status_lines(
     else:
         cache_line = "Message cache: unavailable"
 
-    return [overall, outbox_line, cache_line]
+    return [overall, *_compact_task_health_lines(bot), outbox_line, cache_line]
 
 
 def _cache_detail_lines(bot, health: HealthSnapshot | None = None) -> list[str]:
@@ -718,7 +766,7 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
         _section("XMPP", _xmpp_status_lines(bot, room_snapshot, stored_rooms, full=full))
     )
 
-    plugin_lines = _plugin_status_lines(bot, include_task_summary=not full)
+    plugin_lines = _plugin_status_lines(bot, include_task_summary=False)
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
     lines.extend(_section("Plugins", plugin_lines))
     lines.extend(_section("Database", await _database_status_lines(bot, full=full)))

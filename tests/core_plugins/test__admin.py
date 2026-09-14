@@ -176,8 +176,13 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     reply_lines = replies[-1][0]
     reply = "\n".join(reply_lines)
     assert "Core:" in reply
+    assert "JID:" in reply
+    assert "Prefix:" in reply
+    assert "Connection uptime:" in reply
     assert "Runtime:" in reply
+    assert "envs-xmpp:" in reply
     assert "XMPP:" in reply
+    assert "Connection:" in reply
     assert "Rooms: 2 joined MUCs · 1 direct contact (1:1/DM)" in reply
     assert "Plugins:" in reply
     assert "Database:" in reply
@@ -446,7 +451,7 @@ def test_presence_connection_and_room_snapshots(monkeypatch):
         types.SimpleNamespace(presence=types.SimpleNamespace(status={"show": "chat", "status": "ready"}))
     ) == "chat / ready"
 
-    assert _admin._connection_line(types.SimpleNamespace()) == "Connection: unknown"
+    assert _admin._connection_line(types.SimpleNamespace()) == "Connection uptime: unknown"
 
     class BadConnectionTime:
         def __rsub__(self, other):
@@ -454,14 +459,14 @@ def test_presence_connection_and_room_snapshots(monkeypatch):
 
     assert _admin._connection_line(
         types.SimpleNamespace(connection_start_time=BadConnectionTime())
-    ) == "Connection: unknown"
+    ) == "Connection uptime: unknown"
 
     aware_connection = datetime.now(timezone.utc) - timedelta(seconds=5)
     aware_line = _admin._connection_line(
         types.SimpleNamespace(connection_start_time=aware_connection)
     )
-    assert aware_line.startswith("Connection: ")
-    assert aware_line != "Connection: unknown"
+    assert aware_line.startswith("Connection uptime: ")
+    assert aware_line != "Connection uptime: unknown"
 
     assert _admin._room_occupant_count({"nicks": {"a": {}, "b": {}}}) == 2
     assert _admin._room_occupant_count({"nicks": ["a"]}) == 0
@@ -505,13 +510,14 @@ async def test_status_room_and_direct_contact_helpers(monkeypatch):
 
     assert await _admin._stored_rooms_snapshot(bot) == tuple(stored_rows)
     assert _admin._direct_contact_count(bot, stored_rows) == 1
-    assert _admin._xmpp_status_lines(bot, tuple(), stored_rows)[0] == (
-        "Rooms: 0 joined MUCs · 1 direct contact (1:1/DM)"
-    )
+    xmpp_lines = _admin._xmpp_status_lines(bot, tuple(), stored_rows)
+    assert xmpp_lines[0] == "Connection: example.org:5222 (STARTTLS)"
+    assert xmpp_lines[1] == "Rooms: 0 joined MUCs · 1 direct contact (1:1/DM)"
     bot.client_roster["bob@example.org"] = {"subscription": "both"}
-    assert _admin._xmpp_status_lines(bot, (("joined@example.org", {}),), stored_rows)[0] == (
-        "Rooms: 1 joined MUC · 2 direct contacts (1:1/DM)"
+    xmpp_lines = _admin._xmpp_status_lines(
+        bot, (("joined@example.org", {}),), stored_rows
     )
+    assert xmpp_lines[1] == "Rooms: 1 joined MUC · 2 direct contacts (1:1/DM)"
 
     monkeypatch.setattr(
         _admin,
@@ -521,7 +527,7 @@ async def test_status_room_and_direct_contact_helpers(monkeypatch):
     assert _admin._direct_contact_count(bot, stored_rows) is None
     assert "unknown direct contacts" in _admin._xmpp_status_lines(
         bot, tuple(), stored_rows
-    )[0]
+    )[1]
 
 
 @pytest.mark.asyncio
@@ -744,6 +750,9 @@ async def test_health_and_cache_status_helpers():
 
     assert await _admin._health_status_lines(bot) == [
         "Overall: ⚠️ 2 active alerts",
+        "Services: unavailable",
+        "One-shots: unavailable",
+        "Restarting: unavailable",
         "Outbox: 3 pending · 1 dead",
         "Message cache: 42 messages · persistent · degraded",
     ]
