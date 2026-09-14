@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from xml.etree import ElementTree as ET
 import pytest
 
 from utils import message_cache
@@ -97,6 +98,20 @@ def test_reply_helpers_extract_target_and_quote():
     assert message_cache.extract_reply_quote("> first\n> second\nanswer") == "first\nsecond"
     assert message_cache.extract_reply_quote(">\nanswer") is None
     assert message_cache.extract_reply_quote("") is None
+
+
+def test_is_delayed_message_detects_current_and_legacy_delay_markers():
+    current = ET.fromstring(
+        "<message xmlns='jabber:client'><delay xmlns='urn:xmpp:delay' stamp='2026-09-14T20:00:00Z'/></message>"
+    )
+    legacy = ET.fromstring(
+        "<message xmlns='jabber:client'><x xmlns='jabber:x:delay' stamp='20260914T20:00:00'/></message>"
+    )
+    fresh = ET.fromstring("<message xmlns='jabber:client'><body>hello</body></message>")
+
+    assert message_cache.is_delayed_message(type("Msg", (), {"xml": current})()) is True
+    assert message_cache.is_delayed_message(type("Msg", (), {"xml": legacy})()) is True
+    assert message_cache.is_delayed_message(type("Msg", (), {"xml": fresh})()) is False
 
 
 def test_conversation_key_isolates_muc_private_messages():

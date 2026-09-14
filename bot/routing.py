@@ -6,6 +6,8 @@ import inspect
 import logging
 from typing import Any
 
+from utils.message_cache import is_delayed_message
+
 log = logging.getLogger(__name__)
 
 
@@ -33,6 +35,9 @@ class MessageRoutingMixin:
     async def on_muc_message(self, msg: Any) -> None:
         """Handle public groupchat messages only while the runtime is ready."""
         if not getattr(self, "accepting_commands", False):
+            return
+        if is_delayed_message(msg):
+            log.debug("[BOT] Ignoring delayed MUC history message")
             return
         try:
             room = msg["from"].bare

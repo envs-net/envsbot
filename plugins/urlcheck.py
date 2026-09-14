@@ -44,6 +44,7 @@ from utils.command_metadata import room_toggle_subcommands
 from utils.config import config
 from utils.http_fetch import fetch_json, fetch_preview, passthrough_validator
 from utils.http_user_agent import resolve_user_agent
+from utils.message_cache import is_delayed_message
 from utils.time_utils import utc_timestamp
 from utils.url_safety import UnsafeFetchURL
 from utils.urlcheck_extraction import extract_urls_from_message_text
@@ -239,6 +240,10 @@ async def urlcheck_command(bot, sender_jid, nick, args, msg, is_room):
 
 
 async def on_groupchat_message(bot, msg):
+    if is_delayed_message(msg):
+        log.debug("[URLCHECK] Ignoring delayed MUC history message")
+        return
+
     room = msg["from"].bare
     nick = msg.get("mucnick")
     body = msg.get("body", "").strip()

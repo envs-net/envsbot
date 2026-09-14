@@ -25,6 +25,46 @@ _PROCESSED_STANZA_ORDER: dict[str, deque[str]] = defaultdict(
     lambda: deque(maxlen=10000)
 )
 
+_DELAY_TAGS = {
+    "{urn:xmpp:delay}delay",
+    "{jabber:x:delay}x",
+}
+
+
+def is_delayed_message(msg) -> bool:
+    """Return True for XMPP messages carrying current or legacy delay data.
+
+    MUC history delivered while joining a room is marked with XEP-0203
+    ``urn:xmpp:delay`` (or, on older servers, ``jabber:x:delay``).  Such
+    messages are historical input and must not be treated like freshly sent
+    commands or trigger side-effecting helpers such as URLCheck.
+    """
+    xml = getattr(msg, "xml", None)
+    if xml is None:
+        try:
+            xml = msg.get("xml")
+        except Exception:
+            xml = None
+    if xml is None:
+        return False
+
+    iterator = getattr(xml, "iter", None)
+    if callable(iterator):
+        try:
+            return any(getattr(element, "tag", None) in _DELAY_TAGS for element in iterator())
+        except Exception:
+            pass
+
+    finder = getattr(xml, "find", None)
+    if callable(finder):
+        for tag in _DELAY_TAGS:
+            try:
+                if finder(tag) is not None or finder(f".//{tag}") is not None:
+                    return True
+            except Exception:
+                continue
+    return False
+
 
 def get_stanza_id(msg) -> str | None:
     """Extract a stable message ID from an XMPP stanza."""

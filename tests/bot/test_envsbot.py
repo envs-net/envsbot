@@ -5,6 +5,7 @@ import slixmpp
 import types
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
+from xml.etree import ElementTree as ET
 
 import envsbot
 import bot.lifecycle as lifecycle
@@ -1091,6 +1092,21 @@ async def test_muc_and_private_message_handlers_route_expected_messages(bot):
         "get": lambda key, default=None: "EnvBot" if key == "mucnick" else default,
     }
     await bot.on_muc_message(own_msg)
+    bot.handle_command.assert_not_called()
+    bot.bot_plugins.dispatch_runtime_event.assert_not_called()
+
+    delayed_xml = ET.fromstring(
+        "<message xmlns='jabber:client'><delay xmlns='urn:xmpp:delay' stamp='2026-09-14T20:00:00Z'/></message>"
+    )
+    delayed_msg = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "alice"),
+        "mucnick": "Alice",
+        "xml": delayed_xml,
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    await bot.on_muc_message(delayed_msg)
     bot.handle_command.assert_not_called()
     bot.bot_plugins.dispatch_runtime_event.assert_not_called()
 

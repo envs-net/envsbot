@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 import types
+from xml.etree import ElementTree as ET
 from urllib.parse import urljoin
 
 import plugins.urlcheck as urlcheck
@@ -229,6 +230,33 @@ async def test_on_groupchat_message_disabled_does_nothing(fake_bot,
                         **k: pytest.fail("fetch_url_title called"
                                          " when feature off"))
     await urlcheck.on_groupchat_message(fake_bot, msg)
+    assert fake_bot._replies == []
+
+
+@pytest.mark.asyncio
+async def test_on_groupchat_message_ignores_delayed_muc_history(fake_bot, monkeypatch):
+    room_jid = "history@conf"
+    fake_bot._test_urlcheck_store.data[room_jid] = True
+    urlcheck.JOINED_ROOMS[room_jid] = {"nick": "envsbot"}
+    msg = msg_ns_dict(
+        **{
+            "from": msg_ns_dict(bare=room_jid, resource="alice"),
+            "mucnick": "alice",
+            "body": "https://example.org/old",
+            "type": "groupchat",
+            "xml": ET.fromstring(
+                "<message xmlns='jabber:client'><delay xmlns='urn:xmpp:delay' stamp='2026-09-14T20:00:00Z'/></message>"
+            ),
+        }
+    )
+    monkeypatch.setattr(
+        urlcheck,
+        "fetch_url_title",
+        lambda *args, **kwargs: pytest.fail("historical URL must not be fetched"),
+    )
+
+    await urlcheck.on_groupchat_message(fake_bot, msg)
+
     assert fake_bot._replies == []
 
 
