@@ -116,17 +116,6 @@ def _muc_room_views(bot, rows) -> list[RoomView]:
     return views
 
 
-def _muc_room_lines(bot, rows) -> tuple[list[str], int, int, int]:
-    """Compatibility wrapper returning rendered room rows and counts."""
-    views = _muc_room_views(bot, rows)
-    return (
-        [render_room_entry(view) for view in views],
-        len(views),
-        sum(view.configured for view in views),
-        sum(view.joined for view in views),
-    )
-
-
 def _roster_value(item, key: str, default=None):
     """Read one value from a Slixmpp roster item or a test mapping."""
     try:

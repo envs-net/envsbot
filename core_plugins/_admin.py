@@ -17,7 +17,7 @@ import os
 import platform
 import tempfile
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC
 from importlib import metadata
 from pathlib import Path
 
@@ -353,32 +353,6 @@ def _message_cache_stats(bot) -> dict:
         return {}
 
 
-async def _outbox_runtime_state(bot) -> dict:
-    """Return the persistent-outbox runtime state without failing status."""
-    outbox = getattr(bot, "outbox", None)
-    runtime_state = getattr(outbox, "runtime_state", None)
-    if not callable(runtime_state):
-        return {}
-    try:
-        return dict(await runtime_state() or {})
-    except Exception:
-        log.debug("[ADMIN] Could not read outbox runtime state", exc_info=True)
-        return {}
-
-
-def _alert_runtime_state(bot) -> dict:
-    """Return immediate-alert state without making status depend on it."""
-    alerts = getattr(bot, "alerts", None)
-    runtime_state = getattr(alerts, "runtime_state", None)
-    if not callable(runtime_state):
-        return {}
-    try:
-        return dict(runtime_state() or {})
-    except Exception:
-        log.debug("[ADMIN] Could not read admin-alert runtime state", exc_info=True)
-        return {}
-
-
 def _compact_task_health_lines(bot) -> list[str]:
     """Return the shared compact task lines used by both bot status views."""
     supervisor = getattr(bot, "tasks", None)
@@ -709,20 +683,6 @@ def _plugin_detail_lines(bot) -> list[str]:
             f"{name} {version} | category={category} | commands={command_count}"
         )
     return lines
-
-
-def _timestamp_age(value: str | None) -> str:
-    """Return a compact age for an ISO timestamp used in task diagnostics."""
-    if not value:
-        return "not reported"
-    try:
-        parsed = datetime.fromisoformat(str(value))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        age = (utc_now() - parsed.astimezone(UTC)).total_seconds()
-        return f"{human_time(int(max(0, age)))} ago"
-    except (TypeError, ValueError):
-        return "unknown"
 
 
 def _task_status_lines(bot) -> list[str]:

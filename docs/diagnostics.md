@@ -77,10 +77,10 @@ entries; if more exist, the output points to `,rooms list all`. Plugin-specific
 checks such as RSS retry/backoff remain in the plugin/doctor diagnostics rather
 than running a full per-room plugin sweep as part of every status request.
 
-The `Background tasks` section is intentionally the final section of
-`,status full`, because the task inventory is commonly the longest part of the
-reply. It uses the same compact task rendering and ordering as `,tasks all`.
-For the expanded per-task fields, use `,tasks full all`.
+The `Background tasks` section of `,status full` is health-first: it shows
+the shared task summary and only entries that need operator attention. Use
+`,tasks all` for the complete task inventory and `,tasks full all` for expanded
+per-task fields.
 
 ## Room invite onboarding
 
