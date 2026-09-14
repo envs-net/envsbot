@@ -290,7 +290,7 @@ async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):
     now = utc_timestamp()
 
     if _remember_url(str(room), url, now):
-        log.info("[URLCHECK] 🟡 Fetching %r temporary disabled", url)
+        log.debug("[URLCHECK] Duplicate URL suppressed for %s: %r", room, url)
         return
 
     try:
@@ -351,12 +351,12 @@ async def _handle_urlcheck_url(bot, msg, room, url, thread_id, has_xep_0511):
 async def _send_youtube_urlcheck_reply(
     bot, msg, final_url, title, thread_id, has_xep_0511
 ):
-    yt_info, title, uploader, length_str, views = (
-            await fetch_youtube_info(final_url)
-    )
-
-    if not yt_info:
+    youtube_info = await fetch_youtube_info(final_url)
+    if not youtube_info:
+        log.debug("[URLCHECK] No YouTube API metadata available for %s", final_url)
         return
+
+    yt_info, title, uploader, length_str, views = youtube_info
 
     message = bot.make_message(
         mto=msg["from"].bare,

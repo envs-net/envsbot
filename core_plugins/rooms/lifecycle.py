@@ -218,8 +218,19 @@ async def autojoin_rooms(bot):
         await asyncio.gather(*attempts)
 
 
-async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str, int]:
-    """Repair missing memberships for rooms configured with autojoin enabled."""
+async def reconcile_autojoin_rooms(
+    bot,
+    *,
+    now: float | None = None,
+    session_start: bool = False,
+) -> dict[str, int]:
+    """Repair missing memberships for rooms configured with autojoin enabled.
+
+    During a fresh XMPP session, missing memberships are expected because MUC
+    membership belongs to the session rather than the process.  Periodic
+    health checks keep the stronger warning/rejoin wording for memberships
+    that disappear while an established session is running.
+    """
     summary = {
         "configured": 0,
         "healthy": 0,
@@ -273,13 +284,20 @@ async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str
             continue
 
         failures = _state_int(retry_state.get("failures", 0))
-        log.warning(
-            "[ROOMS] 🟡️ Autojoin membership missing for %s; "
-            "attempting rejoin as %s (previous_failures=%d)",
-            room_jid,
-            nick,
-            failures,
-        )
+        if session_start:
+            log.info(
+                "[ROOMS] Joining autojoin room %s as %s",
+                room_jid,
+                nick,
+            )
+        else:
+            log.warning(
+                "[ROOMS] 🟡️ Autojoin membership missing for %s; "
+                "attempting rejoin as %s (previous_failures=%d)",
+                room_jid,
+                nick,
+                failures,
+            )
         try:
             await _join_room(bot, muc, room_jid, nick, autojoin, status)
         except TimeoutError as exc:
@@ -300,7 +318,10 @@ async def reconcile_autojoin_rooms(bot, *, now: float | None = None) -> dict[str
             )
         else:
             summary["rejoined"] += 1
-            log.info("[ROOMS] ✅ Rejoined autojoin room %s as %s", room_jid, nick)
+            if session_start:
+                log.info("[ROOMS] ✅ Joined autojoin room %s as %s", room_jid, nick)
+            else:
+                log.info("[ROOMS] ✅ Rejoined autojoin room %s as %s", room_jid, nick)
 
     return summary
 
@@ -378,7 +399,7 @@ async def on_ready(bot):
 
 async def on_session_ready(bot):
     """Immediately reconcile configured room membership after reconnect."""
-    summary = await reconcile_autojoin_rooms(bot)
+    summary = await reconcile_autojoin_rooms(bot, session_start=True)
     missing = summary["rejoined"] + summary["failed"] + summary["deferred"]
     if missing:
         log.info(

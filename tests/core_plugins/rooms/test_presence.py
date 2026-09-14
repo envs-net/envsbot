@@ -603,5 +603,30 @@ async def test_on_session_ready_reconciles_rooms_immediately(monkeypatch, fake_b
 
     await rooms_lifecycle.on_session_ready(fake_bot)
 
-    reconcile.assert_awaited_once_with(fake_bot)
+    reconcile.assert_awaited_once_with(fake_bot, session_start=True)
     start_health.assert_called_once_with(fake_bot)
+
+
+@pytest.mark.asyncio
+async def test_session_reconcile_treats_missing_membership_as_expected(
+    fake_bot, caplog
+):
+    room_jid = "news@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[(room_jid, "BotNick", True, "online")]
+    )
+    fake_bot.plugin["xep_0045"].get_joined_rooms = MagicMock(return_value=[])
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+
+    with caplog.at_level("INFO", logger="core_plugins.rooms.state"):
+        summary = await rooms.reconcile_autojoin_rooms(
+            fake_bot,
+            now=100,
+            session_start=True,
+        )
+
+    assert summary["rejoined"] == 1
+    assert "Joining autojoin room" in caplog.text
+    assert "✅ Joined autojoin room" in caplog.text
+    assert "membership missing" not in caplog.text
+    assert "Rejoined autojoin room" not in caplog.text

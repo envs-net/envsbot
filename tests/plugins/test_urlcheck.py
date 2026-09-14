@@ -288,6 +288,36 @@ async def test_on_groupchat_message_regular_url(fake_bot, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_youtube_reply_handles_missing_api_metadata(
+    fake_bot, monkeypatch, caplog
+):
+    monkeypatch.setattr(
+        urlcheck,
+        "fetch_youtube_info",
+        AsyncMock(return_value=None),
+    )
+    msg = msg_ns_dict(
+        **{
+            "from": msg_ns_dict(bare="room@conf", resource="alice"),
+            "xml": types.SimpleNamespace(find=lambda p: None),
+        }
+    )
+
+    with caplog.at_level("DEBUG", logger="plugins.urlcheck"):
+        await urlcheck._send_youtube_urlcheck_reply(
+            fake_bot,
+            msg,
+            "https://youtu.be/ABCDEFGHIJK",
+            "Fallback title",
+            None,
+            False,
+        )
+
+    assert "No YouTube API metadata available" in caplog.text
+    fake_bot._safe_send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_on_groupchat_message_youtube_url(fake_bot, monkeypatch):
     store = fake_bot._test_urlcheck_store
     store.data["room4@conf"] = True
