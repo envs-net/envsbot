@@ -29,7 +29,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * Built-in version command and optional GitHub release update checks
 * SQLite-backed persistence with doctor checks, audit log, managed ZIP backups and documented offline maintenance
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
-* RSS/Atom feed watcher for room announcements
+* RSS/Atom feed watcher for room and direct subscriptions with stable feed numbers, scoped listing/search, pause/retry controls and per-destination templates
 * URL metadata checks for links, files and YouTube videos
 * Shared persistent recent-message cache for reply-aware plugins
 * Weather, translation, vCard lookup, XMPP diagnostics, reminders, polls, pins, tell messages and utility commands
@@ -106,7 +106,7 @@ Verify the installed application and shared core without starting XMPP:
 
 ```bash
 envsbot --version
-# envsbot 2.0.0 (envs-xmpp 1.2.0)
+# envsbot 2.1.0 (envs-xmpp 1.2.0)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -417,7 +417,7 @@ Optional plugins:
 * `pin` - save and manage pinned messages
 * `poll` - room polls with voting and history
 * `reminder` - timed reminders with relative, absolute and timezone-aware scheduling
-* `rss` - RSS/Atom feed watcher with stable feed numbers, delete-by-number and optional per-room/per-feed output templates
+* `rss` - RSS/Atom feed watcher with stable feed numbers, scoped subscription search, delete-by-number and optional per-room/per-feed output templates
 * `sed` - sed-style message corrections
 * `tell` - offline messages delivered when users rejoin
 * `tools` - ping, echo, time/date, seen and timestamp helpers

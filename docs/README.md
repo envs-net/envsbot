@@ -33,6 +33,7 @@ Operational notes:
 - `,tasks` shows supervised background tasks without the rest of the status output.
 - `,doctor` runs a compact operator health check; `,doctor performance` shows in-process latency counters and `,doctor full` includes them in the detailed sweep.
 - `,plugin state <plugin> [room_jid]` shows plugin-provided runtime counters.
+- `,rss search [own|rooms|mods|trusted|room_jid] <query> [page|all|last]` finds visible subscriptions by feed number, title, feed URL, or website URL without exposing direct-subscriber JIDs; see [`plugins/rss.md`](plugins/rss.md).
 - `,rooms diagnose <room_jid>` shows room, invite, plugin-toggle and plugin-state diagnostics.
 - `,version` shows the running EnvsBot version and the latest checked release.
 - `,checkupdate` / `,updatecheck` performs a manual GitHub release check.

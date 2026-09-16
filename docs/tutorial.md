@@ -211,6 +211,16 @@ From a normal private chat, pass the target room explicitly:
 ,rss list room@conference.example.org
 ```
 
+When the subscription list is long, search the feeds visible in the current context by stable feed number, title, feed URL, or website URL. The same optional scopes as `,rss list` can narrow a private-chat search, and direct-subscriber JIDs are not exposed in results:
+
+```text
+,rss search linux
+,rss search 42
+,rss search own example.org
+,rss search room@conference.example.org kernel 2
+,rss search linux all
+```
+
 Common maintenance commands:
 
 ```text
