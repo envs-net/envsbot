@@ -287,11 +287,17 @@ async def test_rss_feed_template_noop_and_cleanup_helpers(make_bot):
 
 
 def test_normalize_template_room_jid_cases():
-    from plugins.rss.store import _normalize_template_room_jid
+    from plugins.rss.store import _normalize_room_jid, _normalize_template_room_jid
 
     assert _normalize_template_room_jid(None) == ""
     assert _normalize_template_room_jid("") == ""
     assert _normalize_template_room_jid("   ") == ""
     assert _normalize_template_room_jid(
         " Room@Conference.Example.org "
+    ) == "room@conference.example.org"
+    assert _normalize_template_room_jid(
+        " Room@\u200bConference.Example.org/Nick "
+    ) == "room@conference.example.org"
+    assert _normalize_room_jid(
+        " Room@\ufeffConference.Example.org/OtherNick "
     ) == "room@conference.example.org"

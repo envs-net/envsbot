@@ -32,6 +32,7 @@ from functools import partial
 from urllib.parse import urlparse, urlunparse
 
 import isodate
+from envs_xmpp_core.xmpp import bare_jid
 
 from bot.room_state import JOINED_ROOMS
 from core_plugins._core import (
@@ -107,7 +108,7 @@ async def get_urlcheck_store(bot):
 
 
 def _normalize_room_jid(room_jid) -> str:
-    return str(room_jid or "").split("/", 1)[0].strip().lower()
+    return bare_jid(room_jid) or ""
 
 
 def _drop_url_room(room_jid: str) -> int:

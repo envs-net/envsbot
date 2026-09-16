@@ -633,7 +633,7 @@ async def test_room_feature_room_ids_are_bare_casefolded_and_deduplicated(
         store_config=_basic_store_config(),
         plugin_defaults={"pin": False},
     )
-    store = DummyStore({"PIN": {"Room@Conference.Example/Nick": True}})
+    store = DummyStore({"PIN": {"Room@\u200bConference.Example/Nick": True}})
     bot = _bot_with_store(store)
 
     state = await room_features.get_room_feature(
@@ -644,7 +644,7 @@ async def test_room_feature_room_ids_are_bare_casefolded_and_deduplicated(
     enabled = await room_features.get_enabled_room_jids(
         bot,
         "pin",
-        ["ROOM@CONFERENCE.EXAMPLE/ThirdNick"],
+        ["ROOM@\ufeffCONFERENCE.EXAMPLE/ThirdNick"],
     )
     await room_features.set_room_feature(
         bot,

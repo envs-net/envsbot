@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import time
 
+from envs_xmpp_core.xmpp import bare_jid
+
 from .config import (
     MAX_BACKOFF_TIME,
     RSS_DEFAULT_TEMPLATE_KEY,
@@ -99,10 +101,10 @@ def _feed_article_count(feed: dict) -> int:
         return 0
 
 def _normalize_room_jid(room: str) -> str:
-    return str(room or "").strip().lower()
+    return bare_jid(room) or ""
 def _normalize_template_room_jid(room: str) -> str:
     """Normalize a room JID used for RSS template storage."""
-    return str(room or "").strip().lower()
+    return bare_jid(room) or ""
 def _normalize_template_feed_url(url: str) -> str:
     """Normalize a feed URL used for RSS template storage."""
     return str(url or "").strip()

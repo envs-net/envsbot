@@ -517,7 +517,7 @@ async def test_urlcheck_cleanup_room_state_and_unload():
     urlcheck._remember_url("room@conf", "https://one", 100.0)
     urlcheck._remember_url("other@conf", "https://two", 100.0)
 
-    summary = await urlcheck.cleanup_room_state(None, "ROOM@CONF/nick")
+    summary = await urlcheck.cleanup_room_state(None, "ROOM@\u200bCONF/nick")
 
     assert summary == {"cached_urls": 1}
     assert "room@conf" not in urlcheck._url_timestamps

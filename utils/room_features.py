@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Protocol, TypedDict
 
+from envs_xmpp_core.xmpp import bare_jid
+
 from utils.formatting import bool_label
 
 log = logging.getLogger(__name__)
@@ -361,7 +363,7 @@ def _coerce_supported_feature_value(
 
 def _normalize_room_jid(value: object) -> str:
     """Return the canonical bare room JID used by feature overrides."""
-    return str(value).split("/", 1)[0].strip().lower()
+    return bare_jid(value) or ""
 
 
 def _safe_room_feature_state(

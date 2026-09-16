@@ -17,7 +17,7 @@ authors = [
 license = "GPL-3.0-only"
 
 dependencies = [
-    "envs-xmpp>=1.1.1,<2.0",
+    "envs-xmpp>=1.2.0,<2.0",
     "aiosqlite>=0.20,<1",
     "aiohttp>=3.14.3,<4",
     "beautifulsoup4>=4.12.3,<5",
