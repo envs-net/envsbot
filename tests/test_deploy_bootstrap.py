@@ -5,13 +5,40 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
+_TEST_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _checkout_root(path: Path) -> Path:
+    """Return the real checkout when tests run from mutmut's copy."""
+    if path.name == "mutants":
+        checkout = path.parent
+        if (
+            (checkout / "pyproject.toml").is_file()
+            and (checkout / "scripts" / "_envs_xmpp_bootstrap.py").is_file()
+        ):
+            return checkout
+    return path
+
+
+ROOT = _checkout_root(_TEST_ROOT)
 BOOTSTRAP_PATH = ROOT / "scripts" / "_envs_xmpp_bootstrap.py"
 
 spec = importlib.util.spec_from_file_location("deploy_bootstrap_under_test", BOOTSTRAP_PATH)
 assert spec is not None and spec.loader is not None
 bootstrap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bootstrap)
+
+
+def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "_envs_xmpp_bootstrap.py").write_text("# test\n", encoding="utf-8")
+    mutants = tmp_path / "mutants"
+    mutants.mkdir()
+
+    assert _checkout_root(mutants) == tmp_path
+    assert _checkout_root(tmp_path) == tmp_path
 
 
 def test_matching_version_needs_no_bootstrap(monkeypatch):
