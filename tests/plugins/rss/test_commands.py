@@ -1,3 +1,11 @@
+import aiohttp
+
+from plugins.rss import command_support as rss_support
+from plugins.rss import commands as rss_commands
+from plugins.rss import fetch as rss_fetch
+from plugins.rss import formatting as rss_formatting
+from plugins.rss import subscriptions as rss_subscriptions
+
 from .helpers import (
     AsyncMock,
     Role,
@@ -7,12 +15,6 @@ from .helpers import (
     pytest,
     rss,
 )
-from plugins.rss import command_support as rss_support
-from plugins.rss import commands as rss_commands
-from plugins.rss import subscriptions as rss_subscriptions
-from plugins.rss import fetch as rss_fetch
-from plugins.rss import formatting as rss_formatting
-import aiohttp
 
 
 @pytest.mark.asyncio
@@ -2745,3 +2747,311 @@ async def test_rss_delete_subcommand_aliases_dispatch_identically(
         "Removed direct RSS subscription" in _reply_text(reply)
         for reply in bot.replies
     )
+
+
+def test_rss_search_helpers_match_supported_fields_and_hide_subscribers():
+    feeds = {
+        "https://feeds.example.org/linux.xml": {
+            "feed_no": 12,
+            "title": "Linux Weekly News",
+            "link": "https://lwn.example.org/",
+            "rooms": ["room@conference.example.org"],
+            "users": {"secret@example.org": {"role": "trusted"}},
+        },
+        "https://example.org/python.xml": {
+            "feed_no": 3,
+            "title": "Python News",
+            "link": "https://python.example.org/",
+            "rooms": [],
+        },
+    }
+
+    assert [url for url, _feed in rss_support._rss_search_matches(feeds, "12")] == [
+        "https://feeds.example.org/linux.xml"
+    ]
+    assert [url for url, _feed in rss_support._rss_search_matches(feeds, "LINUX")] == [
+        "https://feeds.example.org/linux.xml"
+    ]
+    assert [url for url, _feed in rss_support._rss_search_matches(feeds, "lwn.example")] == [
+        "https://feeds.example.org/linux.xml"
+    ]
+    assert [url for url, _feed in rss_support._rss_search_matches(feeds, "python.xml")] == [
+        "https://example.org/python.xml"
+    ]
+    assert rss_support._rss_search_matches(feeds, "secret@example.org") == []
+
+    rendered = rss_support._format_rss_search_item(
+        "https://feeds.example.org/linux.xml",
+        feeds["https://feeds.example.org/linux.xml"],
+    )
+    assert "#12 · Linux Weekly News" in rendered
+    assert "Feed: https://feeds.example.org/linux.xml" in rendered
+    assert "Site: https://lwn.example.org/" in rendered
+    assert "secret@example.org" not in rendered
+
+
+def test_rss_search_scope_helpers_select_feed_level_subscriptions():
+    feeds = {
+        "https://example.org/shared.xml": {
+            "title": "Shared",
+            "rooms": ["room@conference.example.org"],
+            "users": {
+                "mod@example.org": {"role": "moderator"},
+                "trusted@example.org": {"role": "trusted"},
+            },
+        },
+        "https://example.org/own.xml": {
+            "title": "Own",
+            "rooms": [],
+            "users": {"Alice@Example.org": {"role": "trusted"}},
+        },
+        "https://example.org/room.xml": {
+            "title": "Room",
+            "rooms": ["other@conference.example.org"],
+            "users": {},
+        },
+    }
+
+    assert set(rss_support._rss_search_scope_feeds(feeds, "rooms")) == {
+        "https://example.org/shared.xml",
+        "https://example.org/room.xml",
+    }
+    assert set(rss_support._rss_search_scope_feeds(feeds, "mods")) == {
+        "https://example.org/shared.xml"
+    }
+    assert set(rss_support._rss_search_scope_feeds(feeds, "trusted")) == {
+        "https://example.org/shared.xml",
+        "https://example.org/own.xml",
+    }
+    assert set(
+        rss_support._rss_search_scope_feeds(
+            feeds,
+            "own",
+            owner="alice@example.org",
+        )
+    ) == {"https://example.org/own.xml"}
+
+
+def test_rss_search_argument_parser_supports_scope_phrase_and_paging():
+    assert rss_commands._rss_parse_search_args(["search"]) is None
+    assert rss_commands._rss_parse_search_args(["search", "42"]) == (
+        None,
+        "42",
+        ["search"],
+    )
+    assert rss_commands._rss_parse_search_args(["search", "linux", "2"]) == (
+        None,
+        "linux",
+        ["search", "2"],
+    )
+    assert rss_commands._rss_parse_search_args(
+        ["search", "own", "Linux", "Weekly", "last"]
+    ) == ("own", "Linux Weekly", ["search", "last"])
+    assert rss_commands._rss_parse_search_args(
+        ["search", "room@conference.example.org", "kernel", "all"]
+    ) == (
+        "room@conference.example.org",
+        "kernel",
+        ["search", "all"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_rss_search_trusted_private_chat_only_sees_own_direct_feeds(make_bot):
+    bot = make_bot()
+    owner = "trusted@example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/own-linux.xml": {
+            "feed_no": 1,
+            "title": "Linux own",
+            "link": "https://example.org/linux",
+            "rooms": [],
+            "users": {owner: {"role": "trusted"}},
+        },
+        "https://example.org/other-linux.xml": {
+            "feed_no": 2,
+            "title": "Linux other",
+            "link": "https://example.org/other",
+            "rooms": [],
+            "users": {"other@example.org": {"role": "trusted"}},
+        },
+    }
+
+    async def trusted_role(_jid, room=None):
+        return Role.TRUSTED
+
+    bot.get_user_role = trusted_role
+    msg = {"from": SimpleNamespace(bare=owner, resource="phone"), "type": "chat"}
+
+    await rss.rss_command(bot, owner, "trusted", ["search", "linux"], msg, False)
+
+    text = _reply_text(bot.replies[-1])
+    assert "1 match(es)" in text
+    assert "Linux own" in text
+    assert "Linux other" not in text
+    assert owner not in text
+
+
+@pytest.mark.asyncio
+async def test_rss_search_room_context_is_room_scoped_even_for_global_manager(
+    monkeypatch,
+    make_bot,
+):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    other_room = "other@conference.example.org"
+    monkeypatch.setitem(rss_support.JOINED_ROOMS, room, object())
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/here.xml": {
+            "feed_no": 1,
+            "title": "Kernel here",
+            "rooms": [room],
+        },
+        "https://example.org/elsewhere.xml": {
+            "feed_no": 2,
+            "title": "Kernel elsewhere",
+            "rooms": [other_room],
+        },
+    }
+    msg = {"from": SimpleNamespace(bare=room, resource="alice"), "type": "groupchat"}
+
+    await rss.rss_command(bot, "admin@example.org", "admin", ["search", "kernel"], msg, True)
+
+    text = _reply_text(bot.replies[-1])
+    assert "Kernel here" in text
+    assert "Kernel elsewhere" not in text
+
+
+@pytest.mark.asyncio
+async def test_rss_search_global_manager_scopes_and_paginates(monkeypatch, make_bot):
+    bot = make_bot()
+    monkeypatch.setattr(rss_commands, "config", {"prefix": ",", "rss_list_page_size": 1})
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/one.xml": {
+            "feed_no": 1,
+            "title": "Linux One",
+            "rooms": ["room@conference.example.org"],
+            "users": {},
+        },
+        "https://example.org/two.xml": {
+            "feed_no": 2,
+            "title": "Linux Two",
+            "rooms": ["room@conference.example.org"],
+            "users": {},
+        },
+        "https://example.org/direct.xml": {
+            "feed_no": 3,
+            "title": "Linux Direct",
+            "rooms": [],
+            "users": {"trusted@example.org": {"role": "trusted"}},
+        },
+    }
+    msg = {"from": SimpleNamespace(bare="admin@example.org", resource="desktop"), "type": "chat"}
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["search", "rooms", "linux", "2"],
+        msg,
+        False,
+    )
+    page_two = _reply_text(bot.replies[-1])
+    assert 'RSS search "linux" — 2 match(es) - Page 2/2' in page_two
+    assert "Linux Two" in page_two
+    assert "Linux One" not in page_two
+    assert "Linux Direct" not in page_two
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["search", "trusted", "linux", "all"],
+        msg,
+        False,
+    )
+    trusted_text = _reply_text(bot.replies[-1])
+    assert "Linux Direct" in trusted_text
+    assert "trusted@example.org" not in trusted_text
+
+
+@pytest.mark.asyncio
+async def test_rss_search_explicit_room_checks_permission_and_matches_site_url(
+    monkeypatch,
+    make_bot,
+):
+    bot = make_bot()
+    room = "room@conference.example.org"
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://feeds.example.net/news.xml": {
+            "feed_no": 7,
+            "title": "Example News",
+            "link": "https://www.example.org/news/",
+            "rooms": [room],
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="alice@example.org", resource="phone"), "type": "chat"}
+
+    allowed = False
+
+    async def can_manage(_bot, _sender, target_room):
+        assert target_room == room
+        return allowed
+
+    monkeypatch.setattr(rss_commands, "_sender_can_manage_rss_room", can_manage)
+    await rss.rss_command(
+        bot,
+        "alice@example.org",
+        "alice",
+        ["search", room, "www.example.org"],
+        msg,
+        False,
+    )
+    assert "You need a global moderator role" in _reply_text(bot.replies[-1])
+
+    allowed = True
+    await rss.rss_command(
+        bot,
+        "alice@example.org",
+        "alice",
+        ["search", room, "www.example.org"],
+        msg,
+        False,
+    )
+    text = _reply_text(bot.replies[-1])
+    assert "Example News" in text
+    assert "Site: https://www.example.org/news/" in text
+
+
+@pytest.mark.asyncio
+async def test_rss_search_usage_no_matches_and_invalid_page(monkeypatch, make_bot):
+    bot = make_bot()
+    monkeypatch.setattr(rss_commands, "config", {"prefix": ",", "rss_list_page_size": 10})
+    bot.plugin_store[rss.RSS_KEY] = {
+        "https://example.org/feed.xml": {
+            "feed_no": 1,
+            "title": "Known feed",
+            "rooms": [],
+            "users": {},
+        }
+    }
+    msg = {"from": SimpleNamespace(bare="admin@example.org", resource="desktop"), "type": "chat"}
+
+    await rss.rss_command(bot, "admin@example.org", "admin", ["search"], msg, False)
+    assert bot.replies[-1][1] == (
+        "Usage: ,rss search "
+        "[own|rooms|mods|trusted|room_jid] <query> [page|all|last]"
+    )
+
+    await rss.rss_command(bot, "admin@example.org", "admin", ["search", "missing"], msg, False)
+    assert bot.replies[-1][1] == 'No RSS feeds matching "missing".'
+
+    await rss.rss_command(
+        bot,
+        "admin@example.org",
+        "admin",
+        ["search", "known", "0"],
+        msg,
+        False,
+    )
+    assert bot.replies[-1][1].startswith("Usage: ,rss search ")

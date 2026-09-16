@@ -5,7 +5,7 @@ from utils.http_user_agent import resolve_user_agent
 
 PLUGIN_META = {
     "name": "rss",
-    "version": "0.2.11",
+    "version": "0.2.12",
     "description": "RSS/Atom feed watcher and poster",
     "category": "info",
     "requires": ["rooms", "_core", "users"],

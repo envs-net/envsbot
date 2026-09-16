@@ -246,6 +246,97 @@ def _rss_list_usage(bot=None) -> str:
         "[own|rooms|mods|trusted|room_jid] [page|all|last]"
     )
 
+
+def _rss_search_usage(bot=None) -> str:
+    """Return the usage string for scoped, paginated RSS search output."""
+    return (
+        f"Usage: {_command_prefix(bot)}rss search "
+        "[own|rooms|mods|trusted|room_jid] <query> [page|all|last]"
+    )
+
+
+def _rss_search_scope_feeds(
+    feeds: dict,
+    scope: str,
+    *,
+    owner: str | None = None,
+) -> dict:
+    """Return feeds belonging to one compact subscription-search scope.
+
+    This deliberately returns feed-level results rather than subscription-level
+    rows.  Search output therefore never exposes direct subscriber JIDs.
+    """
+    scope = str(scope or "").strip().lower()
+    owner_key = _normalize_direct_user_jid(owner) if owner else None
+    moderator_roles = {"owner", "superadmin", "admin", "moderator"}
+
+    selected: dict = {}
+    for url, feed in feeds.items():
+        if not isinstance(feed, dict):
+            continue
+        users = _direct_subscriptions(feed)
+        include = False
+        if scope == "rooms":
+            include = bool(feed.get("rooms"))
+        elif scope == "own":
+            include = bool(owner_key) and any(
+                _normalize_direct_user_jid(jid) == owner_key
+                for jid in users
+            )
+        elif scope in {"mods", "trusted"}:
+            roles = {
+                str((meta or {}).get("role") or "trusted").lower()
+                for meta in users.values()
+            }
+            if scope == "mods":
+                include = bool(roles & moderator_roles)
+            else:
+                include = bool(roles - moderator_roles)
+        if include:
+            selected[url] = feed
+    return selected
+
+
+def _rss_search_matches(feeds: dict, query: str) -> list[tuple[str, dict]]:
+    """Return feed-level matches by number, title, feed URL or site URL."""
+    _ensure_feed_numbers(feeds)
+    needle = str(query or "").strip().casefold()
+    if not needle:
+        return []
+
+    matches: list[tuple[str, dict]] = []
+    for url, feed in feeds.items():
+        if not isinstance(feed, dict):
+            continue
+        fields = (
+            str(_feed_number(feed) or ""),
+            str(feed.get("title") or ""),
+            str(url or ""),
+            str(feed.get("link") or ""),
+        )
+        if any(needle in field.casefold() for field in fields):
+            matches.append((url, feed))
+
+    return sorted(
+        matches,
+        key=lambda item: (
+            _feed_number(item[1]) or 10**9,
+            str(item[1].get("title") or item[0]).casefold(),
+            str(item[0]).casefold(),
+        ),
+    )
+
+
+def _format_rss_search_item(feed_url: str, feed: dict) -> str:
+    """Return one compact RSS search result without subscriber identities."""
+    feed_no = _feed_number(feed)
+    title = str(feed.get("title") or feed_url)
+    site_link = str(feed.get("link") or "").strip()
+    lines = [f"• #{feed_no or '?'} · {title}", f"  Feed: {feed_url}"]
+    if site_link and site_link != feed_url:
+        lines.append(f"  Site: {site_link}")
+    return "\n".join(lines)
+
 async def burst_recent_entries(
     bot,
     feed,

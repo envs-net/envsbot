@@ -182,6 +182,20 @@ Global moderators may select a single section with `,rss list rooms`, `,rss list
 
 RSS list and health output include the feed number and latest local article number. `,rss list own` also reports the total local article count across all of the sender's direct feeds, independent of the displayed page, and RSS doctor/runtime state reports the aggregate local article count for its scope. These totals sum EnvsBot's persisted successful-post counters; they are not publisher lifetime totals. A visible feed number can be used instead of the URL in all single-feed delete forms. URL-based deletion and the aliases `,rss del`, `,rss remove`, and `,rss rm` remain supported.
 
+## Searching subscriptions
+
+Use `,rss search <query> [page|all|last]` when a long subscription list makes a feed difficult to find. Search is case-insensitive and matches the stable feed number, feed title, subscribed feed URL, and website URL advertised by the feed.
+
+Inside a room or MUC PM, search is scoped to that room. In a normal 1:1 chat, trusted users search only their own direct subscriptions while global moderators search all feeds. Add `own`, `rooms`, `mods`, `trusted`, or an explicit room JID before the query to select a narrower permitted scope. Search results intentionally do not expose direct subscriber JIDs.
+
+```text
+,rss search linux
+,rss search 42
+,rss search own example.org
+,rss search room@conference.example.org kernel 2
+,rss search linux all
+```
+
 ## Fetch retries and startup behavior
 
 Feed workers retain their current cursor when an HTTP request fails, so a temporary timeout does not lose entries. The first retry uses `RSS_RETRY_INITIAL_DELAY`, followed by exponential backoff up to `RSS_MAX_BACKOFF_TIME`.
@@ -197,7 +211,7 @@ Manage RSS feed subscriptions for rooms and direct users.
 Role: `user`<br>
 Context: `room, MUC PM or private chat`<br>
 Category: `rooms`<br>
-Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...`
+Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|search|template> ...`
 
 #### Subcommands
 
@@ -213,6 +227,14 @@ Usage: `,rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|li
     - `,rss list` — Show your direct subscriptions or the full moderator overview.
     - `,rss list own` — Show only your own personal direct subscriptions.
     - `,rss list trusted` — Show trusted-user direct subscriptions permitted for your role.
+
+- `,rss search [own|rooms|mods|trusted|room_jid] <query> [page|all|last]`
+  - Description: Find visible RSS feeds by number, title, feed URL, or website URL.
+  - Examples:
+    - `,rss search linux` — Search feeds visible in the current context.
+    - `,rss search own kernel` — Search only your personal direct subscriptions in 1:1 chat.
+    - `,rss search room@conference.example.org example.org` — Search feeds subscribed to an explicitly named room.
+    - `,rss search linux 2` — Show the second page of matching feeds.
 
 - `,rss delete <feed_url|feed_no> [room_jid|jid|all] | ,rss delete all <user_jid>`
   - Description: Remove one scoped subscription by URL/feed number, or explicitly remove a feed everywhere.

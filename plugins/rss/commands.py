@@ -12,6 +12,7 @@ from .command_support import (
     _command_prefix,
     _compact_subscription_lines,
     _direct_subscriptions,
+    _format_rss_search_item,
     _looks_like_room_arg,
     _message_type,
     _room_for_feed_command,
@@ -19,6 +20,9 @@ from .command_support import (
     _rss_health_summary,
     _rss_list_usage,
     _rss_normalize_room_list,
+    _rss_search_matches,
+    _rss_search_scope_feeds,
+    _rss_search_usage,
     _sender_can_manage_rss_globally,
     _sender_can_manage_rss_room,
     _sender_role,
@@ -557,6 +561,153 @@ async def _rss_handle_health(bot, sender_jid, args, msg, is_room, store, room):
     bot.reply(msg, lines)
     return
 
+def _rss_parse_search_args(args) -> tuple[str | None, str, list[str]] | None:
+    """Parse optional RSS search scope, query text and paging arguments."""
+    if len(args) < 2:
+        return None
+
+    search_args = [str(value).strip() for value in args[1:]]
+    scope: str | None = None
+    if search_args and search_args[0].lower() in {"own", "rooms", "mods", "trusted"}:
+        scope = search_args.pop(0).lower()
+    elif len(search_args) >= 2 and _looks_like_room_arg(search_args[0]):
+        scope = _normalize_room_jid(search_args.pop(0))
+
+    if not search_args:
+        return None
+
+    page_arg: str | None = None
+    if len(search_args) >= 2:
+        candidate = search_args[-1].lower()
+        if candidate in {"all", "last"} or candidate.lstrip("+-").isdigit():
+            page_arg = search_args.pop()
+
+    query = " ".join(search_args).strip()
+    if not query:
+        return None
+
+    paging_args = ["search"]
+    if page_arg is not None:
+        paging_args.append(page_arg)
+    return scope, query, paging_args
+
+
+async def _rss_handle_search(bot, sender_jid, args, msg, is_room, store, room):
+    parsed_args = _rss_parse_search_args(args)
+    if parsed_args is None:
+        bot.reply(msg, _rss_search_usage(bot))
+        return
+
+    scope, query, paging_args = parsed_args
+    feeds = await get_feeds(store)
+    if not feeds:
+        bot.reply(msg, "No feeds configured.")
+        return
+
+    is_global_manager = await _sender_can_manage_rss_globally(bot, sender_jid)
+    message_is_private = _message_type(msg) in ("chat", "normal") and room is None
+
+    if scope == "own":
+        if not message_is_private:
+            bot.reply(
+                msg,
+                "🔴 Own direct RSS subscriptions can only be searched in a normal 1:1 chat.",
+            )
+            return
+        role = await _sender_role(bot, sender_jid)
+        if role > Role.TRUSTED:
+            bot.reply(msg, "🔴 Direct RSS subscriptions require trusted role or higher.")
+            return
+        feeds = _rss_search_scope_feeds(
+            feeds,
+            "own",
+            owner=_normalize_room_jid(sender_jid),
+        )
+    elif scope in {"rooms", "mods", "trusted"}:
+        if not is_global_manager:
+            bot.reply(
+                msg,
+                "🔴 Only global moderators can search this RSS subscription scope.",
+            )
+            return
+        feeds = _rss_search_scope_feeds(feeds, scope)
+    elif scope:
+        target_room = _normalize_room_jid(scope)
+        if not await _sender_can_manage_rss_room(bot, sender_jid, target_room):
+            bot.reply(
+                msg,
+                "🔴 You need a global moderator role, or an RSS plugin "
+                f"grant and owner/admin affiliation in {target_room}.",
+            )
+            return
+        feeds = _filter_feeds_for_room(feeds, target_room)
+    elif room:
+        # Search is intentionally scoped to the current room, even for global
+        # managers.  Use a normal 1:1 chat for a global feed search.
+        if not await _sender_can_manage_rss_room(bot, sender_jid, room):
+            bot.reply(
+                msg,
+                "🔴 You need a global moderator role, or an RSS plugin "
+                f"grant and owner/admin affiliation in {room}.",
+            )
+            return
+        feeds = _filter_feeds_for_room(feeds, room)
+    elif message_is_private:
+        if not is_global_manager:
+            role = await _sender_role(bot, sender_jid)
+            if role > Role.TRUSTED:
+                bot.reply(
+                    msg,
+                    "🔴 RSS search from private chat needs an explicit room JID "
+                    "unless you are trusted or a global moderator.",
+                )
+                return
+            feeds = _rss_search_scope_feeds(
+                feeds,
+                "own",
+                owner=_normalize_room_jid(sender_jid),
+            )
+    else:
+        bot.reply(msg, _rss_search_usage(bot))
+        return
+
+    matches = _rss_search_matches(feeds, query)
+    if not matches:
+        bot.reply(msg, f'No RSS feeds matching "{query}".')
+        return
+
+    page_size = int(config.get("rss_list_page_size", 10) or 10)
+    parsed_page = _rss_list_page(paging_args, len(matches), page_size)
+    if parsed_page is None:
+        bot.reply(msg, _rss_search_usage(bot))
+        return
+
+    page, show_all, page_size = parsed_page
+    if show_all:
+        page_items = matches
+        lines = [f'RSS search "{query}" — {len(matches)} match(es) - all:']
+        total_pages = 1
+    else:
+        page_items, page, total_pages, total = paginate_items(
+            matches,
+            page,
+            page_size,
+        )
+        lines = [
+            f'RSS search "{query}" — {total} match(es) - Page {page}/{total_pages}:',
+        ]
+
+    lines.extend(_format_rss_search_item(url, feed) for url, feed in page_items)
+    if not show_all and page < total_pages:
+        scope_hint = f"{scope} " if scope else ""
+        lines.extend([
+            "",
+            f"Use {_command_prefix(bot)}rss search {scope_hint}{query} {page + 1} "
+            "for the next page.",
+        ])
+    bot.reply(msg, lines)
+
+
 async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
     feeds = await get_feeds(store)
 
@@ -741,7 +892,7 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
     "rss",
     role=Role.USER,
     short="Manage RSS feed subscriptions for rooms and direct users.",
-    usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
+    usage="{prefix}rss <add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|search|template> ...",
     subcommands=[
         help_subcommand(
             "add",
@@ -774,6 +925,29 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
                 help_example(
                     "{prefix}rss list trusted",
                     "Show trusted-user direct subscriptions permitted for your role.",
+                ),
+            ],
+        ),
+        help_subcommand(
+            "search",
+            "{prefix}rss search [own|rooms|mods|trusted|room_jid] <query> [page|all|last]",
+            "Find visible RSS feeds by number, title, feed URL, or website URL.",
+            examples=[
+                help_example(
+                    "{prefix}rss search linux",
+                    "Search feeds visible in the current context.",
+                ),
+                help_example(
+                    "{prefix}rss search own kernel",
+                    "Search only your personal direct subscriptions in 1:1 chat.",
+                ),
+                help_example(
+                    "{prefix}rss search room@conference.example.org example.org",
+                    "Search feeds subscribed to an explicitly named room.",
+                ),
+                help_example(
+                    "{prefix}rss search linux 2",
+                    "Show the second page of matching feeds.",
                 ),
             ],
         ),
@@ -890,6 +1064,8 @@ async def _rss_handle_list(bot, sender_jid, args, msg, is_room, store, room):
         "{prefix}rss list trusted",
         "{prefix}rss list 2",
         "{prefix}rss list all",
+        "{prefix}rss search linux",
+        "{prefix}rss search own example.org",
         "{prefix}rss retry all",
         "{prefix}rss health",
         "{prefix}rss broken",
@@ -925,6 +1101,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
     {prefix}rss pause|resume <feedurl|feed_no> [room_jid|user_jid|all]
     {prefix}rss health|broken [room_jid] [page|all|last]
     {prefix}rss list [own|rooms|mods|trusted|room_jid] [page|all|last]
+    {prefix}rss search [own|rooms|mods|trusted|room_jid] <query> [page|all|last]
     {prefix}rss template [show|set|unset|test] [default|direct|room_jid] [feedurl|feed_no] [template]
     Direct chat: omit room_jid to manage your personal template.
     Room/MUC PM: omit room_jid to manage the current room template.
@@ -935,7 +1112,7 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         bot.reply(
             msg,
             f"Usage: {_command_prefix(bot)}rss "
-            "<add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|template> ...",
+            "<add|delete|remove|del|rm|retry|reset|pause|resume|health|broken|list|search|template> ...",
         )
         return
 
@@ -961,13 +1138,14 @@ async def rss_command(bot, sender_jid, nick, args, msg, is_room):
         "health": _rss_handle_health,
         "broken": _rss_handle_health,
         "list": _rss_handle_list,
+        "search": _rss_handle_search,
     }
     handler = handlers.get(sub)
     if handler is None:
         bot.reply(
             msg,
             "Unknown subcommand. Use add, delete, del, remove, rm, retry, "
-            "reset, pause, resume, health, broken, list, or template.",
+            "reset, pause, resume, health, broken, list, search, or template.",
         )
         return
     await handler(bot, sender_jid, args, msg, is_room, store, room)
