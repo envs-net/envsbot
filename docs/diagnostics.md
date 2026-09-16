@@ -226,6 +226,25 @@ entries are eligible for LRU/TTL eviction; dirty entries are preserved until
 they have been flushed. The global plugin runtime blob is not subject to the
 per-user runtime limit.
 
+In `,status full` and `,doctor performance`, `dirty` does **not** mean corrupt or
+unhealthy. A dirty cache entry was changed in memory and is waiting for the next
+successful database flush. `Users` counts pending user-row writes, while
+`Runtime` counts pending per-user runtime JSON writes. A small non-zero value
+during normal activity is expected and usually returns toward zero after the
+periodic flush runs.
+
+```text
+🧠 Caches:
+├─ Users: 7/5000 · dirty=5 · evicted=0
+├─ Runtime: 7/5000 · dirty=1 · evicted=0
+```
+
+No operator action is needed for transient dirty entries. Investigate only when
+the dirty counts keep growing or remain elevated through a quiet period; in that
+case check database/flush errors and the background-task diagnostics. `evicted`
+counts clean cache entries removed by the configured LRU/TTL bounds and does not
+mean persisted user data was deleted.
+
 ```python
 USER_CACHE_MAX_ENTRIES = 5000
 USER_RUNTIME_CACHE_MAX_ENTRIES = 5000
