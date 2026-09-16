@@ -626,7 +626,7 @@ async def test_session_reconcile_treats_missing_membership_as_expected(
         )
 
     assert summary["rejoined"] == 1
-    assert "Joining autojoin room" in caplog.text
-    assert "✅ Joined autojoin room" in caplog.text
+    assert "Joining autojoin room" not in caplog.text
+    assert "✅ Joined MUC news@conference.example.org as BotNick" in caplog.text
     assert "membership missing" not in caplog.text
     assert "Rejoined autojoin room" not in caplog.text

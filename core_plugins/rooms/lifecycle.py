@@ -284,13 +284,7 @@ async def reconcile_autojoin_rooms(
             continue
 
         failures = _state_int(retry_state.get("failures", 0))
-        if session_start:
-            log.info(
-                "[ROOMS] Joining autojoin room %s as %s",
-                room_jid,
-                nick,
-            )
-        else:
+        if not session_start:
             log.warning(
                 "[ROOMS] 🟡️ Autojoin membership missing for %s; "
                 "attempting rejoin as %s (previous_failures=%d)",
@@ -303,23 +297,27 @@ async def reconcile_autojoin_rooms(
         except TimeoutError as exc:
             delay = _record_join_failure(room_jid, exc, now=timestamp)
             summary["failed"] += 1
+            action = "Join" if session_start else "Rejoin"
             log.warning(
-                "[ROOMS] 🟡️ Rejoin timed out for %s; next retry in %ds",
+                "[ROOMS] 🟡️ %s timed out for %s; next retry in %ds",
+                action,
                 room_jid,
                 int(delay),
             )
         except Exception as exc:
             delay = _record_join_failure(room_jid, exc, now=timestamp)
             summary["failed"] += 1
+            action = "Join" if session_start else "Rejoin"
             log.exception(
-                "[ROOMS] 🔴 Rejoin failed for %s; next retry in %ds",
+                "[ROOMS] 🔴 %s failed for %s; next retry in %ds",
+                action,
                 room_jid,
                 int(delay),
             )
         else:
             summary["rejoined"] += 1
             if session_start:
-                log.info("[ROOMS] ✅ Joined autojoin room %s as %s", room_jid, nick)
+                log.info("[ROOMS] ✅ Joined MUC %s as %s", room_jid, nick)
             else:
                 log.info("[ROOMS] ✅ Rejoined autojoin room %s as %s", room_jid, nick)
 
@@ -403,7 +401,7 @@ async def on_session_ready(bot):
     missing = summary["rejoined"] + summary["failed"] + summary["deferred"]
     if missing:
         log.info(
-            "[ROOMS] Session reconcile: configured=%d healthy=%d rejoined=%d "
+            "[ROOMS] Session reconcile: configured=%d healthy=%d joined=%d "
             "failed=%d deferred=%d intentional=%d",
             summary["configured"],
             summary["healthy"],
