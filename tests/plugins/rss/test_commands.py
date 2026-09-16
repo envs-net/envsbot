@@ -4,6 +4,7 @@ from plugins.rss import command_support as rss_support
 from plugins.rss import commands as rss_commands
 from plugins.rss import fetch as rss_fetch
 from plugins.rss import formatting as rss_formatting
+from plugins.rss import listing as rss_listing
 from plugins.rss import subscriptions as rss_subscriptions
 
 from .helpers import (
@@ -2201,7 +2202,7 @@ def test_compact_subscription_lines_groups_room_feeds_by_room():
         },
     }
 
-    lines = rss_commands._compact_subscription_lines(feeds)
+    lines = rss_support._compact_subscription_lines(feeds)
 
     assert lines[:6] == [
         "Room feeds (3):",
@@ -2227,7 +2228,7 @@ def test_compact_subscription_lines_keeps_direct_feed_sections():
         }
     }
 
-    lines = rss_commands._compact_subscription_lines(feeds)
+    lines = rss_support._compact_subscription_lines(feeds)
 
     assert lines[0:2] == ["Room feeds (0):", "• none"]
     assert "Moderator feeds (1):" in lines
@@ -2249,20 +2250,20 @@ def test_compact_subscription_lines_can_select_one_section():
         }
     }
 
-    assert rss_commands._compact_subscription_lines(feeds, "rooms") == [
+    assert rss_support._compact_subscription_lines(feeds, "rooms") == [
         "Room feeds (1):",
         "• room@conference.example.org",
         "  • #1 · Shared | no articles yet | ok | 900s | https://example.org/shared.xml",
     ]
-    assert rss_commands._compact_subscription_lines(feeds, "mods") == [
+    assert rss_support._compact_subscription_lines(feeds, "mods") == [
         "Moderator feeds (1):",
         "• #1 · Shared | no articles yet | ok | 900s | mod@example.org | https://example.org/shared.xml",
     ]
-    assert rss_commands._compact_subscription_lines(feeds, "trusted") == [
+    assert rss_support._compact_subscription_lines(feeds, "trusted") == [
         "Trusted user feeds (1):",
         "• #1 · Shared | no articles yet | ok | 900s | trusted@example.org | https://example.org/shared.xml",
     ]
-    assert rss_commands._compact_subscription_lines(
+    assert rss_support._compact_subscription_lines(
         feeds,
         "own",
         owner="MOD@example.org/device",
@@ -2396,7 +2397,7 @@ async def test_admin_can_list_only_own_direct_feeds(monkeypatch, make_bot):
         "type": "chat",
     }
     monkeypatch.setattr(
-        rss_commands,
+        rss_listing,
         "config",
         {"prefix": ",", "rss_list_page_size": 1},
     )
@@ -2487,7 +2488,7 @@ async def test_rss_list_own_reports_total_articles_across_all_own_feeds(monkeypa
         "type": "chat",
     }
     monkeypatch.setattr(
-        rss_commands,
+        rss_listing,
         "config",
         {"prefix": ",", "rss_list_page_size": 1},
     )
@@ -2833,21 +2834,21 @@ def test_rss_search_scope_helpers_select_feed_level_subscriptions():
 
 
 def test_rss_search_argument_parser_supports_scope_phrase_and_paging():
-    assert rss_commands._rss_parse_search_args(["search"]) is None
-    assert rss_commands._rss_parse_search_args(["search", "42"]) == (
+    assert rss_listing._rss_parse_search_args(["search"]) is None
+    assert rss_listing._rss_parse_search_args(["search", "42"]) == (
         None,
         "42",
         ["search"],
     )
-    assert rss_commands._rss_parse_search_args(["search", "linux", "2"]) == (
+    assert rss_listing._rss_parse_search_args(["search", "linux", "2"]) == (
         None,
         "linux",
         ["search", "2"],
     )
-    assert rss_commands._rss_parse_search_args(
+    assert rss_listing._rss_parse_search_args(
         ["search", "own", "Linux", "Weekly", "last"]
     ) == ("own", "Linux Weekly", ["search", "last"])
-    assert rss_commands._rss_parse_search_args(
+    assert rss_listing._rss_parse_search_args(
         ["search", "room@conference.example.org", "kernel", "all"]
     ) == (
         "room@conference.example.org",
@@ -2925,7 +2926,7 @@ async def test_rss_search_room_context_is_room_scoped_even_for_global_manager(
 @pytest.mark.asyncio
 async def test_rss_search_global_manager_scopes_and_paginates(monkeypatch, make_bot):
     bot = make_bot()
-    monkeypatch.setattr(rss_commands, "config", {"prefix": ",", "rss_list_page_size": 1})
+    monkeypatch.setattr(rss_listing, "config", {"prefix": ",", "rss_list_page_size": 1})
     bot.plugin_store[rss.RSS_KEY] = {
         "https://example.org/one.xml": {
             "feed_no": 1,
@@ -2998,7 +2999,7 @@ async def test_rss_search_explicit_room_checks_permission_and_matches_site_url(
         assert target_room == room
         return allowed
 
-    monkeypatch.setattr(rss_commands, "_sender_can_manage_rss_room", can_manage)
+    monkeypatch.setattr(rss_listing, "_sender_can_manage_rss_room", can_manage)
     await rss.rss_command(
         bot,
         "alice@example.org",
@@ -3026,7 +3027,7 @@ async def test_rss_search_explicit_room_checks_permission_and_matches_site_url(
 @pytest.mark.asyncio
 async def test_rss_search_usage_no_matches_and_invalid_page(monkeypatch, make_bot):
     bot = make_bot()
-    monkeypatch.setattr(rss_commands, "config", {"prefix": ",", "rss_list_page_size": 10})
+    monkeypatch.setattr(rss_listing, "config", {"prefix": ",", "rss_list_page_size": 10})
     bot.plugin_store[rss.RSS_KEY] = {
         "https://example.org/feed.xml": {
             "feed_no": 1,

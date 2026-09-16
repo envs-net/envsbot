@@ -505,6 +505,7 @@ def test_large_command_modules_keep_refactored_boundaries():
 def test_rss_split_helpers_do_not_register_commands():
     for relative_path in (
         "plugins/rss/command_support.py",
+        "plugins/rss/listing.py",
         "plugins/rss/subscriptions.py",
         "plugins/rss/templates.py",
     ):
