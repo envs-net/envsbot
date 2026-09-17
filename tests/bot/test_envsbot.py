@@ -996,6 +996,8 @@ def test_bot_init_wires_core_runtime_objects(monkeypatch):
     assert event_handlers == [
         ("session_start", "on_start"),
         ("session_end", "on_session_end"),
+        ("disconnected", "on_disconnect"),
+        ("connection_failed", "on_connection_failed"),
         ("groupchat_message", "on_muc_message"),
         ("message", "on_private_message"),
     ]
@@ -1624,6 +1626,65 @@ def test_on_session_end_marks_transport_unavailable(bot):
 
 
 @pytest.mark.asyncio
+async def test_disconnect_schedules_in_process_reconnect(monkeypatch, bot):
+    bot._process_exit_requested = False
+    bot.reconnecting = False
+    bot.reconnect_task = None
+    bot.reconnect_success_event = None
+    bot._session_start_received = False
+    bot._startup_completed_once = True
+    bot._session_start_task = None
+    calls = []
+
+    async def fake_reconnect():
+        calls.append("reconnect")
+
+    monkeypatch.setattr(bot, "_delayed_reconnect", fake_reconnect)
+
+    await envsbot.Bot.on_disconnect(bot, None)
+
+    assert bot.reconnecting is True
+    assert bot.reconnect_task is not None
+    await bot.reconnect_task
+    assert calls == ["reconnect"]
+    assert bot.session_lifecycle.snapshot().state == "reconnecting"
+
+
+@pytest.mark.asyncio
+async def test_disconnect_does_not_reconnect_for_requested_process_exit(monkeypatch, bot):
+    bot._process_exit_requested = True
+    bot.reconnect_task = None
+    called = False
+
+    async def fake_reconnect():
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(bot, "_delayed_reconnect", fake_reconnect)
+
+    await envsbot.Bot.on_disconnect(bot, None)
+    await asyncio.sleep(0)
+
+    assert called is False
+    assert bot.reconnect_task is None
+
+
+@pytest.mark.asyncio
+async def test_successful_session_releases_reconnect_waiter(monkeypatch, bot):
+    bot.reconnecting = True
+    bot._startup_completed_once = True
+    bot._session_was_reconnecting = True
+    bot.reconnect_success_event = asyncio.Event()
+    bot.bot_plugins = types.SimpleNamespace(plugins={}, failed_plugins={})
+    bot._finalize_successful_startup_version = AsyncMock()
+
+    await envsbot.Bot._complete_session_start(bot, 1, ())
+
+    assert bot.reconnecting is False
+    assert bot.reconnect_success_event.is_set() is True
+
+
+@pytest.mark.asyncio
 async def test_on_start_reports_degraded_plugin_state(monkeypatch, bot, caplog):
     monkeypatch.setattr(
         envsbot.Bot,
@@ -1751,6 +1812,7 @@ async def test_main_normal_path_closes_database(monkeypatch):
             self.disconnected = asyncio.Future()
             self.disconnected.set_result(None)
             self.db = FakeDB()
+            self._process_exit_requested = True
 
         def disconnect(self):
             calls.append("disconnect")
@@ -1874,6 +1936,7 @@ def test_install_shutdown_signal_handlers_requests_clean_disconnect():
     callback, args = callbacks[envsbot.signal.SIGTERM]
     callback(*args)
     assert xmpp._requested_exit_code == 0
+    assert xmpp._process_exit_requested is True
     assert xmpp._signal_shutdown_requested is True
     xmpp.disconnect.assert_called_once_with()
 

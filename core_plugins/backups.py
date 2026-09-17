@@ -39,6 +39,7 @@ async def _await_reply_delivery(task) -> None:
 def _request_restore_restart(bot) -> None:
     """Exit non-zero after a quiesced restore so systemd starts a fresh process."""
     bot._requested_exit_code = _RESTART_EXIT_CODE
+    bot._process_exit_requested = True
     disconnect = getattr(bot, "disconnect", None)
     if callable(disconnect):
         disconnect()

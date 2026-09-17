@@ -168,7 +168,14 @@ class Bot(
         self._process_startup_task: asyncio.Task | None = None
         self._session_start_task: asyncio.Task | None = None
         self.session_lifecycle = SessionLifecycleState()
-        # Unexpected disconnects should be restarted by Restart=on-failure.
+        self.reconnect_task: asyncio.Task[None] | None = None
+        self.reconnect_success_event: asyncio.Event | None = None
+        self.reconnecting = False
+        self._session_start_received = False
+        self._startup_completed_once = False
+        self._session_was_reconnecting = False
+        self._process_exit_requested = False
+        # Non-zero remains the safety-net exit if the process itself fails.
         self._requested_exit_code = 1
         # Message routing stays closed until LifecycleMixin.on_start() has
         # initialized DB, caches, outbox and plugins successfully.
@@ -204,6 +211,8 @@ class Bot(
 
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("session_end", self.on_session_end)
+        self.add_event_handler("disconnected", self.on_disconnect)
+        self.add_event_handler("connection_failed", self.on_connection_failed)
         self.add_event_handler("groupchat_message", self.on_muc_message)
         self.add_event_handler("message", self.on_private_message)
 
@@ -229,6 +238,7 @@ def _install_shutdown_signal_handlers(xmpp, loop=None) -> tuple[signal.Signals, 
         if getattr(xmpp, "_signal_shutdown_requested", False):
             return
         xmpp._signal_shutdown_requested = True
+        xmpp._process_exit_requested = True
         xmpp._requested_exit_code = 0
         log.info("[XMPP] Shutdown signal received: %s", sig.name)
         try:
@@ -258,9 +268,18 @@ async def main():
     log.info("[XMPP] ✅ Connected successfully. Starting event loop...")
 
     try:
-        await xmpp.disconnected
+        while True:
+            disconnected = xmpp.disconnected
+            await disconnected
+            if bool(getattr(xmpp, "_process_exit_requested", False)):
+                break
+            log.info(
+                "[XMPP] Transport disconnected; process runtime remains active "
+                "while reconnect is attempted"
+            )
     except (KeyboardInterrupt, asyncio.CancelledError):
         log.info("[XMPP] Shutdown request")
+        xmpp._process_exit_requested = True
         xmpp._requested_exit_code = 0
         xmpp.disconnect()
         try:
@@ -268,7 +287,7 @@ async def main():
         except TimeoutError:
             log.warning("[XMPP] Disconnect timeout")
     finally:
-        log.info("[XMPP] disconnected. Closing Database...")
+        log.info("[XMPP] Process shutdown: closing runtime and database...")
         shutdown_runtime = getattr(xmpp, "shutdown_runtime", None)
         if callable(shutdown_runtime) and isinstance(xmpp, Bot):
             await shutdown_runtime()

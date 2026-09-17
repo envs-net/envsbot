@@ -808,6 +808,7 @@ async def _run_stop_command(stop_cmd: list[str], timeout: float) -> tuple[int, s
 async def _graceful_command_shutdown(bot, *, exit_code: int) -> None:
     """Disconnect and drain runtime state for an operator-requested exit."""
     bot._requested_exit_code = int(exit_code)
+    bot._process_exit_requested = True
     bot.disconnect()
     disconnected = getattr(bot, "disconnected", None)
     if disconnected is not None:

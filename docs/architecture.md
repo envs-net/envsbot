@@ -143,6 +143,8 @@ Main responsibilities:
 - idempotent database flush and close
 
 The process-initialization task is shielded from cancellation when an obsolete
+Unexpected transport loss is recovered in-process through the shared `envs_xmpp_core.runtime.run_reconnect_loop()` retry/backoff transaction. Process-lifetime storage/plugins stay active; each new `session_start` still runs envsbot's own room/profile/readiness hooks before the reconnect is considered complete. systemd `Restart=on-failure` remains the final safety net for process failures rather than the normal XMPP reconnect mechanism.
+
 XMPP `session_start` is replaced, so a reconnect cannot partially tear down
 process-owned database/plugin state. Session phases check their generation both
 before and after awaited work; late completions from an older stream therefore

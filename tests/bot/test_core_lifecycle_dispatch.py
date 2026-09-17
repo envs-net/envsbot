@@ -81,6 +81,7 @@ async def test_shutdown_runtime_orders_plugins_tasks_and_db():
     assert [phase.name for phase in bot._last_shutdown_phases] == [
         "alerts",
         "watchdog",
+        "reconnect",
         "replies",
         "plugins",
         "outbox",

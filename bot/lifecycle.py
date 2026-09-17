@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -16,6 +17,7 @@ from envs_xmpp_core.release.transitions import (
     version_transition,
 )
 from envs_xmpp_core.runtime.lifecycle import LifecyclePhaseResult, LifecyclePhaseRunner
+from envs_xmpp_core.runtime.reconnect import run_reconnect_loop
 
 from utils.logging_helpers import kv
 from utils.release_state import read_legacy_version_state, release_state_repository
@@ -126,6 +128,9 @@ def _database_shutdown_timeout(config_obj: Any) -> float:
     return max(6.0, timeout)
 
 class LifecycleMixin:
+    reconnect_task: asyncio.Task[None] | None
+    reconnect_success_event: asyncio.Event | None
+
     """Startup/shutdown helper methods for the bot class."""
     # Structural attributes supplied by Bot's other mixins/runtime wiring.
     # Annotation-only declarations keep mypy useful without creating runtime
@@ -682,6 +687,7 @@ class LifecycleMixin:
         if session_ready is not None:
             session_ready.clear()
         self._requested_exit_code = 1
+        self._process_exit_requested = True
         disconnect = getattr(self, "disconnect", None)
         if callable(disconnect):
             try:
@@ -723,6 +729,8 @@ class LifecycleMixin:
             exclude=current_task,
         )
         self._session_start_task = current_task
+        self._session_start_received = True
+        self._session_was_reconnecting = bool(getattr(self, "reconnecting", False))
         generation = self.session_lifecycle.begin()
         session_ready = getattr(self, "session_ready", None)
         if session_ready is not None:
@@ -766,6 +774,13 @@ class LifecycleMixin:
     ) -> None:
         """Record successful session readiness and one-time version state."""
         self.session_lifecycle.mark_ready(generation)
+        was_reconnecting = bool(getattr(self, "_session_was_reconnecting", False))
+        self.reconnecting = False
+        self._startup_completed_once = True
+        reconnect_event = getattr(self, "reconnect_success_event", None)
+        if was_reconnecting and reconnect_event is not None:
+            reconnect_event.set()
+            log.info("[XMPP] 🔄 Reconnected successfully")
         startup_healthy = self._log_startup_complete()
         process_initialized = any(
             result.name == "process" and bool(result.details.get("initialized"))
@@ -799,6 +814,117 @@ class LifecycleMixin:
             if getattr(self, "_session_start_task", None) is current_task:
                 self._session_start_task = None
 
+    def _get_reconnect_success_event(self) -> asyncio.Event:
+        """Return the readiness event used by the shared reconnect loop."""
+        event = getattr(self, "reconnect_success_event", None)
+        if event is None:
+            event = asyncio.Event()
+            self.reconnect_success_event = event
+        return event
+
+    def _reconnect_shutdown_requested(self) -> bool:
+        """Return whether process shutdown/restart owns the current disconnect."""
+        return bool(
+            getattr(self, "_process_exit_requested", False)
+            or getattr(self, "_shutdown_complete", False)
+        )
+
+    async def _disconnect_partial_reconnect(self, reason: str) -> None:
+        """Drop a session that connected but never reached application readiness."""
+        await self._cancel_incomplete_session_start(
+            reason,
+            exclude=asyncio.current_task(),
+        )
+        self.reconnecting = True
+        self._session_start_received = False
+        self.session_lifecycle.mark_reconnecting(reason)
+        abort = getattr(self, "abort", None)
+        if callable(abort):
+            abort()
+            return
+        disconnect = getattr(self, "disconnect", None)
+        if callable(disconnect):
+            result = disconnect()
+            if inspect.isawaitable(result):
+                await result
+
+    async def on_connection_failed(self, _event: Any) -> None:
+        """Let Slixmpp own retry scheduling for one failed transport attempt."""
+        if self._reconnect_shutdown_requested():
+            log.debug("[XMPP] connection_failed during shutdown; retry suppressed")
+            return
+        if not bool(getattr(self, "_session_start_received", False)):
+            if bool(getattr(self, "_startup_completed_once", False)):
+                log.info(
+                    "[XMPP] Reconnect attempt failed before session_start; "
+                    "waiting for Slixmpp retry"
+                )
+            else:
+                log.info(
+                    "[XMPP] Initial transport attempt failed before session_start; "
+                    "waiting for Slixmpp retry/fallback"
+                )
+            self.session_lifecycle.mark_reconnecting(
+                "connection attempt failed before session_start"
+            )
+
+    async def on_disconnect(self, _event: Any) -> None:
+        """Schedule in-process recovery after an unexpected transport loss."""
+        if self._reconnect_shutdown_requested():
+            log.debug("[XMPP] Disconnect received during shutdown; reconnect suppressed")
+            return
+
+        await self._cancel_incomplete_session_start(
+            "connection loss",
+            exclude=asyncio.current_task(),
+        )
+        existing = getattr(self, "reconnect_task", None)
+        if existing is not None and not existing.done():
+            if bool(getattr(self, "reconnecting", False)):
+                log.info("[XMPP] 🔄 Reconnect already scheduled")
+                return
+            existing.cancel()
+
+        log.warning("[XMPP] ⚠️ Disconnected from server")
+        self.reconnecting = True
+        self._session_start_received = False
+        self.session_lifecycle.mark_reconnecting("connection lost")
+        self._get_reconnect_success_event().clear()
+        self.reconnect_task = asyncio.create_task(self._delayed_reconnect())
+
+    async def _delayed_reconnect(self) -> None:
+        """Run the shared reconnect transaction until full runtime readiness."""
+        current_task = asyncio.current_task()
+        try:
+            await run_reconnect_loop(
+                connect=lambda: self._reconnect_transport(),
+                disconnect_partial=self._disconnect_partial_reconnect,
+                ready_event=self._get_reconnect_success_event(),
+                session_started=lambda: bool(
+                    getattr(self, "_session_start_received", False)
+                ),
+                shutdown_requested=self._reconnect_shutdown_requested,
+                startup_completed=lambda: bool(
+                    getattr(self, "_startup_completed_once", False)
+                ),
+                logger=log,
+                initial_delay=5,
+                max_delay=60,
+                startup_timeout=120,
+            )
+        except asyncio.CancelledError:
+            log.info("[XMPP] Reconnect task cancelled")
+            raise
+        finally:
+            if getattr(self, "reconnect_task", None) is current_task:
+                self.reconnect_task = None
+
+    async def _reconnect_transport(self) -> bool | None:
+        """Reconnect with envsbot's configured host/TLS adapter."""
+        from bot.connection import connect_xmpp
+
+        return await connect_xmpp(self, self.config)
+
     def on_session_end(self, event: Any) -> None:
         """Stop session-scoped routing without tearing down process services."""
         reason = str(event or "session_end")
@@ -813,6 +939,21 @@ class LifecycleMixin:
         if runtime_ready is not None:
             runtime_ready.clear()
         self.accepting_commands = False
+
+    async def _shutdown_reconnect(self) -> tuple[str, dict[str, object]]:
+        """Cancel an in-process reconnect before tearing down process services."""
+        task = getattr(self, "reconnect_task", None)
+        if task is None or task.done() or task is asyncio.current_task():
+            return "skipped", {}
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if getattr(self, "reconnect_task", None) is task:
+                self.reconnect_task = None
+        return "ok", {}
 
     async def shutdown_runtime(self) -> bool:
         """Run the ordered shutdown once and report whether it was fully clean."""
@@ -988,6 +1129,7 @@ class LifecycleMixin:
         phases = (
             ("alerts", self._shutdown_alerts),
             ("watchdog", self._shutdown_watchdog),
+            ("reconnect", self._shutdown_reconnect),
             ("replies", self._shutdown_replies),
             ("plugins", self._shutdown_plugins),
             ("outbox", self._shutdown_outbox),
