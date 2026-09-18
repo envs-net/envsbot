@@ -20,7 +20,7 @@ Run these commands from the repository root unless a script explicitly says othe
 | `generate_config_sample.py` | Generates `config_sample.py` from the declarative configuration schema or checks that it is current. | `python scripts/generate_config_sample.py`, `python scripts/generate_config_sample.py --check` |
 | `generate_commands_md.py` | Regenerates the checked-in command documentation from registered command metadata. | `python scripts/generate_commands_md.py` |
 | `check_command_docs.py` | Validates that the checked-in generated command documentation matches the current command registry. | `python scripts/check_command_docs.py` |
-| `check_release_tag.py` | Verifies that a release tag exactly matches the package version in `utils/version.py`. | `python scripts/check_release_tag.py v2.1.0` |
+| `check_release_tag.py` | Verifies that a release tag exactly matches the package version in `utils/version.py`. | `python scripts/check_release_tag.py v2.1.1` |
 | `check_wheel.py` | Smoke-tests the single built envsbot wheel and verifies packaged runtime assets. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
 
 `quality.sh` and `test.sh` intentionally use the same shared runners as the
