@@ -395,8 +395,27 @@ async def on_ready(bot):
     start_room_join_health_task(bot)
 
 
+def _invalidate_session_memberships(bot) -> None:
+    """Discard MUC membership mirrors inherited from an older XMPP session.
+
+    Slixmpp's XEP-0045 plugin keeps its local ``rooms`` cache across transport
+    reconnects.  Those entries only mean that a join presence was sent in an
+    earlier session; they do not prove membership in the newly bound session.
+    Clear envsbot's authoritative/session-scoped mirrors before reconciliation
+    so every configured autojoin room is joined again and confirmed by fresh
+    self-presence.  Intentional-leave state remains process-scoped.
+    """
+    JOINED_ROOMS.clear()
+    presence_rooms = getattr(getattr(bot, "presence", None), "joined_rooms", None)
+    if isinstance(presence_rooms, dict):
+        presence_rooms.clear()
+    _ROOM_JOIN_EVENTS.clear()
+    _REJOIN_STATE.clear()
+
+
 async def on_session_ready(bot):
     """Immediately reconcile configured room membership after reconnect."""
+    _invalidate_session_memberships(bot)
     summary = await reconcile_autojoin_rooms(bot, session_start=True)
     missing = summary["rejoined"] + summary["failed"] + summary["deferred"]
     if missing:

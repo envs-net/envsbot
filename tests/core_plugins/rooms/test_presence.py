@@ -608,6 +608,49 @@ async def test_on_session_ready_reconciles_rooms_immediately(monkeypatch, fake_b
 
 
 @pytest.mark.asyncio
+async def test_on_session_ready_rejoins_stale_membership_from_previous_session(
+    fake_bot, monkeypatch
+):
+    room_jid = "news@conference.example.org"
+    fake_bot.db.rooms.list = AsyncMock(
+        return_value=[(room_jid, "BotNick", True, "online")]
+    )
+    # Slixmpp XEP-0045 retains this cache across transport reconnects.  It is
+    # intentionally stale here and must not make the new session look joined.
+    fake_bot.plugin["xep_0045"].get_joined_rooms = MagicMock(
+        return_value=[room_jid]
+    )
+    fake_bot.plugin["xep_0045"].join_muc = AsyncMock()
+    rooms.JOINED_ROOMS[room_jid] = {
+        "nick": "BotNick",
+        "autojoin": True,
+        "status": "online",
+        "confirmed": True,
+        "nicks": {},
+    }
+    fake_bot.presence.joined_rooms[room_jid] = "BotNick"
+    rooms_lifecycle._REJOIN_STATE[room_jid] = {
+        "failures": 1,
+        "next_attempt": 9999999999.0,
+        "last_error": "old session",
+    }
+    rooms_state._ROOM_JOIN_EVENTS[room_jid] = asyncio.Event()
+    rooms_state._ROOM_JOIN_EVENTS[room_jid].set()
+    monkeypatch.setattr(
+        rooms_lifecycle,
+        "start_room_join_health_task",
+        MagicMock(return_value=object()),
+    )
+
+    await rooms_lifecycle.on_session_ready(fake_bot)
+
+    fake_bot.plugin["xep_0045"].join_muc.assert_awaited_once()
+    assert room_jid in rooms.JOINED_ROOMS
+    assert room_jid in fake_bot.presence.joined_rooms
+    assert room_jid not in rooms_lifecycle._REJOIN_STATE
+
+
+@pytest.mark.asyncio
 async def test_session_reconcile_treats_missing_membership_as_expected(
     fake_bot, caplog
 ):
