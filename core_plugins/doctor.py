@@ -1077,16 +1077,36 @@ def _overall_status(lines: list[str]) -> str:
 
 
 def _problem_lines(lines: list[str], *, mode: str) -> list[str]:
-    """Return warning/error lines from a full doctor result."""
-    body = [line for line in lines if line and not str(line).startswith("Overall:") and line != "🩺 EnvsBot doctor"]
-    if mode == "failed":
-        matched = [line for line in body if str(line).startswith("🔴") or "failed" in str(line).lower()]
-        return matched or ["✅ No failed doctor checks found."]
-    matched = [
-        line for line in body
-        if str(line).startswith(("⚠️", "🟡", "🟡️")) or "warning" in str(line).lower()
+    """Return unique warning/error lines from a full doctor result.
+
+    Health summaries may legitimately contain words such as ``failed`` or
+    ``warning`` in a healthy count (for example ``0 failed``).  Severity is
+    already encoded by the doctor line prefix, so filtering must use that
+    structured signal instead of matching free-form text.
+    """
+    body = [
+        line
+        for line in lines
+        if line
+        and not str(line).startswith("Overall:")
+        and line != "🩺 EnvsBot doctor"
     ]
-    return matched or ["✅ No doctor warnings found."]
+    if mode == "failed":
+        matched = [line for line in body if str(line).startswith("🔴")]
+        empty = "✅ No failed doctor checks found."
+    else:
+        matched = [
+            line
+            for line in body
+            if str(line).startswith(("⚠️", "🟡", "🟡️"))
+        ]
+        empty = "✅ No doctor warnings found."
+
+    # The complete doctor sweep intentionally reuses some checks in multiple
+    # sections (for example task health in both Tasks and Release readiness).
+    # Problem-only views should report an identical finding just once.
+    unique = list(dict.fromkeys(matched))
+    return unique or [empty]
 
 
 async def _section_lines(

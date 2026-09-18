@@ -189,6 +189,33 @@ def test_problem_lines_empty_messages():
     ]
 
 
+def test_problem_lines_ignore_healthy_failed_counts_and_deduplicate_failures():
+    lines = [
+        "🩺 EnvsBot doctor",
+        "Overall: 🔴 1 problem(s), 0 warning(s)",
+        "✅ Background tasks: 26 services running · 1 one-shots running · 2 one-shots completed · 0 failed",
+        "🔴 Plugin metadata: 1 error(s), 0 warning(s)",
+        "✅ Background tasks: 26 services running · 1 one-shots running · 2 one-shots completed · 0 failed",
+        "🔴 Plugin metadata: 1 error(s), 0 warning(s)",
+    ]
+
+    assert doctor._problem_lines(lines, mode="failed") == [
+        "🔴 Plugin metadata: 1 error(s), 0 warning(s)"
+    ]
+
+
+def test_problem_lines_ignore_healthy_warning_text():
+    lines = [
+        "🩺 EnvsBot doctor",
+        "Overall: ✅ healthy",
+        "✅ Plugin metadata: 0 error(s), 0 warning(s)",
+    ]
+
+    assert doctor._problem_lines(lines, mode="warnings") == [
+        "✅ No doctor warnings found."
+    ]
+
+
 @pytest.mark.asyncio
 async def test_doctor_release_section_reports_release_readiness(bot, monkeypatch):
     bot.version = "1.5.0"
