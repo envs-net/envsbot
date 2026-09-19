@@ -35,13 +35,17 @@ from functools import partial
 from typing import Any
 
 import aiohttp
-
 from core_plugins import _core
 from utils import message_cache
 from utils.command import Role, command
-from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
+from utils.command_metadata import (
+    help_example,
+    help_subcommand,
+    room_toggle_subcommands,
+)
 from utils.config import config
 from utils.http_fetch import fetch_json
+from utils.room_features import get_room_feature
 from utils.translation_providers import (
     ProviderHTTPError,
     ProviderPayloadError,
@@ -51,7 +55,6 @@ from utils.translation_providers import (
     translate_google_public,
     translate_libretranslate,
 )
-from utils.room_features import get_room_feature
 from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL
 
 log = logging.getLogger(__name__)
