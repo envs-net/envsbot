@@ -655,16 +655,32 @@ PIN_PAGE_SIZE = 10
 
 # ================= TRANSLATE =================
 
-# Translate uses the same public Google Translate endpoint as translate. No API key is
-# required, but the endpoint is unofficial and may change. Set TRANSLATE_TO to a
-# language code such as "de" to allow `,tr` for replies and `,tr text` for direct
-# text. None keeps the target argument mandatory.
+# Default source language. Use "auto" for provider-side language detection. Set
+# TRANSLATE_TO to a language code such as "de" to allow `,tr` for replies and `,tr
+# text` for direct text. None keeps the target argument mandatory.
 TRANSLATE_FROM = 'auto'
 
-# Translate to.
+# Default target language. None keeps the target argument mandatory.
 TRANSLATE_TO = None
 
-# Translate timeout seconds.
+# LibreTranslate base URL. The default uses the envs.net LibreTranslate service
+# without an API key. Set an empty string to disable the unauthenticated
+# LibreTranslate fallback.
+TRANSLATE_LIBRETRANSLATE_URL = 'https://translate.envs.net/'
+
+# Optional LibreTranslate API key. Configured API-key providers are tried before
+# public fallbacks.
+TRANSLATE_LIBRETRANSLATE_API_KEY = None
+
+# Optional Google Cloud Translation Basic v2 API key. When configured, the official
+# authenticated API is preferred over public fallbacks.
+TRANSLATE_GOOGLE_API_KEY = None
+
+# Optional DeepL API key. Free keys ending in :fx use api-free.deepl.com; other keys
+# use api.deepl.com.
+TRANSLATE_DEEPL_API_KEY = None
+
+# Translate timeout seconds per provider attempt.
 TRANSLATE_TIMEOUT_SECONDS = 8
 
 # Translate max input length.

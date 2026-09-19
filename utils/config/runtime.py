@@ -447,6 +447,20 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
                 if cfg.get("translate_to") is None
                 else _to_str(cfg.get("translate_to"))
             ),
+            "TRANSLATE_LIBRETRANSLATE_URL": _to_str(
+                cfg.get("translate_libretranslate_url")
+                if cfg.get("translate_libretranslate_url") is not None
+                else "https://translate.envs.net/"
+            ),
+            "TRANSLATE_LIBRETRANSLATE_API_KEY": _to_str(
+                cfg.get("translate_libretranslate_api_key") or ""
+            ),
+            "TRANSLATE_GOOGLE_API_KEY": _to_str(
+                cfg.get("translate_google_api_key") or ""
+            ),
+            "TRANSLATE_DEEPL_API_KEY": _to_str(
+                cfg.get("translate_deepl_api_key") or ""
+            ),
             "TRANSLATE_TIMEOUT_SECONDS": max(
                 1.0,
                 _to_float(

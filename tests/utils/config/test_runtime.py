@@ -410,6 +410,10 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
 
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_URL", "")
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "")
+    monkeypatch.setattr(translate, "TRANSLATE_DEEPL_API_KEY", "")
     monkeypatch.setattr(translate, "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS", 5.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
@@ -419,6 +423,10 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
         {
             "translate_from": "en",
             "translate_to": "de",
+            "translate_libretranslate_url": "https://translate.envs.net/",
+            "translate_libretranslate_api_key": "libre-key",
+            "translate_google_api_key": "google-key",
+            "translate_deepl_api_key": "deepl-key",
             "translate_provider_queue_timeout_seconds": 3,
             "translate_rate_limit_initial_seconds": 45,
             "translate_rate_limit_max_seconds": 600,
@@ -428,6 +436,10 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
 
     assert translate.TRANSLATE_FROM == "en"
     assert translate.TRANSLATE_TO == "de"
+    assert translate.TRANSLATE_LIBRETRANSLATE_URL == "https://translate.envs.net/"
+    assert translate.TRANSLATE_LIBRETRANSLATE_API_KEY == "libre-key"
+    assert translate.TRANSLATE_GOOGLE_API_KEY == "google-key"
+    assert translate.TRANSLATE_DEEPL_API_KEY == "deepl-key"
     assert translate.TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS == 3
     assert translate.TRANSLATE_RATE_LIMIT_INITIAL_SECONDS == 45
     assert translate.TRANSLATE_RATE_LIMIT_MAX_SECONDS == 600

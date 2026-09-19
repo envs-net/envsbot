@@ -101,7 +101,7 @@ Lower role values have more privileges. A command is visible when your role is s
 | `sed` | `plugins` | `tools` | Message correction using sed-like syntax | [`docs/plugins/sed.md`](plugins/sed.md) |
 | `tell` | `plugins` | `utility` | Store and deliver messages for users when they join a room again. | [`docs/plugins/tell.md`](plugins/tell.md) |
 | `tools` | `plugins` | `utility` | Utility commands: ping/pong, message echo, timezone-aware time/date lookups, Unix timestamp conversion, and HTTPS certificate checks | [`docs/plugins/tools.md`](plugins/tools.md) |
-| `translate` | `plugins` | `utility` | Translate text or replied-to messages with optional source-language auto-detection. | [`docs/plugins/translate.md`](plugins/translate.md) |
+| `translate` | `plugins` | `utility` | Translate text or replied-to messages with multi-provider fallback and optional source-language auto-detection. | [`docs/plugins/translate.md`](plugins/translate.md) |
 | `urlcheck` | `plugins` | `info` | URL title and YouTube info fetcher for groupchats | [`docs/plugins/urlcheck.md`](plugins/urlcheck.md) |
 | `vcard` | `plugins` | `info` | Lookup and display vCard of a MUC occupant by MUC JID only | [`docs/plugins/vcard.md`](plugins/vcard.md) |
 | `weather` | `plugins` | `info` | Gives weather according to users location or an explicit city/ZIP code | [`docs/plugins/weather.md`](plugins/weather.md) |

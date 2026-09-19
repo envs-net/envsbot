@@ -54,6 +54,10 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.IDLERPG["rp_base"] > 0
     assert sample.TRANSLATE_FROM == "auto"
     assert sample.TRANSLATE_TO is None
+    assert sample.TRANSLATE_LIBRETRANSLATE_URL == "https://translate.envs.net/"
+    assert sample.TRANSLATE_LIBRETRANSLATE_API_KEY is None
+    assert sample.TRANSLATE_GOOGLE_API_KEY is None
+    assert sample.TRANSLATE_DEEPL_API_KEY is None
     assert sample.TRANSLATE_TIMEOUT_SECONDS > 0
     assert sample.TRANSLATE_MAX_INPUT_LENGTH > 0
     assert sample.TRANSLATE_MAX_OUTPUT_LENGTH > 0

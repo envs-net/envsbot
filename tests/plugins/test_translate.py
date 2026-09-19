@@ -46,6 +46,12 @@ def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "FALLBACK_NAMESPACE", "translate-test-fallback")
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
+    # Keep legacy focused tests on the single public-Google path; dedicated
+    # provider-chain tests below exercise the new LibreTranslate/API fallbacks.
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_URL", "")
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "")
+    monkeypatch.setattr(translate, "TRANSLATE_DEEPL_API_KEY", "")
     monkeypatch.setattr(translate, "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS", 5.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
@@ -1193,7 +1199,8 @@ async def test_doctor_and_on_load(monkeypatch):
     assert "default_to=none" in global_lines[0]
     assert "queue_wait=5s" in global_lines[0]
     assert "rate_limit=ready" in global_lines[0]
-    assert "429_count=0" in global_lines[0]
+    assert "providers=google(public)" in global_lines[0]
+    assert "429_history=none" in global_lines[0]
 
     monkeypatch.setattr(translate, "TRANSLATE_TO", "invalid-target")
     assert (await translate.doctor(bot))[0].startswith(
@@ -1220,9 +1227,8 @@ async def test_doctor_and_on_load(monkeypatch):
     cooldown_lines = await translate.doctor(bot)
     assert cooldown_lines[0].startswith("⚠️ Translate:")
     assert "rate_limit=cooldown" in cooldown_lines[0]
-    assert "429_count=3" in cooldown_lines[0]
-    assert "last_429=15s ago" in cooldown_lines[0]
-    assert "429_streak=2" in cooldown_lines[0]
+    assert "google(public):30s" in cooldown_lines[0]
+    assert "google(public):3@15s/streak=2" in cooldown_lines[0]
 
 
 @pytest.mark.asyncio
@@ -1235,3 +1241,170 @@ async def test_get_translate_store_uses_exact_plugin_namespace():
 
     assert await translate.get_translate_store(bot) is store
     plugin.assert_called_once_with("translate")
+
+
+def test_provider_chain_defaults_to_libretranslate_then_google(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+
+    chain = translate._provider_chain()
+
+    assert [(item.name, item.state_key, item.authenticated) for item in chain] == [
+        ("libretranslate", "libretranslate-public", False),
+        ("google", "google-public", False),
+    ]
+
+
+def test_provider_chain_prefers_configured_api_keys_in_requested_order(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "libre-key")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+    monkeypatch.setattr(translate, "TRANSLATE_DEEPL_API_KEY", "deepl-key")
+
+    chain = translate._provider_chain()
+
+    assert [(item.name, item.state_key, item.authenticated) for item in chain] == [
+        ("libretranslate", "libretranslate-api", True),
+        ("google", "google-api", True),
+        ("deepl", "deepl-api", True),
+    ]
+
+
+def test_provider_chain_puts_single_keyed_provider_before_public_fallbacks(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_DEEPL_API_KEY", "deepl-key")
+
+    chain = translate._provider_chain()
+
+    assert [(item.name, item.state_key, item.authenticated) for item in chain] == [
+        ("deepl", "deepl-api", True),
+        ("libretranslate", "libretranslate-public", False),
+        ("google", "google-public", False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_translate_falls_back_from_rate_limited_libretranslate_to_google(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    libre = AsyncMock(
+        side_effect=translate.ProviderHTTPError(
+            "libretranslate",
+            429,
+            headers={"Retry-After": "120"},
+        )
+    )
+    google = AsyncMock(
+        return_value=translate.ProviderTranslation("Hallo Welt", "en")
+    )
+    monkeypatch.setattr(translate, "translate_libretranslate", libre)
+    monkeypatch.setattr(translate, "translate_google_public", google)
+
+    result = await translate.translate_text(
+        "Hello world",
+        source_language="auto",
+        target_language="de",
+    )
+
+    assert result == translate.TranslationResult("Hallo Welt", "en")
+    libre.assert_awaited_once()
+    google.assert_awaited_once()
+    assert translate._rate_limit_remaining("libretranslate-public") > 0
+    assert translate._rate_limit_remaining("google-public") == 0
+
+
+@pytest.mark.asyncio
+async def test_translate_falls_back_after_authenticated_provider_failure(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+    google_api = AsyncMock(
+        side_effect=translate.ProviderHTTPError("google", 403)
+    )
+    libre = AsyncMock(
+        return_value=translate.ProviderTranslation("Hallo", "en")
+    )
+    monkeypatch.setattr(translate, "translate_google_cloud", google_api)
+    monkeypatch.setattr(translate, "translate_libretranslate", libre)
+
+    result = await translate.translate_text(
+        "Hello",
+        source_language="en",
+        target_language="de",
+    )
+
+    assert result.text == "Hallo"
+    google_api.assert_awaited_once()
+    libre.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_translate_reports_unavailable_after_all_provider_failures(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_libretranslate",
+        AsyncMock(side_effect=translate.ProviderHTTPError("libretranslate", 503)),
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_google_public",
+        AsyncMock(side_effect=translate.ProviderHTTPError("google", 503)),
+    )
+
+    with pytest.raises(translate.TranslationProvidersUnavailableError):
+        await translate.translate_text(
+            "Hello",
+            source_language="en",
+            target_language="de",
+        )
+
+
+@pytest.mark.asyncio
+async def test_doctor_reports_multi_provider_chain_without_exposing_keys(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_API_KEY",
+        "secret-libre",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "secret-google")
+    monkeypatch.setattr(translate, "TRANSLATE_DEEPL_API_KEY", "secret-deepl")
+    bot = SimpleNamespace()
+
+    line = (await translate.doctor(bot))[0]
+
+    assert (
+        "providers=libretranslate(api-key) -> google(api-key) -> deepl(api-key)"
+        in line
+    )
+    assert "secret-libre" not in line
+    assert "secret-google" not in line
+    assert "secret-deepl" not in line

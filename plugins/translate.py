@@ -1,4 +1,4 @@
-"""Translate text or an XMPP reply using Google Translate's public endpoint.
+"""Translate text or an XMPP reply through configurable translation providers.
 
 Examples
 --------
@@ -33,7 +33,6 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from functools import partial
 from typing import Any
-from urllib.parse import urlencode
 
 import aiohttp
 
@@ -42,7 +41,16 @@ from utils import message_cache
 from utils.command import Role, command
 from utils.command_metadata import help_example, help_subcommand, room_toggle_subcommands
 from utils.config import config
-from utils.http_fetch import fetch_json, passthrough_validator
+from utils.http_fetch import fetch_json
+from utils.translation_providers import (
+    ProviderHTTPError,
+    ProviderPayloadError,
+    ProviderTranslation,
+    translate_deepl,
+    translate_google_cloud,
+    translate_google_public,
+    translate_libretranslate,
+)
 from utils.room_features import get_room_feature
 from utils.url_safety import FetchURLTooLarge, UnsafeFetchURL
 
@@ -50,10 +58,10 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.2.5",
+    "version": "0.3.0",
     "description": (
-        "Translate text or replied-to messages with optional "
-        "source-language auto-detection."
+        "Translate text or replied-to messages with multi-provider fallback "
+        "and optional source-language auto-detection."
     ),
     "category": "utility",
     "requires": ["rooms", "_core"],
@@ -61,7 +69,6 @@ PLUGIN_META = {
 
 FALLBACK_NAMESPACE = "translate-fallback-command"
 TRANSLATE_KEY = "TRANSLATE"
-GOOGLE_TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 
 TRANSLATE_TIMEOUT_SECONDS = max(
     1.0,
@@ -107,6 +114,17 @@ TRANSLATE_TO = (
     else str(_configured_translate_to)
 )
 del _configured_translate_to
+
+TRANSLATE_LIBRETRANSLATE_URL = str(
+    config.get("translate_libretranslate_url", "https://translate.envs.net/")
+    or ""
+).strip()
+TRANSLATE_LIBRETRANSLATE_API_KEY = str(
+    config.get("translate_libretranslate_api_key") or ""
+).strip()
+TRANSLATE_GOOGLE_API_KEY = str(config.get("translate_google_api_key") or "").strip()
+TRANSLATE_DEEPL_API_KEY = str(config.get("translate_deepl_api_key") or "").strip()
+
 # Google Cloud's NMT language-code list is intentionally kept as codes rather
 # than display names. Regional/script variants are normalized case-insensitively.
 # ``auto`` is valid only for the source language.
@@ -148,6 +166,15 @@ class TranslationResult:
     source_language: str | None = None
 
 
+@dataclass(frozen=True)
+class _ProviderAttempt:
+    """One concrete upstream attempt in the configured fallback chain."""
+
+    name: str
+    state_key: str
+    authenticated: bool
+
+
 class TranslationUsageError(ValueError):
     """Raised for invalid command arguments."""
 
@@ -157,15 +184,20 @@ class TranslationProviderError(RuntimeError):
 
 
 class TranslationRateLimitError(RuntimeError):
-    """Raised when the provider is in a local or upstream rate-limit cooldown."""
+    """Raised when every usable provider is currently rate-limited."""
 
-    def __init__(self, retry_after_seconds: float):
+    def __init__(self, retry_after_seconds: float, provider: str | None = None):
         self.retry_after_seconds = max(1.0, float(retry_after_seconds))
+        self.provider = provider
         super().__init__("translation provider is rate-limited")
 
 
 class TranslationProviderBusyError(RuntimeError):
-    """Raised when a command cannot obtain the serialized provider slot quickly."""
+    """Raised when a command cannot obtain a serialized provider slot quickly."""
+
+
+class TranslationProvidersUnavailableError(RuntimeError):
+    """Raised after all configured translation providers fail."""
 
 
 @dataclass
@@ -177,9 +209,14 @@ class _RateLimitState:
     last_429_monotonic: float | None = None
 
 
-_RATE_LIMIT_STATE = _RateLimitState()
+_RATE_LIMIT_STATES: dict[str, _RateLimitState] = {
+    "google-public": _RateLimitState(),
+}
+# Compatibility alias retained for focused tests and diagnostics that historically
+# inspected the single Google-public state directly.
+_RATE_LIMIT_STATE = _RATE_LIMIT_STATES["google-public"]
 _PROVIDER_LOCKS: weakref.WeakKeyDictionary[
-    asyncio.AbstractEventLoop, asyncio.Lock
+    asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
 ] = weakref.WeakKeyDictionary()
 
 
@@ -187,13 +224,25 @@ def _monotonic() -> float:
     return time.monotonic()
 
 
-def _provider_lock() -> asyncio.Lock:
-    """Return one serialization lock per event loop."""
+def _rate_limit_state(provider_key: str = "google-public") -> _RateLimitState:
+    state = _RATE_LIMIT_STATES.get(provider_key)
+    if state is None:
+        state = _RateLimitState()
+        _RATE_LIMIT_STATES[provider_key] = state
+    return state
+
+
+def _provider_lock(provider_key: str = "google-public") -> asyncio.Lock:
+    """Return one serialization lock per provider and event loop."""
     loop = asyncio.get_running_loop()
-    lock = _PROVIDER_LOCKS.get(loop)
+    locks = _PROVIDER_LOCKS.get(loop)
+    if locks is None:
+        locks = {}
+        _PROVIDER_LOCKS[loop] = locks
+    lock = locks.get(provider_key)
     if lock is None:
         lock = asyncio.Lock()
-        _PROVIDER_LOCKS[loop] = lock
+        locks[provider_key] = lock
     return lock
 
 
@@ -230,20 +279,25 @@ def _retry_after_seconds(
     return max(0.0, (retry_at - current).total_seconds())
 
 
-def _rate_limit_remaining(*, now: float | None = None) -> float:
+def _rate_limit_remaining(
+    provider_key: str = "google-public",
+    *,
+    now: float | None = None,
+) -> float:
     current = _monotonic() if now is None else float(now)
-    return max(0.0, _RATE_LIMIT_STATE.until_monotonic - current)
+    state = _rate_limit_state(provider_key)
+    return max(0.0, state.until_monotonic - current)
 
 
 def _activate_rate_limit(
     headers: object | None = None,
+    *,
+    provider_key: str = "google-public",
 ) -> tuple[float, float | None]:
-    """Advance the local backoff and return (cooldown, provider Retry-After)."""
-    if _RATE_LIMIT_STATE.backoff_seconds > 0:
-        backoff = (
-            _RATE_LIMIT_STATE.backoff_seconds
-            * TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER
-        )
+    """Advance one provider's local 429 backoff."""
+    state = _rate_limit_state(provider_key)
+    if state.backoff_seconds > 0:
+        backoff = state.backoff_seconds * TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER
     else:
         backoff = TRANSLATE_RATE_LIMIT_INITIAL_SECONDS
 
@@ -256,26 +310,36 @@ def _activate_rate_limit(
         max(1.0, backoff),
     )
     now = _monotonic()
-    _RATE_LIMIT_STATE.backoff_seconds = cooldown
-    _RATE_LIMIT_STATE.until_monotonic = now + cooldown
-    _RATE_LIMIT_STATE.total_429_count += 1
-    _RATE_LIMIT_STATE.streak_429_count += 1
-    _RATE_LIMIT_STATE.last_429_monotonic = now
+    state.backoff_seconds = cooldown
+    state.until_monotonic = now + cooldown
+    state.total_429_count += 1
+    state.streak_429_count += 1
+    state.last_429_monotonic = now
     return cooldown, provider_retry_after
 
 
-def _reset_rate_limit_backoff() -> None:
-    """End the active 429 streak while retaining process-local history."""
-    _RATE_LIMIT_STATE.backoff_seconds = 0.0
-    _RATE_LIMIT_STATE.until_monotonic = 0.0
-    _RATE_LIMIT_STATE.streak_429_count = 0
+def _reset_rate_limit_backoff(provider_key: str = "google-public") -> None:
+    """End one provider's active 429 streak while retaining history."""
+    state = _rate_limit_state(provider_key)
+    state.backoff_seconds = 0.0
+    state.until_monotonic = 0.0
+    state.streak_429_count = 0
 
 
-def _reset_rate_limit_state() -> None:
-    """Reset cooldown and process-local diagnostics (primarily for tests)."""
-    _reset_rate_limit_backoff()
-    _RATE_LIMIT_STATE.total_429_count = 0
-    _RATE_LIMIT_STATE.last_429_monotonic = None
+def _reset_rate_limit_state(provider_key: str | None = None) -> None:
+    """Reset provider cooldown diagnostics (primarily for tests)."""
+    if provider_key is None:
+        _RATE_LIMIT_STATES.clear()
+        _RATE_LIMIT_STATES["google-public"] = _RATE_LIMIT_STATE
+        states = tuple(_RATE_LIMIT_STATES.values())
+    else:
+        states = (_rate_limit_state(provider_key),)
+    for state in states:
+        state.backoff_seconds = 0.0
+        state.until_monotonic = 0.0
+        state.total_429_count = 0
+        state.streak_429_count = 0
+        state.last_429_monotonic = None
 
 
 def _rate_limit_wait_text(seconds: float) -> str:
@@ -289,14 +353,18 @@ def _rate_limit_wait_text(seconds: float) -> str:
     return f"{hours}h {minutes}m" if minutes else f"{hours}h"
 
 
-def _raise_if_rate_limited() -> None:
-    remaining = _rate_limit_remaining()
+def _raise_if_rate_limited(provider_key: str = "google-public") -> None:
+    remaining = _rate_limit_remaining(provider_key)
     if remaining > 0:
-        raise TranslationRateLimitError(remaining)
+        raise TranslationRateLimitError(remaining, provider_key)
 
 
-def _last_rate_limit_age(*, now: float | None = None) -> float | None:
-    last = _RATE_LIMIT_STATE.last_429_monotonic
+def _last_rate_limit_age(
+    provider_key: str = "google-public",
+    *,
+    now: float | None = None,
+) -> float | None:
+    last = _rate_limit_state(provider_key).last_429_monotonic
     if last is None:
         return None
     current = _monotonic() if now is None else float(now)
@@ -492,6 +560,145 @@ def _clip_output(text: str) -> str:
     return value[: TRANSLATE_MAX_OUTPUT_LENGTH - 1].rstrip() + "…"
 
 
+def _provider_chain() -> tuple[_ProviderAttempt, ...]:
+    """Return provider attempts with authenticated providers first.
+
+    Configured API-key providers are preferred in the deliberate order
+    LibreTranslate -> Google -> DeepL. Providers without a configured key then
+    fall back to the public LibreTranslate instance and Google's legacy public
+    endpoint. DeepL has no unauthenticated mode.
+    """
+    attempts: list[_ProviderAttempt] = []
+    if TRANSLATE_LIBRETRANSLATE_API_KEY and TRANSLATE_LIBRETRANSLATE_URL:
+        attempts.append(
+            _ProviderAttempt("libretranslate", "libretranslate-api", True)
+        )
+    if TRANSLATE_GOOGLE_API_KEY:
+        attempts.append(_ProviderAttempt("google", "google-api", True))
+    if TRANSLATE_DEEPL_API_KEY:
+        attempts.append(_ProviderAttempt("deepl", "deepl-api", True))
+
+    if not TRANSLATE_LIBRETRANSLATE_API_KEY and TRANSLATE_LIBRETRANSLATE_URL:
+        attempts.append(
+            _ProviderAttempt("libretranslate", "libretranslate-public", False)
+        )
+    if not TRANSLATE_GOOGLE_API_KEY:
+        attempts.append(_ProviderAttempt("google", "google-public", False))
+    return tuple(attempts)
+
+
+def _provider_label(attempt: _ProviderAttempt) -> str:
+    mode = "api-key" if attempt.authenticated else "public"
+    return f"{attempt.name}({mode})"
+
+
+async def _call_provider(
+    attempt: _ProviderAttempt,
+    text: str,
+    *,
+    source_language: str,
+    target_language: str,
+    fetcher=fetch_json,
+) -> ProviderTranslation:
+    if attempt.name == "libretranslate":
+        return await translate_libretranslate(
+            text,
+            source_language=source_language,
+            target_language=target_language,
+            base_url=TRANSLATE_LIBRETRANSLATE_URL,
+            api_key=(
+                TRANSLATE_LIBRETRANSLATE_API_KEY
+                if attempt.authenticated
+                else None
+            ),
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+        )
+    if attempt.name == "google" and attempt.authenticated:
+        return await translate_google_cloud(
+            text,
+            source_language=source_language,
+            target_language=target_language,
+            api_key=TRANSLATE_GOOGLE_API_KEY,
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+        )
+    if attempt.name == "google":
+        return await translate_google_public(
+            text,
+            source_language=source_language,
+            target_language=target_language,
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+            fetcher=fetcher,
+        )
+    if attempt.name == "deepl":
+        return await translate_deepl(
+            text,
+            source_language=source_language,
+            target_language=target_language,
+            api_key=TRANSLATE_DEEPL_API_KEY,
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+        )
+    raise TranslationProviderError(f"unknown translation provider {attempt.name!r}")
+
+
+async def _run_provider_attempt(
+    attempt: _ProviderAttempt,
+    text: str,
+    *,
+    source_language: str,
+    target_language: str,
+    fetcher=fetch_json,
+) -> ProviderTranslation:
+    _raise_if_rate_limited(attempt.state_key)
+    lock = _provider_lock(attempt.state_key)
+    try:
+        await asyncio.wait_for(
+            lock.acquire(),
+            timeout=TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        raise TranslationProviderBusyError(
+            f"{attempt.name} translation provider request queue is busy"
+        ) from None
+
+    try:
+        _raise_if_rate_limited(attempt.state_key)
+        try:
+            result = await _call_provider(
+                attempt,
+                text,
+                source_language=source_language,
+                target_language=target_language,
+                fetcher=fetcher,
+            )
+        except ProviderHTTPError as exc:
+            if exc.status != 429:
+                raise
+            cooldown, retry_after = _activate_rate_limit(
+                exc.headers,
+                provider_key=attempt.state_key,
+            )
+            log.warning(
+                "[TRANSLATE] Provider rate limited request provider=%s "
+                "status=429 cooldown_seconds=%.1f retry_after_seconds=%s",
+                attempt.name,
+                cooldown,
+                "n/a" if retry_after is None else f"{retry_after:.1f}",
+            )
+            raise TranslationRateLimitError(
+                cooldown,
+                attempt.state_key,
+            ) from None
+        else:
+            _reset_rate_limit_backoff(attempt.state_key)
+            return result
+    finally:
+        lock.release()
+
+
 def _translation_text_from_payload(data: Any) -> str:
     if not isinstance(data, list) or not data:
         raise TranslationProviderError("provider returned an unexpected response")
@@ -562,7 +769,7 @@ async def translate_text(
     source_language: str = "auto",
     fetcher=fetch_json,
 ) -> TranslationResult:
-    """Translate one text through the fixed Google Translate endpoint."""
+    """Translate text through the configured provider fallback chain."""
     clean_text = str(text or "").strip()
     if not clean_text:
         raise TranslationUsageError("No text to translate.")
@@ -582,65 +789,83 @@ async def translate_text(
             f"Unsupported target language code '{target_language}'."
         )
 
-    query = urlencode(
-        {
-            "client": "gtx",
-            "dt": "t",
-            "q": clean_text,
-            "sl": source,
-            "tl": target,
-        }
-    )
-    _raise_if_rate_limited()
-    lock = _provider_lock()
-    try:
-        await asyncio.wait_for(
-            lock.acquire(),
-            timeout=TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS,
+    attempts = _provider_chain()
+    if not attempts:
+        raise TranslationProvidersUnavailableError(
+            "no translation providers are configured"
         )
-    except TimeoutError:
-        raise TranslationProviderBusyError(
-            "translation provider request queue is busy"
-        ) from None
 
-    try:
-        # Another command may have received HTTP 429 while this one was waiting
-        # for the provider lock. Re-check before sending anything upstream.
-        _raise_if_rate_limited()
+    rate_limits: list[TranslationRateLimitError] = []
+    busy_count = 0
+    failed_count = 0
+    for index, attempt in enumerate(attempts, start=1):
         try:
-            result = await fetcher(
-                f"{GOOGLE_TRANSLATE_ENDPOINT}?{query}",
-                timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
-                max_redirects=0,
-                max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
-                allow_private=False,
-                validator=passthrough_validator,
-                headers={"Accept": "application/json"},
+            result = await _run_provider_attempt(
+                attempt,
+                clean_text,
+                source_language=source,
+                target_language=target,
+                fetcher=fetcher,
             )
-        except aiohttp.ClientResponseError as exc:
-            if exc.status != 429:
-                raise
-            cooldown, retry_after = _activate_rate_limit(exc.headers)
+        except TranslationRateLimitError as exc:
+            rate_limits.append(exc)
+            continue
+        except TranslationProviderBusyError:
+            busy_count += 1
+            continue
+        except ProviderHTTPError as exc:
+            failed_count += 1
             log.warning(
-                "[TRANSLATE] Provider rate limited request status=429 "
-                "cooldown_seconds=%.1f retry_after_seconds=%s",
-                cooldown,
-                "n/a" if retry_after is None else f"{retry_after:.1f}",
+                "[TRANSLATE] Provider request failed provider=%s status=%s "
+                "fallback=%s",
+                attempt.name,
+                exc.status,
+                index < len(attempts),
             )
-            raise TranslationRateLimitError(cooldown) from None
-        else:
-            # A successful provider response ends the current 429 failure streak
-            # while keeping the process-local 429 history visible to diagnostics.
-            _reset_rate_limit_backoff()
-    finally:
-        lock.release()
+            continue
+        except (
+            TimeoutError,
+            aiohttp.ClientError,
+            UnsafeFetchURL,
+            FetchURLTooLarge,
+            json.JSONDecodeError,
+            ProviderPayloadError,
+            ValueError,
+        ) as exc:
+            failed_count += 1
+            log.warning(
+                "[TRANSLATE] Provider request failed provider=%s error=%s "
+                "fallback=%s",
+                attempt.name,
+                type(exc).__name__,
+                index < len(attempts),
+            )
+            continue
 
-    data = result.data
-    return TranslationResult(
-        text=_clip_output(_translation_text_from_payload(data)),
-        source_language=_detected_language_from_payload(data),
+        if index > 1:
+            log.info(
+                "[TRANSLATE] Provider fallback succeeded provider=%s attempt=%d",
+                attempt.name,
+                index,
+            )
+        return TranslationResult(
+            text=_clip_output(result.text),
+            source_language=result.source_language,
+        )
+
+    if rate_limits and failed_count == 0:
+        soonest = min(rate_limits, key=lambda exc: exc.retry_after_seconds)
+        raise TranslationRateLimitError(
+            soonest.retry_after_seconds,
+            soonest.provider,
+        )
+    if busy_count and failed_count == 0 and not rate_limits:
+        raise TranslationProviderBusyError(
+            "all translation provider request queues are busy"
+        )
+    raise TranslationProvidersUnavailableError(
+        "all configured translation providers failed"
     )
-
 
 def _reply_text_from_cache_or_quote(bot, msg, conversation: str | None) -> str | None:
     reply_id = _core.get_reply_target(msg)
@@ -774,6 +999,13 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
             mention=False,
         )
         return
+    except TranslationProvidersUnavailableError:
+        bot.reply(
+            msg,
+            "🔴 No translation provider is currently available.",
+            mention=False,
+        )
+        return
     except (TimeoutError, aiohttp.ClientError, UnsafeFetchURL) as exc:
         log.warning(
             "[TRANSLATE] Translation request failed error=%s status=%s",
@@ -861,44 +1093,64 @@ async def _on_private_message(bot, msg) -> None:
     await _redispatch_reply_fallback(bot, msg, is_room=False)
 
 
+def _provider_diagnostics() -> tuple[str, str, str]:
+    attempts = _provider_chain()
+    if not attempts:
+        return "none", "unavailable", "0"
+
+    labels = " -> ".join(_provider_label(attempt) for attempt in attempts)
+    limited: list[str] = []
+    histories: list[str] = []
+    available = 0
+    for attempt in attempts:
+        remaining = _rate_limit_remaining(attempt.state_key)
+        state = _rate_limit_state(attempt.state_key)
+        if remaining > 0:
+            limited.append(
+                f"{_provider_label(attempt)}:{_rate_limit_wait_text(remaining)}"
+            )
+        else:
+            available += 1
+        if state.total_429_count:
+            history = f"{_provider_label(attempt)}:{state.total_429_count}"
+            age = _last_rate_limit_age(attempt.state_key)
+            if age is not None:
+                history += f"@{_elapsed_text(age)}"
+            if state.streak_429_count:
+                history += f"/streak={state.streak_429_count}"
+            histories.append(history)
+
+    rate_limit = "ready" if not limited else "cooldown " + ", ".join(limited)
+    history = "none" if not histories else ", ".join(histories)
+    return labels, rate_limit, history if available else f"{history}; all cooling down"
+
+
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
-    """Return translate plugin diagnostics without calling the provider."""
+    """Return translate plugin diagnostics without calling providers."""
     try:
         default_from = _configured_source_language()
         default_to = _configured_target_language() or "none"
     except TranslationUsageError as exc:
         return [f"❌ Translate: invalid defaults: {exc}"]
 
-    remaining = _rate_limit_remaining()
-    rate_limit = (
-        f"cooldown {_rate_limit_wait_text(remaining)}"
-        if remaining > 0
-        else "ready"
+    attempts = _provider_chain()
+    provider_chain, rate_limit, history = _provider_diagnostics()
+    all_cooling = bool(attempts) and all(
+        _rate_limit_remaining(attempt.state_key) > 0 for attempt in attempts
     )
-    history = f"429_count={_RATE_LIMIT_STATE.total_429_count}"
-    age = _last_rate_limit_age()
-    if age is not None:
-        history += f", last_429={_elapsed_text(age)} ago"
-    if _RATE_LIMIT_STATE.streak_429_count > 0:
-        history += f", 429_streak={_RATE_LIMIT_STATE.streak_429_count}"
-    icon = "⚠️" if remaining > 0 else "✅"
+    icon = "⚠️" if not attempts or all_cooling else "✅"
+    common = (
+        f"providers={provider_chain}, default_from={default_from}, "
+        f"default_to={default_to}, max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
+        f"queue_wait={TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS:g}s, "
+        f"rate_limit={rate_limit}, 429_history={history}"
+    )
     if room_jid:
         feature = await get_room_feature(bot, str(room_jid), "translate")
         state = "enabled" if feature.enabled else "disabled"
-        return [
-            f"{icon} Translate for {room_jid}: {state}, provider=google, "
-            f"default_from={default_from}, default_to={default_to}, "
-            f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
-            f"queue_wait={TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS:g}s, "
-            f"rate_limit={rate_limit}, {history}"
-        ]
+        return [f"{icon} Translate for {room_jid}: {state}, {common}"]
     return [
-        f"{icon} Translate: provider=google, "
-        f"default_from={default_from}, default_to={default_to}, "
-        f"max_input={TRANSLATE_MAX_INPUT_LENGTH}, "
-        f"timeout={TRANSLATE_TIMEOUT_SECONDS:g}s, "
-        f"queue_wait={TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS:g}s, "
-        f"rate_limit={rate_limit}, {history}"
+        f"{icon} Translate: {common}, timeout={TRANSLATE_TIMEOUT_SECONDS:g}s"
     ]
 
 
