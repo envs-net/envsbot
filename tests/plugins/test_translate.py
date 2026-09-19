@@ -1007,6 +1007,45 @@ async def test_translate_command_reports_rate_limit_without_generic_failure(monk
 
 
 @pytest.mark.asyncio
+async def test_translate_command_reports_language_pair_unavailable(monkeypatch):
+    bot = SimpleNamespace(reply=Mock())
+    msg = make_message(
+        ",tr de la Feuerwehrmann",
+        room="alice@example.org",
+        msg_type="chat",
+    )
+    monkeypatch.setattr(
+        translate, "_room_translation_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_text",
+        AsyncMock(
+            side_effect=translate.TranslationLanguagePairUnavailableError(
+                "de",
+                "la",
+                fallback_temporarily_unavailable=True,
+            )
+        ),
+    )
+
+    await translate.translate_command(
+        bot,
+        "alice@example.org",
+        None,
+        ["de", "la", "Feuerwehrmann"],
+        msg,
+        False,
+    )
+
+    output = bot.reply.call_args.args[1]
+    assert "de → la" in output
+    assert "not supported" in output
+    assert "fallback provider is temporarily unavailable" in output
+    assert "No translation provider" not in output
+
+
+@pytest.mark.asyncio
 async def test_translate_command_reports_busy_provider_queue(monkeypatch):
     bot = SimpleNamespace(reply=Mock())
     msg = make_message(",tr de hello", room="alice@example.org", msg_type="chat")
@@ -1355,6 +1394,74 @@ async def test_translate_falls_back_after_authenticated_provider_failure(monkeyp
     assert result.text == "Hallo"
     google_api.assert_awaited_once()
     libre.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_translate_falls_back_after_language_pair_rejection(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    libre = AsyncMock(
+        side_effect=translate.ProviderHTTPError("libretranslate", 400)
+    )
+    google = AsyncMock(
+        return_value=translate.ProviderTranslation("Ignis vigil", "de")
+    )
+    monkeypatch.setattr(translate, "translate_libretranslate", libre)
+    monkeypatch.setattr(translate, "translate_google_public", google)
+
+    result = await translate.translate_text(
+        "Feuerwehrmann",
+        source_language="de",
+        target_language="la",
+    )
+
+    assert result == translate.TranslationResult("Ignis vigil", "de")
+    libre.assert_awaited_once()
+    google.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_translate_reports_language_pair_when_fallback_is_rate_limited(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_libretranslate",
+        AsyncMock(side_effect=translate.ProviderHTTPError("libretranslate", 400)),
+    )
+    monkeypatch.setattr(
+        translate,
+        "translate_google_public",
+        AsyncMock(
+            side_effect=translate.ProviderHTTPError(
+                "google",
+                429,
+                headers={"Retry-After": "60"},
+            )
+        ),
+    )
+
+    with pytest.raises(
+        translate.TranslationLanguagePairUnavailableError
+    ) as exc_info:
+        await translate.translate_text(
+            "Feuerwehrmann",
+            source_language="de",
+            target_language="la",
+        )
+
+    exc = exc_info.value
+    assert exc.source_language == "de"
+    assert exc.target_language == "la"
+    assert exc.fallback_temporarily_unavailable is True
 
 
 @pytest.mark.asyncio

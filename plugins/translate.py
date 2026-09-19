@@ -204,6 +204,27 @@ class TranslationProvidersUnavailableError(RuntimeError):
     """Raised after all configured translation providers fail."""
 
 
+class TranslationLanguagePairUnavailableError(RuntimeError):
+    """Raised when usable providers reject the requested language pair."""
+
+    def __init__(
+        self,
+        source_language: str,
+        target_language: str,
+        *,
+        fallback_temporarily_unavailable: bool = False,
+    ) -> None:
+        self.source_language = str(source_language)
+        self.target_language = str(target_language)
+        self.fallback_temporarily_unavailable = bool(
+            fallback_temporarily_unavailable
+        )
+        super().__init__(
+            f"translation language pair unavailable: "
+            f"{self.source_language} -> {self.target_language}"
+        )
+
+
 @dataclass
 class _RateLimitState:
     until_monotonic: float = 0.0
@@ -802,6 +823,7 @@ async def translate_text(
     rate_limits: list[TranslationRateLimitError] = []
     busy_count = 0
     failed_count = 0
+    language_rejection_count = 0
     for index, attempt in enumerate(attempts, start=1):
         try:
             result = await _run_provider_attempt(
@@ -818,14 +840,25 @@ async def translate_text(
             busy_count += 1
             continue
         except ProviderHTTPError as exc:
-            failed_count += 1
-            log.warning(
-                "[TRANSLATE] Provider request failed provider=%s status=%s "
-                "fallback=%s",
-                attempt.name,
-                exc.status,
-                index < len(attempts),
-            )
+            if exc.status == 400:
+                language_rejection_count += 1
+                log.info(
+                    "[TRANSLATE] Provider rejected language pair provider=%s "
+                    "source=%s target=%s fallback=%s",
+                    attempt.name,
+                    source,
+                    target,
+                    index < len(attempts),
+                )
+            else:
+                failed_count += 1
+                log.warning(
+                    "[TRANSLATE] Provider request failed provider=%s status=%s "
+                    "fallback=%s",
+                    attempt.name,
+                    exc.status,
+                    index < len(attempts),
+                )
             continue
         except (
             TimeoutError,
@@ -857,6 +890,12 @@ async def translate_text(
             source_language=result.source_language,
         )
 
+    if language_rejection_count and failed_count == 0:
+        raise TranslationLanguagePairUnavailableError(
+            source,
+            target,
+            fallback_temporarily_unavailable=bool(rate_limits or busy_count),
+        )
     if rate_limits and failed_count == 0:
         soonest = min(rate_limits, key=lambda exc: exc.retry_after_seconds)
         raise TranslationRateLimitError(
@@ -1002,6 +1041,16 @@ async def translate_command(bot, sender_jid, nick, args, msg, is_room):
             "🟡 Translation service is busy. Please try again shortly.",
             mention=False,
         )
+        return
+    except TranslationLanguagePairUnavailableError as exc:
+        message = (
+            "🟡 The requested language pair "
+            f"{exc.source_language} → {exc.target_language} is not supported "
+            "by the currently available translation provider(s)."
+        )
+        if exc.fallback_temporarily_unavailable:
+            message += " Another fallback provider is temporarily unavailable."
+        bot.reply(msg, message, mention=False)
         return
     except TranslationProvidersUnavailableError:
         bot.reply(
