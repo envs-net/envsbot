@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
-from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 import pytest
@@ -46,8 +45,6 @@ def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "FALLBACK_NAMESPACE", "translate-test-fallback")
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
-    # Keep legacy focused tests on the single public-Google path; dedicated
-    # provider-chain tests below exercise the new LibreTranslate/API fallbacks.
     monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_URL", "")
     monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "")
     monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "")
@@ -177,33 +174,28 @@ def test_language_code_normalization_supports_bcp47():
 
 
 @pytest.mark.asyncio
-async def test_translate_text_builds_provider_request_and_parses_result():
-    calls = []
-
-    async def fake_fetcher(url, **kwargs):
-        calls.append((url, kwargs))
-        return SimpleNamespace(
-            data=[[["Привіт, світе!", "Hello, world!", None, None]], None, "en"]
-        )
+async def test_translate_text_uses_google_cloud_provider(monkeypatch):
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+    google = AsyncMock(
+        return_value=translate.ProviderTranslation("Привіт, світе!", "en")
+    )
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
 
     result = await translate.translate_text(
         "Hello, world!",
         source_language="en",
         target_language="uk",
-        fetcher=fake_fetcher,
     )
 
-    assert result.text == "Привіт, світе!"
-    assert result.source_language == "en"
-    parsed = urlparse(calls[0][0])
-    query = parse_qs(parsed.query)
-    assert parsed.scheme == "https"
-    assert parsed.netloc == "translate.googleapis.com"
-    assert query["sl"] == ["en"]
-    assert query["tl"] == ["uk"]
-    assert query["q"] == ["Hello, world!"]
-    assert calls[0][1]["max_redirects"] == 0
-    assert calls[0][1]["allow_private"] is False
+    assert result == translate.TranslationResult("Привіт, світе!", "en")
+    google.assert_awaited_once_with(
+        "Hello, world!",
+        source_language="en",
+        target_language="uk",
+        api_key="google-key",
+        timeout_seconds=translate.TRANSLATE_TIMEOUT_SECONDS,
+        max_bytes=translate.TRANSLATE_MAX_RESPONSE_BYTES,
+    )
 
 
 def test_retry_after_parses_seconds_and_http_date():
@@ -219,13 +211,7 @@ def test_retry_after_parses_seconds_and_http_date():
 
 def _rate_limit_error(*, retry_after: str | None = None):
     headers = {} if retry_after is None else {"Retry-After": retry_after}
-    return aiohttp.ClientResponseError(
-        request_info=SimpleNamespace(real_url="https://translate.googleapis.com/"),
-        history=(),
-        status=429,
-        message="Too Many Requests",
-        headers=headers,
-    )
+    return translate.ProviderHTTPError("google", 429, headers=headers)
 
 
 @pytest.mark.asyncio
@@ -234,70 +220,60 @@ async def test_translate_text_429_honors_retry_after_and_suppresses_requests(
 ):
     now = 1000.0
     monkeypatch.setattr(translate, "_monotonic", lambda: now)
-    fetcher = AsyncMock(side_effect=_rate_limit_error(retry_after="120"))
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+    google = AsyncMock(side_effect=_rate_limit_error(retry_after="120"))
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
 
     with caplog.at_level("WARNING", logger=translate.__name__):
         with pytest.raises(translate.TranslationRateLimitError) as exc_info:
-            await translate.translate_text(
-                "Hello",
-                target_language="de",
-                fetcher=fetcher,
-            )
+            await translate.translate_text("Hello", target_language="de")
 
     assert exc_info.value.retry_after_seconds == 120
-    assert translate._rate_limit_remaining() == 120
+    assert translate._rate_limit_remaining("google-api") == 120
     assert "status=429" in caplog.text
     assert "cooldown_seconds=120.0" in caplog.text
     assert "retry_after_seconds=120.0" in caplog.text
 
     with pytest.raises(translate.TranslationRateLimitError) as cooldown:
-        await translate.translate_text(
-            "Second request",
-            target_language="de",
-            fetcher=fetcher,
-        )
+        await translate.translate_text("Second request", target_language="de")
 
     assert cooldown.value.retry_after_seconds == 120
-    assert fetcher.await_count == 1
+    assert google.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_translate_rate_limit_backoff_grows_and_success_resets(monkeypatch):
     now = 2000.0
     monkeypatch.setattr(translate, "_monotonic", lambda: now)
-    fetcher = AsyncMock(side_effect=_rate_limit_error())
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+    google = AsyncMock(side_effect=_rate_limit_error())
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
 
     with pytest.raises(translate.TranslationRateLimitError) as first:
-        await translate.translate_text("one", target_language="de", fetcher=fetcher)
+        await translate.translate_text("one", target_language="de")
     assert first.value.retry_after_seconds == 60
 
     now += 61
     with pytest.raises(translate.TranslationRateLimitError) as second:
-        await translate.translate_text("two", target_language="de", fetcher=fetcher)
+        await translate.translate_text("two", target_language="de")
     assert second.value.retry_after_seconds == 120
 
     now += 121
-    fetcher.side_effect = None
-    fetcher.return_value = SimpleNamespace(
-        data=[[["Hallo", "Hello", None, None]], None, "en"]
-    )
-    result = await translate.translate_text(
-        "Hello", target_language="de", fetcher=fetcher
-    )
+    google.side_effect = None
+    google.return_value = translate.ProviderTranslation("Hallo", "en")
+    result = await translate.translate_text("Hello", target_language="de")
 
     assert result.text == "Hallo"
-    assert translate._rate_limit_remaining() == 0
+    assert translate._rate_limit_remaining("google-api") == 0
     assert translate._RATE_LIMIT_STATE.backoff_seconds == 0
     assert translate._RATE_LIMIT_STATE.total_429_count == 2
     assert translate._RATE_LIMIT_STATE.streak_429_count == 0
     assert translate._RATE_LIMIT_STATE.last_429_monotonic is not None
 
-    fetcher.side_effect = _rate_limit_error()
+    google.side_effect = _rate_limit_error()
     now += 1
     with pytest.raises(translate.TranslationRateLimitError) as after_success:
-        await translate.translate_text(
-            "again", target_language="de", fetcher=fetcher
-        )
+        await translate.translate_text("again", target_language="de")
     assert after_success.value.retry_after_seconds == 60
     assert translate._RATE_LIMIT_STATE.total_429_count == 3
     assert translate._RATE_LIMIT_STATE.streak_429_count == 1
@@ -307,13 +283,15 @@ async def test_translate_rate_limit_backoff_grows_and_success_resets(monkeypatch
 async def test_translate_rate_limit_backoff_is_capped(monkeypatch):
     now = 3000.0
     monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 90.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
-    fetcher = AsyncMock(side_effect=_rate_limit_error(retry_after="600"))
+    google = AsyncMock(side_effect=_rate_limit_error(retry_after="600"))
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
 
     with pytest.raises(translate.TranslationRateLimitError) as exc_info:
-        await translate.translate_text("Hello", target_language="de", fetcher=fetcher)
+        await translate.translate_text("Hello", target_language="de")
 
     assert exc_info.value.retry_after_seconds == 90
     assert translate._RATE_LIMIT_STATE.backoff_seconds == 90
@@ -324,21 +302,23 @@ async def test_concurrent_translation_waiter_is_stopped_after_first_429(monkeypa
     started = asyncio.Event()
     release = asyncio.Event()
     calls = 0
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
 
-    async def fetcher(url, **kwargs):
+    async def google_cloud(text, **kwargs):
         nonlocal calls
-        del url, kwargs
+        del text, kwargs
         calls += 1
         started.set()
         await release.wait()
         raise _rate_limit_error()
 
+    monkeypatch.setattr(translate, "translate_google_cloud", google_cloud)
     first = asyncio.create_task(
-        translate.translate_text("one", target_language="de", fetcher=fetcher)
+        translate.translate_text("one", target_language="de")
     )
     await started.wait()
     second = asyncio.create_task(
-        translate.translate_text("two", target_language="de", fetcher=fetcher)
+        translate.translate_text("two", target_language="de")
     )
     await asyncio.sleep(0)
     release.set()
@@ -354,25 +334,25 @@ async def test_translate_provider_queue_wait_is_bounded(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()
     calls = 0
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
     monkeypatch.setattr(translate, "TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS", 0.01)
 
-    async def fetcher(url, **kwargs):
+    async def google_cloud(text, **kwargs):
         nonlocal calls
-        del url, kwargs
+        del text, kwargs
         calls += 1
         started.set()
         await release.wait()
-        return SimpleNamespace(
-            data=[[["Hallo", "Hello", None, None]], None, "en"]
-        )
+        return translate.ProviderTranslation("Hallo", "en")
 
+    monkeypatch.setattr(translate, "translate_google_cloud", google_cloud)
     first = asyncio.create_task(
-        translate.translate_text("one", target_language="de", fetcher=fetcher)
+        translate.translate_text("one", target_language="de")
     )
     await started.wait()
 
     with pytest.raises(translate.TranslationProviderBusyError):
-        await translate.translate_text("two", target_language="de", fetcher=fetcher)
+        await translate.translate_text("two", target_language="de")
 
     assert calls == 1
     release.set()
@@ -387,18 +367,7 @@ async def test_translate_text_rejects_long_input(monkeypatch):
             "12345",
             source_language="auto",
             target_language="de",
-            fetcher=AsyncMock(),
         )
-
-
-def test_provider_payload_helpers_cover_nested_detection_and_errors():
-    nested = [[["Hallo", "Hello"]], None, None, None, None, None, None, None, [["en"]]]
-    assert translate._translation_text_from_payload(nested) == "Hallo"
-    assert translate._detected_language_from_payload(nested) == "en"
-    with pytest.raises(translate.TranslationProviderError):
-        translate._translation_text_from_payload({"bad": "shape"})
-    with pytest.raises(translate.TranslationProviderError):
-        translate._translation_text_from_payload([[]])
 
 
 def test_auto_detection_noop_response_recommends_explicit_source():
@@ -1223,6 +1192,11 @@ async def test_private_handler_ignores_non_private_messages_and_non_commands():
 
 @pytest.mark.asyncio
 async def test_doctor_and_on_load(monkeypatch):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
     register_event = Mock()
     bot = SimpleNamespace(bot_plugins=SimpleNamespace(register_event=register_event))
 
@@ -1238,7 +1212,7 @@ async def test_doctor_and_on_load(monkeypatch):
     assert "default_to=none" in global_lines[0]
     assert "queue_wait=5s" in global_lines[0]
     assert "rate_limit=ready" in global_lines[0]
-    assert "providers=google(public)" in global_lines[0]
+    assert "providers=libretranslate(public)" in global_lines[0]
     assert "429_history=none" in global_lines[0]
 
     monkeypatch.setattr(translate, "TRANSLATE_TO", "invalid-target")
@@ -1259,15 +1233,16 @@ async def test_doctor_and_on_load(monkeypatch):
     assert "queue_wait=5s" in room_lines[0]
 
     now = translate._monotonic()
-    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "until_monotonic", now + 30)
-    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "total_429_count", 3)
-    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "streak_429_count", 2)
-    monkeypatch.setattr(translate._RATE_LIMIT_STATE, "last_429_monotonic", now - 15)
+    libre_state = translate._rate_limit_state("libretranslate-public")
+    monkeypatch.setattr(libre_state, "until_monotonic", now + 30)
+    monkeypatch.setattr(libre_state, "total_429_count", 3)
+    monkeypatch.setattr(libre_state, "streak_429_count", 2)
+    monkeypatch.setattr(libre_state, "last_429_monotonic", now - 15)
     cooldown_lines = await translate.doctor(bot)
     assert cooldown_lines[0].startswith("⚠️ Translate:")
     assert "rate_limit=cooldown" in cooldown_lines[0]
-    assert "google(public):30s" in cooldown_lines[0]
-    assert "google(public):3@15s/streak=2" in cooldown_lines[0]
+    assert "libretranslate(public):30s" in cooldown_lines[0]
+    assert "libretranslate(public):3@15s/streak=2" in cooldown_lines[0]
 
 
 @pytest.mark.asyncio
@@ -1282,7 +1257,7 @@ async def test_get_translate_store_uses_exact_plugin_namespace():
     plugin.assert_called_once_with("translate")
 
 
-def test_provider_chain_defaults_to_libretranslate_then_google(monkeypatch):
+def test_provider_chain_defaults_to_libretranslate_only(monkeypatch):
     monkeypatch.setattr(
         translate,
         "TRANSLATE_LIBRETRANSLATE_URL",
@@ -1293,7 +1268,6 @@ def test_provider_chain_defaults_to_libretranslate_then_google(monkeypatch):
 
     assert [(item.name, item.state_key, item.authenticated) for item in chain] == [
         ("libretranslate", "libretranslate-public", False),
-        ("google", "google-public", False),
     ]
 
 
@@ -1316,7 +1290,7 @@ def test_provider_chain_prefers_configured_api_keys_in_requested_order(monkeypat
     ]
 
 
-def test_provider_chain_puts_single_keyed_provider_before_public_fallbacks(monkeypatch):
+def test_provider_chain_puts_single_keyed_provider_before_libretranslate_fallback(monkeypatch):
     monkeypatch.setattr(
         translate,
         "TRANSLATE_LIBRETRANSLATE_URL",
@@ -1329,12 +1303,11 @@ def test_provider_chain_puts_single_keyed_provider_before_public_fallbacks(monke
     assert [(item.name, item.state_key, item.authenticated) for item in chain] == [
         ("deepl", "deepl-api", True),
         ("libretranslate", "libretranslate-public", False),
-        ("google", "google-public", False),
     ]
 
 
 @pytest.mark.asyncio
-async def test_translate_falls_back_from_rate_limited_libretranslate_to_google(
+async def test_translate_falls_back_from_rate_limited_libretranslate_to_google_cloud(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -1342,6 +1315,8 @@ async def test_translate_falls_back_from_rate_limited_libretranslate_to_google(
         "TRANSLATE_LIBRETRANSLATE_URL",
         "https://translate.envs.net/",
     )
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "libre-key")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
     libre = AsyncMock(
         side_effect=translate.ProviderHTTPError(
             "libretranslate",
@@ -1353,7 +1328,7 @@ async def test_translate_falls_back_from_rate_limited_libretranslate_to_google(
         return_value=translate.ProviderTranslation("Hallo Welt", "en")
     )
     monkeypatch.setattr(translate, "translate_libretranslate", libre)
-    monkeypatch.setattr(translate, "translate_google_public", google)
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
 
     result = await translate.translate_text(
         "Hello world",
@@ -1364,8 +1339,8 @@ async def test_translate_falls_back_from_rate_limited_libretranslate_to_google(
     assert result == translate.TranslationResult("Hallo Welt", "en")
     libre.assert_awaited_once()
     google.assert_awaited_once()
-    assert translate._rate_limit_remaining("libretranslate-public") > 0
-    assert translate._rate_limit_remaining("google-public") == 0
+    assert translate._rate_limit_remaining("libretranslate-api") > 0
+    assert translate._rate_limit_remaining("google-api") == 0
 
 
 @pytest.mark.asyncio
@@ -1403,14 +1378,16 @@ async def test_translate_falls_back_after_language_pair_rejection(monkeypatch):
         "TRANSLATE_LIBRETRANSLATE_URL",
         "https://translate.envs.net/",
     )
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "libre-key")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
     libre = AsyncMock(
         side_effect=translate.ProviderHTTPError("libretranslate", 400)
     )
     google = AsyncMock(
-        return_value=translate.ProviderTranslation("Ignis vigil", "de")
+        return_value=translate.ProviderTranslation("Vigil ignis", "de")
     )
     monkeypatch.setattr(translate, "translate_libretranslate", libre)
-    monkeypatch.setattr(translate, "translate_google_public", google)
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
 
     result = await translate.translate_text(
         "Feuerwehrmann",
@@ -1418,13 +1395,13 @@ async def test_translate_falls_back_after_language_pair_rejection(monkeypatch):
         target_language="la",
     )
 
-    assert result == translate.TranslationResult("Ignis vigil", "de")
+    assert result == translate.TranslationResult("Vigil ignis", "de")
     libre.assert_awaited_once()
     google.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_translate_reports_language_pair_when_fallback_is_rate_limited(
+async def test_translate_reports_language_pair_when_google_cloud_fallback_is_rate_limited(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -1432,6 +1409,8 @@ async def test_translate_reports_language_pair_when_fallback_is_rate_limited(
         "TRANSLATE_LIBRETRANSLATE_URL",
         "https://translate.envs.net/",
     )
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "libre-key")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
     monkeypatch.setattr(
         translate,
         "translate_libretranslate",
@@ -1439,7 +1418,7 @@ async def test_translate_reports_language_pair_when_fallback_is_rate_limited(
     )
     monkeypatch.setattr(
         translate,
-        "translate_google_public",
+        "translate_google_cloud",
         AsyncMock(
             side_effect=translate.ProviderHTTPError(
                 "google",
@@ -1471,6 +1450,8 @@ async def test_translate_reports_unavailable_after_all_provider_failures(monkeyp
         "TRANSLATE_LIBRETRANSLATE_URL",
         "https://translate.envs.net/",
     )
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "libre-key")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
     monkeypatch.setattr(
         translate,
         "translate_libretranslate",
@@ -1478,7 +1459,7 @@ async def test_translate_reports_unavailable_after_all_provider_failures(monkeyp
     )
     monkeypatch.setattr(
         translate,
-        "translate_google_public",
+        "translate_google_cloud",
         AsyncMock(side_effect=translate.ProviderHTTPError("google", 503)),
     )
 

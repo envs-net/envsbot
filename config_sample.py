@@ -668,12 +668,12 @@ TRANSLATE_TO = None
 # LibreTranslate fallback.
 TRANSLATE_LIBRETRANSLATE_URL = 'https://translate.envs.net/'
 
-# Optional LibreTranslate API key. Configured API-key providers are tried before
-# public fallbacks.
+# Optional LibreTranslate API key. Configured API-key providers are tried before the
+# unauthenticated LibreTranslate fallback.
 TRANSLATE_LIBRETRANSLATE_API_KEY = None
 
-# Optional Google Cloud Translation Basic v2 API key. When configured, the official
-# authenticated API is preferred over public fallbacks.
+# Optional Google Cloud Translation Basic v2 API key. Google translation is enabled
+# only when this key is configured; no unauthenticated Google endpoint is used.
 TRANSLATE_GOOGLE_API_KEY = None
 
 # Optional DeepL API key. Free keys ending in :fx use api-free.deepl.com; other keys

@@ -138,29 +138,6 @@ async def test_deepl_uses_auth_header_and_normalizes_language_codes():
 
 
 @pytest.mark.asyncio
-async def test_google_public_adapter_preserves_legacy_payload_parser():
-    fetcher = AsyncMock(
-        return_value=type(
-            "Result",
-            (),
-            {"data": [[["Hallo", "Hello", None, None]], None, "en"]},
-        )()
-    )
-
-    result = await providers.translate_google_public(
-        "Hello",
-        source_language="auto",
-        target_language="de",
-        timeout_seconds=8,
-        max_bytes=262144,
-        fetcher=fetcher,
-    )
-
-    assert result == providers.ProviderTranslation("Hallo", "en")
-    assert "translate.googleapis.com/translate_a/single" in fetcher.await_args.args[0]
-
-
-@pytest.mark.asyncio
 async def test_provider_payload_errors_are_explicit():
     bad = AsyncMock(return_value={"translatedText": ""})
     with pytest.raises(providers.ProviderPayloadError):

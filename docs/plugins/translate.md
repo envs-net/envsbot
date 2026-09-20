@@ -67,7 +67,7 @@ Reply targets are resolved through the shared persistent message cache. Native X
 
 ## Providers and fallback
 
-Translate supports LibreTranslate, Google and DeepL. Without API keys, the default chain is the envs.net LibreTranslate instance followed by Google's legacy public endpoint:
+Translate supports LibreTranslate, Google and DeepL. Without API keys, the default provider is the envs.net LibreTranslate instance. Google is supported only through the official Cloud Translation API and therefore requires `TRANSLATE_GOOGLE_API_KEY`:
 
 ```python
 TRANSLATE_LIBRETRANSLATE_URL = "https://translate.envs.net/"
@@ -76,9 +76,9 @@ TRANSLATE_GOOGLE_API_KEY = None
 TRANSLATE_DEEPL_API_KEY = None
 ```
 
-When API keys are configured, authenticated providers are tried before public fallbacks in the deliberate order LibreTranslate → Google → DeepL. A configured Google key uses the official Cloud Translation Basic v2 API; a configured DeepL key uses the official `/v2/translate` API. DeepL Free keys ending in `:fx` use `api-free.deepl.com`, while other keys use `api.deepl.com`. API keys are marked sensitive in the envsbot configuration schema and are redacted from operator-facing config output.
+When API keys are configured, authenticated providers are tried before the unauthenticated LibreTranslate fallback in the deliberate order LibreTranslate → Google → DeepL. Google uses only the official Cloud Translation Basic v2 API; the previous unauthenticated Google endpoint is not used. A configured DeepL key uses the official `/v2/translate` API. DeepL Free keys ending in `:fx` use `api-free.deepl.com`, while other keys use `api.deepl.com`. API keys are marked sensitive in the envsbot configuration schema and are redacted from operator-facing config output.
 
-A failed, busy or rate-limited provider does not block the entire command while another provider is available. The command moves to the next configured attempt. HTTP 429 state is tracked separately for each concrete provider/API mode, so a cooldown on Google's public endpoint does not suppress LibreTranslate, Google Cloud or DeepL.
+A failed, busy or rate-limited provider does not block the entire command while another provider is available. The command moves to the next configured attempt. HTTP 429 state is tracked separately for each provider/API mode, so a cooldown on one provider does not suppress LibreTranslate, Google Cloud or DeepL.
 
 Translation requests are serialized per provider. A command waits only a bounded time for a provider slot before trying the next provider. HTTP 429 responses honor a longer `Retry-After` value when present and use bounded exponential backoff for that provider.
 

@@ -11,14 +11,12 @@ import json
 from dataclasses import dataclass
 from html import unescape
 from typing import Any
-from urllib.parse import urlencode
 
 import aiohttp
 
-from utils.http_fetch import default_user_agent, fetch_json
+from utils.http_fetch import default_user_agent
 from utils.url_safety import FetchURLTooLarge
 
-GOOGLE_PUBLIC_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 GOOGLE_CLOUD_ENDPOINT = "https://translation.googleapis.com/language/translate/v2"
 DEEPL_FREE_ENDPOINT = "https://api-free.deepl.com/v2/translate"
 DEEPL_PRO_ENDPOINT = "https://api.deepl.com/v2/translate"
@@ -209,79 +207,6 @@ async def translate_google_cloud(
         raise ProviderPayloadError("Google Cloud returned an empty translation")
     source = _normalize_language(item.get("detectedSourceLanguage"))
     return ProviderTranslation(unescape(translated).strip(), source)
-
-
-def _google_public_translation_text(data: Any) -> str:
-    if not isinstance(data, list) or not data:
-        raise ProviderPayloadError("Google public endpoint returned an unexpected response")
-    segments = data[0]
-    if not isinstance(segments, list):
-        raise ProviderPayloadError("Google public endpoint returned no translation segments")
-
-    translated_parts: list[str] = []
-    for segment in segments:
-        if not isinstance(segment, list) or not segment:
-            continue
-        part = segment[0]
-        if isinstance(part, str):
-            translated_parts.append(part)
-    translated = "".join(translated_parts).strip()
-    if not translated:
-        raise ProviderPayloadError("Google public endpoint returned an empty translation")
-    return translated
-
-
-def _google_public_detected_language(data: Any) -> str | None:
-    if not isinstance(data, list):
-        return None
-    if len(data) > 2 and isinstance(data[2], str) and data[2].strip():
-        return _normalize_language(data[2])
-    try:
-        nested = data[8][0][0]
-    except (IndexError, KeyError, TypeError):
-        return None
-    return _normalize_language(nested)
-
-
-async def translate_google_public(
-    text: str,
-    *,
-    source_language: str,
-    target_language: str,
-    timeout_seconds: float,
-    max_bytes: int,
-    fetcher=fetch_json,
-) -> ProviderTranslation:
-    """Translate through Google's legacy unauthenticated public endpoint."""
-    query = urlencode(
-        {
-            "client": "gtx",
-            "dt": "t",
-            "q": text,
-            "sl": source_language,
-            "tl": target_language,
-        }
-    )
-    try:
-        result = await fetcher(
-            f"{GOOGLE_PUBLIC_ENDPOINT}?{query}",
-            timeout_seconds=timeout_seconds,
-            max_redirects=0,
-            max_bytes=max_bytes,
-            allow_private=False,
-            headers={"Accept": "application/json"},
-        )
-    except aiohttp.ClientResponseError as exc:
-        raise ProviderHTTPError(
-            "google",
-            exc.status,
-            headers=exc.headers,
-        ) from None
-
-    return ProviderTranslation(
-        _google_public_translation_text(result.data),
-        _google_public_detected_language(result.data),
-    )
 
 
 async def translate_deepl(
