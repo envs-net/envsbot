@@ -1,119 +1,43 @@
 #!/usr/bin/env python3
-"""Install the built wheel in isolation and verify packaged runtime assets."""
+"""Smoke-test the built EnvsBot wheel using shared release tooling."""
 
 from __future__ import annotations
 
-import hashlib
-import os
-import subprocess
-import sys
-import tempfile
-import venv
-import zipfile
 from pathlib import Path
+
+from _envs_xmpp_bootstrap import ensure_envs_xmpp
+
+ensure_envs_xmpp()
+
+from envs_xmpp_ops.release import WheelAsset, WheelCheckSpec, wheel_check_main  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ("init_chat_slang.csv", "avatar.jpg")
-
-
-def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def main() -> int:
-    wheels = sorted((ROOT / "dist").glob("envsbot-*.whl"))
-    if len(wheels) != 1:
-        print(f"Expected exactly one built envsbot wheel, found {len(wheels)}", file=sys.stderr)
-        return 1
-    wheel = wheels[0]
-
-    expected = {name: _digest(ROOT / "utils" / "bundled" / name) for name in ASSETS}
-    with zipfile.ZipFile(wheel) as archive:
-        names = set(archive.namelist())
-        for name in ASSETS:
-            member = f"utils/bundled/{name}"
-            if member not in names:
-                print(f"Wheel is missing packaged asset: {member}", file=sys.stderr)
-                return 1
-            actual = hashlib.sha256(archive.read(member)).hexdigest()
-            if actual != expected[name]:
-                print(f"Wheel asset differs from canonical bundled source: {name}", file=sys.stderr)
-                return 1
-
-        for sample in ("config_sample.py", "vcard_sample.py"):
-            if sample not in names:
-                print(f"Wheel is missing operator sample: {sample}", file=sys.stderr)
-                return 1
-
-        entry_points = next((name for name in names if name.endswith(".dist-info/entry_points.txt")), None)
-        if entry_points is None:
-            print("Wheel is missing entry_points.txt", file=sys.stderr)
-            return 1
-        entry_text = archive.read(entry_points).decode("utf-8")
-        if "envsbot = envsbot:cli" not in entry_text:
-            print("Wheel is missing the envsbot console entry point", file=sys.stderr)
-            return 1
-
-    with tempfile.TemporaryDirectory(prefix="envsbot-wheel-") as temp_name:
-        temp = Path(temp_name)
-        env_dir = temp / "venv"
-        venv.EnvBuilder(with_pip=True).create(env_dir)
-        python = env_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        subprocess.run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "--force-reinstall",
-                str(wheel),
-            ],
-            cwd=temp,
-            check=True,
-        )
-        subprocess.run(
-            [str(python), "-m", "pip", "check"],
-            cwd=temp,
-            check=True,
-        )
-        code = """
-from pathlib import Path
-from utils.bundled_assets import bundled_asset
-
-for name in ("init_chat_slang.csv", "avatar.jpg"):
-    path = bundled_asset(name)
-    assert path.is_file(), (name, path)
-    assert "utils/bundled" in path.as_posix(), (name, path)
-print("Wheel asset smoke test passed.")
-"""
-        subprocess.run([str(python), "-c", code], cwd=temp, check=True)
-
-        executable = env_dir / ("Scripts/envsbot.exe" if os.name == "nt" else "bin/envsbot")
-        result = subprocess.run(
-            [str(executable), "--version"],
-            cwd=temp,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(
-                f"Installed envsbot --version failed with exit code {result.returncode}",
-                file=sys.stderr,
-            )
-            if result.stdout:
-                print(result.stdout, file=sys.stderr, end="")
-            if result.stderr:
-                print(result.stderr, file=sys.stderr, end="")
-            return 1
-        if not result.stdout.strip().startswith("envsbot ") or "(envs-xmpp " not in result.stdout:
-            print(f"Unexpected envsbot --version output: {result.stdout!r}", file=sys.stderr)
-            return 1
-
-    print(f"Wheel smoke test passed: {wheel.name}")
-    return 0
+SPEC = WheelCheckSpec(
+    distribution="envsbot",
+    wheel_glob="envsbot-*.whl",
+    console_script="envsbot",
+    entry_point="envsbot:cli",
+    version_prefix="envsbot ",
+    version_contains=("(envs-xmpp ",),
+    assets=(
+        WheelAsset(
+            source="utils/bundled/init_chat_slang.csv",
+            member="utils/bundled/init_chat_slang.csv",
+            resolver="utils.bundled_assets:bundled_asset",
+            resolver_argument="init_chat_slang.csv",
+            expected_runtime_fragment="utils/bundled",
+        ),
+        WheelAsset(
+            source="utils/bundled/avatar.jpg",
+            member="utils/bundled/avatar.jpg",
+            resolver="utils.bundled_assets:bundled_asset",
+            resolver_argument="avatar.jpg",
+            expected_runtime_fragment="utils/bundled",
+        ),
+    ),
+    required_members=("config_sample.py", "vcard_sample.py"),
+)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(wheel_check_main(root=ROOT, spec=SPEC))

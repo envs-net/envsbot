@@ -10,7 +10,7 @@ Run these commands from the repository root unless a script explicitly says othe
 | --- | --- | --- |
 | `deploy.sh` | Preservation-first installation and release-update entrypoint. Bare invocation only shows help. | `./scripts/deploy.sh status`, `./scripts/deploy.sh check`, `./scripts/deploy.sh update --dry-run` |
 | `deploy.py` | Python backend used by `deploy.sh`; normally do not invoke it directly. | Use `deploy.sh` instead. |
-| `_envs_xmpp_bootstrap.py` | Stdlib-only bootstrap for the shared `envs-xmpp` deployment tooling. | Internal helper; `deploy.py` uses it automatically. |
+| `_envs_xmpp_bootstrap.py` | Stdlib-only bootstrap for shared `envs-xmpp` operational tooling used before the package is importable. | Internal helper; `deploy.py` uses it automatically. |
 | `deploy_profile.py` | Declarative envs-xmpp deployment profile used by `deploy.py` after the shared ops bootstrap. | Defines bot-specific defaults while shared deployment mechanics live in `envs_xmpp_ops`. |
 | `quality.sh` | Runs the local release-quality gates: compilation, generated-doc/config checks, Ruff, mypy, dependency validation/audit, and related checks. | `./scripts/quality.sh`, `./scripts/quality.sh --fix` |
 | `test.sh` | Runs the warning-strict pytest suite with compact output; coverage is optional so normal developer loops stay fast without skipping tests. | `./scripts/test.sh`, `./scripts/test.sh --coverage`, `./scripts/test.sh --last-failed`, `./scripts/test.sh --durations 25` |
@@ -20,14 +20,14 @@ Run these commands from the repository root unless a script explicitly says othe
 | `generate_config_sample.py` | Generates `config_sample.py` from the declarative configuration schema or checks that it is current. | `python scripts/generate_config_sample.py`, `python scripts/generate_config_sample.py --check` |
 | `generate_commands_md.py` | Regenerates the checked-in command documentation from registered command metadata. | `python scripts/generate_commands_md.py` |
 | `check_command_docs.py` | Validates that the checked-in generated command documentation matches the current command registry. | `python scripts/check_command_docs.py` |
-| `check_release_tag.py` | Verifies that a release tag exactly matches the package version in `utils/version.py`. | `python scripts/check_release_tag.py v2.2.0` |
-| `check_wheel.py` | Smoke-tests the single built envsbot wheel and verifies packaged runtime assets. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
+| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `utils/version.py` as the package version source. | `python scripts/check_release_tag.py v2.2.0` |
+| `check_wheel.py` | Thin wrapper over the shared wheel checker; declares envsbot entry point, required members and runtime assets. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
 
 `quality.sh` and `test.sh` intentionally use the same shared runners as the
 other envs.net XMPP bot. Repository-specific source roots, project validation
 commands, integration markers and coverage thresholds are declared under
 `[tool.envs-xmpp.quality]` and `[tool.envs-xmpp.testing]` in `pyproject.toml`;
-the runner implementation lives in `envs-xmpp`. The project-validation stage also runs the shared-core release audit, so dependency metadata, constraints and the deployment bootstrap cannot silently drift to different envs-xmpp versions.
+the runner implementation lives in `envs-xmpp`. Release-tag and wheel verification use the same model: repository-specific declarations stay local while generic checking lives in `envs_xmpp_ops.release`. The project-validation stage also runs the shared-core release audit, so dependency metadata, constraints and the deployment bootstrap cannot silently drift to different envs-xmpp versions.
 
 `deploy.sh status` also reports runtime dependency drift against the matching
 Python constraint snapshot. `deploy.sh check` treats any missing, unpinned or
