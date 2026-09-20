@@ -32,7 +32,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from functools import partial
-from typing import Any
 
 import aiohttp
 
