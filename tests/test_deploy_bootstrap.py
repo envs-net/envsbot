@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
 from pathlib import Path
 
@@ -39,6 +40,20 @@ def test_checkout_root_uses_repository_outside_mutmut_copy(tmp_path):
 
     assert _checkout_root(mutants) == tmp_path
     assert _checkout_root(tmp_path) == tmp_path
+
+
+
+def test_installed_version_requires_importable_tooling(monkeypatch):
+    real_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "envs_xmpp_ops":
+            raise ImportError("shared tooling unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+    assert bootstrap._installed_version() is None
 
 
 def test_matching_version_needs_no_bootstrap(monkeypatch):

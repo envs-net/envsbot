@@ -28,8 +28,18 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from _envs_xmpp_bootstrap import ensure_envs_xmpp  # noqa: E402
-from envs_xmpp_ops import inspect_dependency_drift  # noqa: E402
-from envs_xmpp_ops.deploy import DeploymentTarget  # noqa: E402
+
+if TYPE_CHECKING:
+    from envs_xmpp_ops.deploy import DeploymentTarget as _DeploymentTarget
+else:
+    try:
+        from envs_xmpp_ops.deploy import DeploymentTarget as _DeploymentTarget
+    except ImportError:
+        # A bare invocation must be able to print help before the shared
+        # deploy tooling is installed. Commands call ``ensure_envs_xmpp``
+        # before constructing a Deployment and re-exec in a prepared venv.
+        class _DeploymentTarget:
+            pass
 
 # ``deploy.sh`` executes this file directly, so Python otherwise puts only the
 # ``scripts/`` directory on ``sys.path``.  Add the checkout root before loading
@@ -60,7 +70,7 @@ class UserCancelled(DeployError):
     """Raised when an interactive action is declined."""
 
 
-class Deployment(DeploymentTarget):
+class Deployment(_DeploymentTarget):
     """envsbot deployment target with project-specific executable/env."""
 
     @property
@@ -343,6 +353,8 @@ def _constraint_file(deployment: Deployment) -> Path:
 
 def _dependency_drift(deployment: Deployment):
     """Compare installed runtime dependencies with the reviewed constraints."""
+    from envs_xmpp_ops import inspect_dependency_drift
+
     if not deployment.venv_python.is_file():
         raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
     try:

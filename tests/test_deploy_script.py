@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import grp
 import importlib.util
 import os
 import pwd
-import grp
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
 
 _TEST_ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,13 +94,23 @@ def test_bare_deploy_command_only_prints_help(capsys):
     assert "existing config, database, vCard, operator avatar and systemd unit files are kept" in output
 
 
-def test_deploy_shell_wrapper_is_executable_and_defaults_to_help():
+def test_deploy_shell_wrapper_is_executable_and_defaults_to_help(tmp_path):
     wrapper = ROOT / "scripts" / "deploy.sh"
+    isolated_python = tmp_path / "python-no-site"
+    isolated_python.write_text(
+        "#!/bin/sh\n"
+        f'exec "{sys.executable}" -S "$@"\n',
+        encoding="utf-8",
+    )
+    isolated_python.chmod(0o755)
 
     executable = os.access(wrapper, os.X_OK)
+    env = os.environ.copy()
+    env["ENVSBOT_DEPLOY_PYTHON"] = str(isolated_python)
     result = subprocess.run(
         [str(wrapper)],
         cwd=ROOT,
+        env=env,
         check=False,
         capture_output=True,
         text=True,

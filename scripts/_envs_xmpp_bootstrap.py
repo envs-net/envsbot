@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 _REQUIRED_VERSION = "1.3.0"
@@ -13,13 +12,16 @@ _REQUIRED_SPEC = f"envs-xmpp=={_REQUIRED_VERSION}"
 
 
 def _installed_version() -> str | None:
+    """Return the usable shared-tooling version for this interpreter.
+
+    Package metadata alone is not enough here: the deploy frontend needs the
+    Python modules to be importable.  Treat an import failure as missing so
+    ``ensure_envs_xmpp`` can repair/re-exec the deploy environment.
+    """
     try:
         from envs_xmpp_ops import __version__ as package_version
     except ImportError:
-        try:
-            package_version = version("envs-xmpp")
-        except PackageNotFoundError:
-            return None
+        return None
     return package_version
 
 

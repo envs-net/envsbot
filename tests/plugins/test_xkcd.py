@@ -1,9 +1,28 @@
-import aiohttp
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
+import pytest
+
 import plugins.xkcd as xkcd
-from utils import formatting
+from core_plugins.rooms.defaults import PLUGIN_STORE_CONFIG, get_room_plugin_defaults
+from utils import formatting, room_features
+
+
+@pytest.fixture(autouse=True)
+def configure_production_room_features():
+    previous_store_config = room_features._FEATURE_STORE_CONFIG
+    previous_defaults_provider = room_features._FEATURE_DEFAULTS_PROVIDER
+    room_features.configure_room_features(
+        PLUGIN_STORE_CONFIG,
+        get_room_plugin_defaults,
+    )
+    try:
+        yield
+    finally:
+        room_features.configure_room_features(
+            previous_store_config,
+            previous_defaults_provider,
+        )
 
 
 @pytest.fixture
