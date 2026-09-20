@@ -238,8 +238,6 @@ def _usage(bot) -> str:
         "Room owner/admin commands:\n"
         f"{prefix}idlerpg on|off|enabled\n"
         f"{prefix}idlerpg stats\n"
-        f"{prefix}idlerpg push <character> <duration>\n"
-        f"{prefix}idlerpg setlevel <character> <level>\n"
         f"{prefix}idlerpg reset <character>\n"
         f"{prefix}idlerpg delete <character>\n"
         f"{prefix}idlerpg delold <days> [confirm]\n"

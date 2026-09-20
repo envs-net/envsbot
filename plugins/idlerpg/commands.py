@@ -1014,7 +1014,7 @@ async def _handle_delold(bot, sender_jid: str, args: list[str], msg, is_room: bo
 
 async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: bool) -> bool:
     subcmd = args[0].lower() if args else ""
-    if subcmd not in {"push", "setlevel", "reset", "delete", "remove", "delold"}:
+    if subcmd not in {"reset", "delete", "remove", "delold"}:
         return False
     if subcmd == "delold":
         await _handle_delold(bot, sender_jid, args, msg, is_room)
@@ -1036,32 +1036,7 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
         _dep_formatting._reply(bot, msg, "❌ No such IdleRPG character in this room.")
         return True
     name = _dep_formatting._display_player(player)
-    if subcmd == "push":
-        if len(args) < 3:
-            _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg push <character> <duration>")
-            return True
-        amount = _core.parse_duration(args[2])
-        if amount is None:
-            _dep_formatting._reply(bot, msg, "❌ Invalid duration. Example: 10m, 1h30m, 2d")
-            return True
-        changed = _dep_leveling._remove_time(player, amount)
-        text = (
-            f"✅ Pushed {name} {_dep_formatting._duration_clock(changed)} toward next level. "
-            + _dep_formatting._next_level_line(player)
-        )
-    elif subcmd == "setlevel":
-        if len(args) < 3 or not str(args[2]).isdigit():
-            _dep_formatting._reply(bot, msg, f"Usage: {_dep_formatting._command_prefix(bot)}idlerpg setlevel <character> <level>")
-            return True
-        previous_achievements = _dep_leveling._achievement_keys(player)
-        player["level"] = max(0, int(args[2]))
-        player["next"] = _dep_leveling._ttl_for_level(player["level"])
-        _dep_leveling._check_level_achievements(player, room)
-        text = f"✅ Set {name} to level {player['level']}. " + _dep_formatting._next_level_line(player)
-        achievement_lines = _dep_leveling._achievement_announcements(player, previous_achievements)
-        if achievement_lines:
-            text += "\n" + "\n".join(achievement_lines)
-    elif subcmd == "reset":
+    if subcmd == "reset":
         player["level"] = 0
         player["next"] = _dep_leveling._ttl_for_level(0)
         player["idled"] = 0
@@ -1243,20 +1218,6 @@ async def _handle_admin(bot, sender_jid: str, args: list[str], msg, is_room: boo
             "{prefix}idlerpg season clear-end",
             "Remove the automatic season end and make the season manual/endless.",
             examples=[help_example("{prefix}idlerpg season clear-end", "Remove the current season deadline.")],
-            context="room or MUC PM; room owner/admin",
-        ),
-        _admin_help_subcommand(
-            "push",
-            "{prefix}idlerpg push <character> <duration>",
-            "Remove time from a character's next-level clock as a room owner/admin.",
-            examples=[help_example("{prefix}idlerpg push Alice 10m", "Move Alice ten minutes closer to the next level.")],
-            context="room or MUC PM; room owner/admin",
-        ),
-        _admin_help_subcommand(
-            "setlevel",
-            "{prefix}idlerpg setlevel <character> <level>",
-            "Set a character's level and recalculate its timer as a room owner/admin.",
-            examples=[help_example("{prefix}idlerpg setlevel Alice 25", "Set Alice to level 25.")],
             context="room or MUC PM; room owner/admin",
         ),
         _admin_help_subcommand(

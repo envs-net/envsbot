@@ -471,8 +471,6 @@ def test_idlerpg_site_commands_match_available_admin_commands(tmp_path: Path) ->
     )
 
     for command in (
-        ",idlerpg push",
-        ",idlerpg setlevel",
         ",idlerpg reset",
         ",idlerpg delete",
         ",idlerpg delold",
@@ -485,6 +483,23 @@ def test_idlerpg_site_commands_match_available_admin_commands(tmp_path: Path) ->
         ",idlerpg hof clear confirm",
     ):
         assert command in html
+    assert ",idlerpg push" not in html
+    assert ",idlerpg setlevel" not in html
+
+
+def test_idlerpg_site_quest_participants_show_online_state(tmp_path: Path) -> None:
+    data_dir = _export_tree(tmp_path)
+    html = _render(
+        data_dir,
+        view="quest",
+        room="alpha_at_conference.example.org",
+    )
+
+    assert "<th>Status</th>" in html
+    assert ">Alice</a></td>" in html
+    assert ">Bob</a></td>" in html
+    assert 'status online">online</span>' in html
+    assert 'status offline">offline</span>' in html
 
 
 def test_idlerpg_site_uses_singular_day_label(tmp_path: Path) -> None:

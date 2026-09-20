@@ -343,7 +343,7 @@ async def test_login_while_already_online_is_noop(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_push_setlevel_reset_delete():
+async def test_admin_reset_delete():
     bot = DummyBot()
     msg = DummyMsg(resource="Admin")
     await idlerpg._handle_register(
@@ -354,27 +354,44 @@ async def test_admin_push_setlevel_reset_delete():
         True,
     )
 
-    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["setlevel", "Alice", "5"], msg, True)
     room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
-    assert room["players"]["alice@envs.net"]["level"] == 5
-
-    before = room["players"]["alice@envs.net"]["next"]
-    await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["push", "Alice", "1m"], msg, True)
-    assert room["players"]["alice@envs.net"]["next"] < before
-
-    invalid_before = room["players"]["alice@envs.net"]["next"]
-    bot.replies.clear()
-    await idlerpg.idlerpg_command(
-        bot, "admin@envs.net", "Admin", ["push", "Alice", "notaduration"], msg, True
-    )
-    assert room["players"]["alice@envs.net"]["next"] == invalid_before
-    assert "Invalid duration" in bot.replies[-1][0]
+    room["players"]["alice@envs.net"]["level"] = 5
+    room["players"]["alice@envs.net"]["next"] = 1
 
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["reset", "Alice"], msg, True)
     assert room["players"]["alice@envs.net"]["level"] == 0
 
     await idlerpg.idlerpg_command(bot, "admin@envs.net", "Admin", ["delete", "Alice"], msg, True)
     assert "alice@envs.net" not in room["players"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subcommand", ["push", "setlevel"])
+async def test_removed_progress_override_commands_are_unknown(subcommand):
+    bot = DummyBot()
+    msg = DummyMsg(resource="Admin")
+    await idlerpg._handle_register(
+        bot,
+        "alice@envs.net",
+        ["register", "Alice", "sysadmin"],
+        DummyMsg(),
+        True,
+    )
+    room = bot.store.globals[idlerpg.IDLERPG_DATA_KEY]["rooms"]["room@conf"]
+    player = room["players"]["alice@envs.net"]
+    before = (player["level"], player["next"])
+
+    await idlerpg.idlerpg_command(
+        bot,
+        "admin@envs.net",
+        "Admin",
+        [subcommand, "Alice", "5"],
+        msg,
+        True,
+    )
+
+    assert (player["level"], player["next"]) == before
+    assert f"Unknown IdleRPG command: {subcommand}" in bot.replies[-1][0]
 
 
 @pytest.mark.asyncio
@@ -741,9 +758,7 @@ async def test_mutating_admin_commands_require_room_admin():
         ["export"],
         ["season", "end"],
         ["delete", "Alice"],
-        ["setlevel", "Alice", "1"],
         ["reset", "Alice"],
-        ["push", "Alice", "9"],
         ["hof", "clear", "confirm"],
         ["season", "reset"],
         ["season", "discard", "confirm"],
@@ -1855,8 +1870,6 @@ def test_usage_lists_every_primary_player_and_admin_command():
         ",idlerpg season discard confirm",
         ",idlerpg season extend [duration|manual]",
         ",idlerpg season clear-end",
-        ",idlerpg push <character> <duration>",
-        ",idlerpg setlevel <character> <level>",
         ",idlerpg reset <character>",
         ",idlerpg delete <character>",
         ",idlerpg delold <days> [confirm]",
@@ -1876,8 +1889,6 @@ def test_structured_help_lists_all_mutating_admin_commands():
     subcommands = {entry.name: entry for entry in command_subcommands(command_record)}
 
     expected = {
-        "push",
-        "setlevel",
         "reset",
         "delete",
         "delold",
@@ -1892,6 +1903,8 @@ def test_structured_help_lists_all_mutating_admin_commands():
         "topic update",
     }
     assert expected <= set(subcommands)
+    assert "push" not in subcommands
+    assert "setlevel" not in subcommands
     assert subcommands["season end"].aliases == ("season finish",)
     assert subcommands["delete"].aliases == ("remove",)
     assert all("room owner/admin" in subcommands[name].context for name in expected)

@@ -174,18 +174,6 @@ Aliases: `,idle`, `,irpg`
   - Examples:
     - `,idlerpg season clear-end` — Remove the current season deadline.
 
-- `,idlerpg push <character> <duration>`
-  - Description: Remove time from a character's next-level clock as a room owner/admin.
-  - Context: `room or MUC PM; room owner/admin`
-  - Examples:
-    - `,idlerpg push Alice 10m` — Move Alice ten minutes closer to the next level.
-
-- `,idlerpg setlevel <character> <level>`
-  - Description: Set a character's level and recalculate its timer as a room owner/admin.
-  - Context: `room or MUC PM; room owner/admin`
-  - Examples:
-    - `,idlerpg setlevel Alice 25` — Set Alice to level 25.
-
 - `,idlerpg reset <character>`
   - Description: Reset one character's progress, items and penalties as a room owner/admin.
   - Context: `room or MUC PM; room owner/admin`

@@ -799,6 +799,22 @@ function idlerpg_player_status_badge($player) {
     return '<span class="' . h($class) . '">' . h($label) . '</span>';
 }
 
+function idlerpg_find_player_by_name($players, $name) {
+    $needle = strtolower(trim((string) $name));
+    if ($needle === '') {
+        return null;
+    }
+    foreach ((array) $players as $player) {
+        if (!is_array($player)) {
+            continue;
+        }
+        if (strtolower(trim((string) idlerpg_player_name($player))) === $needle) {
+            return $player;
+        }
+    }
+    return null;
+}
+
 function idlerpg_player_created_at($player) {
     if (isset($player['created_at']) && is_numeric($player['created_at'])) {
         return max(0, (int) $player['created_at']);
@@ -1483,9 +1499,17 @@ details.season summary { cursor: pointer; font-weight: 700; }
                         <p class="muted">Current grid target: [<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'x')); ?>,<?php echo h((int) idlerpg_point_coord($quest['current_target'], 'y')); ?>]. The quest completes as soon as all participants reach every route point; the displayed time is the deadline.</p>
                     <?php endif; ?>
                     <?php if (!empty($quest['questers']) && is_array($quest['questers'])): ?>
-                        <table><thead><tr><th>#</th><th>Participant</th></tr></thead><tbody>
-                        <?php foreach ($quest['questers'] as $index => $participant): $participant_name = is_array($participant) ? idlerpg_player_name($participant) : (string) $participant; ?>
-                            <tr><td><?php echo h($index + 1); ?></td><td><a href="<?php echo h(idlerpg_player_url($participant_name)); ?>"><?php echo h($participant_name); ?></a></td></tr>
+                        <table><thead><tr><th>#</th><th>Participant</th><th>Status</th></tr></thead><tbody>
+                        <?php foreach ($quest['questers'] as $index => $participant): ?>
+                            <?php
+                            $participant_name = is_array($participant) ? idlerpg_player_name($participant) : (string) $participant;
+                            $participant_player = is_array($participant) ? $participant : idlerpg_find_player_by_name($players, $participant_name);
+                            ?>
+                            <tr>
+                                <td><?php echo h($index + 1); ?></td>
+                                <td><a href="<?php echo h(idlerpg_player_url($participant_name)); ?>"><?php echo h($participant_name); ?></a></td>
+                                <td><?php echo is_array($participant_player) ? idlerpg_player_status_badge($participant_player) : '<span class="muted">unknown</span>'; ?></td>
+                            </tr>
                         <?php endforeach; ?>
                         </tbody></table>
                     <?php endif; ?>
@@ -1767,8 +1791,6 @@ details.season summary { cursor: pointer; font-weight: 700; }
                     <section class="panel"><h3>Room administration</h3><ul class="compact-list">
                         <li><code>,idlerpg on</code> / <code>,idlerpg off</code> / <code>,idlerpg enabled</code> — room feature state</li>
                         <li><code>,idlerpg stats</code> — room-wide balance and runtime statistics</li>
-                        <li><code>,idlerpg push &lt;character&gt; &lt;duration&gt;</code> — remove time from a character's clock</li>
-                        <li><code>,idlerpg setlevel &lt;character&gt; &lt;level&gt;</code> — set a character level</li>
                         <li><code>,idlerpg reset &lt;character&gt;</code> — reset one character's progress and equipment</li>
                         <li><code>,idlerpg delete &lt;character&gt;</code> — delete another room character</li>
                         <li><code>,idlerpg delold &lt;days&gt; [confirm]</code> — preview or delete offline characters inactive for the given number of days</li>

@@ -324,11 +324,9 @@ IDLERPG = {
 
 ## Admin commands
 
-Room owners/admins can adjust characters:
+Room owners/admins can reset or remove characters:
 
 ```text
-,idlerpg push <character> <duration>
-,idlerpg setlevel <character> <level>
 ,idlerpg reset <character>
 ,idlerpg delete <character>
 ,idlerpg delold <days> [confirm]
@@ -337,8 +335,6 @@ Room owners/admins can adjust characters:
 Examples:
 
 ```text
-,idlerpg push Sven 10m
-,idlerpg setlevel Sven 12
 ,idlerpg reset Sven
 ,idlerpg delete Sven
 ,idlerpg delold 90
