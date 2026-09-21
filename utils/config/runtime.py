@@ -452,6 +452,9 @@ def refresh_runtime_config_constants(cfg: Mapping[str, object]) -> list[str]:
                 if cfg.get("translate_libretranslate_url") is not None
                 else "https://translate.envs.net/"
             ),
+            "TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL": _to_str(
+                cfg.get("translate_libretranslate_languages_url") or ""
+            ),
             "TRANSLATE_LIBRETRANSLATE_API_KEY": _to_str(
                 cfg.get("translate_libretranslate_api_key") or ""
             ),

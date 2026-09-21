@@ -68,7 +68,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "description": (
         "Translate text or replied-to messages with multi-provider fallback "
         "and optional source-language auto-detection."
@@ -129,6 +129,9 @@ del _configured_translate_to
 TRANSLATE_LIBRETRANSLATE_URL = str(
     config.get("translate_libretranslate_url", "https://translate.envs.net/")
     or ""
+).strip()
+TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL = str(
+    config.get("translate_libretranslate_languages_url") or ""
 ).strip()
 TRANSLATE_LIBRETRANSLATE_API_KEY = str(
     config.get("translate_libretranslate_api_key") or ""
@@ -743,6 +746,7 @@ async def _fetch_provider_capabilities(
     if attempt.name == "libretranslate":
         return await fetch_libretranslate_capabilities(
             base_url=TRANSLATE_LIBRETRANSLATE_URL,
+            languages_url=(TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL or None),
             timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
             max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
         )

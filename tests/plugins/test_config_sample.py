@@ -55,6 +55,7 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.TRANSLATE_FROM == "auto"
     assert sample.TRANSLATE_TO is None
     assert sample.TRANSLATE_LIBRETRANSLATE_URL == "https://translate.envs.net/"
+    assert sample.TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL is None
     assert sample.TRANSLATE_LIBRETRANSLATE_API_KEY is None
     assert sample.TRANSLATE_GOOGLE_API_KEY is None
     assert sample.TRANSLATE_DEEPL_API_KEY is None

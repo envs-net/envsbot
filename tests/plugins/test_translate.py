@@ -1265,6 +1265,42 @@ async def test_get_translate_store_uses_exact_plugin_namespace():
     plugin.assert_called_once_with("translate")
 
 
+@pytest.mark.asyncio
+async def test_libretranslate_capability_refresh_uses_explicit_languages_url(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/envsbot/translate",
+    )
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL",
+        "https://translate.envs.net/languages",
+    )
+    fetch = AsyncMock(
+        return_value=translate.ProviderCapabilities(
+            source_languages=frozenset({"en"}),
+            target_languages=frozenset({"de"}),
+            translation_pairs=frozenset({("en", "de")}),
+        )
+    )
+    monkeypatch.setattr(translate, "fetch_libretranslate_capabilities", fetch)
+
+    attempt = translate._ProviderAttempt(
+        "libretranslate", "libretranslate-public", False
+    )
+    await translate._fetch_provider_capabilities(attempt)
+
+    assert fetch.await_args.kwargs["base_url"] == (
+        "https://translate.envs.net/envsbot/translate"
+    )
+    assert fetch.await_args.kwargs["languages_url"] == (
+        "https://translate.envs.net/languages"
+    )
+
+
 def test_provider_chain_defaults_to_libretranslate_only(monkeypatch):
     monkeypatch.setattr(
         translate,

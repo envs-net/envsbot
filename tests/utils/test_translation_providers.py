@@ -168,6 +168,36 @@ def test_capability_endpoints_follow_provider_base_urls():
     assert providers.deepl_base_url("abc") == "https://api.deepl.com/v2"
 
 
+def test_libretranslate_languages_endpoint_preserves_real_subpaths():
+    assert (
+        providers.libretranslate_languages_endpoint(
+            "https://example.org/api/translate"
+        )
+        == "https://example.org/api/languages"
+    )
+
+
+@pytest.mark.asyncio
+async def test_libretranslate_capabilities_can_use_explicit_languages_url():
+    get = AsyncMock(
+        return_value=[
+            {"code": "de", "name": "German", "targets": ["en"]},
+            {"code": "en", "name": "English", "targets": ["de"]},
+        ]
+    )
+
+    result = await providers.fetch_libretranslate_capabilities(
+        base_url="https://translate.envs.net/envsbot/translate",
+        languages_url="https://translate.envs.net/languages",
+        timeout_seconds=8,
+        max_bytes=262144,
+        get_json=get,
+    )
+
+    assert result.source_languages == frozenset({"de", "en"})
+    assert get.await_args.args[0] == "https://translate.envs.net/languages"
+
+
 @pytest.mark.asyncio
 async def test_libretranslate_capabilities_include_exact_pairs():
     get = AsyncMock(

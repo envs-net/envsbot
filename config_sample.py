@@ -679,6 +679,11 @@ TRANSLATE_TO = None
 # LibreTranslate fallback.
 TRANSLATE_LIBRETRANSLATE_URL = 'https://translate.envs.net/'
 
+# Optional explicit LibreTranslate /languages endpoint for capability discovery. Leave
+# None/empty to derive it from TRANSLATE_LIBRETRANSLATE_URL. Useful when translation
+# requests use a custom reverse-proxy path.
+TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL = None
+
 # Optional LibreTranslate API key. Configured API-key providers are tried before the
 # unauthenticated LibreTranslate fallback.
 TRANSLATE_LIBRETRANSLATE_API_KEY = None

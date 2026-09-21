@@ -216,13 +216,18 @@ def deepl_endpoint(api_key: str) -> str:
 async def fetch_libretranslate_capabilities(
     *,
     base_url: str,
+    languages_url: str | None = None,
     timeout_seconds: float,
     max_bytes: int,
     get_json=_get_json,
 ) -> ProviderCapabilities:
     """Fetch exact language-pair capabilities from LibreTranslate."""
+    endpoint = (
+        str(languages_url or "").strip()
+        or libretranslate_languages_endpoint(base_url)
+    )
     data = await get_json(
-        libretranslate_languages_endpoint(base_url),
+        endpoint,
         timeout_seconds=timeout_seconds,
         max_bytes=max_bytes,
         provider="libretranslate",

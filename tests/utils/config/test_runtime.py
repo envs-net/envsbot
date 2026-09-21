@@ -413,6 +413,7 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
     monkeypatch.setattr(translate, "TRANSLATE_FROM", "auto")
     monkeypatch.setattr(translate, "TRANSLATE_TO", None)
     monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_URL", "")
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL", "")
     monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "")
     monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "")
     monkeypatch.setattr(translate, "TRANSLATE_DEEPL_API_KEY", "")
@@ -425,7 +426,8 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
         {
             "translate_from": "en",
             "translate_to": "de",
-            "translate_libretranslate_url": "https://translate.envs.net/",
+            "translate_libretranslate_url": "https://translate.envs.net/envsbot/translate",
+            "translate_libretranslate_languages_url": "https://translate.envs.net/languages",
             "translate_libretranslate_api_key": "libre-key",
             "translate_google_api_key": "google-key",
             "translate_deepl_api_key": "deepl-key",
@@ -438,7 +440,12 @@ def test_runtime_refresh_updates_translate_defaults(monkeypatch):
 
     assert translate.TRANSLATE_FROM == "en"
     assert translate.TRANSLATE_TO == "de"
-    assert translate.TRANSLATE_LIBRETRANSLATE_URL == "https://translate.envs.net/"
+    assert translate.TRANSLATE_LIBRETRANSLATE_URL == (
+        "https://translate.envs.net/envsbot/translate"
+    )
+    assert translate.TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL == (
+        "https://translate.envs.net/languages"
+    )
     assert translate.TRANSLATE_LIBRETRANSLATE_API_KEY == "libre-key"
     assert translate.TRANSLATE_GOOGLE_API_KEY == "google-key"
     assert translate.TRANSLATE_DEEPL_API_KEY == "deepl-key"

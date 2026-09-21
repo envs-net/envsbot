@@ -71,6 +71,7 @@ Translate supports LibreTranslate, Google and DeepL. Without API keys, the defau
 
 ```python
 TRANSLATE_LIBRETRANSLATE_URL = "https://translate.envs.net/"
+TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL = None
 TRANSLATE_LIBRETRANSLATE_API_KEY = None
 TRANSLATE_GOOGLE_API_KEY = None
 TRANSLATE_DEEPL_API_KEY = None
@@ -80,7 +81,7 @@ When API keys are configured, authenticated providers are tried before the unaut
 
 A failed, busy or rate-limited provider does not block the entire command while another provider is available. The command moves to the next configured attempt. HTTP 429 state is tracked separately for each provider/API mode, so a cooldown on one provider does not suppress LibreTranslate, Google Cloud or DeepL.
 
-Configured providers refresh their supported-language capabilities in the background every 12 hours. LibreTranslate contributes exact advertised source/target pairs, Google Cloud contributes its Basic v2 language list, and DeepL contributes separate source and target language lists. While a snapshot is fresh, envsbot skips a provider only when the requested pair is definitely unsupported; ambiguous regional/script variants still fall through to the provider. A failed capability refresh never disables translation through that provider.
+Configured providers refresh their supported-language capabilities in the background every 12 hours. LibreTranslate contributes exact advertised source/target pairs, Google Cloud contributes its Basic v2 language list, and DeepL contributes separate source and target language lists. By default the LibreTranslate `/languages` endpoint is derived from `TRANSLATE_LIBRETRANSLATE_URL`; reverse-proxy deployments with a custom translation path can set `TRANSLATE_LIBRETRANSLATE_LANGUAGES_URL` explicitly. While a snapshot is fresh, envsbot skips a provider only when the requested pair is definitely unsupported; ambiguous regional/script variants still fall through to the provider. A failed capability refresh never disables translation through that provider.
 
 Translation requests are serialized per provider. A command waits only a bounded time for a provider slot before trying the next provider. HTTP 429 responses honor a longer `Retry-After` value when present and use bounded exponential backoff for that provider.
 
