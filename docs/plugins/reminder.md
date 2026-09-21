@@ -23,7 +23,7 @@ Reply to an existing message and provide only the reminder time. The replied-to 
 ,remind 2026-07-10 13:23 Europe/Berlin
 ```
 
-The shared persistent message cache is used to resolve the XMPP reply target. A client-provided XEP-0461 plain-text fallback quote is used when the original message is no longer available in the cache.
+The shared recent-message cache is used to resolve the XMPP reply target. A client-provided XEP-0461 plain-text fallback quote is used when the original message is no longer available in the cache.
 
 ## Timezone-aware reminders
 

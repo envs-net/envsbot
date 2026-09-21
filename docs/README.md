@@ -27,7 +27,7 @@ Operational notes:
 - Runtime configuration is loaded from `ENVSBOT_CONFIG` when set. A first source-tree run can use `config.py`; hardened systemd deployments normally use `/etc/envsbot/config.py`. Keep the active file private.
 - Managed backups live in `data/backups` by default; startup backups are controlled by `BACKUP_ON_START` and supervised periodic backups by `BACKUP_INTERVAL_HOURS` (default 24h). Setting the periodic interval to `0` also disables stale-age monitoring for managed backups.
 - Operator-tunable plugin limits, timeouts, default pagination and reminder timezone defaults are documented directly in `config_sample.py`.
-- `MESSAGE_CACHE_SIZE` controls the shared recent-message history retained per room or private conversation. Message bodies are stored in SQLite and restored after restart.
+- `MESSAGE_CACHE_SIZE` and `MESSAGE_CACHE_MAX_AGE_DAYS` bound the shared recent-message history. `MESSAGE_CACHE_PERSIST` controls whether ordinary message bodies survive restarts in SQLite, and `MESSAGE_CACHE_RESPECT_NO_STORE` keeps XEP-0334 `no-store` / `no-permanent-store` messages out of persistent history as appropriate.
 - `,config diff` shows effective values that differ from `config_sample.py` defaults.
 - `,status` includes compact alert/outbox/message-cache health; `,status full` additionally includes bounded user/runtime/message-cache diagnostics, only MUCs with detected join/routing problems (maximum 10; use `,rooms list all` for the complete MUC inventory), and supervised-task health plus only tasks that need operator attention. Use `,tasks all` for the complete task inventory and `,tasks full all` for per-task detail.
 - `,tasks` shows supervised background tasks without the rest of the status output.

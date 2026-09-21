@@ -463,12 +463,23 @@ def _cache_detail_lines(bot, health: HealthSnapshot | None = None) -> list[str]:
             if (cache_check.needs_attention if cache_check is not None else cache.get("degraded"))
             else "healthy"
         )
+        privacy = ""
+        if "respect_no_store" in cache:
+            if cache.get("respect_no_store"):
+                privacy = (
+                    " · hints=on "
+                    f"(skipped={int(cache.get('no_store_skips', 0) or 0)}, "
+                    "memory-only="
+                    f"{int(cache.get('no_permanent_store_messages', 0) or 0)})"
+                )
+            else:
+                privacy = " · hints=off"
         lines.append(
             f"Message cache: {int(cache.get('messages', 0) or 0)} messages · "
             f"pending={int(cache.get('pending_writes', 0) or 0)} · "
             f"retry={int(cache.get('retry_backlog', 0) or 0)} · "
             f"dropped={int(cache.get('dropped_persistence_entries', 0) or 0)} · "
-            f"{persistence} · {cache_health}"
+            f"{persistence}{privacy} · {cache_health}"
         )
     else:
         lines.append("Message cache: unavailable")

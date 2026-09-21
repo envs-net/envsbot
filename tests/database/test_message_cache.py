@@ -44,6 +44,61 @@ async def test_message_cache_survives_restart_and_prunes_per_conversation(tmp_db
 
 
 @pytest.mark.asyncio
+async def test_memory_only_mode_purges_sqlite_and_does_not_restore_old_history(
+    tmp_db_path,
+):
+    db = DatabaseManager(tmp_db_path)
+    await db.connect()
+
+    persistent = MessageCache(max_messages=3, max_age_days=0)
+    await persistent.start(db.message_cache)
+    await persistent.add_entry({
+        "conversation": "room@conference.example.org",
+        "body": "persisted",
+        "stanza_id": "persisted-1",
+    })
+    await persistent.close()
+    assert await db.message_cache.count() == 1
+
+    memory_only = MessageCache(
+        max_messages=3,
+        max_age_days=0,
+        persist=False,
+    )
+    await memory_only.start(db.message_cache)
+    assert await db.message_cache.count() == 0
+    await memory_only.add_entry({
+        "conversation": "room@conference.example.org",
+        "body": "runtime only",
+        "stanza_id": "runtime-1",
+    })
+    await memory_only.close()
+    assert await db.message_cache.count() == 0
+
+    restored = MessageCache(max_messages=3, max_age_days=0)
+    await restored.start(db.message_cache)
+    assert restored.get_messages("room@conference.example.org") == []
+    await restored.close()
+    await db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rowcount", "expected"),
+    [(4, 4), (0, 0), (None, 0), (-2, 0)],
+)
+async def test_clear_all_deletes_persisted_message_history(rowcount, expected):
+    write = AsyncMock(return_value=SimpleNamespace(rowcount=rowcount))
+    store = MessageCacheStore(SimpleNamespace(write=write))
+
+    assert await store.clear_all() == expected
+    write.assert_awaited_once_with(
+        "DELETE FROM message_cache",
+        label="message_cache_clear_all",
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("rowcount", "expected"),
     [(3, 3), (0, 0), (None, 0), (-4, 0)],

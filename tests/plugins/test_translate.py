@@ -1578,7 +1578,7 @@ async def test_fresh_capabilities_skip_unsupported_provider_before_translation(
 async def test_stale_capabilities_do_not_block_provider_attempt(monkeypatch):
     now = 8000.0
     monkeypatch.setattr(translate, "_monotonic", lambda: now)
-    monkeypatch.setattr(translate, "TRANSLATE_CAPABILITIES_REFRESH_SECONDS", 3600.0)
+    monkeypatch.setattr(translate, "_CAPABILITY_REFRESH_SECONDS", 3600.0)
     monkeypatch.setattr(
         translate,
         "TRANSLATE_LIBRETRANSLATE_URL",

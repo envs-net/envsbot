@@ -31,7 +31,7 @@ The bot was originally developed for the **envs pubnix/tilde** community and fol
 * vCard and avatar support via XEP-0054, XEP-0084 and XEP-0153
 * RSS/Atom feed watcher for room and direct subscriptions with stable feed numbers, scoped listing/search, pause/retry controls and per-destination templates
 * URL metadata checks for links, files and YouTube videos
-* Shared persistent recent-message cache for reply-aware plugins
+* Shared privacy-aware recent-message cache for reply-aware plugins
 * Weather, translation, vCard lookup, XMPP diagnostics, reminders, polls, pins, tell messages and utility commands
 * Community/fun plugins such as IdleRPG, ducks, dice, karma, sed corrections and XKCD
 * Pytest-based test suite with Drone CI and GitHub Actions support

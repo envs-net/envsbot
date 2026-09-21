@@ -165,6 +165,14 @@ class MessageCacheStore:
                     (conversation, conversation, limit),
                 )
 
+    async def clear_all(self) -> int:
+        """Delete every persisted message-cache row."""
+        cursor = await self.db.write(
+            "DELETE FROM message_cache",
+            label="message_cache_clear_all",
+        )
+        return max(0, int(cursor.rowcount or 0))
+
     async def clear_conversation(self, conversation: str) -> int:
         """Delete all persisted rows for one conversation."""
         cursor = await self.db.write(

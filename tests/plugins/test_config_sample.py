@@ -66,6 +66,8 @@ def test_config_sample_imports_and_exposes_safe_defaults():
     assert sample.TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER == 2.0
     assert sample.TRANSLATE_RATE_LIMIT_MAX_SECONDS == 900
     assert sample.MESSAGE_CACHE_SIZE > 0
+    assert sample.MESSAGE_CACHE_PERSIST is True
+    assert sample.MESSAGE_CACHE_RESPECT_NO_STORE is True
     assert sample.XKCD_CHECK_INTERVAL > 0
     assert sample.ROOM_PLUGIN_DEFAULTS == {
         "birthday_notify": False,

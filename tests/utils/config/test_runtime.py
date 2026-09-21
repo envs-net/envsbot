@@ -9,6 +9,8 @@ import utils.config.runtime as runtime
 def test_message_cache_age_is_startup_only():
     assert "message_cache_size" in runtime.STARTUP_ONLY_KEYS
     assert "message_cache_max_age_days" in runtime.STARTUP_ONLY_KEYS
+    assert "message_cache_persist" in runtime.STARTUP_ONLY_KEYS
+    assert "message_cache_respect_no_store" in runtime.STARTUP_ONLY_KEYS
 
     lines = runtime.startup_change_lines(
         {"message_cache_max_age_days": 30},

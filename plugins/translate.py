@@ -116,10 +116,7 @@ TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = max(
     1.0,
     float(config.get("translate_rate_limit_backoff_multiplier", 2.0) or 2.0),
 )
-TRANSLATE_CAPABILITIES_REFRESH_SECONDS = max(
-    60.0,
-    float(config.get("translate_capabilities_refresh_seconds", 3600) or 3600),
-)
+_CAPABILITY_REFRESH_SECONDS = 12 * 60 * 60
 TRANSLATE_FROM = str(config.get("translate_from", "auto") or "auto")
 _configured_translate_to = config.get("translate_to")
 TRANSLATE_TO = (
@@ -719,7 +716,7 @@ def _fresh_provider_capabilities(
     if state.capabilities is None or state.fetched_at_monotonic is None:
         return None
     age = max(0.0, _monotonic() - state.fetched_at_monotonic)
-    if age > TRANSLATE_CAPABILITIES_REFRESH_SECONDS:
+    if age > _CAPABILITY_REFRESH_SECONDS:
         return None
     return state.capabilities
 
@@ -818,7 +815,7 @@ async def _capability_refresh_loop(bot) -> None:
             bot,
             "translate",
             "translate-capabilities",
-            TRANSLATE_CAPABILITIES_REFRESH_SECONDS,
+            _CAPABILITY_REFRESH_SECONDS,
         )
 
 
@@ -1379,7 +1376,7 @@ def _capability_diagnostics() -> str:
         age_text = "unknown" if age is None else _elapsed_text(age)
         freshness = (
             "fresh"
-            if age is not None and age <= TRANSLATE_CAPABILITIES_REFRESH_SECONDS
+            if age is not None and age <= _CAPABILITY_REFRESH_SECONDS
             else "stale"
         )
         detail = f"{name}:{languages} languages/{freshness} {age_text}"

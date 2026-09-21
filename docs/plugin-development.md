@@ -303,8 +303,10 @@ recent = bot.message_cache.get_messages(conversation, limit=10)
 
 Plugins may apply their own read filters, such as ignoring command messages,
 but must not maintain a second physical history or change the shared retention
-limit. `MESSAGE_CACHE_SIZE` is startup-only and applies per conversation to all
-plugins.
+policy. `MESSAGE_CACHE_SIZE`, `MESSAGE_CACHE_MAX_AGE_DAYS`,
+`MESSAGE_CACHE_PERSIST` and `MESSAGE_CACHE_RESPECT_NO_STORE` are startup-only and
+apply to the one shared cache used by all plugins. Plugins must not bypass a
+message that the cache excluded because of an XEP-0334 storage hint.
 
 ## Command/docs CI checks
 

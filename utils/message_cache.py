@@ -1,4 +1,4 @@
-"""Shared, persistent recent-message cache and XMPP reply helpers."""
+"""Shared recent-message cache, persistence controls and XMPP reply helpers."""
 
 from __future__ import annotations
 
@@ -29,6 +29,49 @@ _DELAY_TAGS = {
     "{urn:xmpp:delay}delay",
     "{jabber:x:delay}x",
 }
+_HINT_NAMESPACE = "urn:xmpp:hints"
+_NO_STORE_TAG = f"{{{_HINT_NAMESPACE}}}no-store"
+_NO_PERMANENT_STORE_TAG = f"{{{_HINT_NAMESPACE}}}no-permanent-store"
+
+
+def _message_xml(msg):
+    xml = getattr(msg, "xml", None)
+    if xml is not None:
+        return xml
+    try:
+        return msg.get("xml")
+    except Exception:
+        return None
+
+
+def message_storage_hints(msg) -> frozenset[str]:
+    """Return XEP-0334 storage hints present on one message stanza."""
+    xml = _message_xml(msg)
+    if xml is None:
+        return frozenset()
+
+    tags: set[str] = set()
+    try:
+        tags = {str(getattr(element, "tag", "")) for element in list(xml)}
+    except Exception:
+        tags.clear()
+
+    if not tags:
+        finder = getattr(xml, "find", None)
+        if callable(finder):
+            for tag in (_NO_STORE_TAG, _NO_PERMANENT_STORE_TAG):
+                try:
+                    if finder(tag) is not None:
+                        tags.add(tag)
+                except Exception:
+                    continue
+
+    hints: set[str] = set()
+    if _NO_STORE_TAG in tags:
+        hints.add("no-store")
+    if _NO_PERMANENT_STORE_TAG in tags:
+        hints.add("no-permanent-store")
+    return frozenset(hints)
 
 
 def is_delayed_message(msg) -> bool:
@@ -39,12 +82,7 @@ def is_delayed_message(msg) -> bool:
     messages are historical input and must not be treated like freshly sent
     commands or trigger side-effecting helpers such as URLCheck.
     """
-    xml = getattr(msg, "xml", None)
-    if xml is None:
-        try:
-            xml = msg.get("xml")
-        except Exception:
-            xml = None
+    xml = _message_xml(msg)
     if xml is None:
         return False
 
@@ -191,9 +229,9 @@ def _safe_sender_jid(msg) -> str | None:
 class MessageCache:
     """One bounded recent-message cache shared by every plugin.
 
-    Reads are served from RAM. Writes are queued and committed to the existing
-    SQLite database in small batches. The queue is drained during normal bot
-    shutdown, so cached messages remain available after a restart.
+    Reads are served from RAM. When persistence is enabled, writes are queued
+    and committed to the existing SQLite database in small batches. XEP-0334
+    privacy hints can exclude messages from memory or persistent history.
     """
 
     def __init__(
@@ -201,11 +239,15 @@ class MessageCache:
         max_messages: int = 100,
         max_age_days: int = 30,
         *,
+        persist: bool = True,
+        respect_no_store: bool = True,
         task_supervisor: Any | None = None,
     ):
         self.max_messages = max(1, int(max_messages))
         self.task_supervisor = task_supervisor
         self.max_age_days = max(0, int(max_age_days))
+        self.persist = bool(persist)
+        self.respect_no_store = bool(respect_no_store)
         self._messages: dict[str, deque[dict[str, Any]]] = {}
         self._by_stanza_id: dict[str, dict[str, dict[str, Any]]] = {}
         self._store = None
@@ -221,6 +263,8 @@ class MessageCache:
         self._dropped_persistence_entries = 0
         self._last_persistence_error: str | None = None
         self._last_persistence_failure_at: int | None = None
+        self._no_store_skips = 0
+        self._no_permanent_store_messages = 0
 
     def _minimum_received_at(self) -> int | None:
         if self.max_age_days <= 0:
@@ -234,53 +278,74 @@ class MessageCache:
 
         self._messages.clear()
         self._by_stanza_id.clear()
-        self._store = store
+        self._retry_backlog.clear()
+        self._no_store_skips = 0
+        self._no_permanent_store_messages = 0
         cutoff = self._minimum_received_at()
-        prune_all = getattr(store, "prune_all", None)
-        if callable(prune_all):
-            await prune_all(self.max_messages, min_received_at=cutoff)
-        rows = await store.load_recent(
-            self.max_messages,
-            min_received_at=cutoff,
-        )
-        for row in rows:
-            if cutoff is not None and int(row.get("received_at") or 0) < cutoff:
-                continue
-            entry = {
-                "cache_key": str(row["cache_key"]),
-                "conversation": str(row["conversation"]),
-                "stanza_id": row.get("stanza_id"),
-                "nick": row.get("sender_nick"),
-                "sender_jid": row.get("sender_jid"),
-                "body": str(row.get("body") or ""),
-                "message_type": str(row.get("message_type") or "unknown"),
-                "received_at": int(row.get("received_at") or 0),
-                "ts": int(row.get("received_at") or 0),
-                "db_id": int(row.get("id") or 0),
-            }
-            self._append_to_memory(entry)
+
+        if self.persist:
+            self._store = store
+            prune_all = getattr(store, "prune_all", None)
+            if callable(prune_all):
+                await prune_all(self.max_messages, min_received_at=cutoff)
+            rows = await store.load_recent(
+                self.max_messages,
+                min_received_at=cutoff,
+            )
+            for row in rows:
+                if cutoff is not None and int(row.get("received_at") or 0) < cutoff:
+                    continue
+                entry = {
+                    "cache_key": str(row["cache_key"]),
+                    "conversation": str(row["conversation"]),
+                    "stanza_id": row.get("stanza_id"),
+                    "nick": row.get("sender_nick"),
+                    "sender_jid": row.get("sender_jid"),
+                    "body": str(row.get("body") or ""),
+                    "message_type": str(row.get("message_type") or "unknown"),
+                    "received_at": int(row.get("received_at") or 0),
+                    "ts": int(row.get("received_at") or 0),
+                    "db_id": int(row.get("id") or 0),
+                    "persistent": True,
+                }
+                self._append_to_memory(entry)
+        else:
+            clear_all = getattr(store, "clear_all", None)
+            if callable(clear_all):
+                removed = int(await clear_all() or 0)
+                if removed:
+                    log.info(
+                        "[MESSAGE_CACHE] event=purge status=ok rows=%d reason=memory-only",
+                        removed,
+                    )
+            self._store = None
 
         self._started = True
         self._closing = False
-        creator = getattr(self.task_supervisor, "create_resilient", None)
-        if callable(creator):
-            self._writer_task = creator(
-                "_runtime",
-                self._supervised_writer_loop,
-                name="message-cache-writer",
-                service=True,
-            )
+        if self.persist:
+            creator = getattr(self.task_supervisor, "create_resilient", None)
+            if callable(creator):
+                self._writer_task = creator(
+                    "_runtime",
+                    self._supervised_writer_loop,
+                    name="message-cache-writer",
+                    service=True,
+                )
+            else:
+                self._writer_task = asyncio.create_task(
+                    self._writer_loop(),
+                    name="message-cache-writer",
+                )
         else:
-            self._writer_task = asyncio.create_task(
-                self._writer_loop(),
-                name="message-cache-writer",
-            )
+            self._writer_task = None
         log.info(
             "[MESSAGE_CACHE] event=start status=ok conversations=%d "
-            "messages=%d max_per_conversation=%d",
+            "messages=%d max_per_conversation=%d persistence=%s respect_no_store=%s",
             len(self._messages),
             self.message_count,
             self.max_messages,
+            "sqlite" if self.persist else "memory-only",
+            self.respect_no_store,
         )
 
     async def close(self) -> bool:
@@ -293,6 +358,15 @@ class MessageCache:
             return not bool(self._retry_backlog)
 
         self._closing = True
+        if not self.persist:
+            self._writer_task = None
+            self._started = False
+            log.info(
+                "[MESSAGE_CACHE] event=stop status=memory-only messages=%d",
+                self.message_count,
+            )
+            return True
+
         await self._queue.put(_STOP)
         task = self._writer_task
         if task is not None:
@@ -355,6 +429,16 @@ class MessageCache:
         if not body:
             return False
 
+        persist_entry = True
+        if self.respect_no_store:
+            hints = message_storage_hints(msg)
+            if "no-store" in hints:
+                self._no_store_skips += 1
+                return False
+            if "no-permanent-store" in hints:
+                persist_entry = False
+                self._no_permanent_store_messages += 1
+
         conversation = conversation_key(
             msg,
             is_room=is_room,
@@ -374,10 +458,15 @@ class MessageCache:
             "received_at": int(time.time()),
         }
         entry["ts"] = entry["received_at"]
-        return await self.add_entry(entry)
+        return await self.add_entry(entry, persist=persist_entry)
 
-    async def add_entry(self, entry: Mapping[str, Any]) -> bool:
-        """Add an already-normalized entry and queue persistence."""
+    async def add_entry(
+        self,
+        entry: Mapping[str, Any],
+        *,
+        persist: bool = True,
+    ) -> bool:
+        """Add a normalized entry, optionally keeping it memory-only."""
         async with self._mutation_lock:
             if self._closing:
                 return False
@@ -386,6 +475,8 @@ class MessageCache:
             body = str(entry.get("body") or "").strip()
             if not conversation or not body:
                 return False
+
+            self._prune_memory_conversation(conversation)
 
             stanza_id = entry.get("stanza_id")
             if stanza_id:
@@ -402,13 +493,42 @@ class MessageCache:
                 "body": body,
                 "message_type": str(entry.get("message_type") or "unknown"),
                 "received_at": int(entry.get("received_at") or time.time()),
+                "persistent": bool(self.persist and persist),
             }
             normalized["ts"] = normalized["received_at"]
             self._append_to_memory(normalized)
 
-            if self._started:
+            if self._started and normalized["persistent"]:
                 self._queue.put_nowait(dict(normalized))
             return True
+
+    def _prune_memory_conversation(self, conversation: str) -> int:
+        cutoff = self._minimum_received_at()
+        if cutoff is None:
+            return 0
+
+        key = str(conversation)
+        messages = self._messages.get(key)
+        if not messages:
+            return 0
+        index = self._by_stanza_id.get(key, {})
+        removed = 0
+        while messages and int(messages[0].get("received_at") or 0) < cutoff:
+            entry = messages.popleft()
+            stanza_id = entry.get("stanza_id")
+            if stanza_id and index.get(str(stanza_id)) is entry:
+                index.pop(str(stanza_id), None)
+            removed += 1
+        if not messages:
+            self._messages.pop(key, None)
+            self._by_stanza_id.pop(key, None)
+        return removed
+
+    def _prune_memory_all(self) -> int:
+        return sum(
+            self._prune_memory_conversation(conversation)
+            for conversation in tuple(self._messages)
+        )
 
     def _append_to_memory(self, entry: dict[str, Any]) -> None:
         conversation = str(entry["conversation"])
@@ -536,6 +656,7 @@ class MessageCache:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Return retained entries in oldest-to-newest order."""
+        self._prune_memory_conversation(str(conversation))
         messages = list(self._messages.get(str(conversation), ()))
         if limit is not None:
             requested = max(0, int(limit))
@@ -546,6 +667,7 @@ class MessageCache:
 
     def get_by_id(self, conversation: str, stanza_id: str) -> dict[str, Any] | None:
         """Return one cached message by conversation and stanza ID."""
+        self._prune_memory_conversation(str(conversation))
         entry = self._by_stanza_id.get(str(conversation), {}).get(str(stanza_id))
         return dict(entry) if entry else None
 
@@ -557,6 +679,7 @@ class MessageCache:
         exclude_stanza_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Return the newest entry matching optional filters."""
+        self._prune_memory_conversation(str(conversation))
         for entry in reversed(self._messages.get(str(conversation), ())):
             if exclude_stanza_id and entry.get("stanza_id") == exclude_stanza_id:
                 continue
@@ -582,6 +705,7 @@ class MessageCache:
     @property
     def message_count(self) -> int:
         """Return the total number of retained in-memory messages."""
+        self._prune_memory_all()
         return sum(len(messages) for messages in self._messages.values())
 
     def stats(
@@ -589,6 +713,7 @@ class MessageCache:
     ) -> dict[str, int | bool | str | None]:
         """Return small runtime counters for diagnostics."""
         if conversation is not None:
+            self._prune_memory_conversation(str(conversation))
             count = len(self._messages.get(str(conversation), ()))
             conversations = 1 if count else 0
         else:
@@ -605,10 +730,13 @@ class MessageCache:
             "dropped_persistence_entries": self._dropped_persistence_entries,
             "last_persistence_error": self._last_persistence_error,
             "last_persistence_failure_at": self._last_persistence_failure_at,
+            "no_store_skips": self._no_store_skips,
+            "no_permanent_store_messages": self._no_permanent_store_messages,
+            "respect_no_store": self.respect_no_store,
             "degraded": bool(
                 self._retry_backlog
                 or self._last_persistence_error
                 or self._dropped_persistence_entries
             ),
-            "persistent": self._store is not None,
+            "persistent": self.persist,
         }

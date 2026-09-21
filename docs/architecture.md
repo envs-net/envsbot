@@ -12,7 +12,7 @@ XMPP stanza
    ▼
 bot.routing
    │  public MUC messages and private/MUC-PM messages
-   ├──► bot.message_cache (RAM + SQLite persistence)
+   ├──► bot.message_cache (RAM + optional SQLite persistence)
    ▼
 bot.dispatch
    │  prefix parsing, command lookup, CommandContext, permissions, rate limit
@@ -64,7 +64,7 @@ to command dispatch.
 Main responsibilities:
 
 - ignore the bot's own MUC messages
-- store each accepted incoming message once in the shared message cache
+- evaluate XEP-0334 storage hints and store each accepted incoming message once in the shared message cache
 - route public groupchat messages
 - route direct private messages
 - route MUC private messages through the same private-message handler
@@ -279,12 +279,21 @@ message-history stores.
 
 `MESSAGE_CACHE_SIZE` is the maximum number of retained entries **per
 conversation**. `MESSAGE_CACHE_MAX_AGE_DAYS` additionally removes messages older
-than the configured age (`30` days by default; `0` disables age pruning). The
-same limits apply to every plugin. Reads are served from RAM, while writes are
-batched into the SQLite `message_cache` table. The cache is loaded before
-plugins start and flushed before the database closes, so reply lookups keep
-working after a normal restart. Reducing the configured size also prunes older
-persisted rows on the next start.
+than the configured age (`30` days by default; `0` disables age pruning) from
+both RAM and SQLite. The same limits apply to every plugin.
+
+`MESSAGE_CACHE_PERSIST = True` keeps the bounded history in the SQLite
+`message_cache` table so reply lookups survive a normal restart. Setting it to
+`False` makes the cache process-local: existing `message_cache` rows are purged
+at startup, no writer task is started, and new messages remain in RAM only.
+This does not disable reply-aware plugins during the current process.
+
+With `MESSAGE_CACHE_RESPECT_NO_STORE = True` (the default), XEP-0334 privacy
+hints are enforced before cache insertion. `<no-store/>` messages are excluded
+from the cache entirely. `<no-permanent-store/>` messages remain available to
+reply-aware plugins only in RAM and are never queued for SQLite persistence.
+A sender's `<store/>` hint does not override the operator's local persistence
+policy.
 
 Conversation keys deliberately keep scopes separate:
 
@@ -300,9 +309,10 @@ entry = bot.message_cache.get_by_id(conversation, stanza_id)
 entry = bot.message_cache.get_last(conversation, predicate=filter_entry)
 ```
 
-Message bodies are persisted as plain text in the bot database and are included
-in normal database backups. Operators should choose `MESSAGE_CACHE_SIZE` and
-`MESSAGE_CACHE_MAX_AGE_DAYS` with that retention and privacy implication in mind.
+When persistence is enabled, ordinary message bodies are stored as plain text in
+the bot database and are included in normal database backups. Operators should
+choose `MESSAGE_CACHE_SIZE`, `MESSAGE_CACHE_MAX_AGE_DAYS` and
+`MESSAGE_CACHE_PERSIST` with that retention and privacy implication in mind.
 
 ## Bounded user/runtime caches
 

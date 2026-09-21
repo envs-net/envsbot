@@ -314,16 +314,27 @@ ADMIN_REPORT_BACKUP_SMOKE_TEST = False
 
 # ================= MESSAGE CACHE =================
 
-# Number of recent messages retained per room or private conversation. The cache is
-# shared by all plugins, stored in SQLite and restored on restart. Message bodies are
-# therefore persisted in the bot database and included in normal database backups.
-# Lower this value if less retained history is wanted.
+# Number of recent messages retained in RAM per room or private conversation. The same
+# bound applies to SQLite when MESSAGE_CACHE_PERSIST is enabled.
 # Startup-only: restart envsbot after changing this value.
 MESSAGE_CACHE_SIZE = 100
 
-# Remove cached messages older than this many days. Set 0 to disable age pruning.
+# Remove cached messages older than this many days from RAM and SQLite. Set 0 to
+# disable age pruning.
 # Startup-only: restart envsbot after changing this value.
 MESSAGE_CACHE_MAX_AGE_DAYS = 30
+
+# Persist recent message bodies in SQLite so history survives restarts. When disabled,
+# existing message-cache rows are purged at startup and new history remains in RAM
+# only.
+# Startup-only: restart envsbot after changing this value.
+MESSAGE_CACHE_PERSIST = True
+
+# Respect XEP-0334 storage hints. no-store messages are excluded from history; no-
+# permanent-store messages remain available only in RAM and are never written to
+# SQLite.
+# Startup-only: restart envsbot after changing this value.
+MESSAGE_CACHE_RESPECT_NO_STORE = True
 
 
 # ================= USER TRACKING =================
@@ -707,12 +718,6 @@ TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
 # Maximum local translation cooldown in seconds. Provider Retry-After values are
 # capped at this limit.
 TRANSLATE_RATE_LIMIT_MAX_SECONDS = 900
-
-# How often configured translation providers refresh their supported-language
-# capability cache in the background. Fresh capabilities let envsbot skip providers
-# that definitely cannot serve a requested language pair before sending translation
-# text.
-TRANSLATE_CAPABILITIES_REFRESH_SECONDS = 3600
 
 
 # ================= KARMA / TELL =================

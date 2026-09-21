@@ -149,6 +149,8 @@ class Bot(
         self.message_cache = MessageCache(
             max_messages=int(config.get("message_cache_size", 100) or 100),
             max_age_days=int(config.get("message_cache_max_age_days", 30) or 0),
+            persist=bool(config.get("message_cache_persist", True)),
+            respect_no_store=bool(config.get("message_cache_respect_no_store", True)),
             task_supervisor=self.tasks,
         )
         self.outbox = PersistentOutbox(self)
