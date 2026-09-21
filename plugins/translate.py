@@ -45,10 +45,19 @@ from utils.command_metadata import (
 )
 from utils.config import config
 from utils.room_features import get_room_feature
+from utils.task_supervisor import (
+    create_plugin_task,
+    create_resilient_plugin_task,
+    sleep_with_heartbeat,
+)
 from utils.translation_providers import (
+    ProviderCapabilities,
     ProviderHTTPError,
     ProviderPayloadError,
     ProviderTranslation,
+    fetch_deepl_capabilities,
+    fetch_google_cloud_capabilities,
+    fetch_libretranslate_capabilities,
     translate_deepl,
     translate_google_cloud,
     translate_libretranslate,
@@ -59,7 +68,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "translate",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": (
         "Translate text or replied-to messages with multi-provider fallback "
         "and optional source-language auto-detection."
@@ -106,6 +115,10 @@ TRANSLATE_RATE_LIMIT_MAX_SECONDS = max(
 TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = max(
     1.0,
     float(config.get("translate_rate_limit_backoff_multiplier", 2.0) or 2.0),
+)
+TRANSLATE_CAPABILITIES_REFRESH_SECONDS = max(
+    60.0,
+    float(config.get("translate_capabilities_refresh_seconds", 3600) or 3600),
 )
 TRANSLATE_FROM = str(config.get("translate_from", "auto") or "auto")
 _configured_translate_to = config.get("translate_to")
@@ -231,6 +244,14 @@ class _RateLimitState:
     last_429_monotonic: float | None = None
 
 
+@dataclass
+class _CapabilityState:
+    capabilities: ProviderCapabilities | None = None
+    fetched_at_monotonic: float | None = None
+    last_attempt_monotonic: float | None = None
+    last_error: str | None = None
+
+
 _RATE_LIMIT_STATES: dict[str, _RateLimitState] = {
     "google-api": _RateLimitState(),
 }
@@ -239,6 +260,8 @@ _RATE_LIMIT_STATE = _RATE_LIMIT_STATES["google-api"]
 _PROVIDER_LOCKS: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
 ] = weakref.WeakKeyDictionary()
+_CAPABILITY_STATES: dict[str, _CapabilityState] = {}
+_CAPABILITY_REFRESH_TASK: asyncio.Task | None = None
 
 
 def _monotonic() -> float:
@@ -361,6 +384,34 @@ def _reset_rate_limit_state(provider_key: str | None = None) -> None:
         state.total_429_count = 0
         state.streak_429_count = 0
         state.last_429_monotonic = None
+
+
+def _capability_state(provider_key: str) -> _CapabilityState:
+    state = _CAPABILITY_STATES.get(provider_key)
+    if state is None:
+        state = _CapabilityState()
+        _CAPABILITY_STATES[provider_key] = state
+    return state
+
+
+def _reset_capability_state(provider_key: str | None = None) -> None:
+    """Reset capability cache diagnostics (primarily for tests/reloads)."""
+    if provider_key is None:
+        _CAPABILITY_STATES.clear()
+    else:
+        _CAPABILITY_STATES.pop(provider_key, None)
+
+
+def _capability_age(
+    provider_key: str,
+    *,
+    now: float | None = None,
+) -> float | None:
+    fetched_at = _capability_state(provider_key).fetched_at_monotonic
+    if fetched_at is None:
+        return None
+    current = _monotonic() if now is None else float(now)
+    return max(0.0, current - fetched_at)
 
 
 def _rate_limit_wait_text(seconds: float) -> str:
@@ -612,6 +663,165 @@ def _provider_label(attempt: _ProviderAttempt) -> str:
     return f"{attempt.name}({mode})"
 
 
+def _language_membership(
+    languages: frozenset[str],
+    code: str,
+) -> bool | None:
+    """Return exact support, definite absence, or variant ambiguity."""
+    if code in languages:
+        return True
+    base = code.split("-", 1)[0]
+    if any(item.split("-", 1)[0] == base for item in languages):
+        return None
+    return False
+
+
+def _capability_supports_pair(
+    capabilities: ProviderCapabilities,
+    source_language: str,
+    target_language: str,
+) -> bool | None:
+    """Return whether cached capabilities can decide one language pair.
+
+    ``None`` is deliberately conservative: regional/script variants can be
+    accepted by a provider even if its discovery endpoint reports a related
+    base/variant code. Unknown pairs therefore fall through to the provider
+    instead of being rejected locally.
+    """
+    target_status = _language_membership(
+        capabilities.target_languages,
+        target_language,
+    )
+    if target_status is False:
+        return False
+    if source_language == "auto":
+        return target_status
+
+    source_status = _language_membership(
+        capabilities.source_languages,
+        source_language,
+    )
+    if source_status is False:
+        return False
+    if source_status is None or target_status is None:
+        return None
+
+    pairs = capabilities.translation_pairs
+    if pairs is None:
+        return True
+    return (source_language, target_language) in pairs
+
+
+def _fresh_provider_capabilities(
+    attempt: _ProviderAttempt,
+) -> ProviderCapabilities | None:
+    state = _capability_state(attempt.state_key)
+    if state.capabilities is None or state.fetched_at_monotonic is None:
+        return None
+    age = max(0.0, _monotonic() - state.fetched_at_monotonic)
+    if age > TRANSLATE_CAPABILITIES_REFRESH_SECONDS:
+        return None
+    return state.capabilities
+
+
+def _provider_pair_support(
+    attempt: _ProviderAttempt,
+    *,
+    source_language: str,
+    target_language: str,
+) -> bool | None:
+    capabilities = _fresh_provider_capabilities(attempt)
+    if capabilities is None:
+        return None
+    return _capability_supports_pair(
+        capabilities,
+        source_language,
+        target_language,
+    )
+
+
+async def _fetch_provider_capabilities(
+    attempt: _ProviderAttempt,
+) -> ProviderCapabilities:
+    if attempt.name == "libretranslate":
+        return await fetch_libretranslate_capabilities(
+            base_url=TRANSLATE_LIBRETRANSLATE_URL,
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+        )
+    if attempt.name == "google":
+        return await fetch_google_cloud_capabilities(
+            api_key=TRANSLATE_GOOGLE_API_KEY,
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+        )
+    if attempt.name == "deepl":
+        return await fetch_deepl_capabilities(
+            api_key=TRANSLATE_DEEPL_API_KEY,
+            timeout_seconds=TRANSLATE_TIMEOUT_SECONDS,
+            max_bytes=TRANSLATE_MAX_RESPONSE_BYTES,
+        )
+    raise TranslationProviderError(
+        f"unknown translation provider {attempt.name!r}"
+    )
+
+
+async def _refresh_provider_capabilities(attempt: _ProviderAttempt) -> bool:
+    """Refresh one provider cache without affecting translation availability."""
+    state = _capability_state(attempt.state_key)
+    state.last_attempt_monotonic = _monotonic()
+    try:
+        capabilities = await _fetch_provider_capabilities(attempt)
+    except (
+        TimeoutError,
+        aiohttp.ClientError,
+        FetchURLTooLarge,
+        json.JSONDecodeError,
+        ProviderHTTPError,
+        ProviderPayloadError,
+        ValueError,
+    ) as exc:
+        state.last_error = type(exc).__name__
+        log.warning(
+            "[TRANSLATE] Capability refresh failed provider=%s error=%s",
+            attempt.name,
+            type(exc).__name__,
+        )
+        return False
+
+    state.capabilities = capabilities
+    state.fetched_at_monotonic = _monotonic()
+    state.last_error = None
+    log.info(
+        "[TRANSLATE] Capability refresh succeeded provider=%s "
+        "sources=%d targets=%d",
+        attempt.name,
+        len(capabilities.source_languages),
+        len(capabilities.target_languages),
+    )
+    return True
+
+
+async def _refresh_capabilities_once() -> None:
+    seen: set[str] = set()
+    for attempt in _provider_chain():
+        if attempt.state_key in seen:
+            continue
+        seen.add(attempt.state_key)
+        await _refresh_provider_capabilities(attempt)
+
+
+async def _capability_refresh_loop(bot) -> None:
+    while True:
+        await _refresh_capabilities_once()
+        await sleep_with_heartbeat(
+            bot,
+            "translate",
+            "translate-capabilities",
+            TRANSLATE_CAPABILITIES_REFRESH_SECONDS,
+        )
+
+
 async def _call_provider(
     attempt: _ProviderAttempt,
     text: str,
@@ -774,6 +984,23 @@ async def translate_text(
     failed_count = 0
     language_rejection_count = 0
     for index, attempt in enumerate(attempts, start=1):
+        capability_support = _provider_pair_support(
+            attempt,
+            source_language=source,
+            target_language=target,
+        )
+        if capability_support is False:
+            language_rejection_count += 1
+            log.info(
+                "[TRANSLATE] Provider skipped by capabilities provider=%s "
+                "source=%s target=%s fallback=%s",
+                attempt.name,
+                source,
+                target,
+                index < len(attempts),
+            )
+            continue
+
         try:
             result = await _run_provider_attempt(
                 attempt,
@@ -1126,6 +1353,42 @@ def _provider_diagnostics() -> tuple[str, str, str]:
     return labels, rate_limit, history if available else f"{history}; all cooling down"
 
 
+def _capability_diagnostics() -> str:
+    attempts_by_name = {attempt.name: attempt for attempt in _provider_chain()}
+    parts: list[str] = []
+    for name in ("libretranslate", "google", "deepl"):
+        attempt = attempts_by_name.get(name)
+        if attempt is None:
+            status = "disabled" if name == "libretranslate" else "not configured"
+            parts.append(f"{name}:{status}")
+            continue
+
+        state = _capability_state(attempt.state_key)
+        capabilities = state.capabilities
+        if capabilities is None:
+            if state.last_error:
+                parts.append(f"{name}:error={state.last_error}")
+            else:
+                parts.append(f"{name}:pending")
+            continue
+
+        languages = len(
+            capabilities.source_languages | capabilities.target_languages
+        )
+        age = _capability_age(attempt.state_key)
+        age_text = "unknown" if age is None else _elapsed_text(age)
+        freshness = (
+            "fresh"
+            if age is not None and age <= TRANSLATE_CAPABILITIES_REFRESH_SECONDS
+            else "stale"
+        )
+        detail = f"{name}:{languages} languages/{freshness} {age_text}"
+        if state.last_error:
+            detail += f"/refresh-error={state.last_error}"
+        parts.append(detail)
+    return ", ".join(parts)
+
+
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
     """Return translate plugin diagnostics without calling providers."""
     try:
@@ -1146,17 +1409,24 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
         f"queue_wait={TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS:g}s, "
         f"rate_limit={rate_limit}, 429_history={history}"
     )
+    capability_line = f"ℹ️ Translate capabilities: {_capability_diagnostics()}"
     if room_jid:
         feature = await get_room_feature(bot, str(room_jid), "translate")
         state = "enabled" if feature.enabled else "disabled"
-        return [f"{icon} Translate for {room_jid}: {state}, {common}"]
+        return [
+            f"{icon} Translate for {room_jid}: {state}, {common}",
+            capability_line,
+        ]
     return [
-        f"{icon} Translate: {common}, timeout={TRANSLATE_TIMEOUT_SECONDS:g}s"
+        f"{icon} Translate: {common}, timeout={TRANSLATE_TIMEOUT_SECONDS:g}s",
+        capability_line,
     ]
 
 
 async def on_load(bot) -> None:
-    """Register reply-fallback handlers for room and private messages."""
+    """Register handlers and start non-blocking capability discovery."""
+    global _CAPABILITY_REFRESH_TASK
+
     bot.bot_plugins.register_event(
         "translate",
         "groupchat_message",
@@ -1167,3 +1437,33 @@ async def on_load(bot) -> None:
         "message",
         partial(_on_private_message, bot),
     )
+
+    if _CAPABILITY_REFRESH_TASK and not _CAPABILITY_REFRESH_TASK.done():
+        _CAPABILITY_REFRESH_TASK.cancel()
+        try:
+            await _CAPABILITY_REFRESH_TASK
+        except asyncio.CancelledError:
+            pass
+
+    _CAPABILITY_REFRESH_TASK = create_resilient_plugin_task(
+        bot,
+        "translate",
+        lambda: _capability_refresh_loop(bot),
+        name="translate-capabilities",
+        fallback_creator=create_plugin_task,
+    )
+
+
+async def on_unload(bot) -> None:
+    """Stop capability discovery when the plugin is unloaded."""
+    del bot
+    global _CAPABILITY_REFRESH_TASK
+
+    task = _CAPABILITY_REFRESH_TASK
+    _CAPABILITY_REFRESH_TASK = None
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

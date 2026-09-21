@@ -708,6 +708,12 @@ TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
 # capped at this limit.
 TRANSLATE_RATE_LIMIT_MAX_SECONDS = 900
 
+# How often configured translation providers refresh their supported-language
+# capability cache in the background. Fresh capabilities let envsbot skip providers
+# that definitely cannot serve a requested language pair before sending translation
+# text.
+TRANSLATE_CAPABILITIES_REFRESH_SECONDS = 3600
+
 
 # ================= KARMA / TELL =================
 

@@ -151,3 +151,120 @@ async def test_provider_payload_errors_are_explicit():
             max_bytes=262144,
             post_json=bad,
         )
+
+
+def test_capability_endpoints_follow_provider_base_urls():
+    assert (
+        providers.libretranslate_languages_endpoint("https://translate.envs.net/")
+        == "https://translate.envs.net/languages"
+    )
+    assert (
+        providers.libretranslate_languages_endpoint(
+            "https://translate.envs.net/translate"
+        )
+        == "https://translate.envs.net/languages"
+    )
+    assert providers.deepl_base_url("abc:fx") == "https://api-free.deepl.com/v2"
+    assert providers.deepl_base_url("abc") == "https://api.deepl.com/v2"
+
+
+@pytest.mark.asyncio
+async def test_libretranslate_capabilities_include_exact_pairs():
+    get = AsyncMock(
+        return_value=[
+            {"code": "de", "name": "German", "targets": ["en", "fr"]},
+            {"code": "en", "name": "English", "targets": ["de"]},
+        ]
+    )
+
+    result = await providers.fetch_libretranslate_capabilities(
+        base_url="https://translate.envs.net/",
+        timeout_seconds=8,
+        max_bytes=262144,
+        get_json=get,
+    )
+
+    assert result.source_languages == frozenset({"de", "en"})
+    assert result.target_languages == frozenset({"de", "en", "fr"})
+    assert result.translation_pairs == frozenset(
+        {("de", "en"), ("de", "fr"), ("en", "de")}
+    )
+    assert get.await_args.args[0] == "https://translate.envs.net/languages"
+
+
+@pytest.mark.asyncio
+async def test_google_cloud_capabilities_normalize_language_codes():
+    get = AsyncMock(
+        return_value={
+            "data": {
+                "languages": [
+                    {"language": "EN"},
+                    {"language": "pt_BR"},
+                ]
+            }
+        }
+    )
+
+    result = await providers.fetch_google_cloud_capabilities(
+        api_key="google-secret",
+        timeout_seconds=8,
+        max_bytes=262144,
+        get_json=get,
+    )
+
+    assert result.source_languages == frozenset({"en", "pt-br"})
+    assert result.target_languages == frozenset({"en", "pt-br"})
+    assert result.translation_pairs is None
+    assert get.await_args.kwargs["headers"] == {"X-goog-api-key": "google-secret"}
+
+
+@pytest.mark.asyncio
+async def test_deepl_capabilities_fetch_source_and_target_lists():
+    get = AsyncMock(
+        side_effect=[
+            [{"language": "EN"}, {"language": "DE"}],
+            [{"language": "DE"}, {"language": "EN-GB"}, {"language": "EN-US"}],
+        ]
+    )
+
+    result = await providers.fetch_deepl_capabilities(
+        api_key="deepl-secret:fx",
+        timeout_seconds=8,
+        max_bytes=262144,
+        get_json=get,
+    )
+
+    assert result.source_languages == frozenset({"en", "de"})
+    assert result.target_languages == frozenset({"de", "en-gb", "en-us"})
+    assert [call.args[0] for call in get.await_args_list] == [
+        "https://api-free.deepl.com/v2/languages",
+        "https://api-free.deepl.com/v2/languages",
+    ]
+    assert [call.kwargs["params"] for call in get.await_args_list] == [
+        {"type": "source"},
+        {"type": "target"},
+    ]
+    assert all(
+        call.kwargs["headers"]
+        == {"Authorization": "DeepL-Auth-Key deepl-secret:fx"}
+        for call in get.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_capability_payload_errors_are_explicit():
+    with pytest.raises(providers.ProviderPayloadError):
+        await providers.fetch_libretranslate_capabilities(
+            base_url="https://translate.envs.net/",
+            timeout_seconds=8,
+            max_bytes=262144,
+            get_json=AsyncMock(return_value=[]),
+        )
+
+    with pytest.raises(providers.ProviderPayloadError):
+        await providers.fetch_google_cloud_capabilities(
+            api_key="google-secret",
+            timeout_seconds=8,
+            max_bytes=262144,
+            get_json=AsyncMock(return_value={"data": {"languages": []}}),
+        )

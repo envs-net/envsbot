@@ -80,6 +80,8 @@ When API keys are configured, authenticated providers are tried before the unaut
 
 A failed, busy or rate-limited provider does not block the entire command while another provider is available. The command moves to the next configured attempt. HTTP 429 state is tracked separately for each provider/API mode, so a cooldown on one provider does not suppress LibreTranslate, Google Cloud or DeepL.
 
+Configured providers refresh their supported-language capabilities in the background. LibreTranslate contributes exact advertised source/target pairs, Google Cloud contributes its Basic v2 language list, and DeepL contributes separate source and target language lists. While a snapshot is fresh, envsbot skips a provider only when the requested pair is definitely unsupported; ambiguous regional/script variants still fall through to the provider. A failed capability refresh never disables translation through that provider.
+
 Translation requests are serialized per provider. A command waits only a bounded time for a provider slot before trying the next provider. HTTP 429 responses honor a longer `Retry-After` value when present and use bounded exponential backoff for that provider.
 
 The defaults are:
@@ -89,9 +91,10 @@ TRANSLATE_PROVIDER_QUEUE_TIMEOUT_SECONDS = 5
 TRANSLATE_RATE_LIMIT_INITIAL_SECONDS = 60
 TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER = 2.0
 TRANSLATE_RATE_LIMIT_MAX_SECONDS = 900
+TRANSLATE_CAPABILITIES_REFRESH_SECONDS = 3600
 ```
 
-The fallback cooldown sequence per provider is 60s, 120s, 240s, 480s, then 900s. `,doctor` reports the effective provider chain, per-provider cooldowns and process-local HTTP 429 history without exposing API keys. These settings and provider credentials support live config reload.
+The fallback cooldown sequence per provider is 60s, 120s, 240s, 480s, then 900s. `,doctor` reports the effective provider chain, per-provider cooldowns, process-local HTTP 429 history and capability-cache freshness/language counts without exposing API keys. Capability discovery is non-blocking and runs as a supervised background task. These settings and provider credentials support live config reload.
 
 ## Room setting
 

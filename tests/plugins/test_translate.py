@@ -54,6 +54,8 @@ def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
     translate._reset_rate_limit_state()
+    translate._reset_capability_state()
+    translate._CAPABILITY_REFRESH_TASK = None
     translate._PROVIDER_LOCKS.clear()
     message_cache._PROCESSED_STANZAS.clear()
     message_cache._PROCESSED_STANZA_ORDER.clear()
@@ -1198,6 +1200,10 @@ async def test_doctor_and_on_load(monkeypatch):
         "https://translate.envs.net/",
     )
     register_event = Mock()
+    task = Mock()
+    task.done.return_value = True
+    create_resilient = Mock(return_value=task)
+    monkeypatch.setattr(translate, "create_resilient_plugin_task", create_resilient)
     bot = SimpleNamespace(bot_plugins=SimpleNamespace(register_event=register_event))
 
     await translate.on_load(bot)
@@ -1205,6 +1211,8 @@ async def test_doctor_and_on_load(monkeypatch):
         ("translate", "groupchat_message"),
         ("translate", "message"),
     ]
+    create_resilient.assert_called_once()
+    assert create_resilient.call_args.kwargs["name"] == "translate-capabilities"
 
     global_lines = await translate.doctor(bot)
     assert global_lines[0].startswith("✅ Translate:")
@@ -1496,3 +1504,223 @@ async def test_doctor_reports_multi_provider_chain_without_exposing_keys(monkeyp
     assert "secret-libre" not in line
     assert "secret-google" not in line
     assert "secret-deepl" not in line
+
+
+def test_capability_support_is_conservative_for_language_variants():
+    capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"en", "de"}),
+        target_languages=frozenset({"de", "en-gb", "en-us"}),
+    )
+
+    assert translate._capability_supports_pair(capabilities, "de", "de") is True
+    assert translate._capability_supports_pair(capabilities, "auto", "de") is True
+    assert translate._capability_supports_pair(capabilities, "de", "fr") is False
+    assert translate._capability_supports_pair(capabilities, "de", "en") is None
+
+
+def test_libretranslate_capabilities_use_exact_advertised_pairs():
+    capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"de", "en"}),
+        target_languages=frozenset({"de", "en", "fr"}),
+        translation_pairs=frozenset({("de", "en"), ("en", "de")}),
+    )
+
+    assert translate._capability_supports_pair(capabilities, "de", "en") is True
+    assert translate._capability_supports_pair(capabilities, "de", "fr") is False
+
+
+@pytest.mark.asyncio
+async def test_fresh_capabilities_skip_unsupported_provider_before_translation(
+    monkeypatch,
+):
+    now = 5000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_LIBRETRANSLATE_API_KEY", "libre-key")
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+
+    libre_attempt, google_attempt = translate._provider_chain()
+    libre_state = translate._capability_state(libre_attempt.state_key)
+    libre_state.capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"de", "en"}),
+        target_languages=frozenset({"de", "en"}),
+        translation_pairs=frozenset({("de", "en"), ("en", "de")}),
+    )
+    libre_state.fetched_at_monotonic = now
+    google_state = translate._capability_state(google_attempt.state_key)
+    google_state.capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"de", "en", "la"}),
+        target_languages=frozenset({"de", "en", "la"}),
+    )
+    google_state.fetched_at_monotonic = now
+
+    libre = AsyncMock(return_value=translate.ProviderTranslation("wrong", "de"))
+    google = AsyncMock(return_value=translate.ProviderTranslation("Vigil ignis", "de"))
+    monkeypatch.setattr(translate, "translate_libretranslate", libre)
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
+
+    result = await translate.translate_text(
+        "Feuerwehrmann",
+        source_language="de",
+        target_language="la",
+    )
+
+    assert result == translate.TranslationResult("Vigil ignis", "de")
+    libre.assert_not_awaited()
+    google.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stale_capabilities_do_not_block_provider_attempt(monkeypatch):
+    now = 8000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(translate, "TRANSLATE_CAPABILITIES_REFRESH_SECONDS", 3600.0)
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    attempt = translate._provider_chain()[0]
+    state = translate._capability_state(attempt.state_key)
+    state.capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"de", "en"}),
+        target_languages=frozenset({"de", "en"}),
+        translation_pairs=frozenset({("de", "en"), ("en", "de")}),
+    )
+    state.fetched_at_monotonic = now - 3601
+
+    libre = AsyncMock(return_value=translate.ProviderTranslation("Vigil ignis", "de"))
+    monkeypatch.setattr(translate, "translate_libretranslate", libre)
+
+    result = await translate.translate_text(
+        "Feuerwehrmann",
+        source_language="de",
+        target_language="la",
+    )
+
+    assert result.text == "Vigil ignis"
+    libre.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_all_fresh_capability_rejections_avoid_translation_requests(monkeypatch):
+    now = 9000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+
+    for attempt in translate._provider_chain():
+        state = translate._capability_state(attempt.state_key)
+        state.capabilities = translate.ProviderCapabilities(
+            source_languages=frozenset({"de", "en"}),
+            target_languages=frozenset({"de", "en"}),
+        )
+        state.fetched_at_monotonic = now
+
+    libre = AsyncMock()
+    google = AsyncMock()
+    monkeypatch.setattr(translate, "translate_libretranslate", libre)
+    monkeypatch.setattr(translate, "translate_google_cloud", google)
+
+    with pytest.raises(translate.TranslationLanguagePairUnavailableError):
+        await translate.translate_text(
+            "Feuerwehrmann",
+            source_language="de",
+            target_language="la",
+        )
+
+    libre.assert_not_awaited()
+    google.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_capability_refresh_populates_cache_and_preserves_it_on_failure(
+    monkeypatch,
+):
+    now = 10000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "google-key")
+    attempt = translate._provider_chain()[0]
+    capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"en", "de"}),
+        target_languages=frozenset({"en", "de"}),
+    )
+    fetch = AsyncMock(return_value=capabilities)
+    monkeypatch.setattr(translate, "_fetch_provider_capabilities", fetch)
+
+    assert await translate._refresh_provider_capabilities(attempt) is True
+    state = translate._capability_state(attempt.state_key)
+    assert state.capabilities == capabilities
+    assert state.fetched_at_monotonic == now
+    assert state.last_error is None
+
+    now += 10
+    fetch.side_effect = translate.ProviderHTTPError("google", 503)
+    assert await translate._refresh_provider_capabilities(attempt) is False
+    assert state.capabilities == capabilities
+    assert state.fetched_at_monotonic == 10000.0
+    assert state.last_attempt_monotonic == now
+    assert state.last_error == "ProviderHTTPError"
+
+
+@pytest.mark.asyncio
+async def test_doctor_reports_capability_cache_without_exposing_credentials(
+    monkeypatch,
+):
+    now = 12000.0
+    monkeypatch.setattr(translate, "_monotonic", lambda: now)
+    monkeypatch.setattr(
+        translate,
+        "TRANSLATE_LIBRETRANSLATE_URL",
+        "https://translate.envs.net/",
+    )
+    monkeypatch.setattr(translate, "TRANSLATE_GOOGLE_API_KEY", "secret-google")
+    attempts = {item.name: item for item in translate._provider_chain()}
+
+    libre_state = translate._capability_state(attempts["libretranslate"].state_key)
+    libre_state.capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"de", "en", "fr"}),
+        target_languages=frozenset({"de", "en", "fr"}),
+    )
+    libre_state.fetched_at_monotonic = now - 17 * 60
+
+    google_state = translate._capability_state(attempts["google"].state_key)
+    google_state.capabilities = translate.ProviderCapabilities(
+        source_languages=frozenset({"de", "en", "fr", "la"}),
+        target_languages=frozenset({"de", "en", "fr", "la"}),
+    )
+    google_state.fetched_at_monotonic = now - 30
+
+    lines = await translate.doctor(SimpleNamespace())
+
+    assert len(lines) == 2
+    assert "libretranslate:3 languages/fresh 17m" in lines[1]
+    assert "google:4 languages/fresh 30s" in lines[1]
+    assert "deepl:not configured" in lines[1]
+    assert "secret-google" not in "\n".join(lines)
+
+
+@pytest.mark.asyncio
+async def test_on_unload_cancels_capability_refresh_task():
+    started = asyncio.Event()
+
+    async def forever():
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(forever())
+    translate._CAPABILITY_REFRESH_TASK = task
+    await started.wait()
+
+    await translate.on_unload(SimpleNamespace())
+
+    assert task.cancelled()
+    assert translate._CAPABILITY_REFRESH_TASK is None
