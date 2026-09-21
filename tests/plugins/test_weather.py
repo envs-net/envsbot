@@ -1,3 +1,5 @@
+import urllib.parse
+
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch, Mock, MagicMock
@@ -5,6 +7,22 @@ from types import SimpleNamespace
 import plugins.weather as weather
 
 ORIGINAL_GET_WEATHER_STORE = weather.get_weather_store
+
+WEATHER_TEXT = "\n".join(
+    [
+        "Patchy rain nearby",
+        "+17°C",
+        "+12°C",
+        "50%",
+        "1023hPa",
+        "↘23km/h",
+        "0.1mm",
+        "06:50:12",
+        "19:08:58",
+        "0",
+    ]
+)
+
 
 # --- Support patching of weather.JOINED_ROOMS ---
 
@@ -85,7 +103,7 @@ def patch_aiohttp(monkeypatch):
         status = 200
 
         async def text(self):
-            return "Berlin: Sunny 21°C 🌤️"
+            return WEATHER_TEXT
 
         async def __aenter__(self):
             return self
@@ -129,7 +147,16 @@ async def test_weather_command_happy_path(fake_bot, fake_msg,
     fake_bot.reply.assert_called()
     out = output_of_reply(fake_bot.reply)
     assert "Berlin" in out
-    assert "Sunny" in out
+    assert "Patchy rain nearby" in out
+    assert "🌡️ Temperature: +17°C" in out
+    assert "🤗 Feels like: +12°C" in out
+    assert "💧 Humidity: 50%" in out
+    assert "🧭 Pressure: 1023hPa" in out
+    assert "💨 Wind: ↘23km/h" in out
+    assert "🌧️ Precipitation: 0.1mm" in out
+    assert "🌅 Sunrise: 06:50:12" in out
+    assert "🌇 Sunset: 19:08:58" in out
+    assert "☀️ UV index: 0/12" in out
     assert "Forecast: https://wttr.in/Berlin" in out
 
 
@@ -264,7 +291,7 @@ async def test_weather_unicode_location(fake_bot, fake_msg, patch_plugins,
             status = 200
 
             async def text(self):
-                return "München Hauptbahnhof: Snow ❄️ -3°C"
+                return WEATHER_TEXT
 
             async def __aenter__(self):
                 return self
@@ -411,8 +438,7 @@ async def test_weather_command_muc_pm_success(
 
     fake_bot.reply.assert_called()
     out = output_of_reply(fake_bot.reply)
-    assert "Weather for Alice" in out
-    assert "Saxony" in out
+    assert "Weather for you (📍 Saxony)" in out
 
 
 @pytest.mark.asyncio
@@ -503,33 +529,56 @@ def test_weather_location_helpers():
         "Dresden"
     )
     assert weather._resolve_direct_location(["Alice"], {"Alice": {}}) is None
-    assert weather._build_wttr_urls("München Hauptbahnhof") == (
-        "https://wttr.in/M%C3%BCnchen%20Hauptbahnhof",
-        "https://wttr.in/M%C3%BCnchen%20Hauptbahnhof?format=4&m",
+    forecast_url, weather_url = weather._build_wttr_urls(
+        "München Hauptbahnhof"
     )
-    assert weather._parse_wttr_weather("Berlin: Sunny 21°C") == (
+    assert forecast_url == "https://wttr.in/M%C3%BCnchen%20Hauptbahnhof"
+    assert weather_url.startswith(f"{forecast_url}?m&")
+    parsed_query = urllib.parse.parse_qs(
+        weather_url.split("?", 1)[1].removeprefix("m&")
+    )
+    assert parsed_query == {
+        "format": [weather.WTTR_FORMAT],
+        "lang": ["en"],
+    }
+
+    snapshot = weather._parse_wttr_weather(WEATHER_TEXT)
+    assert snapshot == weather.WeatherSnapshot(
+        condition="Patchy rain nearby",
+        temperature="+17°C",
+        feels_like="+12°C",
+        humidity="50%",
+        pressure="1023hPa",
+        wind="↘23km/h",
+        precipitation="0.1mm",
+        sunrise="06:50:12",
+        sunset="19:08:58",
+        uv_index="0",
+    )
+    assert weather._format_weather_reply(
+        "you",
         "Berlin",
-        "Sunny 21°C",
-    )
-    assert weather._parse_wttr_weather("Sunny 21°C") == (
-        "",
-        "Sunny 21°C",
+        snapshot,
+        "https://wttr.in/Berlin",
+    ) == (
+        "🌤️ Weather for you (📍 Berlin): Patchy rain nearby\n\n"
+        "🌡️ Temperature: +17°C\n"
+        "🤗 Feels like: +12°C\n\n"
+        "💧 Humidity: 50%\n"
+        "🧭 Pressure: 1023hPa\n"
+        "💨 Wind: ↘23km/h\n"
+        "🌧️ Precipitation: 0.1mm\n\n"
+        "🌅 Sunrise: 06:50:12\n"
+        "🌇 Sunset: 19:08:58\n"
+        "☀️ UV index: 0/12\n\n"
+        "Forecast: https://wttr.in/Berlin"
     )
     assert weather._format_weather_reply(
         "Berlin",
         "Berlin",
-        "Berlin: Sunny 21°C",
-    ) == "🌤️ Weather for Berlin: Sunny 21°C"
-    assert weather._format_weather_reply(
-        "alice@example.org",
-        "Saxony",
-        "Saxony: Sunny 21°C",
-    ) == "🌤️ Weather for alice@example.org (Saxony): Sunny 21°C"
-    assert weather._format_weather_reply(
-        "Dresden Neustadt",
-        "Dresden Neustadt",
-        "Dresden: Sunny 21°C",
-    ) == "🌤️ Weather for Dresden Neustadt: Dresden: Sunny 21°C"
+        snapshot,
+        "https://wttr.in/Berlin",
+    ).startswith("🌤️ Weather for Berlin: Patchy rain nearby")
 
 
 @pytest.mark.asyncio
@@ -552,18 +601,17 @@ async def test_fetch_wttr_weather_falls_back_to_plain_http(monkeypatch):
         calls.append(url)
         if url.startswith("https://"):
             raise OSError("tls failed")
-        return SimpleNamespace(status=200, text="Berlin: Sunny 21°C")
+        return SimpleNamespace(status=200, text=WEATHER_TEXT)
 
     monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
 
-    result = await weather._fetch_wttr_weather_text(
-        "https://wttr.in/Berlin?format=4&m"
-    )
+    _forecast_url, weather_url = weather._build_wttr_urls("Berlin")
+    result = await weather._fetch_wttr_weather_text(weather_url)
 
-    assert result == "Berlin: Sunny 21°C"
+    assert result == WEATHER_TEXT
     assert calls == [
-        "https://wttr.in/Berlin?format=4&m",
-        "http://wttr.in/Berlin?format=4&m",
+        weather_url,
+        weather_url.replace("https://", "http://", 1),
     ]
 
 
@@ -575,13 +623,12 @@ async def test_fetch_wttr_weather_reports_all_failed_candidates(monkeypatch):
     monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
 
     with pytest.raises(weather.WeatherFetchError) as exc_info:
-        await weather._fetch_wttr_weather_text(
-            "https://wttr.in/Berlin?format=4&m"
-        )
+        _forecast_url, weather_url = weather._build_wttr_urls("Berlin")
+        await weather._fetch_wttr_weather_text(weather_url)
 
     message = str(exc_info.value)
-    assert "https://wttr.in/Berlin?format=4&m: HTTP 503" in message
-    assert "http://wttr.in/Berlin?format=4&m: HTTP 503" in message
+    assert f"{weather_url}: HTTP 503" in message
+    assert f"{weather_url.replace('https://', 'http://', 1)}: HTTP 503" in message
 
 
 @pytest.mark.asyncio
@@ -590,13 +637,12 @@ async def test_fetch_wttr_weather_uses_curl_like_plain_text_headers(monkeypatch)
 
     async def fake_fetch_text(url, **kwargs):
         captured.append((url, kwargs))
-        return SimpleNamespace(status=200, text="Berlin: Sunny 21°C")
+        return SimpleNamespace(status=200, text=WEATHER_TEXT)
 
     monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
 
-    assert await weather._fetch_wttr_weather_text(
-        "https://wttr.in/Berlin?format=4&m"
-    ) == "Berlin: Sunny 21°C"
+    _forecast_url, weather_url = weather._build_wttr_urls("Berlin")
+    assert await weather._fetch_wttr_weather_text(weather_url) == WEATHER_TEXT
 
     _url, kwargs = captured[0]
     assert kwargs["headers"]["User-Agent"].startswith("curl/")
@@ -615,8 +661,16 @@ async def test_fetch_wttr_weather_rejects_html_response(monkeypatch):
     monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
 
     with pytest.raises(weather.WeatherFetchError) as exc_info:
-        await weather._fetch_wttr_weather_text(
-            "https://wttr.in/Berlin?format=4&m"
-        )
+        _forecast_url, weather_url = weather._build_wttr_urls("Berlin")
+        await weather._fetch_wttr_weather_text(weather_url)
 
     assert "HTML response" in str(exc_info.value)
+
+
+def test_parse_wttr_weather_rejects_incomplete_response():
+    with pytest.raises(weather.WeatherFetchError, match="expected 10"):
+        weather._parse_wttr_weather("Sunny\n+17°C")
+
+
+def test_wttr_headers_force_english_output():
+    assert weather.WTTR_HEADERS["Accept-Language"] == "en"

@@ -14,6 +14,7 @@ Commands:
 
 import logging
 import urllib.parse
+from dataclasses import dataclass
 
 import aiohttp
 
@@ -31,7 +32,7 @@ log = logging.getLogger(__name__)
 
 PLUGIN_META = {
     "name": "weather",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "description": ("Gives weather according to users location or an "
                     "explicit city/ZIP code"),
     "category": "info",
@@ -44,7 +45,26 @@ WEATHER_MAX_BYTES = 65536
 WTTR_HEADERS = {
     "User-Agent": "curl/8.0 (envsbot weather; +https://github.com/envs-net/envsbot)",
     "Accept": "text/plain, */*;q=0.1",
+    "Accept-Language": "en",
 }
+
+WTTR_FORMAT = "%C\n%t\n%f\n%h\n%P\n%w\n%p\n%S\n%s\n%u"
+WTTR_FIELD_COUNT = 10
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherSnapshot:
+    condition: str
+    temperature: str
+    feels_like: str
+    humidity: str
+    pressure: str
+    wind: str
+    precipitation: str
+    sunrise: str
+    sunset: str
+    uv_index: str
+
 
 
 async def get_weather_store(bot):
@@ -178,8 +198,10 @@ async def _handle_weather_room(bot, msg, args, enabled_rooms):
         return
 
     jid = nicks[target_nick].get("jid", None)
-    await _process_weather_for_jid(bot, msg, jid, target_nick,
-                                   muc_jid, is_dm=False)
+    display_name = target_nick if args else "you"
+    await _process_weather_for_jid(
+        bot, msg, jid, target_nick, muc_jid, is_dm=False, display_name=display_name
+    )
 
 
 async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
@@ -221,8 +243,10 @@ async def _handle_weather_muc_pm(bot, msg, args, enabled_rooms):
         return
 
     jid = nicks[target_nick].get("jid", None)
-    await _process_weather_for_jid(bot, msg, jid, target_nick,
-                                   muc_jid, is_dm=False)
+    display_name = target_nick if args else "you"
+    await _process_weather_for_jid(
+        bot, msg, jid, target_nick, muc_jid, is_dm=False, display_name=display_name
+    )
 
 
 async def _handle_weather_dm(bot, msg, args):
@@ -311,8 +335,10 @@ def _extract_location_fields(vcard_data):
     )
 
 
-async def _process_weather_for_jid(bot, msg, jid, target_nick, muc_jid, is_dm):
-    display_name = target_nick
+async def _process_weather_for_jid(
+    bot, msg, jid, target_nick, muc_jid, is_dm, *, display_name=None
+):
+    display_name = display_name or target_nick
     try:
         vcard_data = await vcard.get_user_vcard(bot, msg, jid)
         locality, region, country = _extract_location_fields(vcard_data)
@@ -367,31 +393,32 @@ async def _reply_with_weather_for_location(bot, msg, display_name, location):
         )
         return
 
+    snapshot = _parse_wttr_weather(weather)
     bot.reply(
         msg,
-        f"{_format_weather_reply(display_name, location, weather)}\n"
-        f"Forecast: {forecast_url}",
+        _format_weather_reply(display_name, location, snapshot, forecast_url),
         ephemeral=False,
     )
 
 
-def _format_weather_reply(display_name, location, weather):
-    weather_loc, weather_desc = _parse_wttr_weather(weather)
+def _format_weather_reply(display_name, location, weather, forecast_url):
     header = f"🌤️ Weather for {display_name}"
-
     if not _same_location_text(display_name, location):
-        location_label = location
-        if weather_loc and _same_location_text(weather_loc, location):
-            location_label = weather_loc.title()
-        header = f"{header} ({location_label})"
+        header = f"{header} (📍 {location})"
 
-    if weather_loc and not (
-        _same_location_text(weather_loc, display_name)
-        or _same_location_text(weather_loc, location)
-    ):
-        weather_desc = f"{weather_loc.title()}: {weather_desc}"
-
-    return f"{header}: {weather_desc.strip()}"
+    return (
+        f"{header}: {weather.condition}\n\n"
+        f"🌡️ Temperature: {weather.temperature}\n"
+        f"🤗 Feels like: {weather.feels_like}\n\n"
+        f"💧 Humidity: {weather.humidity}\n"
+        f"🧭 Pressure: {weather.pressure}\n"
+        f"💨 Wind: {weather.wind}\n"
+        f"🌧️ Precipitation: {weather.precipitation}\n\n"
+        f"🌅 Sunrise: {weather.sunrise}\n"
+        f"🌇 Sunset: {weather.sunset}\n"
+        f"☀️ UV index: {weather.uv_index}/12\n\n"
+        f"Forecast: {forecast_url}"
+    )
 
 
 class WeatherFetchError(RuntimeError):
@@ -448,7 +475,7 @@ async def _fetch_wttr_weather_text(weather_url: str) -> str:
 
 
 def _wttr_unusable_response_reason(weather: str) -> str:
-    """Return a reason when wttr.in did not return compact weather text."""
+    """Return a reason when wttr.in did not return structured weather text."""
     normalized = weather.strip()
     lowered = normalized.lower()
     if not normalized:
@@ -456,19 +483,28 @@ def _wttr_unusable_response_reason(weather: str) -> str:
     if lowered.startswith("unknown location"):
         return normalized
     if "<html" in lowered or "<!doctype" in lowered:
-        return "HTML response instead of compact weather text"
-    if len(normalized) > 1000:
-        return "unexpectedly large compact weather response"
-    if normalized.count("\n") > 6:
-        return "unexpected multiline weather response"
+        return "HTML response instead of structured weather text"
+    if len(normalized) > 2000:
+        return "unexpectedly large structured weather response"
+
+    fields = normalized.splitlines()
+    if len(fields) != WTTR_FIELD_COUNT:
+        return (
+            "unexpected structured weather response "
+            f"({len(fields)} fields, expected {WTTR_FIELD_COUNT})"
+        )
+    if any(not field.strip() for field in fields):
+        return "structured weather response contains an empty field"
     return ""
 
 
-def _parse_wttr_weather(weather):
-    weather_loc, separator, weather_desc = weather.partition(":")
-    if not separator:
-        return "", weather.strip()
-    return weather_loc.strip(), weather_desc.strip()
+def _parse_wttr_weather(weather: str) -> WeatherSnapshot:
+    unusable_reason = _wttr_unusable_response_reason(weather)
+    if unusable_reason:
+        raise WeatherFetchError(unusable_reason)
+
+    fields = [field.strip() for field in weather.strip().splitlines()]
+    return WeatherSnapshot(*fields)
 
 
 def _same_location_text(left, right):
@@ -482,7 +518,8 @@ def _normalize_location_text(value):
 def _build_wttr_urls(location):
     enc_location = urllib.parse.quote(location.strip(), safe="")
     forecast_url = f"https://wttr.in/{enc_location}"
-    weather_url = f"{forecast_url}?format=4&m"
+    query = urllib.parse.urlencode({"format": WTTR_FORMAT, "lang": "en"})
+    weather_url = f"{forecast_url}?m&{query}"
     return forecast_url, weather_url
 
 
