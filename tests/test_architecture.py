@@ -518,3 +518,30 @@ def test_rss_split_helpers_do_not_register_commands():
     ):
         source = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "@command" not in source
+
+
+def test_help_formatting_stays_split_from_registry_and_dispatch():
+    help_module = ROOT / "core_plugins" / "help" / "__init__.py"
+    formatting_module = ROOT / "core_plugins" / "help" / "formatting.py"
+
+    assert formatting_module.exists()
+    assert len(help_module.read_text(encoding="utf-8").splitlines()) <= 1050
+
+    source = formatting_module.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(formatting_module))
+    imported_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+    loaded_names = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+
+    assert "COMMANDS" not in imported_names | loaded_names
+    assert "check_permission" not in imported_names | loaded_names
+    assert "resolve_command" not in imported_names | loaded_names
+    assert "@command" not in source

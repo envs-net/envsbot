@@ -1158,7 +1158,7 @@ async def test_help_store_getter_uses_help_plugin_store():
 
 
 def _command_decorator_metadata():
-    root = _checkout_root(Path(help_plugin.__file__).resolve().parents[1])
+    root = _checkout_root(Path(__file__).resolve().parents[2])
     for rel in ("plugins", "core_plugins"):
         for path in sorted((root / rel).rglob("*.py")):
             tree = ast.parse(path.read_text())
