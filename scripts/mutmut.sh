@@ -16,14 +16,22 @@ fi
 
 case "$command" in
     fresh)
+        python -m envs_xmpp_ops.regression mutation-tool-check
         rm -rf mutants
         set -- run "$@"
         ;;
     run|results|browse)
+        python -m envs_xmpp_ops.regression mutation-tool-check
         set -- "$command" "$@"
         ;;
+    check)
+        exec python -m envs_xmpp_ops.regression mutation-check
+        ;;
+    accept)
+        exec python -m envs_xmpp_ops.regression mutation-accept
+        ;;
     *)
-        printf 'Usage: %s [fresh|run|results|browse] [mutmut arguments...]\n' "$0" >&2
+        printf 'Usage: %s [fresh|run|results|browse|check|accept] [mutmut arguments...]\n' "$0" >&2
         exit 2
         ;;
 esac

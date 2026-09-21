@@ -1,0 +1,11 @@
+{
+  "schema": 2,
+  "coverage": {
+    "percent": 86.17073731961474,
+    "allowed_drop": 0.5
+  },
+  "mutation": {
+    "accepted_survivors": null,
+    "mutmut_version": "3.6.0"
+  }
+}

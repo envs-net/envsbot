@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -44,6 +45,12 @@ def _load_test_conftest():
     return module
 
 
+def _install_fake_python(fake_bin: Path) -> None:
+    fake_python = fake_bin / "python"
+    fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+
+
 def _copy_wrapper(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     scripts = repo / "scripts"
@@ -79,6 +86,7 @@ def test_mutmut_wrapper_unsets_pythonpath_before_exec(tmp_path):
     repo = wrapper.parents[1]
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    _install_fake_python(fake_bin)
     output = tmp_path / "output.txt"
     fake_mutmut = fake_bin / "mutmut"
     fake_mutmut.write_text(
@@ -107,6 +115,7 @@ def test_mutmut_wrapper_fresh_removes_cached_tree(tmp_path):
     repo = wrapper.parents[1]
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    _install_fake_python(fake_bin)
     output = tmp_path / "output.txt"
     fake_mutmut = fake_bin / "mutmut"
     fake_mutmut.write_text(
@@ -165,3 +174,39 @@ def test_mutmut_targets_only_covered_lines_and_skips_logging_noise():
         'state["status"] = "healthy"',
     ):
         assert not any(pattern.search(semantic_line) for pattern in patterns)
+
+
+def test_mutmut_version_pin_matches_regression_baseline():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dev = tuple(pyproject["project"]["optional-dependencies"]["dev"])
+    pin = next(requirement for requirement in dev if requirement.startswith("mutmut=="))
+    baseline = json.loads((ROOT / "tests/regression-baseline.json").read_text(encoding="utf-8"))
+
+    assert pin == "mutmut==3.6.0"
+    assert baseline["mutation"]["mutmut_version"] == pin.removeprefix("mutmut==")
+    assert (ROOT / "scripts/mutmut.sh").read_text(encoding="utf-8").count("mutation-tool-check") == 2
+
+
+def test_mutmut_wrapper_dispatches_regression_commands(tmp_path):
+    wrapper = _copy_wrapper(tmp_path)
+    repo = wrapper.parents[1]
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    output = tmp_path / "python-args.txt"
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s' \"$*\" > {output}\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+
+    for command, expected in (
+        ("check", "-m envs_xmpp_ops.regression mutation-check"),
+        ("accept", "-m envs_xmpp_ops.regression mutation-accept"),
+    ):
+        subprocess.run([str(wrapper), command], check=True, cwd=repo, env=env)
+        assert output.read_text(encoding="utf-8") == expected

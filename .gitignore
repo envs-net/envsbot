@@ -48,3 +48,5 @@ vcard_hash.asc
 chat_slang.csv
 slang_additions.csv
 slang_removals.csv
+
+.coverage-regression.json
