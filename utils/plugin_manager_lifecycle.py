@@ -7,6 +7,7 @@ import importlib
 import logging
 import sys
 from collections.abc import Callable
+from functools import wraps
 from types import ModuleType
 
 log = logging.getLogger(__name__)
@@ -46,3 +47,18 @@ async def import_module_async(module_path: str, *, import_module: Callable[[str]
     importlib.invalidate_caches()
     importer = import_module or importlib.import_module
     return await asyncio.to_thread(importer, module_path)
+
+
+def serialized_lifecycle(method):
+    """Serialize plugin lifecycle operations with same-task reentrancy."""
+
+    @wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        allow_shutdown = method.__name__ == "unload_all"
+        async with self._lifecycle_operation(
+            operation=method.__name__,
+            allow_shutdown=allow_shutdown,
+        ):
+            return await method(self, *args, **kwargs)
+
+    return wrapper

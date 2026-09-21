@@ -502,6 +502,13 @@ def test_large_command_modules_keep_refactored_boundaries():
     assert (ROOT / "utils/deploy_systemd_values.py").exists()
 
 
+def test_plugin_manager_facade_keeps_runtime_and_inspection_split():
+    """Keep runtime/diagnostic responsibilities out of the manager facade."""
+    assert len((ROOT / "utils/plugin_manager.py").read_text(encoding="utf-8").splitlines()) <= 1100
+    assert (ROOT / "utils/plugin_manager_runtime.py").exists()
+    assert (ROOT / "utils/plugin_manager_inspection.py").exists()
+
+
 def test_rss_split_helpers_do_not_register_commands():
     for relative_path in (
         "plugins/rss/command_support.py",

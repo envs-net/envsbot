@@ -198,8 +198,10 @@ helper modules for the split responsibilities:
 
 - `utils.plugin_manager_discovery` discovers plugin modules
 - `utils.plugin_manager_dependencies` validates optional dependencies
-- `utils.plugin_manager_lifecycle` calls load/ready/unload hooks
-- `utils.plugin_manager_diagnostics` collects metadata, runtime state and doctor hooks
+- `utils.plugin_manager_lifecycle` provides serialized lifecycle/import/hook primitives
+- `utils.plugin_manager_runtime` owns runtime events, supervised tasks and ready/session hooks
+- `utils.plugin_manager_diagnostics` normalizes runtime-state and doctor hook results
+- `utils.plugin_manager_inspection` exposes metadata validation and operator-facing diagnostics
 
 Plugins can expose optional hooks:
 
