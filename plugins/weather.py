@@ -425,53 +425,38 @@ class WeatherFetchError(RuntimeError):
     """Raised when wttr.in returns an unusable weather response."""
 
 
-def _wttr_fetch_candidates(weather_url: str) -> list[str]:
-    """Return wttr.in fetch URLs, including a plain-HTTP fallback."""
-    urls = [weather_url]
-    if weather_url.startswith("https://wttr.in/"):
-        urls.append(weather_url.replace("https://", "http://", 1))
-    return urls
-
-
 async def _fetch_wttr_weather_text(weather_url: str) -> str:
-    """Fetch and validate the compact wttr.in weather response."""
-    errors: list[str] = []
-    for candidate_url in _wttr_fetch_candidates(weather_url):
-        try:
-            result = await fetch_text(
-                candidate_url,
-                timeout_seconds=WEATHER_HTTP_TIMEOUT,
-                max_bytes=WEATHER_MAX_BYTES,
-                headers=WTTR_HEADERS,
-                session_factory=aiohttp.ClientSession,
-                validator=passthrough_validator,
-                raise_for_status=False,
-            )
-        except Exception as exc:
-            errors.append(f"{candidate_url}: {exc}")
-            log.debug(
-                "[WEATHER] wttr.in fetch attempt failed for %s",
-                candidate_url,
-                exc_info=True,
-            )
-            continue
+    """Fetch and validate the compact wttr.in weather response over HTTPS."""
+    try:
+        result = await fetch_text(
+            weather_url,
+            timeout_seconds=WEATHER_HTTP_TIMEOUT,
+            max_bytes=WEATHER_MAX_BYTES,
+            headers=WTTR_HEADERS,
+            session_factory=aiohttp.ClientSession,
+            validator=passthrough_validator,
+            raise_for_status=False,
+        )
+    except Exception as exc:
+        log.debug(
+            "[WEATHER] wttr.in HTTPS fetch failed for %s",
+            weather_url,
+            exc_info=True,
+        )
+        raise WeatherFetchError(f"{weather_url}: {exc}") from exc
 
-        if result.status != 200:
-            errors.append(f"{candidate_url}: HTTP {result.status}")
-            continue
+    if result.status != 200:
+        raise WeatherFetchError(f"{weather_url}: HTTP {result.status}")
 
-        weather = result.text.strip()
-        if not weather:
-            errors.append(f"{candidate_url}: empty response")
-            continue
-        unusable_reason = _wttr_unusable_response_reason(weather)
-        if unusable_reason:
-            errors.append(f"{candidate_url}: {unusable_reason}")
-            continue
+    weather = result.text.strip()
+    if not weather:
+        raise WeatherFetchError(f"{weather_url}: empty response")
 
-        return weather
+    unusable_reason = _wttr_unusable_response_reason(weather)
+    if unusable_reason:
+        raise WeatherFetchError(f"{weather_url}: {unusable_reason}")
 
-    raise WeatherFetchError("; ".join(errors) or "no usable response")
+    return weather
 
 
 def _wttr_unusable_response_reason(weather: str) -> str:

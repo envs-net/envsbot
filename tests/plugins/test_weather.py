@@ -594,29 +594,24 @@ async def test_weather_store_getter_uses_plugin_store():
 
 
 @pytest.mark.asyncio
-async def test_fetch_wttr_weather_falls_back_to_plain_http(monkeypatch):
+async def test_fetch_wttr_weather_does_not_downgrade_https(monkeypatch):
     calls = []
 
     async def fake_fetch_text(url, **kwargs):
         calls.append(url)
-        if url.startswith("https://"):
-            raise OSError("tls failed")
-        return SimpleNamespace(status=200, text=WEATHER_TEXT)
+        raise OSError("tls failed")
 
     monkeypatch.setattr(weather, "fetch_text", fake_fetch_text)
 
     _forecast_url, weather_url = weather._build_wttr_urls("Berlin")
-    result = await weather._fetch_wttr_weather_text(weather_url)
+    with pytest.raises(weather.WeatherFetchError, match="tls failed"):
+        await weather._fetch_wttr_weather_text(weather_url)
 
-    assert result == WEATHER_TEXT
-    assert calls == [
-        weather_url,
-        weather_url.replace("https://", "http://", 1),
-    ]
+    assert calls == [weather_url]
 
 
 @pytest.mark.asyncio
-async def test_fetch_wttr_weather_reports_all_failed_candidates(monkeypatch):
+async def test_fetch_wttr_weather_reports_failed_https_candidate(monkeypatch):
     async def fake_fetch_text(url, **kwargs):
         return SimpleNamespace(status=503, text="temporarily unavailable")
 
@@ -627,8 +622,7 @@ async def test_fetch_wttr_weather_reports_all_failed_candidates(monkeypatch):
         await weather._fetch_wttr_weather_text(weather_url)
 
     message = str(exc_info.value)
-    assert f"{weather_url}: HTTP 503" in message
-    assert f"{weather_url.replace('https://', 'http://', 1)}: HTTP 503" in message
+    assert message == f"{weather_url}: HTTP 503"
 
 
 @pytest.mark.asyncio

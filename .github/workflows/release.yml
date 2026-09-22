@@ -50,9 +50,40 @@ jobs:
         if: matrix.python-version == '3.13'
         run: sh scripts/quality.sh --skip-tests
 
+  mutation:
+    name: Mutation regression gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            constraints/python313.txt
+
+      - name: Install dependencies
+        run: python -m pip install -c constraints/python313.txt -r requirements.txt -r requirements-dev.txt
+
+      - name: Verify dependency environment
+        run: |
+          python -m pip check
+          python scripts/check_constraints.py constraints/python313.txt
+
+      - name: Run mutation regression gate
+        run: |
+          ./scripts/mutmut.sh fresh
+          ./scripts/mutmut.sh check
+
   build:
     name: Build release distributions
-    needs: test
+    needs: [test, mutation]
     runs-on: ubuntu-latest
 
     steps:
