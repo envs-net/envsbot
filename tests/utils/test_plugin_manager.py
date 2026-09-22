@@ -72,6 +72,20 @@ def test_split_package_command_facades_register_once(monkeypatch):
         assert tuple(expected_command.split()) in registry.index
 
 
+def test_get_dependents_wrapper_delegates_to_dependency_helper(monkeypatch):
+    pm = PluginManager(FakeBot())
+    pm.meta = {
+        "base": {"name": "base", "requires": []},
+        "child": {"name": "child", "requires": ["base"]},
+    }
+    expected = {"child"}
+    helper = MagicMock(return_value=expected)
+    monkeypatch.setattr(plugin_manager, "get_dependents", helper)
+
+    assert pm._get_dependents("base") is expected
+    helper.assert_called_once_with(pm.meta, "base")
+
+
 @pytest.mark.asyncio
 async def test_lifecycle_full_load_and_unload(monkeypatch):
     bot = FakeBot()
