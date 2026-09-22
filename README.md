@@ -106,7 +106,7 @@ Verify the installed application and shared core without starting XMPP:
 
 ```bash
 envsbot --version
-# envsbot 2.2.0 (envs-xmpp 1.4.0)
+# envsbot 2.3.0 (envs-xmpp 1.5.0)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -567,10 +567,11 @@ Run mutation tests with mutmut:
 ```bash
 ./scripts/mutmut.sh run
 ./scripts/mutmut.sh results
+./scripts/mutmut.sh check
 ./scripts/mutmut.sh browse
 ```
 
-The mutmut configuration in `pyproject.toml` explicitly lists the flat-layout source paths and disables coverage during mutant test runs. `scripts/mutmut.sh` deliberately unsets `PYTHONPATH` so the generated `./mutants` checkout cannot be shadowed by the original sources. Use `./scripts/mutmut.sh fresh` for a clean full run.
+The release mutation gate uses a curated deterministic scope in `pyproject.toml` rather than the entire bot. A full-repository audit currently creates more than 70,000 mutants and thousands of timeout-heavy async/background-task mutations, which is useful for occasional deep analysis but too noisy for a reproducible release gate. The curated scope covers routing, persistent message-cache storage, translate/weather behavior, help formatting, and plugin-manager internals and may be expanded only when added paths run without mutation timeouts. `scripts/mutmut.sh` deliberately unsets `PYTHONPATH` so the generated `./mutants` checkout cannot be shadowed by the original sources. Use `./scripts/mutmut.sh fresh` for a clean release-gate run, then `./scripts/mutmut.sh check` to compare it with the accepted survivor baseline. After reviewing an intentional survivor delta, `./scripts/mutmut.sh accept` updates that baseline. New `no tests`, timeout, suspicious, or unchecked results can never be accepted.
 
 Drone CI is configured in `.drone.yml`.
 
