@@ -638,10 +638,16 @@ async def test_fetch_wttr_weather_uses_curl_like_plain_text_headers(monkeypatch)
     _forecast_url, weather_url = weather._build_wttr_urls("Berlin")
     assert await weather._fetch_wttr_weather_text(weather_url) == WEATHER_TEXT
 
-    _url, kwargs = captured[0]
+    url, kwargs = captured[0]
+    assert url == weather_url
+    assert kwargs["timeout_seconds"] == weather.WEATHER_HTTP_TIMEOUT
+    assert kwargs["max_bytes"] == weather.WEATHER_MAX_BYTES
+    assert kwargs["headers"] == weather.WTTR_HEADERS
     assert kwargs["headers"]["User-Agent"].startswith("curl/")
     assert "text/plain" in kwargs["headers"]["Accept"]
-    assert kwargs["max_bytes"] == weather.WEATHER_MAX_BYTES
+    assert kwargs["session_factory"] is weather.aiohttp.ClientSession
+    assert kwargs["validator"] is weather.passthrough_validator
+    assert kwargs["raise_for_status"] is False
 
 
 @pytest.mark.asyncio

@@ -71,6 +71,27 @@ def _bot_with_cache(*, room: str = "room@conference.example.org"):
     )
 
 
+def test_reset_rate_limit_state_without_provider_clears_all_states():
+    google_state = translate._rate_limit_state("google-api")
+    libre_state = translate._rate_limit_state("libretranslate-public")
+    google_state.backoff_seconds = 60.0
+    google_state.until_monotonic = 120.0
+    google_state.total_429_count = 3
+    google_state.streak_429_count = 2
+    google_state.last_429_monotonic = 90.0
+    libre_state.backoff_seconds = 30.0
+
+    translate._reset_rate_limit_state()
+
+    assert translate._RATE_LIMIT_STATES == {"google-api": translate._RATE_LIMIT_STATE}
+    assert translate._RATE_LIMIT_STATES["google-api"] is translate._RATE_LIMIT_STATE
+    assert google_state.backoff_seconds == 0.0
+    assert google_state.until_monotonic == 0.0
+    assert google_state.total_429_count == 0
+    assert google_state.streak_429_count == 0
+    assert google_state.last_429_monotonic is None
+
+
 def test_parse_translation_args_explicit_languages():
     request = translate._parse_translation_args(["en", "uk", "Hello,", "world!"])
     assert request.source_language == "en"
