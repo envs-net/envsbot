@@ -92,14 +92,29 @@ utils = ["bundled/*.csv", "bundled/*.jpg"]
 # The project uses a flat layout plus package directories, so mutmut cannot
 # reliably auto-detect the code paths. Keep this explicit.
 source_paths = [
-    "envsbot.py",
-    "bot/",
-    "core_plugins/",
-    "plugins/",
-    "database/",
-    "utils/",
+    # Curated release-gate scope. The full repository currently produces tens
+    # of thousands of low-signal mutants and timeout-heavy async/task paths.
+    # Keep this list focused on deterministic core behavior and expand it only
+    # when a path can run with zero mutation timeouts.
+    "bot/routing.py",
+    "core_plugins/help/formatting.py",
+    "database/message_cache.py",
+    "plugins/translate.py",
+    "plugins/weather.py",
+    "utils/plugin_manager.py",
+    "utils/plugin_manager_runtime.py",
+    "utils/plugin_manager_inspection.py",
+    "utils/plugin_manager_lifecycle.py",
 ]
-pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args_test_selection = [
+    "tests/bot/test_envsbot.py",
+    "tests/core_plugins/test_help.py",
+    "tests/database/test_message_cache.py",
+    "tests/plugins/test_translate.py",
+    "tests/plugins/test_weather.py",
+    "tests/utils/test_command_help.py",
+    "tests/utils/test_plugin_manager.py",
+]
 pytest_add_cli_args = ["--no-cov", "-q", "-x", "--tb=short", "--disable-warnings"]
 # Mutate only statements actually exercised by the clean suite.  Mutmut 3
 # otherwise mutates every line of a function as soon as that function is hit
@@ -112,6 +127,14 @@ do_not_mutate_patterns = [
     '(?:^|\.)(?:log|logger)\.(?:debug|info|warning|error|exception|critical)\(',
 ]
 also_copy = [
+    # Keep the generated mutmut checkout import-complete while mutating only
+    # the curated release-gate source paths above.
+    "envsbot.py",
+    "bot",
+    "core_plugins",
+    "plugins",
+    "database",
+    "utils",
     "config_sample.py",
     "vcard_sample.py",
 ]

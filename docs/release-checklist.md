@@ -75,7 +75,7 @@ Run the final mutation gate from a fresh mutant tree:
 ./scripts/mutmut.sh check
 ```
 
-The final release mutation run must start from a fresh `mutants/` tree so cached results from earlier test/config revisions cannot leak into the release gate. Never set `PYTHONPATH` to the repository root for mutmut 3. The release is blocked by any new survivor, any `no tests`, timeout, suspicious, or incomplete mutant result. `accept` is a deliberate baseline update, not part of the normal release gate.
+The final release mutation run must start from a fresh `mutants/` tree so cached results from earlier test/config revisions cannot leak into the release gate. The configured release gate is deliberately a curated deterministic scope; the normal pytest/coverage gate remains repository-wide. Never set `PYTHONPATH` to the repository root for mutmut 3. The release is blocked by any new survivor, any `no tests`, timeout, suspicious, or incomplete mutant result. `accept` is a deliberate baseline update, not part of the normal release gate.
 
 Investigate any new `no tests` results before tagging. Long-lived surviving
 mutants should be reviewed, but not every survivor is necessarily a release

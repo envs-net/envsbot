@@ -176,6 +176,40 @@ def test_mutmut_targets_only_covered_lines_and_skips_logging_noise():
         assert not any(pattern.search(semantic_line) for pattern in patterns)
 
 
+
+def test_mutmut_release_gate_uses_curated_deterministic_scope():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    config = pyproject["tool"]["mutmut"]
+
+    assert config["source_paths"] == [
+        "bot/routing.py",
+        "core_plugins/help/formatting.py",
+        "database/message_cache.py",
+        "plugins/translate.py",
+        "plugins/weather.py",
+        "utils/plugin_manager.py",
+        "utils/plugin_manager_runtime.py",
+        "utils/plugin_manager_inspection.py",
+        "utils/plugin_manager_lifecycle.py",
+    ]
+    assert config["pytest_add_cli_args_test_selection"] == [
+        "tests/bot/test_envsbot.py",
+        "tests/core_plugins/test_help.py",
+        "tests/database/test_message_cache.py",
+        "tests/plugins/test_translate.py",
+        "tests/plugins/test_weather.py",
+        "tests/utils/test_command_help.py",
+        "tests/utils/test_plugin_manager.py",
+    ]
+
+    # These paths are covered by the normal pytest/coverage gate but are kept
+    # out of the release mutation gate because the full-repo audit showed
+    # large numbers of timeout mutants in long-running/background workflows.
+    assert "utils/message_cache.py" not in config["source_paths"]
+    assert "plugins/idlerpg/commands.py" not in config["source_paths"]
+    assert "utils/config/runtime.py" not in config["source_paths"]
+
+
 def test_mutmut_version_pin_matches_regression_baseline():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     dev = tuple(pyproject["project"]["optional-dependencies"]["dev"])

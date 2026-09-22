@@ -354,7 +354,10 @@ async def test_translate_provider_queue_wait_is_bounded(monkeypatch):
     await started.wait()
 
     with pytest.raises(translate.TranslationProviderBusyError):
-        await translate.translate_text("two", target_language="de")
+        await asyncio.wait_for(
+            translate.translate_text("two", target_language="de"),
+            timeout=0.25,
+        )
 
     assert calls == 1
     release.set()
