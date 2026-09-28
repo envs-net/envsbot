@@ -45,6 +45,8 @@ from .state import (
     JOINED_ROOMS,
     _jid_bare,
     _join_muc_with_timeout,
+    _log_muc_join_failure,
+    _muc_join_failure_reply,
     _safe_get_plugin,
     _safe_plugin_value,
     log,
@@ -580,11 +582,13 @@ async def rooms_invite(bot, sender_jid, nick, args, msg, is_room):
         room_nick = str(config.get("nick") or getattr(bot.boundjid, "resource", None) or "EnvsBot")
         try:
             await _join_invited_room(bot, room_jid, room_nick)
-        except Exception:
-            log.exception("[ROOMS] Failed to accept room invite #%s", invite_id)
+        except Exception as exc:
+            _log_muc_join_failure("Invite join", room_jid, room_nick, exc)
             bot.reply_error(
                 msg,
-                f"Room invite #{invite_id} could not be accepted. The invite remains pending.",
+                f"Room invite #{invite_id} could not be accepted: "
+                f"{_muc_join_failure_reply(room_jid, exc)} "
+                "The invite remains pending.",
             )
             return
         await _delete_pending_room_invite(bot, invite_id)

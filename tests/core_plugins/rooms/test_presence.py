@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import core_plugins.rooms.state as rooms_state
 
@@ -16,6 +17,88 @@ from .helpers import (
     rooms,
     rooms_lifecycle,
 )
+
+
+def test_muc_join_failure_logging_keeps_expected_timeout_compact(caplog):
+    caplog.set_level(logging.WARNING, logger=rooms_state.log.name)
+
+    rooms_state._log_muc_join_failure(
+        "Join",
+        "room@conference.example",
+        "EnvsBot",
+        TimeoutError("raw timeout"),
+    )
+
+    record = caplog.records[-1]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    assert "Join timed out for room@conference.example nick=EnvsBot" in record.getMessage()
+    assert "Traceback" not in caplog.text
+
+
+def test_muc_join_failure_logging_keeps_presence_rejection_compact(caplog):
+    class XMPPError(Exception):
+        pass
+
+    class PresenceError(XMPPError):
+        condition = "registration-required"
+        text = "members only"
+
+    caplog.set_level(logging.WARNING, logger=rooms_state.log.name)
+    rooms_state._log_muc_join_failure(
+        "Join",
+        "room@conference.example",
+        "EnvsBot",
+        PresenceError(),
+    )
+
+    record = caplog.records[-1]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    assert (
+        "Join rejected for room@conference.example nick=EnvsBot: "
+        "registration-required: members only"
+    ) in record.getMessage()
+
+
+def test_muc_join_failure_logging_preserves_traceback_for_unexpected_errors(caplog):
+    caplog.set_level(logging.ERROR, logger=rooms_state.log.name)
+
+    try:
+        raise KeyError("broken-room-state")
+    except KeyError as exc:
+        rooms_state._log_muc_join_failure(
+            "Join",
+            "room@conference.example",
+            "EnvsBot",
+            exc,
+        )
+
+    record = caplog.records[-1]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
+    assert "KeyError" in record.getMessage()
+    assert "Traceback" in caplog.text
+
+
+def test_muc_join_failure_reply_is_specific_for_operational_failures():
+    class XMPPError(Exception):
+        pass
+
+    class PresenceError(XMPPError):
+        condition = "forbidden"
+        text = "members only"
+
+    room = "room@conference.example"
+    assert rooms_state._muc_join_failure_reply(room, TimeoutError()) == (
+        f"🟡️ Joining room timed out: {room}"
+    )
+    assert rooms_state._muc_join_failure_reply(room, PresenceError()) == (
+        f"🟡️ Joining room rejected: {room} (forbidden: members only)"
+    )
+    assert rooms_state._muc_join_failure_reply(room, RuntimeError("bug")) == (
+        f"🔴 Joining room failed: {room}"
+    )
 
 
 @pytest.mark.asyncio
@@ -247,6 +330,33 @@ async def test_rooms_join_leave_and_sync(fake_bot, fake_msg):
     with patch("core_plugins.rooms.commands.is_valid_room_jid",
                AsyncMock(return_value=True)):
         await rooms.rooms_sync(fake_bot, "jid", "nick", [], fake_msg, False)
+
+
+@pytest.mark.asyncio
+async def test_rooms_join_timeout_returns_compact_admin_reply(fake_bot, fake_msg):
+    room_jid = "closed@conference.example"
+    fake_bot.db.rooms.get = AsyncMock(return_value=None)
+
+    with (
+        patch("core_plugins.rooms.commands.is_valid_room_jid", AsyncMock(return_value=True)),
+        patch(
+            "core_plugins.rooms.commands._join_muc_with_timeout",
+            AsyncMock(side_effect=TimeoutError("no self presence")),
+        ),
+    ):
+        await rooms.rooms_join(
+            fake_bot,
+            "jid",
+            "nick",
+            [room_jid, "EnvsBot"],
+            fake_msg,
+            False,
+        )
+
+    fake_bot.reply.assert_called_with(
+        fake_msg,
+        f"🟡️ Joining room timed out: {room_jid}",
+    )
 
 
 @pytest.mark.asyncio

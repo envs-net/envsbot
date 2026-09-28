@@ -376,7 +376,10 @@ class TaskSupervisor(CoreTaskSupervisor):
             task.cancel()
             done, pending = await asyncio.wait({task}, timeout=timeout)
             if pending:
-                log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
+                log.warning(
+                    "[TASKS] Plugin task did not stop in time: %s",
+                    self._tasks.get(task, {}).get("name") or task.get_name(),
+                )
                 return True
             for done_task in done:
                 try:
@@ -400,7 +403,10 @@ class TaskSupervisor(CoreTaskSupervisor):
         if running_tasks:
             done, pending = await asyncio.wait(running_tasks, timeout=timeout)
             for task in pending:
-                log.warning("[TASKS] Plugin task did not stop in time: %s", task.get_name())
+                log.warning(
+                    "[TASKS] Plugin task did not stop in time: %s",
+                    self._tasks.get(task, {}).get("name") or task.get_name(),
+                )
             for done_task in done:
                 try:
                     done_task.result()

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from envs_xmpp_core.xmpp import muc_join_error_kind, muc_join_error_summary
 from envs_xmpp_core.xmpp.muc_join import join_muc_confirmed
 from envs_xmpp_core.xmpp.stanza import (
     maybe_await_result as _maybe_await_result,
@@ -35,6 +36,64 @@ _DIRECT_INVITE_NS = "jabber:x:conference"
 _MUC_USER_NS = "http://jabber.org/protocol/muc#user"
 _ROOM_JOIN_TIMEOUT_SECONDS = 30.0
 _ROOM_JOIN_EVENTS: dict[str, asyncio.Event] = {}
+
+
+def _muc_join_failure_detail(error: BaseException) -> tuple[str, str]:
+    """Return the shared operational kind and stanza-safe join detail."""
+    return muc_join_error_kind(error), muc_join_error_summary(error)
+
+
+def _log_muc_join_failure(
+    action: str,
+    room_jid: str,
+    nick: str,
+    error: BaseException,
+    *,
+    retry_delay: float | None = None,
+) -> None:
+    """Log expected join failures compactly and unexpected bugs with traceback."""
+    kind, detail = _muc_join_failure_detail(error)
+    retry = "" if retry_delay is None else f"; next retry in {int(retry_delay)}s"
+
+    if kind == "timeout":
+        log.warning(
+            "[ROOMS] 🟡️ %s timed out for %s nick=%s%s",
+            action,
+            room_jid,
+            nick,
+            retry,
+        )
+        return
+    if kind == "rejected":
+        log.warning(
+            "[ROOMS] 🟡️ %s rejected for %s nick=%s: %s%s",
+            action,
+            room_jid,
+            nick,
+            detail,
+            retry,
+        )
+        return
+
+    log.error(
+        "[ROOMS] 🔴 %s failed for %s nick=%s: %s%s",
+        action,
+        room_jid,
+        nick,
+        detail,
+        retry,
+        exc_info=(type(error), error, error.__traceback__),
+    )
+
+
+def _muc_join_failure_reply(room_jid: str, error: BaseException) -> str:
+    """Return a concise admin-facing reply for one failed room join."""
+    kind, detail = _muc_join_failure_detail(error)
+    if kind == "timeout":
+        return f"🟡️ Joining room timed out: {room_jid}"
+    if kind == "rejected":
+        return f"🟡️ Joining room rejected: {room_jid} ({detail})"
+    return f"🔴 Joining room failed: {room_jid}"
 
 
 def _jid_bare(value) -> str:

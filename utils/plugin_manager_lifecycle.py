@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import inspect
 import logging
 import sys
 from collections.abc import Callable
@@ -36,7 +37,7 @@ async def run_hook(bot, hook) -> None:
     """Run a plugin hook that may be sync or async."""
     if hook is None:
         return
-    if asyncio.iscoroutinefunction(hook):
+    if inspect.iscoroutinefunction(hook):
         await hook(bot)
     else:
         await asyncio.to_thread(hook, bot)

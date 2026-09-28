@@ -29,6 +29,8 @@ from .state import (
     JOINED_ROOMS,
     _join_muc_with_timeout,
     _leave_runtime_room,
+    _log_muc_join_failure,
+    _muc_join_failure_reply,
     _plugin_cleanup_changed,
     _room_diagnose_lines,
     _room_in_runtime_state,
@@ -759,13 +761,9 @@ async def rooms_join(bot, sender_jid, nick, args, msg, is_room):
             msg,
             f"🚪 Joined room: {room_jid}",
         )
-    except Exception:
-        log.exception("[ROOMS] 🚪 Joining room %s nick=%s FAILED!",
-                      room_jid, room_nick)
-        bot.reply(
-            msg,
-            f"🚪 Joining room FAILED: {room_jid}",
-        )
+    except Exception as exc:
+        _log_muc_join_failure("Join", room_jid, room_nick, exc)
+        bot.reply(msg, _muc_join_failure_reply(room_jid, exc))
 
 
 @command(
@@ -908,9 +906,9 @@ async def rooms_sync(bot, sender_jid, nick, args, msg, is_room):
             }
             bot.presence.joined_rooms[room_jid] = nick_name
             joined.append(room_jid)
-        except Exception:
+        except Exception as exc:
             failed.append(room_jid)
-            log.exception("[ROOMS] 🚪 Failed to join room %s", room_jid)
+            _log_muc_join_failure("Sync join", room_jid, nick_name, exc)
 
     # Join autojoin rooms concurrently. One unavailable MUC may take the full
     # bounded join timeout, but it must not consume that timeout once per room

@@ -27,6 +27,8 @@ from .state import (
     JOINED_ROOMS,
     _jid_bare,
     _join_muc_with_timeout,
+    _log_muc_join_failure,
+    _muc_join_failure_detail,
     _maybe_await_result,
     log,
 )
@@ -76,10 +78,16 @@ def _record_join_failure(
     failures = _state_int(current.get("failures", 0)) + 1
     delay = _rejoin_backoff(failures)
     timestamp = time.time() if now is None else float(now)
+    kind, detail = _muc_join_failure_detail(error)
+    if kind == "unexpected":
+        raw = str(error).strip()
+        detail = f"{type(error).__name__}: {raw}" if raw else type(error).__name__
+    else:
+        detail = f"{type(error).__name__}: {detail}"
     _REJOIN_STATE[room_jid] = {
         "failures": failures,
         "next_attempt": timestamp + delay,
-        "last_error": f"{type(error).__name__}: {error}",
+        "last_error": detail,
     }
     return delay
 
@@ -191,19 +199,14 @@ async def autojoin_rooms(bot):
         log.info("[MUC] Autojoining room %s as %s", room_jid, nick)
         try:
             await _join_room(bot, muc, room_jid, nick, autojoin, status)
-        except TimeoutError as exc:
-            delay = _record_join_failure(room_jid, exc)
-            log.warning(
-                "[ROOMS] 🟡️ Autojoin timed out for %s; automatic retry in %ds",
-                room_jid,
-                int(delay),
-            )
         except Exception as exc:
             delay = _record_join_failure(room_jid, exc)
-            log.exception(
-                "[ROOMS] 🔴 Couldn't join room %s; automatic retry in %ds",
+            _log_muc_join_failure(
+                "Autojoin",
                 room_jid,
-                int(delay),
+                nick,
+                exc,
+                retry_delay=delay,
             )
 
     rows = await rooms_db.list()
@@ -294,25 +297,16 @@ async def reconcile_autojoin_rooms(
             )
         try:
             await _join_room(bot, muc, room_jid, nick, autojoin, status)
-        except TimeoutError as exc:
-            delay = _record_join_failure(room_jid, exc, now=timestamp)
-            summary["failed"] += 1
-            action = "Join" if session_start else "Rejoin"
-            log.warning(
-                "[ROOMS] 🟡️ %s timed out for %s; next retry in %ds",
-                action,
-                room_jid,
-                int(delay),
-            )
         except Exception as exc:
             delay = _record_join_failure(room_jid, exc, now=timestamp)
             summary["failed"] += 1
             action = "Join" if session_start else "Rejoin"
-            log.exception(
-                "[ROOMS] 🔴 %s failed for %s; next retry in %ds",
+            _log_muc_join_failure(
                 action,
                 room_jid,
-                int(delay),
+                nick,
+                exc,
+                retry_delay=delay,
             )
         else:
             summary["rejoined"] += 1
