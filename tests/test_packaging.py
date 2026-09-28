@@ -77,7 +77,11 @@ def test_ci_constraint_files_exist():
 
 def test_constraint_snapshots_are_exact_and_transitive():
     """Snapshots should be full exact locks, not a copy of direct requirements."""
-    for path in (ROOT / "constraints/python312.txt", ROOT / "constraints/python313.txt"):
+    for path in (
+        ROOT / "constraints/python312.txt",
+        ROOT / "constraints/python313.txt",
+        ROOT / "constraints/python314.txt",
+    ):
         pins = []
         for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
@@ -97,6 +101,9 @@ def test_constraint_snapshots_are_exact_and_transitive():
     ).read_text(encoding="utf-8").lower()
     assert "pyyaml-ft==8.0.0" in (
         ROOT / "constraints/python313.txt"
+    ).read_text(encoding="utf-8").lower()
+    assert "pyyaml==6.0.3" in (
+        ROOT / "constraints/python314.txt"
     ).read_text(encoding="utf-8").lower()
 
 
@@ -166,6 +173,7 @@ def test_obsolete_dev_tools_and_static_systemd_example_stay_removed():
     for constraint_path in (
         ROOT / "constraints/python312.txt",
         ROOT / "constraints/python313.txt",
+        ROOT / "constraints/python314.txt",
     ):
         pins = constraint_path.read_text(encoding="utf-8").lower()
         assert all(f"{name}==" not in pins for name in obsolete_names)
@@ -188,7 +196,11 @@ def test_aiohttp_security_floor_and_locks():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert requirement in pyproject["project"]["dependencies"]
 
-    for path in (ROOT / "constraints/python312.txt", ROOT / "constraints/python313.txt"):
+    for path in (
+        ROOT / "constraints/python312.txt",
+        ROOT / "constraints/python313.txt",
+        ROOT / "constraints/python314.txt",
+    ):
         assert "aiohttp==3.14.3" in path.read_text(encoding="utf-8").lower()
 
 

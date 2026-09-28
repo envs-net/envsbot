@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: $0 <3.12|3.13> [--refresh]" >&2
+    echo "usage: $0 <3.12|3.13|3.14> [--refresh]" >&2
     exit 2
 }
 
@@ -11,6 +11,7 @@ mode=${2:-}
 case "$version" in
     3.12) interpreter=${PYTHON312:-python3.12}; output=constraints/python312.txt ;;
     3.13) interpreter=${PYTHON313:-python3.13}; output=constraints/python313.txt ;;
+    3.14) interpreter=${PYTHON314:-python3.14}; output=constraints/python314.txt ;;
     *) usage ;;
 esac
 case "$mode" in
