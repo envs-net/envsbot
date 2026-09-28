@@ -99,3 +99,51 @@ async def test_command_executor_does_not_audit_regular_user(monkeypatch):
 
     handler.assert_awaited_once()
     bot.audit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_command_executor_preserves_reply_encryption_inside_timeout_task(monkeypatch):
+    monkeypatch.setitem(ce.config, "command_timeout_seconds", 5)
+    current_owner = None
+    current_value = True
+    seen = []
+
+    def get_context():
+        if current_owner is asyncio.current_task():
+            return current_value
+        # The outer routing task owns the incoming OMEMO context.
+        if current_owner is None:
+            return True
+        return None
+
+    def set_context(value):
+        nonlocal current_owner, current_value
+        previous = (current_owner, current_value)
+        current_owner = asyncio.current_task()
+        current_value = value
+        return previous
+
+    def reset_context(token):
+        nonlocal current_owner, current_value
+        current_owner, current_value = token
+
+    bot = SimpleNamespace(
+        audit=AsyncMock(),
+        reply=MagicMock(),
+        reply_error=MagicMock(),
+        _get_reply_encryption_context=get_context,
+        _set_reply_encryption_context=set_context,
+        _reset_reply_encryption_context=reset_context,
+        _command_error_message=MagicMock(return_value="friendly error"),
+    )
+
+    async def handler(*_args):
+        seen.append(get_context())
+
+    await ce.CommandExecutor(bot).execute(
+        SimpleNamespace(handler=handler),
+        _context(),
+        MagicMock(),
+    )
+
+    assert seen == [True]

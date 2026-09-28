@@ -988,3 +988,20 @@ def test_xmpp_status_lines_include_session_lifecycle_telemetry(monkeypatch, tmp_
     assert "Session: reconnecting · generation 3 · reconnects 2" in lines
     assert "Session phase: backoff · age 4s" in lines
     assert any("Last disconnect: transport lost" in line for line in lines)
+
+
+def test_xmpp_status_lines_include_omemo_transport_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(_admin, "vcard_file", lambda cfg: tmp_path / "vcard.py")
+    bot = types.SimpleNamespace(
+        avatar_hash=None,
+        client_roster={},
+        omemo_status=lambda: {
+            "enabled": True,
+            "ready": True,
+            "plaintext_fallback": False,
+        },
+    )
+
+    lines = _admin._xmpp_status_lines(bot, (), ())
+
+    assert "OMEMO: enabled · ready · plaintext fallback off" in lines

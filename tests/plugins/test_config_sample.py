@@ -118,6 +118,7 @@ def test_config_display_sections_keep_operator_facing_order():
     assert [title for title, _keys in CONFIG_DISPLAY_SECTIONS] == [
         "XMPP Account",
         "Connection",
+        "OMEMO",
         "Bot Runtime",
         "Backups",
         "Persistent Outbox",

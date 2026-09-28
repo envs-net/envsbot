@@ -2289,3 +2289,175 @@ async def test_late_completion_from_old_session_generation_is_rejected(bot):
         await stale_phase
     assert bot.session_lifecycle.snapshot().generation == second_generation
     assert bot.session_lifecycle.snapshot().state == "starting"
+
+
+@pytest.mark.asyncio
+async def test_omemo_safe_send_uses_encrypted_transport_without_plaintext(bot):
+    message = MagicMock()
+    bot._send_omemo_message_object = AsyncMock(return_value=message)
+
+    assert await bot._safe_send_message(message, encrypted=True) is True
+
+    bot._send_omemo_message_object.assert_awaited_once_with(message)
+    message.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_omemo_safe_send_does_not_downgrade_or_queue_by_default(bot):
+    message = MagicMock()
+    bot._send_omemo_message_object = AsyncMock(side_effect=RuntimeError("no session"))
+    bot.omemo_plaintext_fallback = False
+    enqueue = AsyncMock(return_value=1)
+    bot.outbox = types.SimpleNamespace(enqueue_message=enqueue)
+
+    assert await bot._safe_send_message(message, encrypted=True, persist=True) is False
+
+    message.send.assert_not_called()
+    enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_omemo_plaintext_fallback_is_explicit_opt_in(bot):
+    message = MagicMock()
+    message.send.return_value = None
+    bot._send_omemo_message_object = AsyncMock(side_effect=RuntimeError("no usable device"))
+    bot.omemo_plaintext_fallback = True
+
+    assert await bot._safe_send_message(message, encrypted=True) is True
+    message.send.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_omemo_encrypted_reply_is_not_queued_while_disconnected(bot):
+    message = MagicMock()
+    enqueue = AsyncMock(return_value=1)
+    bot.outbox = types.SimpleNamespace(enqueue_message=enqueue)
+    bot.session_ready.clear()
+
+    assert await bot._safe_send_message(message, encrypted=True, persist=True) is False
+
+    message.send.assert_not_called()
+    enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reply_captures_encryption_context_for_child_send(monkeypatch, bot):
+    message = MagicMock()
+    monkeypatch.setattr(bot, "_build_reply_message", MagicMock(return_value=(message, "secret")))
+    send_wrapper = AsyncMock(return_value=True)
+    monkeypatch.setattr(bot, "_reply_send_wrapper", send_wrapper)
+    msg = {"type": "chat", "from": DummyFrom("alice@example.org", "desktop")}
+
+    token = bot._set_reply_encryption_context(True)
+    try:
+        envsbot.Bot.reply(bot, msg, "secret")
+        await asyncio.sleep(0)
+    finally:
+        bot._reset_reply_encryption_context(token)
+
+    assert send_wrapper.await_count == 1
+    assert send_wrapper.await_args.kwargs["encrypted"] is True
+
+
+@pytest.mark.asyncio
+async def test_encrypted_routing_decrypts_skips_cache_and_sets_reply_context(bot):
+    bot._cache_incoming_message = AsyncMock()
+    decrypted = {
+        "type": "chat",
+        "body": ",status",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+    encrypted = {
+        "type": "chat",
+        "body": "fallback",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+    bot._decrypt_incoming_omemo_message = AsyncMock(return_value=(decrypted, True))
+    seen = []
+
+    async def runtime_event(*_args):
+        seen.append(("event", bot._get_reply_encryption_context()))
+
+    async def command(*_args):
+        seen.append(("command", bot._get_reply_encryption_context()))
+
+    bot.bot_plugins.dispatch_runtime_event = AsyncMock(side_effect=runtime_event)
+    bot.handle_command = AsyncMock(side_effect=command)
+
+    await bot.on_private_message(encrypted)
+
+    bot._cache_incoming_message.assert_not_awaited()
+    bot.bot_plugins.dispatch_runtime_event.assert_awaited_once_with(
+        "private_message_received", decrypted
+    )
+    bot.handle_command.assert_awaited_once_with(
+        ",status", decrypted["from"], None, decrypted, False
+    )
+    assert seen == [("event", True), ("command", True)]
+    assert bot._get_reply_encryption_context() is None
+
+
+@pytest.mark.asyncio
+async def test_plain_routing_keeps_cache_and_plain_reply_context(bot):
+    bot._cache_incoming_message = AsyncMock()
+    plain = {
+        "type": "chat",
+        "body": ",status",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+    bot._decrypt_incoming_omemo_message = AsyncMock(return_value=(plain, False))
+    contexts = []
+
+    async def command(*_args):
+        contexts.append(bot._get_reply_encryption_context())
+
+    bot.bot_plugins.dispatch_runtime_event = AsyncMock()
+    bot.handle_command = AsyncMock(side_effect=command)
+
+    await bot.on_private_message(plain)
+
+    bot._cache_incoming_message.assert_awaited_once_with(plain, is_room=False)
+    assert contexts == [False]
+    assert bot._get_reply_encryption_context() is None
+
+
+@pytest.mark.asyncio
+async def test_encrypted_muc_routing_uses_decrypted_message_and_encrypted_context(bot):
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+    bot._cache_incoming_message = AsyncMock()
+    encrypted = {
+        "type": "groupchat",
+        "body": "fallback",
+        "from": DummyFrom("room@conference.example.org", "Alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    decrypted = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "Alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    bot._decrypt_incoming_omemo_message = AsyncMock(return_value=(decrypted, True))
+    contexts = []
+
+    async def command(*_args):
+        contexts.append(bot._get_reply_encryption_context())
+
+    bot.bot_plugins.dispatch_runtime_event = AsyncMock()
+    bot.handle_command = AsyncMock(side_effect=command)
+
+    await bot.on_muc_message(encrypted)
+
+    bot._cache_incoming_message.assert_not_awaited()
+    bot.bot_plugins.dispatch_runtime_event.assert_awaited_once_with(
+        "public_groupchat_message", decrypted
+    )
+    bot.handle_command.assert_awaited_once_with(
+        ",help", decrypted["from"], "Alice", decrypted, True
+    )
+    assert contexts == [True]

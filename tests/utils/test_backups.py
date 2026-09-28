@@ -628,6 +628,11 @@ async def test_restore_support_files_online_when_runtime_dir_is_outside_app_tree
     monkeypatch.setattr(backups, "BASE_DIR", project_root)
     (runtime_dir / "vcard.py").write_text('VCARD = "backup"\n', encoding="utf-8")
     (runtime_dir / "chat_slang.csv").write_text("brb,backup\n", encoding="utf-8")
+    (runtime_dir / "omemo.json").write_text('{"session": "backup"}\n', encoding="utf-8")
+    (runtime_dir / "omemo.identity.json").write_text(
+        '{"jid": "bot@example.org", "nick": "EnvsBot", "resource": "service"}\n',
+        encoding="utf-8",
+    )
     monkeypatch.setitem(backups.config, "runtime_data_dir", str(runtime_dir))
 
     _write_sqlite_value(backup_env.db_path, "backup")
@@ -637,16 +642,27 @@ async def test_restore_support_files_online_when_runtime_dir_is_outside_app_tree
     _write_sqlite_value(backup_env.db_path, "current")
     (runtime_dir / "vcard.py").write_text('VCARD = "current"\n', encoding="utf-8")
     (runtime_dir / "chat_slang.csv").write_text("brb,current\n", encoding="utf-8")
+    (runtime_dir / "omemo.json").write_text('{"session": "current"}\n', encoding="utf-8")
+    (runtime_dir / "omemo.identity.json").write_text(
+        '{"jid": "other@example.org", "nick": "Other", "resource": "other"}\n',
+        encoding="utf-8",
+    )
 
     result = await backups.restore_backup(bot, archive)
 
     assert (runtime_dir / "vcard.py").read_text(encoding="utf-8") == 'VCARD = "backup"\n'
     assert (runtime_dir / "chat_slang.csv").read_text(encoding="utf-8") == "brb,backup\n"
+    assert (runtime_dir / "omemo.json").read_text(encoding="utf-8") == '{"session": "backup"}\n'
+    assert (runtime_dir / "omemo.identity.json").read_text(encoding="utf-8") == (
+        '{"jid": "bot@example.org", "nick": "EnvsBot", "resource": "service"}\n'
+    )
     assert result["restored"] == [
         "bot.db",
         "config.py",
         "vcard.py",
         "chat_slang.csv",
+        "omemo.json",
+        "omemo.identity.json",
     ]
     assert result["manual_restore"] == []
     assert result["restart_required"] is True

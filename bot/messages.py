@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from contextvars import ContextVar, Token
 from typing import Any
 
 from slixmpp.xmlstream import ET
@@ -14,16 +15,47 @@ from utils.outbox import ensure_message_origin_id
 
 log = logging.getLogger(__name__)
 
+_EncryptionContext = tuple[object | None, bool | None]
+_REPLY_ENCRYPTED: ContextVar[_EncryptionContext | None] = ContextVar(
+    "envsbot_reply_encrypted",
+    default=None,
+)
+
 
 class MessageMixin:
     """Common reply and safe-send helpers for the bot."""
 
     make_message: Any
 
+    def _set_reply_encryption_context(
+        self,
+        encrypted: bool | None,
+    ) -> Token[_EncryptionContext | None]:
+        """Set the encryption mode inherited by replies in the current task."""
+        return _REPLY_ENCRYPTED.set((asyncio.current_task(), encrypted))
+
+    def _reset_reply_encryption_context(
+        self,
+        token: Token[_EncryptionContext | None],
+    ) -> None:
+        """Restore the previous task-local reply encryption mode."""
+        _REPLY_ENCRYPTED.reset(token)
+
+    def _get_reply_encryption_context(self) -> bool | None:
+        """Return the current task's reply encryption mode, if any."""
+        value = _REPLY_ENCRYPTED.get()
+        if value is None:
+            return None
+        owner_task, encrypted = value
+        if owner_task is not None and asyncio.current_task() is not owner_task:
+            return None
+        return encrypted
+
     async def _safe_send_message(
         self,
         message: Any,
         *,
+        encrypted: bool | None = None,
         persist: bool = False,
         category: str = "message",
         dedupe_key: str | None = None,
@@ -42,11 +74,25 @@ class MessageMixin:
             # is cleared, outbox recovery will replay the same XEP-0359 ID.
             origin_id = ensure_message_origin_id(message)
 
+        if encrypted is None:
+            encrypted = self._get_reply_encryption_context()
+
         if not session_is_ready(self):
+            if encrypted is True:
+                # A queued stanza would lose its task-local OMEMO recipient
+                # context and could later be replayed as plaintext.
+                log.warning("[OMEMO] Encrypted reply not queued while the XMPP session is unavailable")
+                return False
             error: Exception = RuntimeError("XMPP session is not ready")
             log.debug("[BOT] Deferring send because the XMPP session is not ready")
         else:
             try:
+                if encrypted is True:
+                    send_omemo = getattr(self, "_send_omemo_message_object", None)
+                    if not callable(send_omemo):
+                        raise RuntimeError("OMEMO transport is unavailable")
+                    await send_omemo(message)
+                    return True
                 result = message.send()
                 if inspect.isawaitable(result):
                     result = await result
@@ -55,9 +101,28 @@ class MessageMixin:
                 error = RuntimeError("Slixmpp did not accept the stanza")
             except Exception as exc:
                 error = exc
-                log.exception("[BOT] Failed to send message: %s", exc)
+                if encrypted is True:
+                    log.warning("[OMEMO] Encrypted send failed: %s", exc)
+                    if not bool(getattr(self, "omemo_plaintext_fallback", False)):
+                        # Never persist an encrypted reply as plaintext. The
+                        # queue cannot currently retain OMEMO recipient/session
+                        # context safely across restarts.
+                        return False
+                    log.warning("[OMEMO] Falling back to plaintext send")
+                    try:
+                        result = message.send()
+                        if inspect.isawaitable(result):
+                            result = await result
+                        if result is not False:
+                            return True
+                        error = RuntimeError("Slixmpp did not accept the plaintext fallback stanza")
+                    except Exception as fallback_exc:
+                        error = fallback_exc
+                        log.exception("[BOT] Plaintext fallback send failed: %s", fallback_exc)
+                else:
+                    log.exception("[BOT] Failed to send message: %s", exc)
 
-        if persist:
+        if persist and encrypted is not True:
             outbox = getattr(self, "outbox", None)
             enqueue = getattr(outbox, "enqueue_message", None)
             if callable(enqueue):
@@ -152,17 +217,19 @@ class MessageMixin:
         self,
         message: Any,
         *,
+        encrypted: bool | None = None,
         persist: bool = False,
         category: str = "reply",
         dedupe_key: str | None = None,
         max_attempts: int | None = None,
     ) -> asyncio.Task[Any]:
         """Track one short-lived reply task until it finishes or shutdown drains it."""
-        if not persist and dedupe_key is None and max_attempts is None:
+        if not persist and dedupe_key is None and max_attempts is None and encrypted is not True:
             send_coro = self._reply_send_wrapper(message)
         else:
             send_coro = self._reply_send_wrapper(
                 message,
+                encrypted=encrypted,
                 persist=persist,
                 category=category,
                 dedupe_key=dedupe_key,
@@ -243,8 +310,10 @@ class MessageMixin:
         del rate_limit  # legacy parameter; command rate limiting happens in dispatch
         try:
             message, _body = self._build_reply_message(msg, text, mention, thread, ephemeral, no_store)
+            encrypted = self._get_reply_encryption_context()
             task = self._schedule_reply_send(
                 message,
+                encrypted=encrypted,
                 persist=persist,
                 category=category,
                 dedupe_key=dedupe_key,
@@ -266,6 +335,7 @@ class MessageMixin:
         self,
         message: Any,
         *,
+        encrypted: bool | None = None,
         persist: bool = False,
         category: str = "reply",
         dedupe_key: str | None = None,
@@ -273,10 +343,11 @@ class MessageMixin:
     ) -> bool:
         """Wrapper to send messages asynchronously with error handling."""
         try:
-            if not persist and dedupe_key is None and max_attempts is None:
+            if not persist and dedupe_key is None and max_attempts is None and encrypted is not True:
                 return await self._safe_send_message(message)
             return await self._safe_send_message(
                 message,
+                encrypted=encrypted,
                 persist=persist,
                 category=category,
                 dedupe_key=dedupe_key,

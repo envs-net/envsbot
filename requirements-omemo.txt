@@ -1,0 +1,2 @@
+# Optional OMEMO transport support.
+slixmpp-omemo>=2,<3

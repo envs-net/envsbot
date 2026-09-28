@@ -231,6 +231,8 @@ DB_FILE = "/var/lib/envsbot/bot.db"
 RUNTIME_DATA_DIR = "/var/lib/envsbot"
 BACKUP_DIR = "/var/lib/envsbot/backups"
 RESTART_NOTIFICATION_FILE = "/var/lib/envsbot/restart_notification.json"
+# Optional OMEMO state defaults to /var/lib/envsbot/omemo.json:
+OMEMO_STORAGE_FILE = None
 # In the existing IDLERPG dictionary:
 # "export_path": "/var/lib/envsbot/idlerpg",
 ```
@@ -246,6 +248,24 @@ first startup. The default avatar is bundled with the Python package as well, so
 production deployments do not need `avatar.jpg` or `init_chat_slang.csv` copies
 in the application root. Configure a separate `AVATAR_PATH` only when using a
 custom avatar.
+
+When OMEMO support is enabled, install the optional transport dependency in
+the service virtualenv before restarting the bot:
+
+```bash
+sudo apt install libsodium-dev libxeddsa-dev
+sudo -u envsbot .venv/bin/pip install -r requirements-omemo.txt
+```
+
+Then configure `OMEMO_ENABLED = True`. EnvsBot mirrors incoming transport
+mode: encrypted requests receive encrypted replies, plaintext requests receive
+plaintext replies, and proactive messages remain plaintext. Keep
+`OMEMO_PLAINTEXT_FALLBACK = False` unless an explicit plaintext downgrade is
+acceptable. No admin-room auto-encryption policy is used by EnvsBot.
+Managed ZIP backups include both the configured OMEMO state file and its
+identity metadata; restoring both together preserves the cryptographic session
+state expected by the configured bot identity. Treat those backup archives as
+private key material and keep their existing restrictive permissions/storage.
 
 Runtime Python data files are executed directly from source instead of being
 imported as modules, so current releases do not create `__pycache__` beside

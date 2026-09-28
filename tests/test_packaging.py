@@ -341,3 +341,12 @@ def test_markdown_tables_escape_pipes_inside_inline_code():
                     broken.append(f"{path.relative_to(ROOT)}:{line_number}")
 
     assert broken == []
+
+
+def test_omemo_optional_dependency_is_declared_once():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["optional-dependencies"]["omemo"] == [
+        "slixmpp-omemo>=2,<3"
+    ]
+    requirements = (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")
+    assert "slixmpp-omemo>=2,<3" in requirements

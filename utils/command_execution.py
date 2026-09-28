@@ -63,6 +63,31 @@ class CommandExecutor:
         """Return threshold for slow command logging in seconds."""
         return max(0.0, _float_config("command_slow_log_seconds", 2.0))
 
+    async def _await_handler_result(self, result: Any) -> Any:
+        """Await a command while preserving task-local reply encryption mode.
+
+        ``asyncio.wait_for`` executes a coroutine in its own task. EnvsBot's
+        reply-encryption context intentionally belongs to exactly one task so
+        arbitrary background work cannot inherit an encrypted reply policy.
+        Re-establish the current incoming-message mode inside the guarded
+        command task and restore it when the handler finishes.
+        """
+        get_context = getattr(self.bot, "_get_reply_encryption_context", None)
+        set_context = getattr(self.bot, "_set_reply_encryption_context", None)
+        reset_context = getattr(self.bot, "_reset_reply_encryption_context", None)
+        if not (callable(get_context) and callable(set_context) and callable(reset_context)):
+            return await result
+
+        encrypted = get_context()
+        if encrypted is None:
+            return await result
+
+        token = set_context(encrypted)
+        try:
+            return await result
+        finally:
+            reset_context(token)
+
     async def _audit(
         self,
         context: CommandExecutionContext,
@@ -154,9 +179,12 @@ class CommandExecutor:
             )
             if inspect.isawaitable(result):
                 if timeout > 0:
-                    await asyncio.wait_for(result, timeout=timeout)
+                    await asyncio.wait_for(
+                        self._await_handler_result(result),
+                        timeout=timeout,
+                    )
                 else:
-                    await result
+                    await self._await_handler_result(result)
         except TimeoutError:
             status = "timeout"
             error_text = f"timeout after {timeout:g}s"

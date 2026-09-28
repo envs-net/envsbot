@@ -46,6 +46,26 @@ def chat_slang_removals_file(config: Mapping[str, Any]) -> Path:
     return runtime_data_dir(config) / "slang_removals.csv"
 
 
+def omemo_storage_file(config: Mapping[str, Any]) -> Path:
+    """Return the private OMEMO state file for this runtime.
+
+    An explicit ``OMEMO_STORAGE_FILE`` keeps its historical BASE_DIR-relative
+    semantics.  Otherwise OMEMO follows the mutable runtime-data directory.
+    """
+    configured = config.get("omemo_storage_file")
+    if isinstance(configured, str) and configured.strip():
+        return _resolve(configured)
+    return runtime_data_dir(config) / "omemo.json"
+
+
+def omemo_identity_file(config: Mapping[str, Any]) -> Path:
+    """Return the identity metadata file paired with the OMEMO state file."""
+    storage = omemo_storage_file(config)
+    if storage.suffix:
+        return storage.with_name(f"{storage.stem}.identity.json")
+    return storage.with_name(f"{storage.name}.identity.json")
+
+
 def profile_state_file(config: Mapping[str, Any], name: str) -> Path:
     """Return one writable profile-state marker below the runtime directory."""
     return runtime_data_dir(config) / name

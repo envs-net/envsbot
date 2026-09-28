@@ -92,6 +92,13 @@ pip install envsbot
 python -m pip show envsbot
 ```
 
+Install the optional OMEMO transport dependencies when encrypted replies are
+needed:
+
+```bash
+pip install 'envsbot[omemo]'
+```
+
 The PyPI package contains the application code, `config_sample.py`,
 `vcard_sample.py`, and bundled read-only runtime assets. It does not create
 `/etc/envsbot`, `/var/lib/envsbot`, a systemd unit, or operator configuration.
@@ -254,6 +261,40 @@ port or STARTTLS mode. For direct TLS, set:
 CONNECT_DIRECT_TLS = True
 CONNECT_PORT = 5223
 ```
+
+### Optional OMEMO
+
+OMEMO is opt-in. For a tagged checkout, install the optional dependency and
+enable the transport in `config.py`:
+
+```bash
+# Debian/Ubuntu build prerequisites when not already installed:
+sudo apt install libsodium-dev libxeddsa-dev
+python -m pip install -r requirements-omemo.txt
+```
+
+```python
+OMEMO_ENABLED = True
+OMEMO_STORAGE_FILE = None  # defaults to RUNTIME_DATA_DIR/omemo.json
+OMEMO_PLAINTEXT_FALLBACK = False
+OMEMO_RESET_ON_IDENTITY_CHANGE = True
+```
+
+EnvsBot mirrors the transport mode of the incoming message: plaintext input
+gets a plaintext reply and an OMEMO-encrypted input gets an OMEMO-encrypted
+reply. Proactive/background messages remain plaintext because they have no
+incoming encryption context. There is deliberately no admin-room auto-encrypt
+setting in EnvsBot. If an encrypted reply cannot be produced and
+`OMEMO_PLAINTEXT_FALLBACK` is `False` (the recommended default), EnvsBot does
+not silently disclose that reply as plaintext.
+
+Decrypted OMEMO bodies are excluded from the ordinary persistent message
+cache. The OMEMO state file is private runtime state and is created with
+owner-only permissions. With the hardened deployment layout, keep it below
+`RUNTIME_DATA_DIR` (normally `/var/lib/envsbot`). Managed EnvsBot backups carry
+both the OMEMO state and its identity metadata so a restore preserves the
+device/session identity together. Those archives therefore contain private
+OMEMO key/session material and must remain protected like the live state file.
 
 `config_sample.py` also contains operator tuning sections for network timeouts, default pagination, URL checks, RSS backoff and per-poll burst limits, birthday scans, sed/poll/pin limits, anti-spam delays and XKCD indexing. These values are safe to adjust without editing plugin code.
 

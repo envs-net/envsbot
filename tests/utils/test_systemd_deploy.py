@@ -124,3 +124,32 @@ def test_systemd_check_rejects_writable_application_tree(monkeypatch, tmp_path):
 
     assert status == 1
     assert "FAIL  Application tree read-only" in output
+
+
+def test_render_systemd_unit_allows_explicit_omemo_storage_parent(monkeypatch, tmp_path):
+    project = tmp_path / "envsbot"
+    project.mkdir()
+    config_dir = tmp_path / "etc-envsbot"
+    config_dir.mkdir()
+    config_file = config_dir / "config.py"
+    config_file.write_text("# test\n", encoding="utf-8")
+    omemo_dir = tmp_path / "private-omemo"
+    omemo_dir.mkdir()
+
+    monkeypatch.setattr(systemd_deploy, "PROJECT_ROOT", project)
+    monkeypatch.setattr(systemd_deploy, "get_runtime_config_path", lambda: config_file)
+    monkeypatch.setattr(systemd_deploy, "_exec_start", lambda: "/srv/envsbot/.venv/bin/envsbot")
+
+    unit = systemd_deploy.render_systemd_unit(
+        {
+            "db": "data/bot.db",
+            "log_dir": "logs",
+            "runtime_data_dir": "data",
+            "backup_dir": "data/backups",
+            "restart_notification_file": "data/restart.json",
+            "omemo_storage_file": str(omemo_dir / "omemo.json"),
+            "idlerpg": {"export_path": "data/idlerpg"},
+        }
+    )
+
+    assert str(omemo_dir) in unit.split("ReadWritePaths=", 1)[1].splitlines()[0]

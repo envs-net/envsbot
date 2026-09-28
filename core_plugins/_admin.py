@@ -309,6 +309,20 @@ def _xmpp_status_lines(
         f"Avatar: {'published' if avatar_hash else 'missing'}",
         f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
     ]
+    omemo_status = getattr(bot, "omemo_status", None)
+    if callable(omemo_status):
+        try:
+            omemo = dict(omemo_status() or {})
+        except Exception:
+            log.debug("[ADMIN] Could not read OMEMO status", exc_info=True)
+            omemo = {}
+        if omemo:
+            if not omemo.get("enabled"):
+                lines.append("OMEMO: disabled")
+            else:
+                readiness = "ready" if omemo.get("ready") else "initializing"
+                fallback = "on" if omemo.get("plaintext_fallback") else "off"
+                lines.append(f"OMEMO: enabled · {readiness} · plaintext fallback {fallback}")
     lifecycle = getattr(bot, "session_lifecycle", None)
     snapshot = getattr(lifecycle, "snapshot", None)
     if callable(snapshot):

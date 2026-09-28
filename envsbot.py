@@ -31,6 +31,7 @@ from bot.connection import (
 from bot.dispatch import CommandDispatchMixin
 from bot.lifecycle import LifecycleMixin
 from bot.messages import MessageMixin
+from bot.omemo import OmemoMixin
 from bot.permissions import PermissionMixin
 from bot.room_state import room_state
 from bot.routing import MessageRoutingMixin
@@ -104,6 +105,7 @@ class Bot(
     CommandDispatchMixin,
     PermissionMixin,
     MessageMixin,
+    OmemoMixin,
     AuditMixin,
     slixmpp.ClientXMPP,
 ):
@@ -204,6 +206,7 @@ class Bot(
         self.presence = PresenceManager(self)
         for plugin_name in self.XMPP_PLUGINS:
             self.register_plugin(plugin_name)
+        self.configure_omemo()
 
         self.db = DatabaseManager(
             config.get("db", "bot.db"),

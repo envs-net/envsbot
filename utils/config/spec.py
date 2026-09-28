@@ -166,6 +166,10 @@ CONFIG_FIELDS: dict[str, ConfigKeySpec] = {
     'direct_tls': ConfigKeySpec(False, 'CONNECT_DIRECT_TLS', bool, startup_only=True, section='Connection', description='False = regular STARTTLS on port 5222. True = direct TLS / legacy SSL, commonly on port 5223.'),
     'xmpp_query_timeout_seconds': ConfigKeySpec(8, 'XMPP_QUERY_TIMEOUT_SECONDS', (int, float), minimum=0, minimum_exclusive=True, section='Connection', description='XMPP query timeout used by diagnostic/info commands.'),
     'xmpp_compliance_max_read_bytes': ConfigKeySpec(262144, 'XMPP_COMPLIANCE_MAX_READ_BYTES', int, section='Connection', description='Maximum bytes read from compliance.conversations.im for ,xmpp compliance. The command only needs a small HTML preview containing the score marker.'),
+    'omemo_enabled': ConfigKeySpec(False, 'OMEMO_ENABLED', bool, startup_only=True, section='OMEMO', description='Enable optional OMEMO support. Install envsbot with the omemo extra or requirements-omemo.txt first.'),
+    'omemo_storage_file': ConfigKeySpec(None, 'OMEMO_STORAGE_FILE', str, startup_only=True, section='OMEMO', description='Private OMEMO state file. None stores omemo.json below RUNTIME_DATA_DIR.', sample=None),
+    'omemo_plaintext_fallback': ConfigKeySpec(False, 'OMEMO_PLAINTEXT_FALLBACK', bool, startup_only=True, section='OMEMO', description='Allow a failed encrypted reply to fall back to plaintext. Keep False to prevent accidental plaintext disclosure.'),
+    'omemo_reset_on_identity_change': ConfigKeySpec(True, 'OMEMO_RESET_ON_IDENTITY_CHANGE', bool, startup_only=True, section='OMEMO', description='Rotate existing OMEMO state when JID, resource or nick changes so cryptographic identity is not silently reused.'),
     'loglevel': ConfigKeySpec('INFO', 'LOG_LEVEL', str, section='Bot Runtime', description='Python logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.'),
     'log_dir': ConfigKeySpec('logs', 'LOG_DIR', str, startup_only=True, section='Bot Runtime', description='Directory for the rotating envsbot.log file. Use an absolute path such as /var/log/envsbot with the hardened systemd unit.'),
     'prefix': ConfigKeySpec(',', 'COMMAND_PREFIX', str, section='Bot Runtime', description='Command prefix used to trigger bot commands in rooms and direct chats.'),
@@ -336,6 +340,7 @@ OPERATIONAL_CONFIG_FIELDS = CONFIG_FIELDS
 CONFIG_SECTION_ORDER: tuple[str, ...] = (
     "XMPP Account",
     "Connection",
+    "OMEMO",
     "Bot Runtime",
     "Backups",
     "Persistent Outbox",

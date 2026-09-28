@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.config import get_runtime_config_path
-from utils.runtime_paths import runtime_data_dir
+from utils.runtime_paths import omemo_storage_file, runtime_data_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,6 +40,7 @@ def service_paths(config: Mapping[str, Any]) -> dict[str, Path]:
         "database": _resolve_runtime_path(config.get("db", "bot.db")),
         "log_directory": _resolve_runtime_path(config.get("log_dir", "logs")),
         "runtime_data_directory": runtime_data_dir(config),
+        "omemo_storage": omemo_storage_file(config),
         "backup_directory": _resolve_runtime_path(config.get("backup_dir", "data/backups")),
         "idlerpg_export": _idlerpg_export_path(config),
         "restart_notification": _resolve_runtime_path(
@@ -65,6 +66,7 @@ def _unique_writable_paths(config: Mapping[str, Any]) -> list[Path]:
         paths["database"].parent,
         paths["log_directory"],
         paths["runtime_data_directory"],
+        paths["omemo_storage"].parent,
         paths["backup_directory"],
         paths["idlerpg_export"],
         paths["restart_notification"].parent,
@@ -179,7 +181,7 @@ def check_systemd_installation(
         f"Config: {config_path}",
     ))
 
-    for label in ("database", "restart_notification"):
+    for label in ("database", "omemo_storage", "restart_notification"):
         parent = paths[label].parent
         checks.append((
             parent.is_dir() and user_ok and group_ok and _account_access(

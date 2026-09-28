@@ -54,6 +54,28 @@ XMPP_QUERY_TIMEOUT_SECONDS = 8
 XMPP_COMPLIANCE_MAX_READ_BYTES = 262144
 
 
+# ================= OMEMO =================
+
+# Enable optional OMEMO support. Install envsbot with the omemo extra or requirements-
+# omemo.txt first.
+# Startup-only: restart envsbot after changing this value.
+OMEMO_ENABLED = False
+
+# Private OMEMO state file. None stores omemo.json below RUNTIME_DATA_DIR.
+# Startup-only: restart envsbot after changing this value.
+OMEMO_STORAGE_FILE = None
+
+# Allow a failed encrypted reply to fall back to plaintext. Keep False to prevent
+# accidental plaintext disclosure.
+# Startup-only: restart envsbot after changing this value.
+OMEMO_PLAINTEXT_FALLBACK = False
+
+# Rotate existing OMEMO state when JID, resource or nick changes so cryptographic
+# identity is not silently reused.
+# Startup-only: restart envsbot after changing this value.
+OMEMO_RESET_ON_IDENTITY_CHANGE = True
+
+
 # ================= BOT RUNTIME =================
 
 # Python logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.

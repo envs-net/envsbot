@@ -32,6 +32,27 @@ class MessageRoutingMixin:
                 is_room,
             )
 
+    async def _prepare_incoming_message(self, msg: Any) -> tuple[Any | None, bool]:
+        """Decrypt OMEMO when available and report the incoming transport mode."""
+        decrypt = getattr(self, "_decrypt_incoming_omemo_message", None)
+        if not callable(decrypt):
+            return msg, False
+        result = decrypt(msg)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    def _set_incoming_encryption_context(self, encrypted: bool):
+        setter = getattr(self, "_set_reply_encryption_context", None)
+        return setter(encrypted) if callable(setter) else None
+
+    def _reset_incoming_encryption_context(self, token: Any) -> None:
+        if token is None:
+            return
+        resetter = getattr(self, "_reset_reply_encryption_context", None)
+        if callable(resetter):
+            resetter(token)
+
     async def on_muc_message(self, msg: Any) -> None:
         """Handle public groupchat messages only while the runtime is ready."""
         if not getattr(self, "accepting_commands", False):
@@ -46,14 +67,25 @@ class MessageRoutingMixin:
             if bot_nick == nick:
                 return
             if msg["type"] == "groupchat":
-                await self._cache_incoming_message(msg, is_room=True)
-                plugin_manager = getattr(self, "bot_plugins", None)
-                dispatch_runtime_event = getattr(plugin_manager, "dispatch_runtime_event", None)
-                if callable(dispatch_runtime_event):
-                    result = dispatch_runtime_event("public_groupchat_message", msg)
-                    if inspect.isawaitable(result):
-                        await result
-                await self.handle_command(msg["body"], msg["from"], nick, msg, True)
+                msg, encrypted = await self._prepare_incoming_message(msg)
+                if msg is None:
+                    return
+                token = self._set_incoming_encryption_context(encrypted)
+                try:
+                    # Never persist decrypted OMEMO plaintext in the ordinary
+                    # message cache. Plain messages keep their existing cache
+                    # behavior unchanged.
+                    if not encrypted:
+                        await self._cache_incoming_message(msg, is_room=True)
+                    plugin_manager = getattr(self, "bot_plugins", None)
+                    dispatch_runtime_event = getattr(plugin_manager, "dispatch_runtime_event", None)
+                    if callable(dispatch_runtime_event):
+                        result = dispatch_runtime_event("public_groupchat_message", msg)
+                        if inspect.isawaitable(result):
+                            await result
+                    await self.handle_command(msg["body"], msg["from"], nick, msg, True)
+                finally:
+                    self._reset_incoming_encryption_context(token)
         except Exception as exc:
             log.exception("[BOT] Error in on_muc_message: %s", exc)
 
@@ -63,17 +95,25 @@ class MessageRoutingMixin:
             return
         try:
             if msg["type"] in ("chat", "normal"):
-                await self._cache_incoming_message(msg, is_room=False)
-                plugin_manager = getattr(self, "bot_plugins", None)
-                dispatch_runtime_event = getattr(
-                    plugin_manager,
-                    "dispatch_runtime_event",
-                    None,
-                )
-                if callable(dispatch_runtime_event):
-                    result = dispatch_runtime_event("private_message_received", msg)
-                    if inspect.isawaitable(result):
-                        await result
-                await self.handle_command(msg["body"], msg["from"], None, msg, False)
+                msg, encrypted = await self._prepare_incoming_message(msg)
+                if msg is None:
+                    return
+                token = self._set_incoming_encryption_context(encrypted)
+                try:
+                    if not encrypted:
+                        await self._cache_incoming_message(msg, is_room=False)
+                    plugin_manager = getattr(self, "bot_plugins", None)
+                    dispatch_runtime_event = getattr(
+                        plugin_manager,
+                        "dispatch_runtime_event",
+                        None,
+                    )
+                    if callable(dispatch_runtime_event):
+                        result = dispatch_runtime_event("private_message_received", msg)
+                        if inspect.isawaitable(result):
+                            await result
+                    await self.handle_command(msg["body"], msg["from"], None, msg, False)
+                finally:
+                    self._reset_incoming_encryption_context(token)
         except Exception as exc:
             log.exception("[BOT] Error in on_private_message: %s", exc)

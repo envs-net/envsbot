@@ -55,6 +55,8 @@ from utils.runtime_paths import (
     chat_slang_additions_file,
     chat_slang_file,
     chat_slang_removals_file,
+    omemo_identity_file,
+    omemo_storage_file,
     vcard_file,
 )
 from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
@@ -71,6 +73,8 @@ SUPPORT_FILE_ENTRIES = (
     "chat_slang.csv",
     "slang_additions.csv",
     "slang_removals.csv",
+    "omemo.json",
+    "omemo.identity.json",
 )
 
 
@@ -175,6 +179,8 @@ def _source_items(db_path: Path) -> list[tuple[str, Path]]:
         ("chat_slang.csv", chat_slang_file(config)),
         ("slang_additions.csv", chat_slang_additions_file(config)),
         ("slang_removals.csv", chat_slang_removals_file(config)),
+        ("omemo.json", omemo_storage_file(config)),
+        ("omemo.identity.json", omemo_identity_file(config)),
     ]
 
 
@@ -649,6 +655,8 @@ def _target_paths() -> dict[str, Path]:
         "chat_slang.csv": chat_slang_file(config),
         "slang_additions.csv": chat_slang_additions_file(config),
         "slang_removals.csv": chat_slang_removals_file(config),
+        "omemo.json": omemo_storage_file(config),
+        "omemo.identity.json": omemo_identity_file(config),
     }
 
 
