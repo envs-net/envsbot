@@ -28,8 +28,8 @@ from .state import (
     _jid_bare,
     _join_muc_with_timeout,
     _log_muc_join_failure,
-    _muc_join_failure_detail,
     _maybe_await_result,
+    _muc_join_failure_detail,
     log,
 )
 
