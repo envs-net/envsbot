@@ -123,8 +123,9 @@ class OmemoMixin:
         self._configure_omemo_dependency_logging()
         if not OMEMO_AVAILABLE or XEP_0384Impl is None or XEP_0384_module is None:
             log.warning(
-                "[OMEMO] Enabled but optional dependencies are missing; continuing with OMEMO disabled. "
-                "Install the required system libraries plus envsbot[omemo] or requirements-omemo.txt."
+                "[OMEMO] Enabled but required OMEMO runtime dependencies are unavailable; "
+                "continuing with OMEMO disabled. Reinstall the normal envsbot dependencies; "
+                "install platform build/system libraries first if a native OMEMO dependency cannot be installed."
             )
             self.omemo_enabled = False
             return

@@ -94,9 +94,9 @@ def test_configure_omemo_disabled_is_noop(tmp_path):
     bot.register_plugin.assert_not_called()
 
 
-def test_configure_omemo_missing_optional_dependency_disables_cleanly(tmp_path):
+def test_configure_omemo_missing_runtime_dependency_disables_cleanly(tmp_path):
     if OMEMO_AVAILABLE:
-        pytest.skip("optional OMEMO dependency is installed in this environment")
+        pytest.skip("OMEMO runtime dependency is installed in this environment")
     bot = DummyOmemoBot({"omemo_enabled": True, "runtime_data_dir": str(tmp_path)})
 
     bot.configure_omemo()
