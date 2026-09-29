@@ -346,7 +346,7 @@ def test_markdown_tables_escape_pipes_inside_inline_code():
 def test_omemo_optional_dependency_is_declared_once():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["project"]["optional-dependencies"]["omemo"] == [
-        "slixmpp-omemo>=2,<3"
+        "envs-xmpp[omemo]>=1.6.0,<2.0"
     ]
     requirements = (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")
-    assert "slixmpp-omemo>=2,<3" in requirements
+    assert "envs-xmpp[omemo]>=1.6.0,<2.0" in requirements

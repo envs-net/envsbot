@@ -1139,3 +1139,153 @@ async def restart_tasks(bot):
     """Resynchronize optional admin workers after a live config reload."""
     bot.version_check_task = None
     await on_ready(bot)
+
+
+@command(
+    "omemo status",
+    role=Role.ADMIN,
+    aliases=["omemo"],
+    short="Show OMEMO readiness, storage and identity state.",
+    usage="{prefix}omemo status",
+    examples=["{prefix}omemo status"],
+    category="admin",
+    context="any",
+)
+async def omemo_status_command(bot, sender, nick, args, msg, is_room):
+    """Show OMEMO runtime and storage status."""
+    status_fn = getattr(bot, "omemo_status", None)
+    if not callable(status_fn):
+        bot.reply_error(msg, "OMEMO support is unavailable in this build.")
+        return
+    status = dict(status_fn() or {})
+    storage = Path(str(status.get("storage") or ""))
+    identity = status.get("identity") or {}
+    stored = status.get("stored_identity") or {}
+    lines = [
+        "🔐 OMEMO Status",
+        "",
+        f"Enabled: {bool(status.get('enabled'))}",
+        f"Optional dependencies: {bool(status.get('available'))}",
+        f"Ready: {bool(status.get('ready'))}",
+        f"Storage: {storage or '-'}",
+        f"Reset on identity change: {bool(status.get('reset_on_identity_change', True))}",
+        f"Reset pending restart: {bool(status.get('reset_pending_restart', False))}",
+        f"Plaintext fallback: {bool(status.get('plaintext_fallback', False))}",
+    ]
+    if storage and storage.exists():
+        try:
+            stat_result = storage.stat()
+            lines.extend([
+                f"Storage size: {stat_result.st_size} bytes",
+                f"Storage permissions: {oct(stat_result.st_mode & 0o777)}",
+            ])
+        except OSError:
+            lines.append("Storage stat: unavailable")
+    else:
+        lines.append("Storage file: not created yet")
+    lines.append(
+        "Current identity: "
+        f"jid={identity.get('jid') or '-'} resource={identity.get('resource') or '-'} nick={identity.get('nick') or '-'}"
+    )
+    if stored:
+        lines.append(
+            "Stored identity: "
+            f"jid={stored.get('jid') or '-'} resource={stored.get('resource') or '-'} nick={stored.get('nick') or '-'}"
+        )
+        lines.append(f"Identity matches: {stored == identity}")
+    else:
+        lines.append("Stored identity: none")
+    bot.reply(msg, lines)
+
+
+@command(
+    "omemo devices",
+    role=Role.ADMIN,
+    short="Show OMEMO recipients and conservative local device hints.",
+    usage="{prefix}omemo devices",
+    examples=["{prefix}omemo devices"],
+    category="admin",
+    context="any",
+)
+async def omemo_devices_command(bot, sender, nick, args, msg, is_room):
+    """Show current-room OMEMO recipients and local storage hints."""
+    lines = ["🔐 OMEMO Devices", ""]
+    if is_room and callable(getattr(bot, "_omemo_recipients_for_room", None)):
+        try:
+            recipients = await bot._omemo_recipients_for_room(str(msg["from"].bare))
+        except Exception as exc:
+            lines.append(f"Current room recipients: unavailable ({type(exc).__name__})")
+        else:
+            lines.append(f"Current room recipients: {len(recipients)}")
+            lines.extend(f"• {jid.bare}" for jid in sorted(recipients, key=lambda item: str(item.bare)))
+            if not recipients:
+                lines.append("• none")
+    else:
+        try:
+            lines.append(f"Direct peer: {str(msg['from'].bare)}")
+        except Exception:
+            pass
+
+    hints_fn = getattr(bot, "omemo_device_hints", None)
+    format_fn = getattr(bot, "format_omemo_device_ids", None)
+    hints = hints_fn() if callable(hints_fn) else {}
+    lines.extend(["", "Local storage hints:"])
+    if hints:
+        for jid in sorted(hints):
+            rendered = format_fn(hints[jid]) if callable(format_fn) else ", ".join(sorted(hints[jid]))
+            lines.append(f"• {jid}: {rendered}")
+    else:
+        lines.append("• no clear device-id hints found")
+    lines.extend(["", "Local storage hints are best-effort and may be stale."])
+    bot.reply(msg, lines)
+
+
+@command(
+    "omemo reset",
+    role=Role.OWNER,
+    short="Rotate OMEMO state and restart with a fresh local identity.",
+    usage="{prefix}omemo reset confirm",
+    examples=["{prefix}omemo reset", "{prefix}omemo reset confirm"],
+    category="admin",
+    context="private chat / MUC PM",
+)
+async def omemo_reset_command(bot, sender, nick, args, msg, is_room):
+    """Rotate OMEMO state after explicit confirmation and restart the bot."""
+    if not args or args[0].lower() != "confirm":
+        prefix = str(config.get("prefix", ",") or ",")
+        bot.reply_warn(
+            msg,
+            "This rotates the local OMEMO storage and identity metadata. "
+            f"Confirm with: {prefix}omemo reset confirm",
+        )
+        return
+    if getattr(bot, "omemo_reset_pending_restart", False):
+        bot.reply_info(msg, "OMEMO reset is already prepared and waiting for restart.", encrypted=False)
+        return
+    reset = getattr(bot, "reset_omemo_storage", None)
+    if not callable(reset):
+        bot.reply_error(msg, "OMEMO reset support is unavailable.")
+        return
+    storage_backup, metadata_backup = reset()
+    await audit_event(
+        bot,
+        "omemo_reset",
+        actor=sender,
+        target="omemo",
+        details={
+            "storage_backup": str(storage_backup) if storage_backup else None,
+            "metadata_backup": str(metadata_backup) if metadata_backup else None,
+        },
+    )
+    lines = [
+        "✅ OMEMO storage reset prepared.",
+        "OMEMO is disabled for this process until restart.",
+        "Restarting now to create and publish a fresh OMEMO identity.",
+    ]
+    if storage_backup:
+        lines.append(f"Old storage backup: {storage_backup}")
+    if metadata_backup:
+        lines.append(f"Old metadata backup: {metadata_backup}")
+    bot.reply(msg, lines, encrypted=False)
+    await asyncio.sleep(0.5)
+    await _graceful_command_shutdown(bot, exit_code=75)

@@ -1005,3 +1005,87 @@ def test_xmpp_status_lines_include_omemo_transport_state(monkeypatch, tmp_path):
     lines = _admin._xmpp_status_lines(bot, (), ())
 
     assert "OMEMO: enabled · ready · plaintext fallback off" in lines
+
+
+@pytest.mark.asyncio
+async def test_omemo_status_command_renders_runtime_state(tmp_path, fake_bot):
+    storage = tmp_path / "omemo.json"
+    storage.write_text("{}\n", encoding="utf-8")
+    fake_bot.omemo_status = lambda: {
+        "enabled": True,
+        "available": True,
+        "ready": True,
+        "storage": str(storage),
+        "plaintext_fallback": False,
+        "reset_on_identity_change": True,
+        "reset_pending_restart": False,
+        "identity": {"jid": "bot@example.org", "resource": "service", "nick": "EnvsBot"},
+        "stored_identity": {"jid": "bot@example.org", "resource": "service", "nick": "EnvsBot"},
+    }
+
+    await _admin.omemo_status_command(fake_bot, Sender(), None, [], DummyMsg(), False)
+
+    body = "\n".join(fake_bot._replies[-1][0])
+    assert "🔐 OMEMO Status" in body
+    assert "Enabled: True" in body
+    assert "Ready: True" in body
+    assert "Identity matches: True" in body
+    assert "Storage permissions:" in body
+
+
+@pytest.mark.asyncio
+async def test_omemo_devices_command_room_and_storage_hints(fake_bot):
+    fake_bot._omemo_recipients_for_room = AsyncMock(
+        return_value={__import__("slixmpp").JID("alice@example.org")}
+    )
+    fake_bot.omemo_device_hints = lambda: {"alice@example.org": {"123", "456"}}
+    fake_bot.format_omemo_device_ids = lambda ids: ", ".join(sorted(ids))
+
+    await _admin.omemo_devices_command(
+        fake_bot,
+        Sender(),
+        "nick",
+        [],
+        DummyMsg(groupchat=True),
+        True,
+    )
+
+    body = "\n".join(fake_bot._replies[-1][0])
+    assert "Current room recipients: 1" in body
+    assert "alice@example.org" in body
+    assert "123, 456" in body
+
+
+@pytest.mark.asyncio
+async def test_omemo_reset_command_requires_confirmation(fake_bot):
+    fake_bot.reply_warn = lambda msg, text, *a, **k: fake_bot._replies.append((text, msg))
+    await _admin.omemo_reset_command(fake_bot, Sender(), None, [], DummyMsg(), False)
+    assert "Confirm with:" in fake_bot._replies[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_omemo_reset_command_rotates_and_restarts(monkeypatch, tmp_path, fake_bot):
+    storage_backup = tmp_path / "omemo.json.bak"
+    metadata_backup = tmp_path / "omemo.identity.json.bak"
+    fake_bot.omemo_reset_pending_restart = False
+    fake_bot.reset_omemo_storage = Mock(return_value=(storage_backup, metadata_backup))
+    audit = AsyncMock()
+    monkeypatch.setattr(_admin, "audit_event", audit)
+    monkeypatch.setattr(_admin.asyncio, "sleep", AsyncMock())
+    graceful = AsyncMock()
+    monkeypatch.setattr(_admin, "_graceful_command_shutdown", graceful)
+
+    await _admin.omemo_reset_command(
+        fake_bot,
+        Sender(),
+        None,
+        ["confirm"],
+        DummyMsg(),
+        False,
+    )
+
+    fake_bot.reset_omemo_storage.assert_called_once_with()
+    audit.assert_awaited_once()
+    text, _msg = fake_bot._replies[-1]
+    assert "OMEMO storage reset prepared" in "\n".join(text)
+    graceful.assert_awaited_once_with(fake_bot, exit_code=75)

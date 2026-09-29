@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from contextvars import ContextVar, Token
 from typing import Any
 
+from envs_xmpp_core.xmpp.omemo import TaskLocalEncryptionMode
 from slixmpp.xmlstream import ET
 
 from bot.connection import session_is_ready
@@ -15,11 +15,7 @@ from utils.outbox import ensure_message_origin_id
 
 log = logging.getLogger(__name__)
 
-_EncryptionContext = tuple[object | None, bool | None]
-_REPLY_ENCRYPTED: ContextVar[_EncryptionContext | None] = ContextVar(
-    "envsbot_reply_encrypted",
-    default=None,
-)
+_REPLY_ENCRYPTION = TaskLocalEncryptionMode("envsbot_reply_encrypted")
 
 
 class MessageMixin:
@@ -30,26 +26,20 @@ class MessageMixin:
     def _set_reply_encryption_context(
         self,
         encrypted: bool | None,
-    ) -> Token[_EncryptionContext | None]:
+    ):
         """Set the encryption mode inherited by replies in the current task."""
-        return _REPLY_ENCRYPTED.set((asyncio.current_task(), encrypted))
+        return _REPLY_ENCRYPTION.set(encrypted)
 
     def _reset_reply_encryption_context(
         self,
-        token: Token[_EncryptionContext | None],
+        token,
     ) -> None:
         """Restore the previous task-local reply encryption mode."""
-        _REPLY_ENCRYPTED.reset(token)
+        _REPLY_ENCRYPTION.reset(token)
 
     def _get_reply_encryption_context(self) -> bool | None:
         """Return the current task's reply encryption mode, if any."""
-        value = _REPLY_ENCRYPTED.get()
-        if value is None:
-            return None
-        owner_task, encrypted = value
-        if owner_task is not None and asyncio.current_task() is not owner_task:
-            return None
-        return encrypted
+        return _REPLY_ENCRYPTION.get()
 
     async def _safe_send_message(
         self,
@@ -301,6 +291,7 @@ class MessageMixin:
         ephemeral: bool = False,
         no_store: bool | None = None,
         *,
+        encrypted: bool | None = None,
         persist: bool = False,
         category: str = "reply",
         dedupe_key: str | None = None,
@@ -310,7 +301,8 @@ class MessageMixin:
         del rate_limit  # legacy parameter; command rate limiting happens in dispatch
         try:
             message, _body = self._build_reply_message(msg, text, mention, thread, ephemeral, no_store)
-            encrypted = self._get_reply_encryption_context()
+            if encrypted is None:
+                encrypted = self._get_reply_encryption_context()
             task = self._schedule_reply_send(
                 message,
                 encrypted=encrypted,

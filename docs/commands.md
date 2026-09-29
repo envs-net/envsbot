@@ -144,6 +144,9 @@ Lower role values have more privileges. A command is visible when your role is s
 | `,doctor failed` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only failed doctor checks. |
 | `,doctor release` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Run release-readiness checks for version, docs, config, syntax, DB, backups, tasks and plugin metadata. |
 | `,doctor warnings` | [`doctor`](plugins/doctor.md) | `admin` | `private chat / MUC PM` | Show only doctor warning lines. |
+| `,omemo devices` | [`_admin`](plugins/_admin.md) | `admin` | `private chat / MUC PM` | Show OMEMO recipients and conservative local device hints. |
+| `,omemo reset` | [`_admin`](plugins/_admin.md) | `owner` | `private chat / MUC PM` | Rotate OMEMO state and restart with a fresh local identity. |
+| `,omemo status` | [`_admin`](plugins/_admin.md) | `admin` | `private chat / MUC PM` | Show OMEMO readiness, storage and identity state. |
 | `,outbox` | [`outbox`](plugins/outbox.md) | `admin` | `private chat / MUC PM` | Inspect pending and failed durable message deliveries. |
 | `,plugin diagnose` | [`plugins`](plugins/plugins.md) | `admin` | `private chat / MUC PM` | Show diagnostics for one plugin, including hooks, commands and tasks. |
 | `,plugin state` | [`plugins`](plugins/plugins.md) | `admin` | `private chat / MUC PM` | Show plugin-provided runtime state counters. |

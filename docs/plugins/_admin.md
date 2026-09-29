@@ -94,3 +94,45 @@ Examples:
 
 - `,bot version` — Show the running EnvsBot version and latest checked release.
 - `,version` — Show the running EnvsBot version and latest checked release.
+
+### `,omemo devices`
+
+Show OMEMO recipients and conservative local device hints.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,omemo devices`
+
+Examples:
+
+- `,omemo devices` — Show OMEMO recipients and conservative local device hints.
+
+### `,omemo reset`
+
+Rotate OMEMO state and restart with a fresh local identity.
+
+Role: `owner`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,omemo reset confirm`
+
+Examples:
+
+- `,omemo reset` — Rotate OMEMO state and restart with a fresh local identity.
+- `,omemo reset confirm` — Rotate OMEMO state and restart with a fresh local identity.
+
+### `,omemo status`
+
+Show OMEMO readiness, storage and identity state.
+
+Role: `admin`<br>
+Context: `private chat / MUC PM`<br>
+Category: `admin`<br>
+Usage: `,omemo status`
+
+Aliases: `,omemo`
+
+Examples:
+
+- `,omemo status` — Show OMEMO readiness, storage and identity state.
