@@ -216,6 +216,7 @@ def test_shared_quality_profile_covers_all_runtime_roots():
         "Command documentation",
         "Generated configuration sample",
         "Shared-core release audit",
+        "Dependency snapshot closure",
     ]
 
 
@@ -267,28 +268,29 @@ def test_ci_installs_and_smoke_tests_built_wheel():
     assert drone.count("python scripts/check_wheel.py") == 1
 
 
-def test_ci_runs_complete_suite_on_both_pythons_without_duplicate_coverage():
+def test_ci_runs_complete_suite_on_all_supported_pythons_without_duplicate_coverage():
     github = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
     drone = (ROOT / ".drone.yml").read_text(encoding="utf-8")
 
-    # Both supported Python versions still run the complete suite. Coverage is
-    # collected once on 3.13, while 3.12 avoids that extra instrumentation.
+    # All supported Python versions run the complete suite. Coverage is
+    # collected once on 3.13, while 3.12/3.14 avoid duplicate instrumentation.
     assert "Full test suite (Python 3.12, no coverage overhead)" in github
     assert "run: sh scripts/test.sh" in github
     assert "Full test suite with coverage gate (Python 3.13)" in github
     assert "run: sh scripts/test.sh --coverage" in github
+    assert "Full test suite (Python 3.14)" in github
     drone_lines = drone.splitlines()
-    assert drone_lines.count("    - sh scripts/test.sh") == 1
+    assert drone_lines.count("    - sh scripts/test.sh") == 2
     assert drone_lines.count("    - sh scripts/test.sh --coverage") == 1
 
     # Static quality/package work is a separate parallel job/pipeline rather
     # than being repeated serially before each full pytest run.
     assert "quality-package:" in github
-    assert "name: quality-package-3.13" in drone
+    assert "name: quality-package-3.14" in drone
     assert drone.count("python scripts/check_wheel.py") == 1
 
     # Python 3.12 still receives its dependency security audit even though the
-    # shared quality job itself runs on Python 3.13.
+    # shared quality job itself runs on Python 3.14.
     assert "pip-audit -r constraints/python312.txt" in github
     assert "pip-audit -r constraints/python312.txt" in drone
 
@@ -343,10 +345,14 @@ def test_markdown_tables_escape_pipes_inside_inline_code():
     assert broken == []
 
 
-def test_omemo_optional_dependency_is_declared_once():
+def test_omemo_dependency_is_part_of_default_runtime():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    runtime_dependencies = pyproject["project"]["dependencies"]
+    assert "envs-xmpp[omemo]>=1.6.1,<2.0" in runtime_dependencies
     assert pyproject["project"]["optional-dependencies"]["omemo"] == [
-        "envs-xmpp[omemo]>=1.6.0,<2.0"
+        "envs-xmpp[omemo]>=1.6.1,<2.0"
     ]
-    requirements = (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")
-    assert "envs-xmpp[omemo]>=1.6.0,<2.0" in requirements
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    compatibility_requirements = (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")
+    assert "envs-xmpp[omemo]>=1.6.1,<2.0" in requirements
+    assert "envs-xmpp[omemo]>=1.6.1,<2.0" in compatibility_requirements

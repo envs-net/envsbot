@@ -129,7 +129,7 @@ guess XMPP credentials.
 For updates, use a release tag:
 
 ```bash
-sudo ./scripts/deploy.sh update --to v2.3.0
+sudo ./scripts/deploy.sh update --to v2.4.0
 # or let the helper select the newest stable vX.Y.Z tag from the remote:
 sudo ./scripts/deploy.sh update
 ```
@@ -249,8 +249,7 @@ production deployments do not need `avatar.jpg` or `init_chat_slang.csv` copies
 in the application root. Configure a separate `AVATAR_PATH` only when using a
 custom avatar.
 
-When OMEMO support is enabled, install the optional transport dependency in
-the service virtualenv before restarting the bot:
+OMEMO transport dependencies are part of the normal envsbot installation. For legacy/manual environments, the compatibility requirements file can be used before restarting the bot:
 
 ```bash
 sudo apt install libsodium-dev libxeddsa-dev
@@ -262,6 +261,7 @@ mode: encrypted requests receive encrypted replies, plaintext requests receive
 plaintext replies, and proactive messages remain plaintext. Keep
 `OMEMO_PLAINTEXT_FALLBACK = False` unless an explicit plaintext downgrade is
 acceptable. No admin-room auto-encryption policy is used by EnvsBot.
+The shared adapter uses BTBV for newly seen devices; unsupported encrypted wire formats are rejected fail-closed rather than downgraded to plaintext.
 Managed ZIP backups include both the configured OMEMO state file and its
 identity metadata; restoring both together preserves the cryptographic session
 state expected by the configured bot identity. Treat those backup archives as

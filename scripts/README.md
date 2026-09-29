@@ -17,10 +17,11 @@ Run these commands from the repository root unless a script explicitly says othe
 | `mutmut.sh` | Safe wrapper around mutation testing that prevents imports from the unmutated checkout. | `./scripts/mutmut.sh fresh`, `./scripts/mutmut.sh results` |
 | `update-constraints.sh` | Reproduces or refreshes the complete Python 3.12/3.13/3.14 dependency snapshots. | `./scripts/update-constraints.sh 3.14`, `./scripts/update-constraints.sh 3.14 --refresh` |
 | `check_constraints.py` | Verifies that a constraint snapshot pins the complete installed dependency closure. | `python scripts/check_constraints.py constraints/python313.txt` |
+| `check_current_constraints.py` | Validates the audited dependency snapshot for the running Python minor against the installed closure. | `python scripts/check_current_constraints.py` |
 | `generate_config_sample.py` | Generates `config_sample.py` from the declarative configuration schema or checks that it is current. | `python scripts/generate_config_sample.py`, `python scripts/generate_config_sample.py --check` |
 | `generate_commands_md.py` | Regenerates the checked-in command documentation from registered command metadata. | `python scripts/generate_commands_md.py` |
 | `check_command_docs.py` | Validates that the checked-in generated command documentation matches the current command registry. | `python scripts/check_command_docs.py` |
-| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `utils/version.py` as the package version source. | `python scripts/check_release_tag.py v2.3.0` |
+| `check_release_tag.py` | Thin wrapper over `envs_xmpp_ops.release`; declares `utils/version.py` as the package version source. | `python scripts/check_release_tag.py v2.4.0` |
 | `check_wheel.py` | Thin wrapper over the shared wheel checker; declares envsbot entry point, required members and runtime assets. | `rm -rf dist && python -m build && python scripts/check_wheel.py` |
 
 `quality.sh` and `test.sh` intentionally use the same shared runners as the

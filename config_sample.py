@@ -56,8 +56,8 @@ XMPP_COMPLIANCE_MAX_READ_BYTES = 262144
 
 # ================= OMEMO =================
 
-# Enable optional OMEMO support. Install envsbot with the omemo extra or requirements-
-# omemo.txt first.
+# Enable OMEMO transport. Runtime dependencies are installed with envsbot; activation
+# remains opt-in.
 # Startup-only: restart envsbot after changing this value.
 OMEMO_ENABLED = False
 

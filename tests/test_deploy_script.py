@@ -1088,3 +1088,21 @@ def test_dependency_drift_check_rejects_version_drift(monkeypatch, tmp_path):
 
     with pytest.raises(deploy.DeployError, match=r"slixmpp: installed 1\.14\.1, expected 1\.17\.0"):
         deploy._check_dependency_drift(deployment)
+
+
+@pytest.mark.parametrize("minor", [12, 13, 14])
+def test_constraint_file_matches_supported_virtualenv_python(tmp_path, monkeypatch, minor):
+    deployment = _current_deployment(tmp_path)
+    deployment.venv_python.parent.mkdir(parents=True)
+    deployment.venv_python.write_text("", encoding="utf-8")
+    constraints = deployment.root / "constraints"
+    constraints.mkdir()
+    expected = constraints / f"python3{minor}.txt"
+    expected.write_text("envs-xmpp==1.6.1\n", encoding="utf-8")
+
+    class Result:
+        stdout = f"3.{minor}\n"
+
+    monkeypatch.setattr(deploy, "_run", lambda *_args, **_kwargs: Result())
+
+    assert deploy._constraint_file(deployment) == expected

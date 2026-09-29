@@ -342,8 +342,8 @@ def _venv_version(deployment: Deployment) -> tuple[int, int]:
 
 def _constraint_file(deployment: Deployment) -> Path:
     major, minor = _venv_version(deployment)
-    if major != 3 or minor not in {12, 13}:
-        raise DeployError(f"unsupported Python version {major}.{minor}; envsbot supports Python 3.12/3.13")
+    if major != 3 or minor not in {12, 13, 14}:
+        raise DeployError(f"unsupported Python version {major}.{minor}; envsbot supports Python 3.12/3.13/3.14")
     path = deployment.root / f"constraints/python3{minor}.txt"
     if not path.is_file():
         raise DeployError(f"constraint snapshot missing: {path}")

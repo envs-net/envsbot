@@ -92,12 +92,9 @@ pip install envsbot
 python -m pip show envsbot
 ```
 
-Install the optional OMEMO transport dependencies when encrypted replies are
-needed:
-
-```bash
-pip install 'envsbot[omemo]'
-```
+OMEMO transport dependencies are installed with envsbot by default. The historical
+`envsbot[omemo]` extra remains a compatibility alias; runtime encryption is still
+opt-in through `OMEMO_ENABLED`.
 
 The PyPI package contains the application code, `config_sample.py`,
 `vcard_sample.py`, and bundled read-only runtime assets. It does not create
@@ -113,7 +110,7 @@ Verify the installed application and shared core without starting XMPP:
 
 ```bash
 envsbot --version
-# envsbot 2.3.0 (envs-xmpp 1.6.0)
+# envsbot 2.4.0 (envs-xmpp 1.6.1)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -264,8 +261,7 @@ CONNECT_PORT = 5223
 
 ### Optional OMEMO
 
-OMEMO is opt-in. For a tagged checkout, install the optional dependency and
-enable the transport in `config.py`:
+OMEMO runtime dependencies are installed by default; enabling encrypted transport remains opt-in in `config.py`. For an older/manual checkout, `requirements-omemo.txt` remains available as a compatibility installer:
 
 ```bash
 # Debian/Ubuntu build prerequisites when not already installed:
@@ -287,6 +283,9 @@ incoming encryption context. There is deliberately no admin-room auto-encrypt
 setting in EnvsBot. If an encrypted reply cannot be produced and
 `OMEMO_PLAINTEXT_FALLBACK` is `False` (the recommended default), EnvsBot does
 not silently disclose that reply as plaintext.
+
+Trust model: the shared XEP-0384 adapter uses Blind Trust Before Verification (BTBV), matching the existing bot behavior. New devices are accepted automatically; there is currently no interactive fingerprint verification workflow.
+The shared core recognizes both legacy and OMEMO 2 encrypted payload namespaces, while actual wire-format support is provided by the installed `slixmpp-omemo` backend. Unsupported encrypted payloads are rejected fail-closed and are never reinterpreted as plaintext.
 
 Decrypted OMEMO bodies are excluded from the ordinary persistent message
 cache. The OMEMO state file is private runtime state and is created with

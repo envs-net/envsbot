@@ -20,6 +20,8 @@ jobs:
             constraints: constraints/python312.txt
           - python-version: "3.13"
             constraints: constraints/python313.txt
+          - python-version: "3.14"
+            constraints: constraints/python314.txt
 
     steps:
       - uses: actions/checkout@v7
@@ -47,7 +49,7 @@ jobs:
         run: sh scripts/test.sh
 
       - name: Static quality and dependency audit
-        if: matrix.python-version == '3.13'
+        if: matrix.python-version == '3.14'
         run: sh scripts/quality.sh --skip-tests
 
   mutation:

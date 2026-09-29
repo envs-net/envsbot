@@ -2,7 +2,7 @@
 
 `python312.txt`, `python313.txt`, and `python314.txt` are fully resolved dependency
 snapshots used for reproducible installs and dependency audits. They pin the complete
-runtime/development dependency closure, not only packages named directly in
+runtime/development dependency closure, including the default `envs-xmpp[omemo]` stack, not only packages named directly in
 `requirements.txt` and `requirements-dev.txt`.
 
 Reproduce the current reviewed snapshot intentionally on a networked development
