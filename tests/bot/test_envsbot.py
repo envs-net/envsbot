@@ -11,6 +11,7 @@ import envsbot
 import bot.lifecycle as lifecycle
 import bot.connection as connection
 import bot.permissions as bot_permissions
+from bot.routing import MessageRoutingMixin
 from envs_xmpp_core.release.state import ReleaseState
 
 
@@ -2461,3 +2462,94 @@ async def test_encrypted_muc_routing_uses_decrypted_message_and_encrypted_contex
         ",help", decrypted["from"], "Alice", decrypted, True
     )
     assert contexts == [True]
+    assert bot._get_reply_encryption_context() is None
+
+
+@pytest.mark.asyncio
+async def test_routing_helpers_tolerate_missing_optional_omemo_hooks():
+    class RoutingOnly(MessageRoutingMixin):
+        pass
+
+    router = RoutingOnly()
+    msg = {"type": "chat", "body": ",status"}
+
+    prepared, encrypted = await router._prepare_incoming_message(msg)
+
+    assert prepared is msg
+    assert encrypted is False
+    assert router._set_incoming_encryption_context(True) is None
+    router._reset_incoming_encryption_context(object())
+
+
+@pytest.mark.asyncio
+async def test_plain_muc_routing_caches_decrypted_message_as_room(bot):
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+    bot._cache_incoming_message = AsyncMock()
+    plain = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "Alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    bot._decrypt_incoming_omemo_message = AsyncMock(return_value=(plain, False))
+    bot.bot_plugins.dispatch_runtime_event = AsyncMock()
+    bot.handle_command = AsyncMock()
+
+    await bot.on_muc_message(plain)
+
+    bot._cache_incoming_message.assert_awaited_once_with(plain, is_room=True)
+
+
+@pytest.mark.asyncio
+async def test_routing_continues_without_plugin_manager(bot):
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+    bot._cache_incoming_message = AsyncMock()
+    bot.handle_command = AsyncMock()
+    del bot.bot_plugins
+
+    room_msg = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "Alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    private_msg = {
+        "type": "chat",
+        "body": ",status",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+
+    await bot.on_muc_message(room_msg)
+    await bot.on_private_message(private_msg)
+
+    assert bot.handle_command.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_routing_continues_without_runtime_event_dispatcher(bot):
+    bot.presence.joined_rooms = {"room@conference.example.org": "EnvBot"}
+    bot._cache_incoming_message = AsyncMock()
+    bot.handle_command = AsyncMock()
+    bot.bot_plugins = object()
+
+    room_msg = {
+        "type": "groupchat",
+        "body": ",help",
+        "from": DummyFrom("room@conference.example.org", "Alice"),
+        "mucnick": "Alice",
+        "get": lambda key, default=None: "Alice" if key == "mucnick" else default,
+    }
+    private_msg = {
+        "type": "chat",
+        "body": ",status",
+        "from": DummyFrom("alice@example.org", "desktop"),
+        "get": lambda key, default=None: default,
+    }
+
+    await bot.on_muc_message(room_msg)
+    await bot.on_private_message(private_msg)
+
+    assert bot.handle_command.await_count == 2
