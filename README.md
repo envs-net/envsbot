@@ -110,7 +110,7 @@ Verify the installed application and shared core without starting XMPP:
 
 ```bash
 envsbot --version
-# envsbot 2.4.0 (envs-xmpp 1.6.1)
+# envsbot 2.4.1 (envs-xmpp 1.6.1)
 ```
 
 For a structured 72-hour post-release observation checklist, see
