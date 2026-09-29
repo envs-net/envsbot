@@ -223,7 +223,7 @@ class OmemoMixin:
     async def _send_omemo_message_object(self, msg: Any) -> Any:
         if not await self._wait_for_omemo_ready():
             raise RuntimeError("OMEMO is not initialized")
-        plugin = self._omemo_host().plugin.get("xep_0384")
+        plugin = self._omemo_host().plugin.get("xep_0384", None)
         if plugin is None:
             raise RuntimeError("OMEMO plugin is not registered")
         mto = msg["to"]
@@ -238,10 +238,11 @@ class OmemoMixin:
         return await encrypt_and_send(plugin, msg, recipients, mto=str(mto))
 
     async def _decrypt_incoming_omemo_message(self, msg: Any) -> tuple[Any | None, bool]:
+        plugin = self._omemo_host().plugin.get("xep_0384", None)
         decrypted, encrypted, reason = await decrypt_incoming_message(
             msg,
             enabled=bool(getattr(self, "omemo_enabled", False)),
-            plugin_map=self._omemo_host().plugin,
+            plugin_map={"xep_0384": plugin} if plugin is not None else {},
             ready_event=getattr(self, "omemo_ready", asyncio.Event()),
             timeout=getattr(self, "omemo_ready_timeout", 15),
             reset_pending=bool(getattr(self, "omemo_reset_pending_restart", False)),

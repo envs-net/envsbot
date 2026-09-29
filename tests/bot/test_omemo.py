@@ -28,6 +28,16 @@ class DummyOmemoBot(OmemoMixin):
         self.add_event_handler = MagicMock()
 
 
+class StrictPluginManager:
+    """Mirror Slixmpp PluginManager.get(name, default)."""
+
+    def __init__(self, plugins):
+        self._plugins = dict(plugins)
+
+    def get(self, name, default):
+        return self._plugins.get(name, default)
+
+
 class FakeMessage(dict):
     def __init__(self, *, xml=None, **values):
         super().__init__(values)
@@ -179,6 +189,29 @@ async def test_decrypt_incoming_omemo_success_and_plaintext_passthrough():
     assert plain_result is plain
     assert plain_encrypted is False
     plugin.decrypt_message.assert_awaited_once_with(encrypted)
+
+
+@pytest.mark.asyncio
+async def test_omemo_accepts_slixmpp_style_plugin_manager_get_signature():
+    bot = DummyOmemoBot()
+    bot.omemo_enabled = True
+    bot.omemo_ready = asyncio.Event()
+    bot.omemo_ready.set()
+    encrypted_xml = ET.fromstring(
+        "<message><encrypted xmlns='eu.siacs.conversations.axolotl'/></message>"
+    )
+    encrypted = FakeMessage(xml=encrypted_xml, body="fallback")
+    decrypted = FakeMessage(body=",status")
+    plugin = SimpleNamespace(
+        is_encrypted=MagicMock(return_value="eu.siacs.conversations.axolotl"),
+        decrypt_message=AsyncMock(return_value=(decrypted, object())),
+    )
+    bot.plugin = StrictPluginManager({"xep_0384": plugin})
+
+    result, was_encrypted = await bot._decrypt_incoming_omemo_message(encrypted)
+
+    assert result is decrypted
+    assert was_encrypted is True
 
 
 @pytest.mark.asyncio
