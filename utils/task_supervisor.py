@@ -17,7 +17,7 @@ from envs_xmpp_core.runtime.tasks import (
 from envs_xmpp_core.runtime.tasks import (
     SupervisorOptions,
 )
-from envs_xmpp_core.runtime import TaskInfo
+from envs_xmpp_core.runtime import TaskInfo as TaskInfo  # Public compatibility re-export
 from envs_xmpp_core.runtime.tasks import (
     TaskSupervisor as CoreTaskSupervisor,
 )
