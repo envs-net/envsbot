@@ -71,6 +71,30 @@ class MessageMixin:
             origin_id = ensure_message_origin_id(message)
 
         encrypted = resolve_reply_encryption(encrypted, self._get_reply_encryption_context())
+        if getattr(self, "omemo_reset_pending_restart", False) and encrypted is not False:
+            # Identity rotation disables OMEMO until restart; explicit reset
+            # acknowledgements may use plaintext, but ordinary DM traffic must
+            # not silently change its security mode in the interim.
+            log.warning("[OMEMO] Deferring outbound delivery until identity reset restarts")
+            return False
+        if encrypted is None and bool(getattr(self, "omemo_enabled", False)):
+            # Scheduled DM traffic has no inbound command/task encryption
+            # context (RSS, daily health, upgrade/restart notes, outbox retry).
+            # The default MUST be the encrypted transport for direct chats.
+            # Preserve explicit False for intentionally plaintext replies and
+            # never try OMEMO for an ordinary public groupchat message.
+            try:
+                message_type = str(message["type"] or "chat").lower()
+            except Exception:
+                # Unknown stanza shape with OMEMO active: fail closed rather
+                # than risk sending a private notification in plaintext.
+                log.warning("[OMEMO] Cannot classify outbound message type")
+                return False
+            if message_type in {"chat", "normal"}:
+                encrypted = True
+            elif message_type != "groupchat":
+                log.warning("[OMEMO] Refusing unknown outbound message type: %s", message_type)
+                return False
 
         if not session_is_ready(self):
             if encrypted is True:
