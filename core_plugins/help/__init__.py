@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 
 import slixmpp
+from envs_xmpp_core.commands import resolve_structured_subcommand
 
 from core_plugins._core import _get_enabled_rooms, handle_room_toggle_command
 from core_plugins.help.formatting import (
@@ -75,7 +76,6 @@ from utils.command import (
     Role,
     check_permission,
     command,
-    command_subcommands,
     resolve_command,
 )
 from utils.command_metadata import help_example, help_subcommand
@@ -315,30 +315,19 @@ def _structured_subcommand_match(
     if len(tokens) < 2:
         return None
 
-    candidates = []
-    for registered_tokens, cmd in COMMANDS.items():
-        if not command_subcommands(cmd):
-            continue
-        if len(tokens) <= len(registered_tokens):
-            continue
-        if tokens[: len(registered_tokens)] != registered_tokens:
-            continue
-        if not check_permission(role, cmd):
-            continue
-        remainder = tokens[len(registered_tokens):]
-        for subcommand in _visible_subcommands(cmd, role, prefix):
-            names = [subcommand.name, *subcommand.aliases]
-            for name in names:
-                if not name or name.startswith("<"):
-                    continue
-                name_tokens = tuple(name.lower().split())
-                if remainder[: len(name_tokens)] == name_tokens:
-                    candidates.append(
-                        (len(registered_tokens) + len(name_tokens), cmd, subcommand)
-                    )
-    if not candidates:
+    # Keep application-specific permission checks outside the shared resolver.
+    visible_commands = {
+        registered_tokens: cmd
+        for registered_tokens, cmd in COMMANDS.items()
+        if check_permission(role, cmd)
+    }
+    cmd, subcommand, _remaining = resolve_structured_subcommand(
+        tokens,
+        visible_commands,
+        subcommands=lambda command: _visible_subcommands(command, role, prefix),
+    )
+    if cmd is None or subcommand is None:
         return None
-    _score, cmd, subcommand = max(candidates, key=lambda item: item[0])
     return cmd, subcommand
 
 

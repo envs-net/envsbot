@@ -7,10 +7,10 @@ import pytest
 
 import core_plugins.help as help_plugin
 import utils.command as command_utils
+import utils.config
 from utils.command_docs import _checkout_root
 from utils.command_registry import decorated_command_records
 
-import utils.config
 utils.config.config["prefix"] = ","
 
 
@@ -1288,3 +1288,28 @@ def test_structured_subcommand_names_and_aliases_are_unique_per_command():
                 seen[key] = subcommand.name
     assert count
     assert duplicates == []
+
+
+def test_structured_help_alias_match_respects_role_and_longest_name(monkeypatch):
+    """Alias metadata is not an authorization bypass for focused help."""
+    registry = command_utils.CommandRegistry()
+    monkeypatch.setattr(help_plugin, "COMMANDS", registry)
+
+    def handler(*_args, **_kwargs):
+        return None
+
+    cmd = command_utils.Command(
+        name="rooms invite", handler=handler, role=command_utils.Role.USER,
+        subcommands=[
+            help_plugin.help_subcommand("remove", "{prefix}rooms invite remove <id>", "Remove", aliases=("rm",)),
+            help_plugin.help_subcommand("remove all", "{prefix}rooms invite remove all", "Remove all", role=command_utils.Role.ADMIN, aliases=("rm all",)),
+        ],
+    )
+    registry.register("rooms invite", cmd)
+    registry.register("ri", cmd)
+    match = help_plugin._structured_subcommand_match("ri rm", ",", command_utils.Role.USER)
+    assert match is not None and match[1].name == "remove"
+    match = help_plugin._structured_subcommand_match("rooms invite RM ALL", ",", command_utils.Role.ADMIN)
+    assert match is not None and match[1].name == "remove all"
+    assert help_plugin._structured_subcommand_match("rooms invite rm all", ",", command_utils.Role.USER)[1].name == "remove"
+    assert help_plugin._structured_subcommand_match("rooms invite unknown", ",", command_utils.Role.USER) is None
