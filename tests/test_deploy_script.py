@@ -1098,7 +1098,7 @@ def test_constraint_file_matches_supported_virtualenv_python(tmp_path, monkeypat
     constraints = deployment.root / "constraints"
     constraints.mkdir()
     expected = constraints / f"python3{minor}.txt"
-    expected.write_text("envs-xmpp==1.6.1\n", encoding="utf-8")
+    expected.write_text("envs-xmpp==1.7.0\n", encoding="utf-8")
 
     class Result:
         stdout = f"3.{minor}\n"
