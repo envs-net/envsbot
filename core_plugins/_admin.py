@@ -33,10 +33,11 @@ from envs_xmpp_core.presentation import (
     render_status_sections,
     render_task_entry,
     render_task_summary,
+    room_lifecycle_summary,
 )
 
 from bot.lifecycle import _restart_notification_paths
-from bot.room_state import direct_roster_contacts
+from bot.room_state import ROOM_LIFECYCLE, direct_roster_contacts
 from core_plugins._core import JOINED_ROOMS
 from utils.audit import audit_event
 from utils.command import COMMANDS, Role, command
@@ -307,6 +308,9 @@ def _xmpp_status_lines(
         f"Avatar: {'published' if avatar_hash else 'missing'}",
         f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
     ]
+    tracked_rooms = ROOM_LIFECYCLE.snapshot()
+    if tracked_rooms:
+        lines.append(room_lifecycle_summary(tracked_rooms))
     omemo_status = getattr(bot, "omemo_status", None)
     if callable(omemo_status):
         try:
@@ -668,6 +672,13 @@ def _room_problem_lines(
                 room,
                 f"presence nick differs from runtime nick ({presence_nick} != {runtime_nick})",
             )
+
+    confirmed = {room.casefold() for room in set(core_rooms) | set(presence_rooms)}
+    for observation in ROOM_LIFECYCLE.snapshot():
+        if observation.state in {"degraded", "failed", "deferred"}:
+            add_problem(observation.room, f"lifecycle={observation.state}")
+        elif observation.state == "joined" and observation.room not in confirmed:
+            add_problem(observation.room, "lifecycle joined but runtime presence missing")
 
     if not problems:
         return []

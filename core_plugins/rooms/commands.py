@@ -9,9 +9,10 @@ from envs_xmpp_core.presentation import (
     render_room_entry,
     room_list_preamble,
     room_list_title,
+    room_view_with_lifecycle,
 )
 
-from bot.room_state import direct_roster_contacts
+from bot.room_state import ROOM_LIFECYCLE, direct_roster_contacts
 from utils.audit import audit_event
 from utils.command import Role, command
 from utils.formatting import format_page, parse_page_args
@@ -108,12 +109,15 @@ def _muc_room_views(bot, rows) -> list[RoomView]:
         if status not in (None, "", "{}"):
             details.append(f"status={status}")
         views.append(
-            RoomView(
-                jid=room,
-                joined=live is not None,
-                details=tuple(details),
-                expected_joined=bool(saved.get("autojoin", False)),
-                configured=room in stored,
+            room_view_with_lifecycle(
+                RoomView(
+                    jid=room,
+                    joined=live is not None,
+                    details=tuple(details),
+                    expected_joined=bool(saved.get("autojoin", False)),
+                    configured=room in stored,
+                ),
+                ROOM_LIFECYCLE.get(room),
             )
         )
     return views

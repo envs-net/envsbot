@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from bot.room_state import direct_roster_contacts
+from envs_xmpp_core.presentation import room_lifecycle_summary
+
+from bot.room_state import ROOM_LIFECYCLE, direct_roster_contacts
 from utils.backups import (
     backup_dir,
     backup_keep,
@@ -326,6 +328,10 @@ async def _room_lines(
             "ok" if not missing else f"missing: {', '.join(sorted(missing))}",
         ),
     ]
+    tracked_rooms = ROOM_LIFECYCLE.snapshot()
+    if tracked_rooms:
+        summary = room_lifecycle_summary(tracked_rooms).removeprefix("Room lifecycle: ")
+        lines.append(_line(None, "Room lifecycle", summary))
     if full and joined_rooms:
         try:
             from bot.room_state import JOINED_ROOMS
