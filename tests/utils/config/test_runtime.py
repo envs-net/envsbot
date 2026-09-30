@@ -528,3 +528,15 @@ def test_nested_schema_covers_reloadable_runtime_values():
     assert idlerpg_expected == runtime._idlerpg_values({}).keys()
     assert duck_expected <= runtime._duck_values({}).keys()
     assert user_expected == {"MAX_ROOM_NICKS"}
+
+
+def test_config_operator_change_preview_redacts_nested_secrets():
+    lines = runtime.config_change_lines(
+        {"runtime_extra": {"api_token": "old-token", "enabled": False}},
+        {"runtime_extra": {"api_token": "new-token", "enabled": True}},
+    )
+    message = "\n".join(lines)
+    assert "old-token" not in message
+    assert "new-token" not in message
+    assert "<redacted>" in message
+    assert "enabled" in message

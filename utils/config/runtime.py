@@ -7,7 +7,7 @@ import sys
 from collections.abc import Mapping
 from typing import Any, cast
 
-from envs_xmpp_core.config.changes import config_value_changes
+from envs_xmpp_core.config.operator import format_config_change_lines
 from envs_xmpp_core.security import redact_named
 
 from utils.config.spec import (
@@ -51,12 +51,7 @@ def _display_value(key: str, value: object) -> str:
 
 def config_change_lines(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:
     """Return human-readable changed config values."""
-    return [
-        f"- {_display_key(change.key)}: "
-        f"{_display_value(change.key, change.before)} → "
-        f"{_display_value(change.key, change.after)}"
-        for change in config_value_changes(before, after)
-    ]
+    return format_config_change_lines(dict(before), dict(after), display_key=_display_key)
 
 
 def startup_change_lines(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:

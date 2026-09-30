@@ -41,6 +41,7 @@ from envs_xmpp_core.storage.restore import (
     RestoreFileSpec,
     RestoreTransactionError,
     replace_restore_file,
+    restore_recovery_report,
     run_restore_transaction,
 )
 from envs_xmpp_core.storage.sqlite import check_sqlite_integrity
@@ -916,12 +917,10 @@ async def restore_backup(bot: Any, archive_path: Path) -> dict[str, Any]:
                 replace_file=_publish_restore_spec,
             )
         except RestoreTransactionError as exc:
-            if exc.rollback_attempted:
-                if exc.rollback_errors or exc.recovery_errors:
-                    details = "; ".join(
-                        str(item)
-                        for item in (*exc.rollback_errors, *exc.recovery_errors)
-                    )
+            recovery = restore_recovery_report(exc)
+            if recovery.outcome in {"rollback_complete", "rollback_incomplete"}:
+                if recovery.outcome == "rollback_incomplete":
+                    details = "; ".join(str(item) for item in recovery.errors)
                     raise RestoreRuntimeQuiescedError(
                         "Restore failed and automatic rollback also failed; "
                         f"safety backup {safety_backup.name} was preserved. "

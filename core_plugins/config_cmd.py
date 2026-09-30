@@ -8,6 +8,11 @@ from collections.abc import Iterable, Sequence
 from contextlib import suppress
 
 from envs_xmpp_core.config.literals import parse_literal
+from envs_xmpp_core.config.operator import (
+    ConfigReloadReport,
+    format_config_diff_entries,
+    render_config_reload_report,
+)
 from envs_xmpp_core.config.python_file import (
     ConfigFileTransactionError,
     PythonConfigEdit,
@@ -224,27 +229,23 @@ async def _apply_config_reload(bot, sender: str, before: dict, new_config: dict)
             apply_runtime_config(bot, effective_config, config)
         raise
 
-    notes = ["config.py reloaded."]
-    if changed_lines:
-        notes.append("\nChanged:")
-        notes.extend(changed_lines)
-    else:
-        notes.append("\nNo config changes detected.")
-
-    if runtime_notes:
-        notes.append("\nApplied at runtime:")
-        notes.extend(f"- {line}" for line in runtime_notes)
-
-    if restarted:
-        notes.append("\nRestarted plugin tasks:")
-        notes.extend(f"- {line}" for line in restarted)
-
-    if startup_changes:
-        notes.append("\nStartup-only changes detected and NOT fully applied. Restart the bot to activate:")
-        notes.extend(startup_changes)
-
+    report = ConfigReloadReport(
+        changes=tuple(changed_lines),
+        runtime_actions=tuple(runtime_notes),
+        restarted_tasks=tuple(restarted),
+        startup_changes=tuple(startup_changes),
+    )
+    message = render_config_reload_report(
+        report,
+        heading="config.py reloaded.",
+        no_changes="No config changes detected.",
+        startup_heading=(
+            "Startup-only changes detected and NOT fully applied. "
+            "Restart the bot to activate:"
+        ),
+    )
     await audit_event(bot, "config_reloaded", actor=sender, target="config")
-    return "\n".join(notes)
+    return message
 
 
 def _is_secret_key(key: str) -> bool:
@@ -304,22 +305,15 @@ def _format_config_lines(cfg: dict) -> list[str]:
 
 def _config_diff_entries(cfg: dict) -> list[str]:
     sections = get_config_diff_sections(cfg)
-    lines: list[str] = []
-
-    for _section_title, entries in sections:
-        for name, current_value, default_value in entries:
-            if _is_secret_key(name):
-                continue
-            lines.extend([
-                f"• {name}",
-                f"  current: {_render_value(_redact_named(name, current_value))}",
-                f"  default: {_render_value(_redact_named(name, default_value))}",
-                "",
-            ])
-
-    if lines and lines[-1] == "":
-        lines.pop()
-    return lines
+    return format_config_diff_entries(
+        (
+            (name, current, default)
+            for _section_title, entries in sections
+            for name, current, default in entries
+        ),
+        format_value=lambda _name, value: _render_value(value),
+        hidden=_is_secret_key,
+    )
 
 
 def _config_diff_arg_requests_page(args: Sequence[str]) -> bool:
