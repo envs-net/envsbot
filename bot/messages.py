@@ -7,7 +7,13 @@ import inspect
 import logging
 from typing import Any
 
+from envs_xmpp_core.xmpp.messaging import message_context_from_stanza
 from envs_xmpp_core.xmpp.omemo import TaskLocalEncryptionMode
+from envs_xmpp_core.xmpp.outbound import (
+    can_persist_without_encryption_context,
+    resolve_reply_encryption,
+    transport_accepted,
+)
 from slixmpp.xmlstream import ET
 
 from bot.connection import session_is_ready
@@ -64,8 +70,7 @@ class MessageMixin:
             # is cleared, outbox recovery will replay the same XEP-0359 ID.
             origin_id = ensure_message_origin_id(message)
 
-        if encrypted is None:
-            encrypted = self._get_reply_encryption_context()
+        encrypted = resolve_reply_encryption(encrypted, self._get_reply_encryption_context())
 
         if not session_is_ready(self):
             if encrypted is True:
@@ -86,7 +91,7 @@ class MessageMixin:
                 result = message.send()
                 if inspect.isawaitable(result):
                     result = await result
-                if result is not False:
+                if transport_accepted(result):
                     return True
                 error = RuntimeError("Slixmpp did not accept the stanza")
             except Exception as exc:
@@ -103,7 +108,7 @@ class MessageMixin:
                         result = message.send()
                         if inspect.isawaitable(result):
                             result = await result
-                        if result is not False:
+                        if transport_accepted(result):
                             return True
                         error = RuntimeError("Slixmpp did not accept the plaintext fallback stanza")
                     except Exception as fallback_exc:
@@ -112,7 +117,7 @@ class MessageMixin:
                 else:
                     log.exception("[BOT] Failed to send message: %s", exc)
 
-        if persist and encrypted is not True:
+        if persist and can_persist_without_encryption_context(encrypted):
             outbox = getattr(self, "outbox", None)
             enqueue = getattr(outbox, "enqueue_message", None)
             if callable(enqueue):
@@ -157,10 +162,9 @@ class MessageMixin:
         body = "\n".join(text) if isinstance(text, list) else text
         body = self._format_reply_body(msg, body, mention)
 
-        if msg_type == "groupchat":
-            message = self.make_message(mto=msg["from"].bare, mbody=body, mtype="groupchat")
-        else:
-            message = self.make_message(mto=msg["from"], mbody=body, mtype="chat")
+        # The same route contract also covers MUC-PMs (full occupant JID).
+        route = message_context_from_stanza(msg).reply_route
+        message = self.make_message(mto=route.target, mbody=body, mtype=route.message_type)
 
         if thread:
             thread_id = msg.get("thread") or msg.get("id")

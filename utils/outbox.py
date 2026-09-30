@@ -7,12 +7,12 @@ import hashlib
 import inspect
 import logging
 import time
-import uuid
 from typing import Any
 
 from envs_xmpp_core.runtime.diagnostics import exception_summary
 from envs_xmpp_core.storage import OutboxCapacityError
 from envs_xmpp_core.storage.outbox import retry_delay_seconds
+from envs_xmpp_core.xmpp.outbound import ensure_message_origin_id as ensure_message_origin_id
 
 from bot.room_state import JOINED_ROOMS
 from utils.performance import observe
@@ -32,28 +32,6 @@ def message_dedupe_key(category: str, destination: str, body: str) -> str:
         f"{category}\0{destination}\0{body}".encode()
     ).hexdigest()
     return f"{category}:{digest}"
-
-
-def ensure_message_origin_id(message: Any, origin_id: str | None = None) -> str:
-    """Attach and return one stable XEP-0359 origin ID for a send attempt.
-
-    Durable sends call this *before* the first transport attempt and persist the
-    returned value if delivery ownership moves to the outbox.  Every retry then
-    reuses the same ID, so a server/client can recognize a replay after the
-    process died between transport acceptance and ``mark_sent()``.
-    """
-    stable = str(origin_id or "").strip() or uuid.uuid4().hex
-    try:
-        message["id"] = stable
-    except Exception:
-        log.debug("[OUTBOX] Could not set stable stanza id", exc_info=True)
-    try:
-        message["origin_id"]["id"] = stable
-    except Exception:
-        # Production EnvsBot registers xep_0359.  Keep the normal stanza id as
-        # a compatibility fallback for lightweight test doubles.
-        log.debug("[OUTBOX] Could not attach XEP-0359 origin-id", exc_info=True)
-    return stable
 
 
 async def durable_send(
