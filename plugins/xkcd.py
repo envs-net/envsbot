@@ -34,6 +34,7 @@ from utils.task_supervisor import (
     create_plugin_task,
     create_resilient_plugin_task,
     sleep_with_heartbeat,
+    wait_for_runtime_ready,
 )
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ XKCD_LATEST_URL = "https://xkcd.com/info.0.json"
 XKCD_COMIC_URL = "https://xkcd.com/{}"
 
 CHECK_INTERVAL = int(config.get("xkcd_check_interval", 3600) or 3600)
+STARTUP_RETRY_SECONDS = min(float(CHECK_INTERVAL), 30.0)
 INDEX_START_DELAY_SECONDS = int(config.get("xkcd_index_start_delay_seconds", 30) or 30)
 INDEX_REQUEST_DELAY_SECONDS = float(config.get("xkcd_index_request_delay_seconds", 0.15) or 0.15)
 XKCD_HTTP_TIMEOUT = float(config.get("xkcd_http_timeout", config.get("http_timeout_seconds", 10)) or 10)
@@ -508,10 +510,25 @@ async def xkcd_check_loop(bot):
     global LAST_COMIC_ID
 
     try:
+        await wait_for_runtime_ready(
+            bot,
+            plugin="xkcd",
+            name="xkcd-check",
+        )
+
         latest = await get_latest_xkcd()
-        if not latest:
-            log.error("[XKCD] Could not fetch initial comic info")
-            return
+        while not latest:
+            log.warning(
+                "[XKCD] Could not fetch initial comic info; retrying in %.1fs",
+                STARTUP_RETRY_SECONDS,
+            )
+            await sleep_with_heartbeat(
+                bot,
+                "xkcd",
+                "xkcd-check",
+                STARTUP_RETRY_SECONDS,
+            )
+            latest = await get_latest_xkcd()
 
         LAST_COMIC_ID = await get_last_comic_id(bot)
         current_id = int(latest.get("num", 0) or 0)

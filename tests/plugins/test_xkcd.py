@@ -747,8 +747,26 @@ async def test_xkcd_check_loop_initializes_catches_up_and_cancels(monkeypatch):
         await xkcd.xkcd_check_loop(bot)
     assert caught_up == [(8, 10)]
 
-    monkeypatch.setattr(xkcd, "get_latest_xkcd", AsyncMock(return_value=None))
-    assert await xkcd.xkcd_check_loop(bot) is None
+    saved.clear()
+    latest = AsyncMock(side_effect=[None, {"num": 10}])
+    sleeps = []
+
+    async def retry_then_cancel(_bot, plugin, name, delay):
+        sleeps.append((plugin, name, delay))
+        if len(sleeps) > 1:
+            raise xkcd.asyncio.CancelledError
+
+    monkeypatch.setattr(xkcd, "get_latest_xkcd", latest)
+    monkeypatch.setattr(xkcd, "get_last_comic_id", AsyncMock(return_value=0))
+    monkeypatch.setattr(xkcd, "sleep_with_heartbeat", retry_then_cancel)
+    with pytest.raises(xkcd.asyncio.CancelledError):
+        await xkcd.xkcd_check_loop(bot)
+    assert latest.await_count == 2
+    assert saved == [10]
+    assert sleeps == [
+        ("xkcd", "xkcd-check", xkcd.STARTUP_RETRY_SECONDS),
+        ("xkcd", "xkcd-check", xkcd.CHECK_INTERVAL),
+    ]
 
 
 @pytest.mark.asyncio
