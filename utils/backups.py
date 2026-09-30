@@ -62,7 +62,7 @@ from utils.runtime_paths import (
     omemo_storage_file,
     vcard_file,
 )
-from utils.task_supervisor import sleep_with_heartbeat, wait_for_runtime_ready
+from utils.task_supervisor import ExpectedTaskExit, sleep_with_heartbeat, wait_for_runtime_ready
 from utils.time_utils import datetime_from_timestamp, utc_now
 from utils.version import __version__
 
@@ -422,7 +422,7 @@ async def periodic_backup_worker(bot: Any) -> None:
     while True:
         interval = _periodic_backup_interval_seconds(bot)
         if interval <= 0:
-            return
+            raise ExpectedTaskExit("scheduled backup worker disabled")
 
         archives = await asyncio.to_thread(list_backups)
         age_seconds = backup_age_seconds(archives[0]) if archives else None

@@ -574,7 +574,8 @@ async def test_birthday_check_loop_cancelled_and_error(monkeypatch, caplog):
     monkeypatch.setattr(birthday_notify, "_check_and_announce_birthdays", AsyncMock())
     monkeypatch.setattr(birthday_notify, "_today", lambda: datetime.date(2026, 6, 24))
 
-    await birthday_notify._birthday_check_loop(MagicMock(), check_interval=1)
+    with pytest.raises(RuntimeError, match="sleep boom"):
+        await birthday_notify._birthday_check_loop(MagicMock(), check_interval=1)
     assert "Error in check loop" in caplog.text
 
 @pytest.mark.asyncio

@@ -747,6 +747,15 @@ def test_periodic_backup_worker_can_be_disabled():
 
 
 @pytest.mark.asyncio
+async def test_running_periodic_backup_worker_treats_disable_as_expected_exit(monkeypatch):
+    bot = SimpleNamespace(config={"backup_interval_hours": 0})
+    monkeypatch.setattr(backups, "wait_for_runtime_ready", AsyncMock())
+
+    with pytest.raises(backups.ExpectedTaskExit, match="scheduled backup worker disabled"):
+        await backups.periodic_backup_worker(bot)
+
+
+@pytest.mark.asyncio
 async def test_backup_never_archives_orphaned_omemo_state(backup_env, monkeypatch):
     """An optional but incomplete state/identity pair is omitted as a unit."""
     runtime_dir = backup_env.root / "runtime"

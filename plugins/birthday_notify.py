@@ -607,6 +607,7 @@ async def _birthday_check_loop(
 
     except Exception as exc:
         log.exception("[BIRTHDAY] Error in check loop: %s", exc)
+        raise
 
 
 # ============================================================================
