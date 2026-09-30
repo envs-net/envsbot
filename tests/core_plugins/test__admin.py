@@ -175,6 +175,7 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
                and "🤖 EnvsBot Status" in r[0][0] for r in replies)
     reply_lines = replies[-1][0]
     reply = "\n".join(reply_lines)
+    assert reply_lines[1] == "✅ Bot is online and healthy."
     assert "Core:" in reply
     assert "JID:" in reply
     assert "Prefix:" in reply
@@ -184,6 +185,7 @@ async def test_bot_status_success_and_all_fields(monkeypatch, fake_bot):
     assert "XMPP:" in reply
     assert "Connection:" in reply
     assert "Rooms: 2 joined MUCs · 1 direct contact (1:1/DM)" in reply
+    assert "Pending invites: 0" in reply
     assert "Plugins:" in reply
     assert "Database:" in reply
     assert "Health:" in reply
@@ -514,11 +516,16 @@ async def test_status_room_and_direct_contact_helpers(monkeypatch):
     xmpp_lines = _admin._xmpp_status_lines(bot, tuple(), stored_rows)
     assert xmpp_lines[0] == "Connection: example.org:5222 (STARTTLS)"
     assert xmpp_lines[1] == "Rooms: 0 joined MUCs · 1 direct contact (1:1/DM)"
+    assert xmpp_lines[2] == "Pending invites: 0"
     bot.client_roster["bob@example.org"] = {"subscription": "both"}
     xmpp_lines = _admin._xmpp_status_lines(
         bot, (("joined@example.org", {}),), stored_rows
     )
     assert xmpp_lines[1] == "Rooms: 1 joined MUC · 2 direct contacts (1:1/DM)"
+    bot.pending_room_invites = {"invite-1": {"room_jid": "new@example.org"}}
+    assert "Pending invites: 1" in _admin._xmpp_status_lines(
+        bot, (("joined@example.org", {}),), stored_rows
+    )
 
     monkeypatch.setattr(
         _admin,
@@ -718,6 +725,26 @@ def test_room_problem_lines_are_limited_and_point_to_rooms_list_all():
     assert len(lines) == 11
     assert sum(line.startswith("⚠️ room") for line in lines) == 10
     assert lines[-1] == "… 2 more room problems; see ,rooms list all"
+
+
+def test_status_health_banner_severity():
+    from utils.health import HealthCheck, HealthSnapshot
+
+    def snapshot(status):
+        return HealthSnapshot(
+            checked_at="now",
+            checks={"probe": HealthCheck("probe", status, "probe")},
+        )
+
+    assert _admin._status_health_banner(snapshot("ok")) == "✅ Bot is online and healthy."
+    assert (
+        _admin._status_health_banner(snapshot("warning"))
+        == "⚠️ Bot is online, but attention is needed."
+    )
+    assert (
+        _admin._status_health_banner(snapshot("error"))
+        == "❌ Bot is online, but problems were detected."
+    )
 
 
 @pytest.mark.asyncio

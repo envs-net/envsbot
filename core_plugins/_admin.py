@@ -301,9 +301,11 @@ def _xmpp_status_lines(
     avatar_hash = getattr(bot, "avatar_hash", None)
     vcard_path = vcard_file(config)
 
+    pending_invites = len(getattr(bot, "pending_room_invites", {}) or {})
     lines = [
         _xmpp_connection_line(bot),
         f"Rooms: {muc_label} · {direct_label}",
+        f"Pending invites: {pending_invites}",
         f"Occupants: {occupants} tracked",
         f"Avatar: {'published' if avatar_hash else 'missing'}",
         f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
@@ -746,6 +748,16 @@ def _task_status_lines(bot) -> list[str]:
     return lines
 
 
+def _status_health_banner(health: HealthSnapshot) -> str:
+    """Return the compact online/health banner used by bot status."""
+    statuses = {check.status for check in health.checks.values()}
+    if "error" in statuses:
+        return "❌ Bot is online, but problems were detected."
+    if "warning" in statuses:
+        return "⚠️ Bot is online, but attention is needed."
+    return "✅ Bot is online and healthy."
+
+
 async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     """Build the complete status reply."""
     set_bot_start_time(bot)
@@ -784,7 +796,11 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
             ]
         )
 
-    return render_status_sections("🤖 EnvsBot Status", sections)
+    return render_status_sections(
+        "🤖 EnvsBot Status",
+        sections,
+        preamble=[_status_health_banner(health)],
+    )
 
 
 def _invalid_status_args(args: list[str]) -> bool:
