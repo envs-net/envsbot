@@ -448,7 +448,7 @@ def _task_lines(
     if full:
         for task in open_circuits[:20]:
             lines.append(
-                _line(False, "Open circuit", f"{task.plugin}/{task.name}: {task.last_error or '-'}")
+                _line(False, "Open circuit", f"{task.scope}/{task.name}: {task.last_error or '-'}")
             )
 
     if health is not None:
@@ -499,7 +499,7 @@ def _task_lines(
             )
             if full:
                 for task in stale_items[:20]:
-                    lines.append(_line(False, "Stale task", f"{task.plugin}/{task.name}"))
+                    lines.append(_line(False, "Stale task", f"{task.scope}/{task.name}"))
         except Exception as exc:
             lines.append(_line(False, "Task heartbeat", str(exc)))
     return lines

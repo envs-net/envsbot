@@ -36,7 +36,7 @@ def bot():
     bot.watchdog = None
     bot.tasks = Supervisor([
         TaskInfo(
-            plugin="rss",
+            scope="rss",
             name="feed-loop",
             status="running",
             created_at="2026-06-22T10:00:00+00:00",
@@ -46,7 +46,7 @@ def bot():
             kind="service",
         ),
         TaskInfo(
-            plugin="xkcd",
+            scope="xkcd",
             name="index-update",
             status="done",
             created_at="2026-06-22T09:00:00+00:00",
@@ -55,7 +55,7 @@ def bot():
             last_error=None,
         ),
         TaskInfo(
-            plugin="birthday_notify",
+            scope="birthday_notify",
             name="birthday-loop",
             status="failed",
             created_at="2026-06-22T08:00:00+00:00",
@@ -185,7 +185,7 @@ async def test_tasks_restart_delegates_to_plugin_manager(msg):
 async def test_tasks_stale_command_lists_stale_tasks(msg):
     stale = [
         TaskInfo(
-            plugin="rss",
+            scope="rss",
             name="feed-loop",
             status="running",
             created_at="2026-06-22T10:00:00+00:00",

@@ -40,7 +40,7 @@ def _stale_ids(supervisor) -> set[tuple[str, str]]:
     if not callable(stale_getter):
         return set()
     return {
-        (task.plugin, task.name)
+        task.identity
         for task in stale_getter(max_age_seconds=_stale_after())
     }
 
@@ -127,7 +127,7 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
         )
         views = normalize_tasks(
             stale_tasks,
-            stale_ids={(task.plugin, task.name) for task in stale_tasks},
+            stale_ids={task.identity for task in stale_tasks},
         )
     else:
         tasks = list(supervisor.snapshot(include_done=True))

@@ -549,9 +549,9 @@ async def test_database_background_workers_use_runtime_supervisor(tmp_db_path):
     try:
         infos = supervisor.snapshot(include_done=False)
         by_name = {info.name: info for info in infos}
-        assert by_name["database-flush"].plugin == "_runtime"
+        assert by_name["database-flush"].scope == "_runtime"
         assert by_name["database-flush"].kind == "service"
-        assert by_name["database-maintenance"].plugin == "_runtime"
+        assert by_name["database-maintenance"].scope == "_runtime"
         assert by_name["database-maintenance"].kind == "service"
     finally:
         await db.close()

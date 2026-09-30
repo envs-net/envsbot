@@ -377,7 +377,7 @@ def _compact_task_health_lines(bot) -> list[str]:
         try:
             stale_after = float(config.get("task_stale_after_seconds", 3600) or 3600)
             stale_ids = {
-                (task.plugin, task.name)
+                task.identity
                 for task in stale_getter(max_age_seconds=stale_after)
             }
         except Exception:
@@ -721,7 +721,7 @@ def _task_status_lines(bot) -> list[str]:
     stale_ids: set[tuple[str, str]] = set()
     if callable(stale_getter):
         stale_ids = {
-            (task.plugin, task.name)
+            task.identity
             for task in stale_getter(max_age_seconds=stale_after)
         }
     views = normalize_tasks(supervisor.snapshot(include_done=True), stale_ids=stale_ids)

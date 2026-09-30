@@ -232,7 +232,7 @@ async def plugin_diagnose(bot, sender, nick, args, msg, is_room):
     if supervisor is not None:
         tasks = [
             task for task in supervisor.snapshot(include_done=True)
-            if task.plugin == name
+            if task.scope == name
         ]
 
     module = getattr(bot.bot_plugins, "plugins", {}).get(name)

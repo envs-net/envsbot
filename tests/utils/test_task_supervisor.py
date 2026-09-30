@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+import envs_xmpp_core.runtime.tasks as core_tasks
 from utils import task_supervisor as ts
 from utils.task_supervisor import ExpectedTaskExit, TaskSupervisor, create_plugin_task
 
@@ -191,7 +192,7 @@ async def test_cancel_task_keeps_timed_out_task_tracked(caplog):
     snapshot = supervisor.snapshot(include_done=False)
     assert [item.name for item in snapshot] == ["stubborn"]
     assert snapshot[0].status == "running"
-    assert "Plugin task did not stop in time: stubborn" in caplog.text
+    assert "Scope task did not stop in time: stubborn" in caplog.text
 
     release.set()
     task.cancel()
@@ -227,7 +228,7 @@ async def test_cancel_plugin_uses_wait_and_keeps_pending_tasks(caplog):
     snapshot = supervisor.snapshot(include_done=True)
     assert [item.name for item in snapshot] == ["stubborn"]
     assert snapshot[0].status == "running"
-    assert "Plugin task did not stop in time: stubborn" in caplog.text
+    assert "Scope task did not stop in time: stubborn" in caplog.text
 
     release.set()
     stubborn_task.cancel()
@@ -318,7 +319,7 @@ async def test_task_supervisor_failure_summary_and_cancel_all():
 
 @pytest.mark.asyncio
 async def test_task_supervisor_ignores_untracked_done_task_and_creator_shapes(caplog):
-    caplog.set_level("DEBUG", logger="utils.task_supervisor")
+    caplog.set_level("DEBUG", logger="envs_xmpp_core.runtime.tasks")
 
     async def marker():
         return "ok"
@@ -361,7 +362,7 @@ async def test_prune_task_unless_failed_removes_success_and_cancelled_tasks():
 
     supervisor._prune_task_unless_failed(success_task)
     assert success_task not in supervisor._tasks
-    assert "example" not in supervisor._by_plugin
+    assert "example" not in supervisor._by_scope
 
     cancelled_task = supervisor.create("example", sleeper(), name="cancelled")
     cancelled_task.cancel()
@@ -371,7 +372,7 @@ async def test_prune_task_unless_failed_removes_success_and_cancelled_tasks():
 
     supervisor._prune_task_unless_failed(cancelled_task)
     assert cancelled_task not in supervisor._tasks
-    assert "example" not in supervisor._by_plugin
+    assert "example" not in supervisor._by_scope
 
 
 @pytest.mark.asyncio
@@ -427,7 +428,7 @@ async def test_heartbeat_touch_and_stale_task_edges(monkeypatch):
     assert supervisor.heartbeat("missing") is False
 
     first_snapshot = supervisor.snapshot(include_done=False)[0]
-    assert first_snapshot.plugin == "alpha"
+    assert first_snapshot.scope == "alpha"
     assert first_snapshot.name == "main"
     assert first_snapshot.heartbeat_at is not None
 
@@ -724,7 +725,7 @@ async def test_summary_by_kind_separates_service_and_one_shot_lifecycle():
 
 @pytest.mark.asyncio
 async def test_completed_one_shot_history_is_bounded(monkeypatch):
-    monkeypatch.setattr(ts, "_COMPLETED_ONE_SHOT_HISTORY_LIMIT", 2)
+    monkeypatch.setattr(core_tasks, "_COMPLETED_ONE_SHOT_HISTORY_LIMIT", 2)
     supervisor = TaskSupervisor()
 
     async def quick(value):

@@ -95,7 +95,7 @@ async def _cancel_duplicate_supervised_room_tasks(
     for task, meta in tuple(task_meta.items()):
         if task is keep or task.done():
             continue
-        if not isinstance(meta, dict) or meta.get("plugin") != _dep_constants.PLUGIN_NAME:
+        if not isinstance(meta, dict) or meta.get("scope") != _dep_constants.PLUGIN_NAME:
             continue
         task_room = _room_jid_from_task_name(str(meta.get("name") or ""))
         if task_room != room_jid:

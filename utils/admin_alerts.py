@@ -269,13 +269,13 @@ class AdminAlertManager:
         for info in snapshot.check("tasks").data.get("snapshot", ()):
             if str(getattr(info, "circuit_state", "closed")) != "open":
                 continue
-            key = f"task-circuit:{info.plugin}:{info.name}"
+            key = f"task-circuit:{info.scope}:{info.name}"
             current.add(key)
             await self._set(
                 key,
                 True,
                 (
-                    f"Task circuit is open: {info.plugin}/{info.name} "
+                    f"Task circuit is open: {info.scope}/{info.name} "
                     f"({info.last_error or 'unknown error'})"
                 ),
                 fingerprint="open",

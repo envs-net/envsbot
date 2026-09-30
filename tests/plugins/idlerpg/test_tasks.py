@@ -98,12 +98,12 @@ async def test_ensure_game_task_cleans_duplicate_supervised_room_tasks():
 
     assert legacy.cancelled()
     assert idlerpg.ROOM_TASKS["room@conf"] is task
-    assert [(item.plugin, item.name, item.status) for item in snapshot] == [
+    assert [(item.scope, item.name, item.status) for item in snapshot] == [
         (idlerpg.PLUGIN_NAME, "room@conf", "running")
     ]
 
     await idlerpg._ensure_game_task(bot, "room@conf")
-    assert [(item.plugin, item.name, item.status) for item in bot.tasks.snapshot()] == [
+    assert [(item.scope, item.name, item.status) for item in bot.tasks.snapshot()] == [
         (idlerpg.PLUGIN_NAME, "room@conf", "running")
     ]
     await idlerpg._cancel_room_task("room@conf")
@@ -135,7 +135,7 @@ async def test_ensure_game_task_serializes_concurrent_start(monkeypatch):
 
     assert first is second
     assert checkpoint_calls == 1
-    assert [(item.plugin, item.name, item.status) for item in bot.tasks.snapshot()] == [
+    assert [(item.scope, item.name, item.status) for item in bot.tasks.snapshot()] == [
         (idlerpg.PLUGIN_NAME, "room@conf", "running")
     ]
 

@@ -6,11 +6,8 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
-from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Protocol, cast
-
-from utils.time_utils import utc_now
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +17,7 @@ from envs_xmpp_core.runtime.tasks import (
 from envs_xmpp_core.runtime.tasks import (
     SupervisorOptions,
 )
+from envs_xmpp_core.runtime import TaskInfo
 from envs_xmpp_core.runtime.tasks import (
     TaskSupervisor as CoreTaskSupervisor,
 )
@@ -39,7 +37,6 @@ from envs_xmpp_core.runtime.tasks import (
     wait_for_runtime_ready as _core_wait_for_runtime_ready,
 )
 
-_COMPLETED_ONE_SHOT_HISTORY_LIMIT = 50
 
 
 ExpectedTaskExit = CoreExpectedTaskExit
@@ -49,9 +46,6 @@ class BotLike(Protocol):
 
     bot_plugins: Any
 
-
-def _now() -> str:
-    return utc_now().isoformat(timespec="seconds")
 
 
 def runtime_is_ready(bot: Any) -> bool:
@@ -126,24 +120,6 @@ async def wait_for_event_with_heartbeat(
         interval=interval,
         wait_for_func=asyncio.wait_for,
     )
-
-
-@dataclass(frozen=True)
-class TaskInfo:
-    """Read-only task state for status output and diagnostics."""
-
-    plugin: str
-    name: str
-    status: str
-    created_at: str
-    done_at: str | None
-    cancelled: bool
-    last_error: str | None
-    heartbeat_at: str | None = None
-    restart_count: int = 0
-    circuit_state: str = "closed"
-    next_restart_at: str | None = None
-    kind: str = "one-shot"
 
 
 def _is_test_mock(candidate: object) -> bool:
@@ -306,22 +282,6 @@ class TaskSupervisor(CoreTaskSupervisor):
             stale_after=max(0.05, float(config.get("task_stale_after_seconds", 3600.0) or 3600.0)),
         )
         super().__init__(options, on_circuit_open=self._envs_circuit_open)
-        self._by_plugin = self._by_scope
-
-    def create(
-        self,
-        plugin: str,
-        coro: Awaitable[Any],
-        *,
-        name: str | None = None,
-        kind: str = "one-shot",
-    ) -> asyncio.Task[Any]:
-        """Create a core task while preserving envsbot's private metadata key."""
-        task = super().create(plugin, coro, name=name, kind=kind)
-        meta = self._tasks.get(task)
-        if meta is not None:
-            meta["plugin"] = plugin
-        return task
 
     async def _envs_circuit_open(self, plugin: str, name: str, error: str) -> None:
         if self.bot is None:
@@ -347,96 +307,9 @@ class TaskSupervisor(CoreTaskSupervisor):
         await sleep_with_heartbeat(self.bot, plugin, name, delay)
 
 
-    def _on_task_done(self, task: asyncio.Task[Any]) -> None:
-        if task not in self._tasks:
-            log.debug("[TASKS] Done callback for untracked task; metadata missing: %r", task)
-            return
-        super()._on_task_done(task)
-
-    def _prune_completed_one_shot_history(self) -> None:
-        completed = [
-            task for task, meta in self._tasks.items()
-            if task.done()
-            and not task.cancelled()
-            and meta.get("kind") != "service"
-            and meta.get("last_error") is None
-        ]
-        excess = len(completed) - _COMPLETED_ONE_SHOT_HISTORY_LIMIT
-        for task in completed[: max(0, excess)]:
-            self._forget_task(task)
-
-    async def cancel_task(
-        self,
-        task: asyncio.Task[Any],
-        *,
-        timeout: float = 5.0,
-    ) -> bool:
-        was_running = not task.done()
-        if was_running:
-            task.cancel()
-            done, pending = await asyncio.wait({task}, timeout=timeout)
-            if pending:
-                log.warning(
-                    "[TASKS] Plugin task did not stop in time: %s",
-                    self._tasks.get(task, {}).get("name") or task.get_name(),
-                )
-                return True
-            for done_task in done:
-                try:
-                    done_task.result()
-                except asyncio.CancelledError:
-                    continue
-                except Exception as exc:
-                    log.debug("[TASKS] Task raised during cancellation", exc_info=exc)
-        self._prune_task_unless_failed(task)
-        return was_running
-
     async def cancel_plugin(self, plugin: str, *, timeout: float = 5.0) -> int:
-        plugin_tasks = [
-            task for task, meta in tuple(self._tasks.items())
-            if meta.get("scope") == plugin
-        ]
-        running_tasks = [task for task in plugin_tasks if not task.done()]
-        for task in running_tasks:
-            task.cancel()
-        pending: set[asyncio.Task[Any]] = set()
-        if running_tasks:
-            done, pending = await asyncio.wait(running_tasks, timeout=timeout)
-            for task in pending:
-                log.warning(
-                    "[TASKS] Plugin task did not stop in time: %s",
-                    self._tasks.get(task, {}).get("name") or task.get_name(),
-                )
-            for done_task in done:
-                try:
-                    done_task.result()
-                except asyncio.CancelledError:
-                    continue
-                except Exception as exc:
-                    log.debug("[TASKS] Task raised during cancellation", exc_info=exc)
-        for task in plugin_tasks:
-            if task not in pending:
-                self._prune_task_unless_failed(task)
-        return len(running_tasks)
+        """Compatibility alias for cancelling one plugin-owned task scope."""
+        return await super().cancel_scope(plugin, timeout=timeout)
 
     def clear_plugin_failures(self, plugin: str) -> int:
         return super().clear_scope_failures(plugin)
-
-    def snapshot(self, *, include_done: bool = True) -> list[TaskInfo]:
-        return [
-            TaskInfo(
-                plugin=item.scope,
-                name=item.name,
-                status=item.status,
-                created_at=item.created_at,
-                done_at=item.done_at,
-                cancelled=item.cancelled,
-                last_error=item.last_error,
-                heartbeat_at=item.heartbeat_at,
-                restart_count=item.restart_count,
-                circuit_state=item.circuit_state,
-                next_restart_at=item.next_restart_at,
-                kind=item.kind,
-            )
-            for item in super().snapshot(include_done=include_done)
-        ]
