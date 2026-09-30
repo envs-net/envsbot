@@ -10,12 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from envs_xmpp_core.runtime import RoomLifecycleRegistry
+
 
 @dataclass
 class RoomState:
     """Mutable runtime state shared by the bot and room-aware plugins."""
 
     joined_rooms: dict[str, dict[str, Any]] = field(default_factory=dict)
+    lifecycle: RoomLifecycleRegistry = field(default_factory=RoomLifecycleRegistry)
     leaving_rooms: set[str] = field(default_factory=set)
     warned_plugin_default_keys: set[str] = field(default_factory=set)
 
@@ -25,6 +28,7 @@ room_state = RoomState()
 # Transitional aliases keep existing room-aware plugins source-compatible
 # while ownership remains in the bot layer.
 JOINED_ROOMS = room_state.joined_rooms
+ROOM_LIFECYCLE = room_state.lifecycle
 LEAVING_ROOMS = room_state.leaving_rooms
 WARNED_PLUGIN_DEFAULT_KEYS = room_state.warned_plugin_default_keys
 
@@ -135,6 +139,7 @@ def direct_roster_contacts(
 
 __all__ = [
     "JOINED_ROOMS",
+    "ROOM_LIFECYCLE",
     "LEAVING_ROOMS",
     "RoomState",
     "WARNED_PLUGIN_DEFAULT_KEYS",

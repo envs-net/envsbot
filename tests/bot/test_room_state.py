@@ -125,3 +125,19 @@ def test_direct_roster_contacts_handles_missing_roster_and_object_items():
     assert room_state.direct_roster_contacts(bot) == [
         ("alice@example.org", bot.client_roster["alice@example.org"]),
     ]
+
+
+def test_room_lifecycle_registry_survives_mirrors_but_not_reconnect() -> None:
+    registry = room_state.RoomLifecycleRegistry()
+    room = "room@conference.example.org"
+    registry.configure(room)
+    registry.begin_join(room)
+    assert registry.get(room).state == "joining"
+    registry.confirm_self_presence(room, "VerifiedBot")
+    assert registry.get(room).joined
+    registry.new_session()
+    assert registry.get(room).state == "configured"
+    assert not registry.get(room).joined
+    registry.begin_leave(room)
+    assert registry.new_session() == 2
+    assert registry.get(room).state == "leaving"

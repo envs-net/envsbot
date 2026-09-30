@@ -18,6 +18,7 @@ from slixmpp import JID
 
 from bot.room_state import (
     JOINED_ROOMS,
+    ROOM_LIFECYCLE,
 )
 from bot.room_state import (
     LEAVING_ROOMS as _LEAVING_ROOMS,
@@ -145,6 +146,7 @@ async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
         if isinstance(presence_rooms, dict):
             presence_rooms.pop(room_jid, None)
 
+    ROOM_LIFECYCLE.begin_join(room_jid)
     result = await join_muc_confirmed(
         muc,
         room_jid,
@@ -162,6 +164,11 @@ async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
         on_cleanup_error=log_cleanup_error,
     )
     if result.joined:
+        if _room_self_presence_confirmed(bot, room_jid):
+            room_info = JOINED_ROOMS.get(room_jid, {})
+            confirmed_nick = str(room_info.get("nick") or "")
+            if confirmed_nick:
+                ROOM_LIFECYCLE.confirm_self_presence(room_jid, confirmed_nick)
         if result.waiter_error is not None:
             log.debug(
                 "[ROOMS] %s ended after self-presence for %s: %s",
@@ -173,6 +180,7 @@ async def _join_muc_with_timeout(bot, muc, room_jid: str, nick: str) -> None:
     error = result.error or TimeoutError(
         f"No self-presence received within {_ROOM_JOIN_TIMEOUT_SECONDS:g}s"
     )
+    ROOM_LIFECYCLE.mark_failed(room_jid, reason=f"{type(error).__name__}: {error}")
     raise error
 
 
@@ -265,6 +273,7 @@ async def _leave_runtime_room(bot, room_jid: str) -> bool:
 
     if joined or nick_to_leave:
         _LEAVING_ROOMS.add(room_jid)
+        ROOM_LIFECYCLE.begin_leave(room_jid)
 
     if nick_to_leave:
         try:

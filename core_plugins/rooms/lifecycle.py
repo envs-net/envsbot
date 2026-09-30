@@ -6,6 +6,7 @@ import asyncio
 import time
 from functools import partial
 
+from bot.room_state import ROOM_LIFECYCLE
 from utils.config import config
 from utils.task_supervisor import (
     create_plugin_task,
@@ -89,6 +90,7 @@ def _record_join_failure(
         "next_attempt": timestamp + delay,
         "last_error": detail,
     }
+    ROOM_LIFECYCLE.mark_deferred(room_jid, reason=detail, retry_at=timestamp + delay)
     return delay
 
 
@@ -126,6 +128,7 @@ def _mark_room_joined(
     room_info.setdefault("nicks", {})
 
     bot.presence.joined_rooms[room_jid] = str(room_info["nick"])
+    ROOM_LIFECYCLE.confirm_self_presence(room_jid, str(room_info["nick"]))
     _clear_join_failure(room_jid)
 
 
@@ -214,6 +217,7 @@ async def autojoin_rooms(bot):
     for raw_room_jid, nick, autojoin, status in rows:
         room_jid = _jid_bare(raw_room_jid)
         if autojoin and room_jid:
+            ROOM_LIFECYCLE.configure(room_jid)
             attempts.append(
                 join_one(room_jid, str(nick), autojoin, status)
             )
@@ -252,6 +256,7 @@ async def reconcile_autojoin_rooms(
     for raw_room_jid, nick, autojoin, status in rows:
         room_jid = _jid_bare(raw_room_jid)
         if autojoin and room_jid:
+            ROOM_LIFECYCLE.configure(room_jid)
             autojoin_rows.append((room_jid, str(nick), autojoin, status))
 
     configured_rooms = {row[0] for row in autojoin_rows}
@@ -259,20 +264,26 @@ async def reconcile_autojoin_rooms(
     for room_jid in tuple(_REJOIN_STATE):
         if room_jid not in configured_rooms:
             _REJOIN_STATE.pop(room_jid, None)
+            ROOM_LIFECYCLE.forget(room_jid)
 
     muc_joined_rooms = await _muc_joined_room_snapshot(muc)
     timestamp = time.time() if now is None else float(now)
 
     for room_jid, nick, autojoin, status in autojoin_rows:
         if room_jid in _LEAVING_ROOMS:
+            ROOM_LIFECYCLE.begin_leave(room_jid)
             summary["intentional"] += 1
             continue
 
         if _room_join_is_confirmed(bot, room_jid, muc_joined_rooms):
             summary["healthy"] += 1
+            runtime_nick = str(JOINED_ROOMS[room_jid].get("nick") or "")
+            if runtime_nick:
+                ROOM_LIFECYCLE.confirm_self_presence(room_jid, runtime_nick)
             _clear_join_failure(room_jid)
             continue
 
+        ROOM_LIFECYCLE.mark_degraded(room_jid, reason="membership not confirmed")
         # Remove incomplete or stale mirrors so delivery code does not treat
         # the room as usable while a repair attempt is still pending.
         JOINED_ROOMS.pop(room_jid, None)
@@ -283,6 +294,9 @@ async def reconcile_autojoin_rooms(
         retry_state = _REJOIN_STATE.get(room_jid, {})
         next_attempt = _state_float(retry_state.get("next_attempt", 0))
         if timestamp < next_attempt:
+            ROOM_LIFECYCLE.mark_deferred(
+                room_jid, retry_at=next_attempt, reason="autojoin backoff"
+            )
             summary["deferred"] += 1
             continue
 
@@ -405,6 +419,7 @@ def _invalidate_session_memberships(bot) -> None:
         presence_rooms.clear()
     _ROOM_JOIN_EVENTS.clear()
     _REJOIN_STATE.clear()
+    ROOM_LIFECYCLE.new_session()
 
 
 async def on_session_ready(bot):
@@ -538,3 +553,4 @@ async def on_unload(bot):
     bot.presence.joined_rooms.clear()
     _ROOM_JOIN_EVENTS.clear()
     _REJOIN_STATE.clear()
+    ROOM_LIFECYCLE.clear()

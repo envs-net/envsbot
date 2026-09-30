@@ -4,13 +4,13 @@ import logging
 import core_plugins.rooms.state as rooms_state
 
 from .helpers import (
-    AsyncMock,
     BOT_JID,
     BOT_NICK,
-    MagicMock,
     ROOM_JID,
-    USER_NICK,
     USER_JID,
+    USER_NICK,
+    AsyncMock,
+    MagicMock,
     make_presence,
     patch,
     pytest,
@@ -134,6 +134,8 @@ async def test_on_muc_presence_join_or_leave(fake_bot):
     assert ROOM_JID in rooms.JOINED_ROOMS
     assert BOT_NICK in rooms.JOINED_ROOMS[ROOM_JID]["nicks"]
     assert fake_bot.presence.joined_rooms[ROOM_JID] == BOT_NICK
+    observation = rooms_state.ROOM_LIFECYCLE.get(ROOM_JID)
+    assert observation is not None and observation.joined and observation.nick == BOT_NICK
 
     # User joins.
     await rooms.on_muc_presence(fake_bot, make_presence(USER_NICK))
@@ -156,6 +158,8 @@ async def test_on_muc_presence_join_or_leave(fake_bot):
     )
     assert ROOM_JID not in rooms.JOINED_ROOMS
     assert ROOM_JID not in fake_bot.presence.joined_rooms
+    observation = rooms_state.ROOM_LIFECYCLE.get(ROOM_JID)
+    assert observation is not None and observation.state == "degraded"
 
 
 @pytest.mark.asyncio

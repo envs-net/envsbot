@@ -5,6 +5,8 @@ import inspect
 
 from envs_xmpp_core.xmpp.occupants import normalize_affiliation, normalize_role
 
+from bot.room_state import ROOM_LIFECYCLE
+
 from .permissions import _sender_can_manage_room_settings
 from .state import _LEAVING_ROOMS, JOINED_ROOMS, _jid_bare, _room_join_event, log
 
@@ -143,6 +145,12 @@ async def on_muc_presence(bot, pres):
                 )
                 if isinstance(presence_rooms, dict):
                     presence_rooms.pop(room, None)
+                if room in _LEAVING_ROOMS:
+                    ROOM_LIFECYCLE.begin_leave(room)
+                else:
+                    ROOM_LIFECYCLE.mark_degraded(
+                        room, reason="bot self-presence unavailable"
+                    )
                 log.info(f"[ROOMS] Bot left room {
                          room}, cleaned up room state.")
             return
@@ -178,6 +186,7 @@ async def on_muc_presence(bot, pres):
             )
             if isinstance(presence_rooms, dict):
                 presence_rooms[room] = nick
+            ROOM_LIFECYCLE.confirm_self_presence(room, nick)
             _room_join_event(room).set()
 
         JOINED_ROOMS[room] = room_info

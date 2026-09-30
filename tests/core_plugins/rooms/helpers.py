@@ -1,17 +1,18 @@
+import logging
+import types
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 import core_plugins.rooms as rooms
 import core_plugins.rooms.lifecycle as rooms_lifecycle
 import core_plugins.rooms.state as rooms_state
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-import types
-import plugins.rss as rss_plugin
-import plugins.xkcd as xkcd_plugin
 import plugins.pin as pin_plugin
 import plugins.poll as poll_plugin
+import plugins.rss as rss_plugin
+import plugins.xkcd as xkcd_plugin
 from tests.helpers import PresenceStub, make_presence_stub
-import logging
 from utils.command import Role
-
 
 logging.getLogger("core_plugins.rooms").setLevel(logging.CRITICAL)
 
@@ -66,6 +67,7 @@ def cleanup_joined_rooms():
     rooms._LEAVING_ROOMS.clear()
     rooms_lifecycle._REJOIN_STATE.clear()
     rooms_state._ROOM_JOIN_EVENTS.clear()
+    rooms_state.ROOM_LIFECYCLE.clear()
     yield
     rooms.JOINED_ROOMS.clear()
     rooms.JOINED_ROOMS.update(orig)
@@ -74,6 +76,7 @@ def cleanup_joined_rooms():
     rooms_lifecycle._REJOIN_STATE.clear()
     rooms_lifecycle._REJOIN_STATE.update(orig_rejoin)
     rooms_state._ROOM_JOIN_EVENTS.clear()
+    rooms_state.ROOM_LIFECYCLE.clear()
 
 
 @pytest.fixture
