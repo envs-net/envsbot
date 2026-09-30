@@ -11,13 +11,13 @@ from typing import Any, Protocol, cast
 
 log = logging.getLogger(__name__)
 
+from envs_xmpp_core.runtime import TaskInfo as TaskInfo  # Public compatibility re-export
 from envs_xmpp_core.runtime.tasks import (
     ExpectedTaskExit as CoreExpectedTaskExit,
 )
 from envs_xmpp_core.runtime.tasks import (
     SupervisorOptions,
 )
-from envs_xmpp_core.runtime import TaskInfo as TaskInfo  # Public compatibility re-export
 from envs_xmpp_core.runtime.tasks import (
     TaskSupervisor as CoreTaskSupervisor,
 )
@@ -36,8 +36,6 @@ from envs_xmpp_core.runtime.tasks import (
 from envs_xmpp_core.runtime.tasks import (
     wait_for_runtime_ready as _core_wait_for_runtime_ready,
 )
-
-
 
 ExpectedTaskExit = CoreExpectedTaskExit
 
