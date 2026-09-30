@@ -92,6 +92,19 @@ def test_reset_rate_limit_state_without_provider_clears_all_states():
     assert google_state.last_429_monotonic is None
 
 
+def test_rate_limit_time_helpers_honor_explicit_now_and_subsecond_age():
+    state = translate._rate_limit_state("google-api")
+    state.until_monotonic = 110.5
+    state.last_429_monotonic = 100.25
+
+    assert translate._rate_limit_remaining("google-api", now=100.25) == pytest.approx(
+        10.25
+    )
+    assert translate._rate_limit_remaining("google-api", now=111.0) == 0.0
+    assert translate._last_rate_limit_age("google-api", now=100.5) == pytest.approx(0.25)
+    assert translate._last_rate_limit_age("google-api", now=99.0) == 0.0
+
+
 def test_parse_translation_args_explicit_languages():
     request = translate._parse_translation_args(["en", "uk", "Hello,", "world!"])
     assert request.source_language == "en"
