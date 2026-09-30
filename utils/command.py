@@ -10,6 +10,22 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import cast
+
+from envs_xmpp_core.commands import (
+    CommandExample,
+    SubcommandSpec,
+    command_spec_from,
+    command_tokens,
+    is_command_family,
+    resolve_longest_command,
+)
+from envs_xmpp_core.commands import (
+    normalize_command_example as _shared_normalize_example,
+)
+from envs_xmpp_core.commands import (
+    normalize_subcommand as _shared_normalize_subcommand,
+)
 
 
 class Role(IntEnum):
@@ -54,75 +70,38 @@ def is_banned(role: Role) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class CommandExample:
-    """One help example with an optional explanatory sentence."""
-
-    command: str
-    description: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class CommandSubcommand:
-    """Structured help metadata for a subcommand handled by a parent command."""
-
-    name: str
-    usage: str
-    short: str
-    aliases: tuple[str, ...] = ()
-    examples: tuple[CommandExample, ...] = ()
-    role: Role | None = None
-    context: str = ""
-    section: str = ""
+class CommandSubcommand(SubcommandSpec[Role]):
+    """Bot-specific, role-typed view of the shared subcommand specification."""
 
 
 def normalize_command_example(value: object) -> CommandExample:
-    """Normalize string, pair or mapping example metadata."""
-    if isinstance(value, CommandExample):
+    """Compatibility wrapper using shared example normalization."""
+    return _shared_normalize_example(value)
+
+
+def _parse_command_role(value: object) -> Role:
+    """Only envsbot interprets numeric or named command roles."""
+    if isinstance(value, Role):
         return value
-    if isinstance(value, str):
-        return CommandExample(value)
-    if isinstance(value, Mapping):
-        command_text = value.get("command", value.get("example", ""))
-        return CommandExample(
-            str(command_text or ""),
-            str(value.get("description", value.get("short", "")) or ""),
-        )
-    if isinstance(value, (tuple, list)) and value:
-        command_text = value[0]
-        description = value[1] if len(value) > 1 else ""
-        return CommandExample(str(command_text), str(description or ""))
-    return CommandExample(str(value))
+    if isinstance(value, str) and not value.strip().isdigit():
+        return Role[value.strip().upper()]
+    return Role(int(cast(int | str, value)))
 
 
 def normalize_command_subcommand(value: object) -> CommandSubcommand:
-    """Normalize mapping or dataclass subcommand metadata."""
+    """Adapt the shared metadata contract to envsbot's typed role policy."""
     if isinstance(value, CommandSubcommand):
         return value
-    if not isinstance(value, Mapping):
-        raise TypeError(f"Unsupported subcommand metadata: {value!r}")
-    examples = tuple(
-        normalize_command_example(example)
-        for example in (value.get("examples", ()) or ())
-    )
-    role = value.get("role")
-    if role is not None and not isinstance(role, Role):
-        if isinstance(role, str) and not role.strip().isdigit():
-            role = Role[role.strip().upper()]
-        else:
-            role = Role(int(role))
-    alias_values = value.get("aliases", ()) or ()
-    if isinstance(alias_values, str):
-        alias_values = (alias_values,)
-    aliases = tuple(str(alias) for alias in alias_values)
+    spec = _shared_normalize_subcommand(value, parse_role=_parse_command_role)
     return CommandSubcommand(
-        name=str(value.get("name", "") or ""),
-        usage=str(value.get("usage", "") or ""),
-        short=str(value.get("short", value.get("description", "")) or ""),
-        aliases=aliases,
-        examples=examples,
-        role=role,
-        context=str(value.get("context", "") or ""),
-        section=str(value.get("section", "") or ""),
+        name=spec.name,
+        usage=spec.usage,
+        short=spec.short,
+        aliases=spec.aliases,
+        examples=spec.examples,
+        role=_parse_command_role(spec.role) if spec.role is not None else None,
+        context=spec.context,
+        section=spec.section,
     )
 
 
@@ -137,7 +116,7 @@ def command_examples(cmd: object) -> list[CommandExample]:
 def command_subcommands(cmd: object) -> list[CommandSubcommand]:
     """Return normalized structured subcommands from a command-like object."""
     values = getattr(cmd, "subcommands", ()) or ()
-    if isinstance(values, (Mapping, CommandSubcommand)):
+    if isinstance(values, (Mapping, SubcommandSpec)):
         values = (values,)
     return [normalize_command_subcommand(value) for value in values]
 
@@ -161,7 +140,7 @@ class CommandRegistry:
         Register a command under the given name and optional plugin.
         Raises ValueError if the command name is already registered.
         """
-        tokens = tuple(name.lower().split())
+        tokens = command_tokens(name)
         if not tokens:
             return
 
@@ -186,9 +165,7 @@ class CommandRegistry:
 
     def _normalize_tokens(self, tokens: str | Iterable[str]) -> tuple[str, ...]:
         """Normalize command names or token iterables to registry keys."""
-        if isinstance(tokens, str):
-            return tuple(tokens.lower().split())
-        return tuple(str(token).lower() for token in tokens)
+        return command_tokens(tokens)
 
     def remove(self, tokens: str | Iterable[str]):
         tokens = self._normalize_tokens(tokens)
@@ -271,7 +248,7 @@ class CommandRegistry:
                 "category": cmd.category,
                 "context": cmd.context,
             }
-            subcommands = command_subcommands(cmd)
+            subcommands = command_spec_from(cmd, parse_role=_parse_command_role).subcommands
             if subcommands:
                 entry["subcommands"] = [
                     {
@@ -330,7 +307,7 @@ def _register(name: str, cmd: Command):
     Prevents duplicate registrations during plugin reloads by checking
     existing metadata on the handler.
     """
-    tokens = tuple(name.lower().split())
+    tokens = command_tokens(name)
 
     if not tokens:
         return
@@ -420,39 +397,7 @@ def resolve_command(text: str):
     Returns a tuple of (Command, arguments) if found, or (None, tokens)
     if no command matches the input.
     """
-    tokens = text.split()
-
-    if not tokens:
-        return None, []
-
-    lower_tokens = [t.lower() for t in tokens]
-
-    best_cmd = None
-    best_len = 0
-
-    candidates = COMMANDS.by_prefix.get(lower_tokens[0], ())
-
-    for cmd_tokens in candidates:
-
-        cmd = COMMANDS.get(cmd_tokens)
-
-        n = len(cmd_tokens)
-
-        if len(lower_tokens) < n:
-            continue
-
-        if tuple(lower_tokens[:n]) == cmd_tokens:
-
-            if n > best_len:
-                best_cmd = cmd
-                best_len = n
-
-    if best_cmd is None:
-        return None, tokens
-
-    args = tokens[best_len:]
-
-    return best_cmd, args
+    return resolve_longest_command(text, COMMANDS.index)
 
 
 def is_command_group(text: str) -> bool:
@@ -466,12 +411,7 @@ def is_command_group(text: str) -> bool:
     tokens = tuple(part.lower() for part in str(text).split() if part)
     if not tokens:
         return False
-
-    candidates = COMMANDS.by_prefix.get(tokens[0], ())
-    return any(
-        len(candidate) > len(tokens) and candidate[:len(tokens)] == tokens
-        for candidate in candidates
-    )
+    return is_command_family(tokens, COMMANDS.by_prefix.get(tokens[0], ()))
 
 
 def has_permission(user_role: Role, required_role: Role) -> bool:

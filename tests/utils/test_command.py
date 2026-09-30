@@ -1,5 +1,6 @@
 import pytest
-from utils.command import Role, role_from_int, is_banned, CommandRegistry
+
+from utils.command import CommandRegistry, Role, is_banned, role_from_int
 
 
 def fake_handler1():
@@ -356,3 +357,48 @@ def test_is_command_group_recognizes_only_registered_longer_prefixes(monkeypatch
     assert command_mod.is_command_group("rooms list") is False
     assert command_mod.is_command_group("rooms missing") is False
     assert command_mod.is_command_group("") is False
+
+
+def test_shared_command_spec_keeps_envsbot_roles_and_aliases() -> None:
+    from envs_xmpp_core.commands import CommandExample, command_spec_from
+
+    cmd = command_mod.Command(
+        name="omemo",
+        handler=fake_handler1,
+        role=Role.ADMIN,
+        aliases=["crypto"],
+        usage="{prefix}omemo status",
+        examples=[{"command": "{prefix}omemo status", "description": "Show state"}],
+        subcommands=[{"name": "status", "usage": "{prefix}omemo status", "role": "admin"}],
+    )
+    spec = command_spec_from(cmd, parse_role=command_mod._parse_command_role)
+    assert spec.name == "omemo"
+    assert spec.role is Role.ADMIN
+    assert spec.aliases == ("crypto",)
+    assert spec.examples == (CommandExample("{prefix}omemo status", "Show state"),)
+    assert spec.subcommands[0].role is Role.ADMIN
+
+
+def test_shared_multiword_lookup_preserves_envsbot_command_matching(monkeypatch) -> None:
+    reg = CommandRegistry()
+    monkeypatch.setattr(command_mod, "COMMANDS", reg)
+    root = command_mod.Command("rooms", fake_handler1, role=Role.USER)
+    child = command_mod.Command("rooms invite", fake_handler2, role=Role.USER)
+    reg.register("rooms", root)
+    reg.register("rooms invite", child)
+    assert command_mod.resolve_command("ROOMS invite Alice@Example.org") == (child, ["Alice@Example.org"])
+    assert command_mod.resolve_command("rooms list") == (root, ["list"])
+    assert command_mod.is_command_group("rooms")
+    assert not command_mod.is_command_group("rooms invite")
+
+
+def test_shared_subcommand_spec_adapts_role_to_envsbot_policy() -> None:
+    from envs_xmpp_core.commands import SubcommandSpec
+
+    raw = SubcommandSpec(
+        name="reset", usage="{prefix}omemo reset", short="Reset", role="moderator"
+    )
+    adapted = command_mod.normalize_command_subcommand(raw)
+    assert adapted.role is Role.MODERATOR
+    holder = type("Holder", (), {"subcommands": raw})()
+    assert command_mod.command_subcommands(holder) == [adapted]

@@ -10,6 +10,8 @@ from __future__ import annotations
 import inspect
 import re
 
+from envs_xmpp_core.commands import format_command_examples, format_command_usage
+
 from utils.command import (
     CommandExample,
     CommandSubcommand,
@@ -80,18 +82,12 @@ def _command_short(cmd_obj, prefix: str) -> str:
 def _command_usage(cmd_obj, prefix: str) -> list[str]:
     """Return usage lines from decorator metadata only."""
     usage = str(getattr(cmd_obj, "usage", "") or "")
-    return [usage.format(prefix=prefix)] if usage else []
+    return format_command_usage(usage, prefix)
 
 
 def _command_example_entries(cmd_obj, prefix: str) -> list[CommandExample]:
     """Return normalized, prefix-resolved command examples."""
-    return [
-        CommandExample(
-            example.command.format(prefix=prefix),
-            example.description.format(prefix=prefix),
-        )
-        for example in command_examples(cmd_obj)
-    ]
+    return format_command_examples(command_examples(cmd_obj), prefix)
 
 
 def _command_examples(cmd_obj, prefix: str) -> list[str]:
