@@ -298,6 +298,9 @@ async def backup_verify(bot, sender, nick, args, msg, is_room):
     if result["errors"]:
         lines.append("Errors:")
         lines.extend(f"• {error}" for error in result["errors"])
+    if result.get("warnings"):
+        lines.append("Warnings:")
+        lines.extend(f"• {warning}" for warning in result["warnings"])
     text = "\n".join(lines)
     if result["ok"]:
         bot.reply_ok(msg, text)
@@ -346,6 +349,10 @@ def _format_restore_plan_lines(plan: dict) -> list[str]:
     if manual_entries:
         lines.append("Kept in archive for offline/manual restore:")
         lines.extend(f"• {entry}" for entry in manual_entries)
+    skipped_unsafe = list(plan.get("skipped_unsafe") or [])
+    if skipped_unsafe:
+        lines.append("⚠️ Skipped incomplete OMEMO companion pair (not restored):")
+        lines.extend(f"• {entry}" for entry in skipped_unsafe)
     return lines
 
 

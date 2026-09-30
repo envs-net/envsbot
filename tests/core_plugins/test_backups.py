@@ -329,3 +329,17 @@ async def test_backup_restore_supports_dry_run(bot, msg, monkeypatch):
     assert "• bot.db -> /srv/envsbot/bot.db" in lines
     assert "Kept in archive for offline/manual restore:" in lines
     assert "• vcard.py" in lines
+
+
+def test_restore_plan_displays_skipped_incomplete_omemo_companion():
+    plan = {
+        "archive": "test.zip",
+        "manifest": {"created_at": "now"},
+        "entries": ["bot.db"],
+        "targets": {"bot.db": "/var/lib/envsbot/bot.db"},
+        "manual_restore": [],
+        "skipped_unsafe": ["omemo.json"],
+    }
+    lines = backups_plugin._format_restore_plan_lines(plan)
+    assert "⚠️ Skipped incomplete OMEMO companion pair (not restored):" in lines
+    assert "• omemo.json" in lines

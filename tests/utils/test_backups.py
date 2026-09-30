@@ -744,3 +744,71 @@ def test_periodic_backup_worker_can_be_disabled():
 
     assert backups.start_periodic_backup_worker(bot) is None
     supervisor.create_resilient.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_backup_never_archives_orphaned_omemo_state(backup_env, monkeypatch):
+    """An optional but incomplete state/identity pair is omitted as a unit."""
+    runtime_dir = backup_env.root / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "omemo.json").write_text('{"orphan": true}', encoding="utf-8")
+    monkeypatch.setitem(backups.config, "runtime_data_dir", str(runtime_dir))
+
+    bot = SimpleNamespace(db=FakeDB(backup_env.db_path))
+    archive = await backups.create_backup(bot, reason="orphan", verify=False)
+    with zipfile.ZipFile(archive) as zf:
+        members = set(zf.namelist())
+        manifest = json.loads(zf.read("manifest.json"))
+    assert not {"omemo.json", "omemo.identity.json"} & members
+    assert manifest["omemo_pair"] == "absent"
+
+
+@pytest.mark.parametrize("member", ["omemo.json", "omemo.identity.json"])
+def test_restore_plan_does_not_publish_single_omemo_companion(backup_env, member):
+    """Older archives may have only one member: never stage half the identity."""
+    backup_env.backup_dir.mkdir(parents=True, exist_ok=True)
+    path = backup_env.backup_dir / "envsbot-backup-partial.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("bot.db", b"database")
+        zf.writestr(member, "{}")
+        zf.writestr("manifest.json", json.dumps({"app": "envsbot"}))
+
+    plan = backups.restore_plan(path)
+    assert plan["omemo_pair"] == "incomplete"
+    assert plan["skipped_unsafe"] == [member]
+    assert not {"omemo.json", "omemo.identity.json"} & set(plan["entries"])
+    assert not {"omemo.json", "omemo.identity.json"} & set(plan["manual_restore"])
+
+    result = backups.verify_backup(path)
+    assert result["ok"] is True
+    assert result["omemo_pair"] == "incomplete"
+    assert result["warnings"]
+
+
+def test_restore_plan_keeps_complete_omemo_pair_together_when_one_target_is_local(
+    backup_env, monkeypatch,
+):
+    runtime = backup_env.root.parent / f"{backup_env.root.name}-external-runtime"
+    runtime.mkdir()
+    monkeypatch.setitem(backups.config, "runtime_data_dir", str(runtime))
+    # One target is outside BASE_DIR, while the other is inside the checkout.
+    original_targets = backups._target_paths
+
+    def targets():
+        result = original_targets()
+        result["omemo.identity.json"] = backup_env.root / "identity.json"
+        return result
+
+    monkeypatch.setattr(backups, "_target_paths", targets)
+    path = backup_env.backup_dir / "envsbot-backup-pair.zip"
+    backup_env.backup_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("bot.db", b"database")
+        zf.writestr("omemo.json", "{}")
+        zf.writestr("omemo.identity.json", "{}")
+        zf.writestr("manifest.json", json.dumps({"app": "envsbot"}))
+
+    plan = backups.restore_plan(path)
+    assert plan["omemo_pair"] == "complete"
+    assert {"omemo.json", "omemo.identity.json"} <= set(plan["manual_restore"])
+    assert not {"omemo.json", "omemo.identity.json"} & set(plan["entries"])

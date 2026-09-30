@@ -24,7 +24,9 @@ from envs_xmpp_core.storage.backup import (
     BackupArchiveEntrySpec,
     BackupArchiveError,
     BackupArchiveSource,
+    BackupCompanionPair,
     build_backup_archive,
+    inspect_backup_companion_pair,
     read_backup_manifest,
     stage_backup_archive,
     verify_backup_archive,
@@ -76,6 +78,7 @@ SUPPORT_FILE_ENTRIES = (
     "omemo.json",
     "omemo.identity.json",
 )
+OMEMO_BACKUP_PAIR = ("omemo.json", "omemo.identity.json")
 
 
 class BackupError(Exception):
@@ -169,6 +172,13 @@ def _archive_name(reason: str) -> str:
     return f"{BACKUP_PREFIX}-{timestamp}-{_safe_reason(reason)}.zip"
 
 
+def _omemo_archive_pair(available: set[str]) -> BackupCompanionPair:
+    """Shared, strictly paired OMEMO state/identity presence inspection."""
+    return inspect_backup_companion_pair(
+        available, primary=OMEMO_BACKUP_PAIR[0], companion=OMEMO_BACKUP_PAIR[1]
+    )
+
+
 def _source_items(db_path: Path) -> list[tuple[str, Path]]:
     config_path = get_runtime_config_path()
     config_arcname = "config.py" if config_path.suffix.lower() == ".py" else config_path.name
@@ -228,6 +238,7 @@ def _build_backup_archive(
             name=arcname,
             path=archive_source,
             source=original_source,
+            required=arcname in OMEMO_BACKUP_PAIR,
         )
         for arcname, archive_source, original_source in source_items
     ]
@@ -262,8 +273,19 @@ async def create_backup(
         if db_path.exists():
             await _create_database_snapshot(bot, db_path, db_snapshot)
 
+        source_items = _source_items(db_path)
+        present_names = {name for name, source in source_items if source.is_file()}
+        omemo_pair = _omemo_archive_pair(present_names)
+        if omemo_pair.incomplete:
+            log.warning(
+                "[BACKUP] OMEMO companion pair incomplete; omitting both files"
+            )
+        # A single OMEMO file must never be published as a recoverable pair.
+        manifest["omemo_pair"] = omemo_pair.state if omemo_pair.complete else "absent"
         archive_sources: list[tuple[str, Path, Path]] = []
-        for arcname, original_source in _source_items(db_path):
+        for arcname, original_source in source_items:
+            if arcname in OMEMO_BACKUP_PAIR and not omemo_pair.complete:
+                continue
             archive_source = db_snapshot if arcname == "bot.db" else original_source
             archive_sources.append((arcname, archive_source, original_source))
 
@@ -688,13 +710,24 @@ def _restore_specs(members: set[str]) -> tuple[list[tuple[str, Path]], list[str]
     project_root = BASE_DIR.resolve()
     manual: list[str] = []
     for entry in SUPPORT_FILE_ENTRIES:
-        if entry not in members:
+        if entry not in members or entry in OMEMO_BACKUP_PAIR:
             continue
         target = targets[entry].resolve()
         if target == project_root or project_root in target.parents:
             manual.append(entry)
         else:
             online.append((entry, target))
+
+    # The two identity files must share one restore destination policy.  When
+    # either target is inside the read-only checkout, keep both for manual
+    # recovery instead of writing only half of the state at runtime.
+    omemo_pair = _omemo_archive_pair(members)
+    if omemo_pair.complete:
+        pair_targets = [(entry, targets[entry].resolve()) for entry in OMEMO_BACKUP_PAIR]
+        if any(target == project_root or project_root in target.parents for _, target in pair_targets):
+            manual.extend(OMEMO_BACKUP_PAIR)
+        else:
+            online.extend(pair_targets)
 
     for config_entry in ("config.py", "config.json"):
         if config_entry in members and config_entry != config_member:
@@ -943,10 +976,14 @@ def verify_backup(path: Path) -> dict[str, Any]:
         manifest_name=MANIFEST_NAME,
         expected_fields={"app": "envsbot"},
     )
+    pair = _omemo_archive_pair(set(verification.members))
     return {
         "name": path.name,
         "ok": verification.ok,
         "errors": list(verification.errors),
+        "warnings": (["incomplete OMEMO companion pair; neither file will be restored"]
+                     if pair.incomplete else []),
+        "omemo_pair": pair.state,
         "manifest": manifest,
         "files": list(verification.files),
     }
@@ -1010,10 +1047,13 @@ def restore_plan(archive_path: Path) -> dict[str, Any]:
         members = _safe_members(archive)
     specs, manual_entries = _restore_specs(members)
     entries = [entry for entry, _target in specs]
+    pair = _omemo_archive_pair(members)
     return {
         "archive": archive_path.name,
         "manifest": manifest,
         "entries": entries,
         "targets": {entry: str(target) for entry, target in specs},
         "manual_restore": manual_entries,
+        "omemo_pair": pair.state,
+        "skipped_unsafe": list(pair.available) if pair.incomplete else [],
     }
