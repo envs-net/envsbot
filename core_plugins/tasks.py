@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from envs_xmpp_core.presentation import (
-    TaskListRequest,
     filter_task_views,
     normalize_tasks,
     parse_task_list_request,
     render_task_entry,
-    render_task_summary,
-    render_watchdog_lines,
+    render_task_overview,
+    task_list_title,
 )
 
 from utils.command import Role, command
@@ -44,17 +43,6 @@ def _stale_ids(supervisor) -> set[tuple[str, str]]:
         (task.plugin, task.name)
         for task in stale_getter(max_age_seconds=_stale_after())
     }
-
-
-def _task_title(request: TaskListRequest) -> str:
-    parts = ["🧵 Background Tasks"]
-    if request.scope:
-        parts.append(f"scope={request.scope}")
-    if request.mode not in {"overview", "inventory"}:
-        parts.append(request.mode)
-    if request.full:
-        parts.append("full")
-    return " — ".join(parts)
 
 
 @command(
@@ -132,7 +120,11 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
     stale_ids = _stale_ids(supervisor)
     if request.mode == "stale":
         stale_getter = getattr(supervisor, "stale_tasks", None)
-        stale_tasks = list(stale_getter(max_age_seconds=_stale_after())) if callable(stale_getter) else []
+        stale_tasks = (
+            list(stale_getter(max_age_seconds=_stale_after()))
+            if callable(stale_getter)
+            else []
+        )
         views = normalize_tasks(
             stale_tasks,
             stale_ids={(task.plugin, task.name) for task in stale_tasks},
@@ -142,15 +134,10 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
         views = normalize_tasks(tasks, stale_ids=stale_ids)
 
     if request.mode == "overview":
-        lines = [_task_title(request), "", *render_task_summary(views)]
-        problems = filter_task_views(views, TaskListRequest(mode="problems"))
-        if problems:
-            lines.extend(["", "⚠️ Problems"])
-            lines.extend(render_task_entry(view, full=False) for view in problems[:5])
         watchdog = getattr(bot, "watchdog", None)
         runtime_state = getattr(watchdog, "runtime_state", None)
-        if callable(runtime_state):
-            lines.extend(["", "🐕 Runtime Watchdog", *render_watchdog_lines(runtime_state())])
+        watchdog_state = runtime_state() if callable(runtime_state) else None
+        lines = render_task_overview(views, watchdog_state=watchdog_state)
         bot.reply(msg, lines)
         return
 
@@ -170,7 +157,7 @@ async def tasks_command(bot, sender, nick, args, msg, is_room):
     bot.reply(
         msg,
         format_page(
-            _task_title(request),
+            task_list_title(request),
             entries,
             page_request=request.page,
             page_size=5 if request.full else 10,

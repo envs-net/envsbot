@@ -30,7 +30,7 @@ from envs_xmpp_core.presentation import (
     filter_task_views,
     normalize_tasks,
     render_session_lifecycle_lines,
-    render_status_section,
+    render_status_sections,
     render_task_entry,
     render_task_summary,
 )
@@ -93,20 +93,18 @@ _STATUS_SECTION_ICONS = {
     "Database": "🗄️",
     "Room issues": "🏠",
     "Loaded plugins": "📦",
-    "Background tasks": "⏱️",
+    "Background tasks": "🧵",
     "Health": "🩺",
     "Caches": "🧠",
 }
 
 
-def _section(title: str, lines: list[str]) -> list[str]:
-    """Format one visually structured status section via envs-xmpp."""
-    return render_status_section(
-        StatusSection.from_lines(
-            title,
-            lines,
-            icon=_STATUS_SECTION_ICONS.get(title, "•"),
-        )
+def _status_section(title: str, lines: list[str]) -> StatusSection:
+    """Build one shared structured status section."""
+    return StatusSection.from_lines(
+        title,
+        lines,
+        icon=_STATUS_SECTION_ICONS.get(title, "•"),
     )
 
 
@@ -744,28 +742,38 @@ async def _build_status_lines(bot, *, full: bool = False) -> list[str]:
     stored_rooms = await _stored_rooms_snapshot(bot)
     health = await collect_health_snapshot(bot, verify_backup=False)
 
-    lines = ["🤖 EnvsBot Status", ""]
-    lines.extend(_section("Core", _core_status_lines(bot)))
-    lines.extend(_section("Runtime", _runtime_status_lines()))
-    lines.extend(
-        _section("XMPP", _xmpp_status_lines(bot, room_snapshot, stored_rooms, full=full))
-    )
+    sections = [
+        _status_section("Core", _core_status_lines(bot)),
+        _status_section("Runtime", _runtime_status_lines()),
+        _status_section(
+            "XMPP",
+            _xmpp_status_lines(bot, room_snapshot, stored_rooms, full=full),
+        ),
+    ]
 
     plugin_lines = _plugin_status_lines(bot, include_task_summary=False)
     plugin_lines.append(await _room_feature_override_line(bot, room_snapshot))
-    lines.extend(_section("Plugins", plugin_lines))
-    lines.extend(_section("Database", await _database_status_lines(bot, full=full)))
-    lines.extend(_section("Health", await _health_status_lines(bot, health=health)))
+    sections.extend(
+        [
+            _status_section("Plugins", plugin_lines),
+            _status_section("Database", await _database_status_lines(bot, full=full)),
+            _status_section("Health", await _health_status_lines(bot, health=health)),
+        ]
+    )
 
     if full:
         room_problems = _room_problem_lines(bot, room_snapshot, health)
         if room_problems:
-            lines.extend(_section("Room issues", room_problems))
-        lines.extend(_section("Loaded plugins", _plugin_detail_lines(bot)))
-        lines.extend(_section("Caches", _cache_detail_lines(bot, health=health)))
-        lines.extend(_section("Background tasks", _task_status_lines(bot)))
+            sections.append(_status_section("Room issues", room_problems))
+        sections.extend(
+            [
+                _status_section("Loaded plugins", _plugin_detail_lines(bot)),
+                _status_section("Caches", _cache_detail_lines(bot, health=health)),
+                _status_section("Background tasks", _task_status_lines(bot)),
+            ]
+        )
 
-    return lines[:-1] if lines and lines[-1] == "" else lines
+    return render_status_sections("🤖 EnvsBot Status", sections)
 
 
 def _invalid_status_args(args: list[str]) -> bool:

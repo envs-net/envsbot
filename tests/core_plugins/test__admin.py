@@ -330,13 +330,13 @@ async def test_bot_status_full_omits_healthy_rooms_and_includes_plugin_details(m
     assert "Background tasks:" in reply
     assert "Tasks: unavailable" not in reply
     assert "Users: unavailable" in reply
-    assert reply_lines.index("⏱️ Background tasks:") > reply_lines.index("🧠 Caches:")
+    assert reply_lines.index("🧵 Background tasks:") > reply_lines.index("🧠 Caches:")
     section_headers = [
         index
         for index, line in enumerate(reply_lines)
         if line.endswith(":") and not line.startswith(("├─", "└─"))
     ]
-    assert reply_lines.index("⏱️ Background tasks:") == max(section_headers)
+    assert reply_lines.index("🧵 Background tasks:") == max(section_headers)
 
 
 @pytest.mark.asyncio
@@ -417,12 +417,13 @@ async def test_on_load_sets_start_time(monkeypatch):
 def test_status_formatting_helpers_cover_edges(monkeypatch):
     assert _admin.human_time(24 * 3600 + 60) == "1d 1m"
     assert _admin.human_size(1024 ** 4) == "1.0 TiB"
-    assert _admin._section("Title", ["one", "two"]) == [
-        "• Title:", "├─ one", "└─ two", ""
-    ]
-    assert _admin._section("Core", ["ready"]) == [
-        "⚙️ Core:", "└─ ready", ""
-    ]
+    section = _admin._status_section("Title", ["one", "two"])
+    assert section.title == "Title"
+    assert section.icon == "•"
+    assert [field.value for field in section.fields] == ["one", "two"]
+    core_section = _admin._status_section("Core", ["ready"])
+    assert core_section.title == "Core"
+    assert core_section.icon == "⚙️"
 
     monkeypatch.setattr(_admin.metadata, "version", lambda package: "9.9")
     assert _admin._package_version("pkg") == "9.9"

@@ -7,7 +7,8 @@ from envs_xmpp_core.presentation import (
     filter_room_views,
     parse_room_list_request,
     render_room_entry,
-    room_summary,
+    room_list_preamble,
+    room_list_title,
 )
 
 from bot.room_state import direct_roster_contacts
@@ -650,13 +651,12 @@ async def rooms_list(bot, sender_jid, nick, args, msg, is_room):
         all_views = _muc_room_views(bot, rows)
         room_views = filter_room_views(all_views, room_request)
         details = [render_room_entry(view) for view in room_views]
-        preamble = [
-            room_summary(all_views),
-            "Legend: 🟢 joined · 🟠 attention · 🔴 unavailable · ⚪ not joined",
-        ]
-        if room_request.filter != "all":
-            preamble.append(f"View: {room_request.filter} · {len(room_views)} match(es)")
-        title = "📋 Rooms" + (f" — {room_request.filter}" if room_request.filter != "all" else "")
+        preamble = room_list_preamble(
+            all_views,
+            room_request,
+            matching_count=len(room_views),
+        )
+        title = room_list_title(room_request)
         command_hint = f"{bot.prefix}rooms list"
 
     bot.reply(
