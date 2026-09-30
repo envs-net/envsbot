@@ -13,6 +13,7 @@ from envs_xmpp_core.xmpp.omemo import (
     XEP_0384_module,
     XEP_0384Impl,
     collect_storage_device_hints,
+    configure_omemo_dependency_logging,
     current_identity,
     decrypt_incoming_message,
     encrypt_and_send,
@@ -25,6 +26,7 @@ from envs_xmpp_core.xmpp.omemo import (
     prepare_storage_file,
     read_identity_metadata,
     recipient_bare_jids,
+    require_omemo_bare_jid,
     rotate_storage_identity,
     wait_for_omemo_ready,
 )
@@ -100,10 +102,8 @@ class OmemoMixin:
         return cast(_OmemoHost, self)
 
     def _configure_omemo_dependency_logging(self) -> None:
-        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
-            return
-        for logger_name in ("omemo", "omemo.core", "slixmpp_omemo", "slixmpp_omemo.xep_0384"):
-            logging.getLogger(logger_name).setLevel(logging.ERROR)
+        """Compatibility wrapper for shared dependency logger setup."""
+        configure_omemo_dependency_logging()
 
     def configure_omemo(self) -> None:
         host = self._omemo_host()
@@ -168,10 +168,8 @@ class OmemoMixin:
         return normalize_bare_jid(value)
 
     def _bare_jid(self, value: object) -> str:
-        bare = normalize_bare_jid(value)
-        if not bare:
-            raise ValueError("OMEMO recipient does not contain a valid bare JID")
-        return bare
+        """Compatibility wrapper for strict shared OMEMO JID validation."""
+        return require_omemo_bare_jid(value)
 
     @staticmethod
     def _message_has_omemo_payload(msg: Any) -> bool:

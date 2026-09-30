@@ -86,7 +86,9 @@ class MessageMixin:
                     send_omemo = getattr(self, "_send_omemo_message_object", None)
                     if not callable(send_omemo):
                         raise RuntimeError("OMEMO transport is unavailable")
-                    await send_omemo(message)
+                    result = await send_omemo(message)
+                    if not transport_accepted(result):
+                        raise RuntimeError("OMEMO transport rejected outbound stanza")
                     return True
                 result = message.send()
                 if inspect.isawaitable(result):
