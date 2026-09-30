@@ -6,6 +6,8 @@ import inspect
 import logging
 from typing import Any
 
+from envs_xmpp_core.xmpp.messaging import message_context_from_stanza
+
 from utils.message_cache import is_delayed_message
 
 log = logging.getLogger(__name__)
@@ -61,16 +63,18 @@ class MessageRoutingMixin:
             log.debug("[BOT] Ignoring delayed MUC history message")
             return
         try:
-            room = msg["from"].bare
+            incoming = message_context_from_stanza(msg)
+            room = incoming.sender_bare
             nick = msg.get("mucnick")
             bot_nick = self.presence.joined_rooms.get(room)
             if bot_nick == nick:
                 return
-            if msg["type"] == "groupchat":
+            if incoming.is_room:
                 msg, encrypted = await self._prepare_incoming_message(msg)
                 if msg is None:
                     return
-                token = self._set_incoming_encryption_context(encrypted)
+                context = message_context_from_stanza(msg, encrypted=encrypted)
+                token = self._set_incoming_encryption_context(context.encrypted)
                 try:
                     # Never persist decrypted OMEMO plaintext in the ordinary
                     # message cache. Plain messages keep their existing cache
@@ -83,7 +87,7 @@ class MessageRoutingMixin:
                         result = dispatch_runtime_event("public_groupchat_message", msg)
                         if inspect.isawaitable(result):
                             await result
-                    await self.handle_command(msg["body"], msg["from"], nick, msg, True)
+                    await self.handle_command(context.body, msg["from"], nick, msg, True)
                 finally:
                     self._reset_incoming_encryption_context(token)
         except Exception as exc:
@@ -94,11 +98,14 @@ class MessageRoutingMixin:
         if not getattr(self, "accepting_commands", False):
             return
         try:
-            if msg["type"] in ("chat", "normal"):
+            if message_context_from_stanza(msg).message_type in ("chat", "normal"):
                 msg, encrypted = await self._prepare_incoming_message(msg)
                 if msg is None:
                     return
-                token = self._set_incoming_encryption_context(encrypted)
+                context = message_context_from_stanza(
+                    msg, encrypted=encrypted, joined_rooms=self.presence.joined_rooms
+                )
+                token = self._set_incoming_encryption_context(context.encrypted)
                 try:
                     if not encrypted:
                         await self._cache_incoming_message(msg, is_room=False)
@@ -112,7 +119,7 @@ class MessageRoutingMixin:
                         result = dispatch_runtime_event("private_message_received", msg)
                         if inspect.isawaitable(result):
                             await result
-                    await self.handle_command(msg["body"], msg["from"], None, msg, False)
+                    await self.handle_command(context.body, msg["from"], None, msg, False)
                 finally:
                     self._reset_incoming_encryption_context(token)
         except Exception as exc:

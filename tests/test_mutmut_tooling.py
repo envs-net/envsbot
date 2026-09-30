@@ -194,6 +194,7 @@ def test_mutmut_release_gate_uses_curated_deterministic_scope():
     ]
     assert config["pytest_add_cli_args_test_selection"] == [
         "tests/bot/test_envsbot.py",
+        "tests/bot/test_message_context_routing.py",
         "tests/core_plugins/test_help.py",
         "tests/database/test_message_cache.py",
         "tests/plugins/test_translate.py",
