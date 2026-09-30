@@ -1,3 +1,9 @@
+from plugins.rss import formatting as rss_formatting
+from plugins.rss import lifecycle as rss_lifecycle
+from plugins.rss import store as rss_store
+from plugins.rss import subscriptions as rss_subscriptions
+from plugins.rss import tasks as rss_tasks
+
 from .helpers import (
     AsyncMock,
     Entry,
@@ -11,11 +17,6 @@ from .helpers import (
     pytest,
     rss,
 )
-from plugins.rss import store as rss_store
-from plugins.rss import tasks as rss_tasks
-from plugins.rss import subscriptions as rss_subscriptions
-from plugins.rss import formatting as rss_formatting
-from plugins.rss import lifecycle as rss_lifecycle
 
 
 @pytest.mark.asyncio
@@ -616,3 +617,50 @@ async def test_post_error_records_backoff_without_killing_worker(
     assert feed["next_retry"] == 1030
     assert feed["last_error"] == "post: direct render failed"
     assert sleeps == [30]
+
+
+@pytest.mark.asyncio
+async def test_rss_check_loop_retries_checkpointed_entry_after_feed_becomes_empty(
+    monkeypatch, make_bot
+):
+    """An empty feed response must not indefinitely strand an unfinished entry."""
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/no-longer-listed.xml"
+    context = rss_formatting._build_rss_template_context(
+        feed_title="Feed", entry_title="Saved story", entry_desc="",
+        entry_link="https://example.org/saved", feed_url=url,
+    )
+    store[rss.RSS_KEY] = {url: {
+        "title": "Feed", "link": url, "period": 1, "rooms": [],
+        "users": {"alice@example.org": {}}, "last_id": "older",
+        "error_count": 0, "next_retry": 0,
+        "_delivery_progress": {
+            "entry_id": "saved", "context": context, "rooms": [], "users": [],
+        },
+    }}
+
+    class EmptyFeed:
+        entries = []
+        feed = {"title": "Feed", "link": url}
+
+        def __contains__(self, key):
+            return key == "feed"
+
+    async def fetch(_):
+        return EmptyFeed()
+
+    async def stop_after_poll(_secs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(rss_tasks, "fetch_feed", fetch)
+    monkeypatch.setattr(asyncio, "sleep", stop_after_poll)
+
+    with pytest.raises(asyncio.CancelledError):
+        await rss.rss_check_loop(bot, store, url, 1)
+
+    assert len(bot.sent_messages) == 1
+    assert bot.sent_messages[0]["mto"] == "alice@example.org"
+    assert "Saved story" in bot.sent_messages[0]["mbody"]
+    assert store[rss.RSS_KEY][url]["last_id"] == "saved"
+    assert "_delivery_progress" not in store[rss.RSS_KEY][url]

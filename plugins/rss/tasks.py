@@ -96,12 +96,16 @@ async def rss_check_loop(bot, store, url, period, *, initial_delay=0.0):
 
         await _handle_feed_recovery(bot, store, url, error_count)
 
-        if await _handle_empty_feed(bot, url, period, parsed):
+        # A pending entry can outlive the feed's current window. It carries a
+        # saved rendering context and must still be retried even for an empty
+        # feed response, otherwise a stalled subscriber never catches up.
+        pending_delivery = feed.get("_delivery_progress")
+        if not pending_delivery and await _handle_empty_feed(bot, url, period, parsed):
             continue
 
         feed_link = await _maybe_update_feed_link(store, url, parsed, feed_link)
 
-        if await _initialize_missing_last_id(bot, store, url, last_id, parsed):
+        if not pending_delivery and await _initialize_missing_last_id(bot, store, url, last_id, parsed):
             await sleep_with_heartbeat(bot, "rss", f"rss-check-{url}", period)
             continue
 

@@ -212,43 +212,123 @@ async def _post_rss_entry_to_rooms(bot, store, rooms, url, context):
         delivered += room_delivered
         attempted += room_attempted
     return delivered, attempted
+# A single incomplete entry is checkpointed per feed. This is written before
+# sending and after every accepted destination, so ordinary poll retries and
+# process restarts do not resend to recipients that were already served.
+_RSS_DELIVERY_PROGRESS = "_delivery_progress"
+
+
+def _saved_delivery_progress(feed: dict, entry_id: str) -> tuple[set[str], set[str]]:
+    progress = feed.get(_RSS_DELIVERY_PROGRESS)
+    if not isinstance(progress, dict) or progress.get("entry_id") != entry_id:
+        return set(), set()
+    rooms = progress.get("rooms", [])
+    users = progress.get("users", [])
+    return (
+        set(rooms) if isinstance(rooms, list) else set(),
+        set(users) if isinstance(users, list) else set(),
+    )
+
+
+async def _prepare_delivery_progress(bot, store, url: str, entry_id: str,
+                                     context: dict[str, str]) -> bool:
+    """Persist the entry context before attempting its first delivery."""
+    def mutator(feed: dict) -> bool:
+        progress = feed.get(_RSS_DELIVERY_PROGRESS)
+        if isinstance(progress, dict):
+            if progress.get("entry_id") != entry_id:
+                raise RuntimeError(
+                    "RSS delivery checkpoint belongs to a different entry"
+                )
+            return False
+        feed[_RSS_DELIVERY_PROGRESS] = {
+            "entry_id": entry_id,
+            "context": context,
+            "rooms": [],
+            "users": [],
+        }
+        return True
+
+    return await _update_feed_for_post(bot, store, url, mutator)
+
+
+async def _ack_delivery_destination(bot, store, url: str, entry_id: str,
+                                    kind: str, destination: str) -> bool:
+    """Checkpoint one accepted destination before attempting the next."""
+    def mutator(feed: dict) -> bool:
+        progress = feed.get(_RSS_DELIVERY_PROGRESS)
+        if not isinstance(progress, dict) or progress.get("entry_id") != entry_id:
+            raise RuntimeError("RSS delivery checkpoint disappeared")
+        existing = progress.get(kind, [])
+        if not isinstance(existing, list):
+            raise RuntimeError("RSS delivery checkpoint is malformed")
+        if destination in existing:
+            return False
+        progress[kind] = [*existing, destination]
+        return True
+
+    if not await _update_feed_for_post(bot, store, url, mutator):
+        # Treat deletion as a failure: never continue sending against a deleted
+        # subscription, and never advance the feed cursor without the ACK.
+        return False
+    return True
+
+
 async def _post_new_entries(bot, store, url, feed_title,
                             feed_link, rooms, new_entries, feed: dict | None = None):
-    """Post entries using the freshest persisted destination state.
+    """Post each entry with a durable per-destination progress checkpoint.
 
-    RSS workers keep a local feed snapshot while fetching. Direct subscriptions
-    and room destinations may change during that network request, so reloading
-    before every entry avoids skipping a newly added 1:1 subscriber for an
-    entire polling interval.
+    Destinations are reloaded after fetching. If an incomplete entry falls
+    outside the feed's polling window, its saved rendering context lets us
+    finish that entry before handling the newer ones.
     """
-    for entry, entry_id in reversed(new_entries):
+    current_feeds = await get_feeds(store)
+    current_feed = current_feeds.get(url)
+    if not isinstance(current_feed, dict):
+        return
+    pending = current_feed.get(_RSS_DELIVERY_PROGRESS)
+    pending_id = str(pending.get("entry_id") or "") if isinstance(pending, dict) else ""
+    pending_entries = list(new_entries)
+    if pending_id and all(entry_id != pending_id for _, entry_id in pending_entries):
+        # _post_new_entries traverses reversed(new_entries), oldest first.
+        pending_entries.append(({}, pending_id))
+
+    for entry, entry_id in reversed(pending_entries):
         current_feeds = await get_feeds(store)
         current_feed = current_feeds.get(url)
         if not isinstance(current_feed, dict):
             log.warning("Feed %s was deleted before posting", url)
             break
         active_rooms = _feed_active_rooms(current_feed)
-        entry_link = _normalize_url(
-            _resolve_relative_url(feed_link, _extract_entry_link(entry))
-        )
-        entry_title = html_to_text_with_links(
-            entry_get(entry, "title", "No title")
-        )
-        entry_desc = html_to_text_with_links(
-            entry_get(entry, "description", "")
-        )
-        context = _build_rss_template_context(
-            feed_title=feed_title,
-            entry_title=entry_title,
-            entry_desc=entry_desc,
-            entry_link=entry_link,
-            feed_url=url,
-            feed_link=feed_link,
-            feed_no=_feed_number(current_feed) or "",
-            article_no=_feed_article_count(current_feed) + 1,
-            entry_id=entry_id,
-            entry_date=_entry_date(entry),
-        )
+        existing = current_feed.get(_RSS_DELIVERY_PROGRESS)
+        if isinstance(existing, dict) and existing.get("entry_id") == entry_id:
+            saved_context = existing.get("context")
+        else:
+            saved_context = None
+        if isinstance(saved_context, dict) and saved_context:
+            context = saved_context
+        else:
+            entry_link = _normalize_url(
+                _resolve_relative_url(feed_link, _extract_entry_link(entry))
+            )
+            entry_title = html_to_text_with_links(
+                entry_get(entry, "title", "No title")
+            )
+            entry_desc = html_to_text_with_links(
+                entry_get(entry, "description", "")
+            )
+            context = _build_rss_template_context(
+                feed_title=feed_title,
+                entry_title=entry_title,
+                entry_desc=entry_desc,
+                entry_link=entry_link,
+                feed_url=url,
+                feed_link=feed_link,
+                feed_no=_feed_number(current_feed) or "",
+                article_no=_feed_article_count(current_feed) + 1,
+                entry_id=entry_id,
+                entry_date=_entry_date(entry),
+            )
 
         missing_rooms = [
             room for room in active_rooms if room not in JOINED_ROOMS
@@ -262,14 +342,31 @@ async def _post_new_entries(bot, store, url, feed_title,
             )
             break
 
-        room_delivered, room_attempted = await _post_rss_entry_to_rooms(
-            bot, store, active_rooms, url, context
-        )
-        posted = room_delivered > 0
-        direct_users = sorted(_feed_active_direct_users(current_feed))
+        if not await _prepare_delivery_progress(bot, store, url, entry_id, context):
+            log.warning("Feed %s disappeared before delivery", url)
+            break
+        completed_rooms, completed_users = _saved_delivery_progress(current_feed, entry_id)
+        room_delivered = 0
+        room_attempted = 0
+        for room in active_rooms:
+            room_key = _normalize_room_jid(room)
+            if room_key in completed_rooms:
+                continue
+            delivered, attempted = await _post_rss_entry_to_rooms(
+                bot, store, [room], url, context
+            )
+            room_delivered += delivered
+            room_attempted += attempted
+            if delivered:
+                if not await _ack_delivery_destination(
+                    bot, store, url, entry_id, "rooms", room_key
+                ):
+                    return
+                completed_rooms.add(room_key)
+
         direct_delivered = 0
         direct_attempted = 0
-        for direct_user in direct_users:
+        for direct_user in sorted(_feed_active_direct_users(current_feed)):
             normalized_user = _normalize_direct_user_jid(direct_user)
             if not normalized_user:
                 log.error(
@@ -277,11 +374,11 @@ async def _post_new_entries(bot, store, url, feed_title,
                     direct_user,
                 )
                 continue
+            if normalized_user in completed_users:
+                continue
             try:
                 template = await get_effective_template(
-                    store,
-                    normalized_user,
-                    url,
+                    store, normalized_user, url
                 )
             except Exception:
                 log.exception(
@@ -291,22 +388,22 @@ async def _post_new_entries(bot, store, url, feed_title,
                 template = None
             direct_msg = _build_rss_message_from_context(context, template)
             delivered, attempted = await _post_entry_to_users(
-                bot,
-                [normalized_user],
-                direct_msg,
+                bot, [normalized_user], direct_msg
             )
             direct_delivered += delivered
             direct_attempted += attempted
-        posted = direct_delivered > 0 or posted
+            if delivered:
+                if not await _ack_delivery_destination(
+                    bot, store, url, entry_id, "users", normalized_user
+                ):
+                    return
+                completed_users.add(normalized_user)
 
         if room_attempted and room_delivered < room_attempted:
             log.warning(
                 "[RSS] Room delivery incomplete for %s entry=%s "
                 "delivered=%s/%s; retaining last_id for retry",
-                url,
-                entry_id,
-                room_delivered,
-                room_attempted,
+                url, entry_id, room_delivered, room_attempted,
             )
             break
 
@@ -314,15 +411,16 @@ async def _post_new_entries(bot, store, url, feed_title,
             log.warning(
                 "[RSS] Direct delivery incomplete for %s entry=%s "
                 "delivered=%s/%s; retaining last_id for retry",
-                url,
-                entry_id,
-                direct_delivered,
-                direct_attempted,
+                url, entry_id, direct_delivered, direct_attempted,
             )
             break
 
+        posted = bool(completed_rooms or completed_users)
+
         def mutator(feed_data, entry_id=entry_id, posted=posted):
             changed = _set_last_id_in_feed(feed_data, entry_id)
+            if feed_data.pop(_RSS_DELIVERY_PROGRESS, None) is not None:
+                changed = True
             if posted:
                 changed = _record_feed_post(feed_data, now=_feed_now(), posted=1) or changed
             return changed
@@ -331,17 +429,9 @@ async def _post_new_entries(bot, store, url, feed_title,
             log.warning("Feed %s was deleted during posting!", url)
             break
 
-        if posted:
-            log.debug(
-                "[RSS] Posted and saved last_id for %s: %s",
-                url,
-                entry_id,
-            )
-        else:
-            log.debug(
-                "[RSS] Saved last_id for %s without posting; no joined rooms",
-                url,
-            )
+        log.debug(
+            "[RSS] Saved last_id for %s: %s (posted=%s)", url, entry_id, posted
+        )
 def _set_last_id_in_feed(feed_data: dict, entry_id: str) -> bool:
     if feed_data.get("last_id") == entry_id:
         return False

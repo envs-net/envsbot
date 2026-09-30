@@ -1,14 +1,15 @@
+from plugins.rss import formatting as rss_formatting
+from plugins.rss import tasks as rss_tasks
+
 from .helpers import (
     Entry,
     SimpleNamespace,
     asyncio,
-    logging,
     core_plugins,
+    logging,
     pytest,
     rss,
 )
-from plugins.rss import formatting as rss_formatting
-from plugins.rss import tasks as rss_tasks
 
 
 @pytest.mark.asyncio
@@ -469,7 +470,9 @@ async def test_post_new_entries_stops_when_feed_was_deleted(monkeypatch, make_bo
          (Entry(title="Second", link="/second"), "second")],
     )
 
-    assert calls == [([room], url, "Second")]
+    # A removed feed must not emit even one message without being able to
+    # persist its delivery checkpoint first.
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -925,3 +928,145 @@ async def test_post_new_entries_falls_back_when_direct_template_lookup_fails(
         "Feed #1 · Article #1 · https://example.org/direct.xml"
     )
     assert store[rss.RSS_KEY][url]["last_id"] == "new-entry"
+
+
+@pytest.mark.asyncio
+async def test_partial_room_delivery_retries_only_missing_destination(monkeypatch, make_bot):
+    """A successful MUC delivery must not be repeated after another room fails."""
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/two-rooms.xml"
+    first = "one@conference.example.org"
+    second = "two@conference.example.org"
+    store[rss.RSS_KEY] = {url: {
+        "title": "Feed", "link": url, "rooms": [first, second],
+        "users": {}, "last_id": "old", "posted_count": 0,
+    }}
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, first, True)
+    monkeypatch.setitem(core_plugins.rooms.JOINED_ROOMS, second, True)
+    attempts = []
+    failed = {second}
+
+    async def send(message):
+        attempts.append(message["mto"])
+        return message["mto"] not in failed
+
+    bot._safe_send_message = send
+    entry = [(Entry(title="New", link="https://example.org/new"), "new")]
+    await rss._post_new_entries(bot, store, url, "Feed", url, [first, second], entry)
+    current = store[rss.RSS_KEY][url]
+    assert current["last_id"] == "old"
+    assert current["_delivery_progress"]["rooms"] == [first]
+    assert current["posted_count"] == 0
+
+    failed.clear()
+    await rss._post_new_entries(bot, store, url, "Feed", url, [first, second], entry)
+    current = store[rss.RSS_KEY][url]
+    assert attempts == [first, second, second]
+    assert current["last_id"] == "new"
+    assert current["posted_count"] == 1
+    assert "_delivery_progress" not in current
+
+
+@pytest.mark.asyncio
+async def test_partial_direct_delivery_resumes_after_restart(make_bot):
+    """Persisted ACKs survive replacing the bot instance and its worker."""
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/two-users.xml"
+    alice = "alice@example.org"
+    bob = "bob@example.org"
+    store[rss.RSS_KEY] = {url: {
+        "title": "Feed", "link": url, "rooms": [],
+        "users": {alice: {}, bob: {}}, "last_id": "old", "posted_count": 0,
+    }}
+    attempts = []
+
+    async def first_send(message):
+        attempts.append(message["mto"])
+        return message["mto"] != bob
+
+    bot._safe_send_message = first_send
+    entry = [(Entry(title="News", link="https://example.org/new"), "new")]
+    await rss._post_new_entries(bot, store, url, "Feed", url, [], entry)
+    assert store[rss.RSS_KEY][url]["_delivery_progress"]["users"] == [alice]
+    assert store[rss.RSS_KEY][url]["last_id"] == "old"
+
+    restarted_bot = make_bot()
+    restarted_bot.plugin_store = store
+
+    async def second_send(message):
+        attempts.append(message["mto"])
+        return True
+
+    restarted_bot._safe_send_message = second_send
+    await rss._post_new_entries(restarted_bot, store, url, "Feed", url, [], entry)
+    assert attempts == [alice, bob, bob]
+    assert store[rss.RSS_KEY][url]["last_id"] == "new"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 1
+    assert "_delivery_progress" not in store[rss.RSS_KEY][url]
+
+
+@pytest.mark.asyncio
+async def test_pending_entry_survives_feed_window_rotation(make_bot):
+    """Complete the saved entry before processing newer feed-window entries."""
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/rotating.xml"
+    alice = "alice@example.org"
+    bob = "bob@example.org"
+    store[rss.RSS_KEY] = {url: {
+        "title": "Feed", "link": url, "rooms": [],
+        "users": {alice: {}, bob: {}}, "last_id": "older", "posted_count": 0,
+    }}
+    attempts = []
+    failed = {bob}
+
+    async def send(message):
+        attempts.append((message["mto"], message["mbody"]))
+        return message["mto"] not in failed
+
+    bot._safe_send_message = send
+    original = [(Entry(title="Old story", link="https://example.org/old"), "old")]
+    await rss._post_new_entries(bot, store, url, "Feed", url, [], original)
+    failed.clear()
+    # Old story disappeared from feedparser's bounded recent-entries window.
+    newer = [(Entry(title="New story", link="https://example.org/new"), "new")]
+    await rss._post_new_entries(bot, store, url, "Feed", url, [], newer)
+
+    assert [jid for jid, body in attempts if "Old story" in body] == [alice, bob, bob]
+    assert [jid for jid, body in attempts if "New story" in body] == [alice, bob]
+    assert store[rss.RSS_KEY][url]["last_id"] == "new"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 2
+    assert "_delivery_progress" not in store[rss.RSS_KEY][url]
+
+
+@pytest.mark.asyncio
+async def test_partial_delivery_handles_unsubscribe_and_new_subscriber(make_bot):
+    """Completed destinations stay ACKed while recipient lists change."""
+    bot = make_bot()
+    store = bot.plugin_store
+    url = "https://example.org/change.xml"
+    alice = "alice@example.org"
+    bob = "bob@example.org"
+    charlie = "charlie@example.org"
+    store[rss.RSS_KEY] = {url: {
+        "title": "Feed", "link": url, "rooms": [],
+        "users": {alice: {}, bob: {}}, "last_id": "old", "posted_count": 0,
+    }}
+    attempts = []
+    failed = {bob}
+
+    async def send(message):
+        attempts.append(message["mto"])
+        return message["mto"] not in failed
+
+    bot._safe_send_message = send
+    entries = [(Entry(title="New", link="https://example.org/new"), "new")]
+    await rss._post_new_entries(bot, store, url, "Feed", url, [], entries)
+    # A removed subscriber is not retried, a newly-added subscriber is served.
+    store[rss.RSS_KEY][url]["users"] = {alice: {}, charlie: {}}
+    await rss._post_new_entries(bot, store, url, "Feed", url, [], entries)
+    assert attempts == [alice, bob, charlie]
+    assert store[rss.RSS_KEY][url]["last_id"] == "new"
+    assert store[rss.RSS_KEY][url]["posted_count"] == 1
