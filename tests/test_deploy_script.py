@@ -135,39 +135,6 @@ def test_copy_if_missing_never_overwrites_existing_operator_file(tmp_path):
     assert contents == "keep\n"
 
 
-def test_project_protected_files_are_restored_after_checkout_changes(tmp_path):
-    deployment = _current_deployment(tmp_path)
-    config = deployment.root / "config.py"
-    database = deployment.root / "data" / "bot.db"
-    external_vcard = tmp_path / "runtime" / "vcard.py"
-    database.parent.mkdir()
-    external_vcard.parent.mkdir()
-    config.write_text("operator config\n", encoding="utf-8")
-    database.write_bytes(b"operator database")
-    external_vcard.write_text("operator vcard\n", encoding="utf-8")
-
-    backup_dir = tmp_path / "protect"
-    backup_dir.mkdir()
-    backups = deploy._backup_project_protected_paths(
-        deployment,
-        {"config": config, "database": database, "vcard": external_vcard},
-        backup_dir,
-    )
-
-    assert {item.label for item in backups} == {"config", "database"}
-    config.unlink()
-    database.write_bytes(b"checkout replacement")
-    deploy._restore_project_protected_paths(backups)
-
-    restored_config = config.read_text(encoding="utf-8")
-    restored_database = database.read_bytes()
-    untouched_vcard = external_vcard.read_text(encoding="utf-8")
-
-    assert restored_config == "operator config\n"
-    assert restored_database == b"operator database"
-    assert untouched_vcard == "operator vcard\n"
-
-
 def test_install_dry_run_requires_no_confirmation_and_changes_nothing(tmp_path, monkeypatch, capsys):
     deployment = _current_deployment(tmp_path, dry_run=True)
     _write_source_markers(deployment)
@@ -749,22 +716,6 @@ def test_automatic_update_refuses_latest_release_behind_current_head(
     assert "No newer release is available (latest release: v1.7.3)." in output
     assert "contains commits newer than v1.7.3" in output
     assert "development branch is never deployed automatically" in output
-
-
-def test_stable_release_tag_requires_exact_vx_y_z_shape():
-    accepted = ("v0.0.1", "v1.8.0", "v12.34.567")
-    rejected = (
-        "1.8.0",
-        "v1.8",
-        "v1.8.0-rc1",
-        "v1.8.0+build",
-        "release-v1.8.0",
-        "backup-20260810",
-        "test",
-    )
-
-    assert all(deploy._is_stable_release_tag(tag) for tag in accepted)
-    assert not any(deploy._is_stable_release_tag(tag) for tag in rejected)
 
 
 def test_latest_local_release_tag_ignores_prerelease_and_nonrelease_tags(tmp_path, monkeypatch):

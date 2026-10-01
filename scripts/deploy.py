@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from envs_xmpp_ops.deploy import InstallApplyResult, ProtectedFileBackup
+    from envs_xmpp_ops.deploy import InstallApplyResult
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
@@ -652,12 +652,6 @@ def _current_revision(deployment: Deployment) -> str:
     return describe_revision(partial(_git, deployment))
 
 
-def _is_stable_release_tag(tag: str) -> bool:
-    from envs_xmpp_ops.git import is_stable_release_tag
-
-    return is_stable_release_tag(tag)
-
-
 def _latest_tag(deployment: Deployment) -> str:
     from envs_xmpp_ops.git import stable_release_tags
 
@@ -735,26 +729,6 @@ def _protected_paths(deployment: Deployment) -> dict[str, Path]:
                 continue
         protected[name] = path
     return protected
-
-
-def _backup_project_protected_paths(
-    deployment: Deployment,
-    protected: dict[str, Path],
-    backup_dir: Path,
-) -> list[ProtectedFileBackup]:
-    from envs_xmpp_ops.deploy import backup_checkout_files
-
-    return backup_checkout_files(
-        protected,
-        root=deployment.root,
-        backup_dir=backup_dir,
-    )
-
-
-def _restore_project_protected_paths(backups: list[ProtectedFileBackup]) -> None:
-    from envs_xmpp_ops.deploy import restore_checkout_files
-
-    restore_checkout_files(backups)
 
 
 def _print_paths(
