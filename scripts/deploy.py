@@ -367,14 +367,6 @@ def _dependency_drift(deployment: Deployment):
         raise DeployError(f"could not inspect runtime dependency drift: {exc}") from exc
 
 
-def _check_dependency_drift(deployment: Deployment) -> None:
-    report = _dependency_drift(deployment)
-    if report.ok:
-        print(f"OK  dependency drift: {report.summary()}")
-        return
-    details = "; ".join(report.details())
-    raise DeployError(f"runtime dependency drift detected: {details}")
-
 def _install_dependencies(deployment: Deployment) -> None:
     from envs_xmpp_ops.venv import install_editable_checkout
 
@@ -1039,7 +1031,12 @@ def check(deployment: Deployment) -> int:
             "installed systemd service differs from the rendered envsbot service; review the FAIL entries above"
         )
     print("OK  installed systemd service matches the rendered deployment")
-    _check_dependency_drift(deployment)
+    from envs_xmpp_ops import require_clean_dependency_drift
+
+    require_clean_dependency_drift(
+        _dependency_drift(deployment),
+        error_factory=DeployError,
+    )
     return 0
 
 

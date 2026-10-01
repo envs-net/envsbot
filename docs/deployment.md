@@ -249,18 +249,13 @@ production deployments do not need `avatar.jpg` or `init_chat_slang.csv` copies
 in the application root. Configure a separate `AVATAR_PATH` only when using a
 custom avatar.
 
-OMEMO transport dependencies are part of the normal envsbot installation. For legacy/manual environments, the compatibility requirements file can be used before restarting the bot:
+OMEMO transport dependencies are part of the normal envsbot installation. On Debian/Ubuntu, install `libsodium-dev` and `libxeddsa-dev` only when native build prerequisites are needed by your platform.
 
-```bash
-sudo apt install libsodium-dev libxeddsa-dev
-sudo -u envsbot .venv/bin/pip install -r requirements-omemo.txt
-```
-
-Then configure `OMEMO_ENABLED = True`. EnvsBot mirrors incoming transport
-mode: encrypted requests receive encrypted replies, plaintext requests receive
-plaintext replies, and proactive messages remain plaintext. Keep
-`OMEMO_PLAINTEXT_FALLBACK = False` unless an explicit plaintext downgrade is
-acceptable. No admin-room auto-encryption policy is used by EnvsBot.
+Configure `OMEMO_ENABLED = True` to enable encrypted transport. EnvsBot mirrors
+incoming transport mode for replies, while proactive 1:1 messages also use
+OMEMO when it is enabled. Keep `OMEMO_PLAINTEXT_FALLBACK = False` unless an
+explicit plaintext downgrade is acceptable. No admin-room auto-encryption
+policy is used by EnvsBot.
 The shared adapter uses BTBV for newly seen devices; unsupported encrypted wire formats are rejected fail-closed rather than downgraded to plaintext.
 Managed ZIP backups include both the configured OMEMO state file and its
 identity metadata; restoring both together preserves the cryptographic session

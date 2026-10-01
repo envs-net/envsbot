@@ -652,7 +652,11 @@ def test_deploy_check_succeeds_when_effective_service_matches(
         lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout="", stderr=""),
     )
     monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
-    monkeypatch.setattr(deploy, "_check_dependency_drift", lambda _deployment: None)
+    monkeypatch.setattr(
+        deploy,
+        "_dependency_drift",
+        lambda _deployment: _FakeDependencyReport(True),
+    )
 
     result = deploy.check(deployment)
     output = capsys.readouterr().out
@@ -1066,17 +1070,38 @@ class _FakeDependencyReport:
         return self._details
 
 
-def test_dependency_drift_check_accepts_matching_runtime(monkeypatch, tmp_path, capsys):
+def test_deploy_check_uses_shared_dependency_drift_gate(monkeypatch, tmp_path, capsys):
     deployment = _current_deployment(tmp_path)
-    monkeypatch.setattr(deploy, "_dependency_drift", lambda _deployment: _FakeDependencyReport(True))
+    _write_source_markers(deployment)
+    (deployment.venv / "bin").mkdir(parents=True)
+    deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        deploy,
+        "_envsbot",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
+    monkeypatch.setattr(
+        deploy,
+        "_dependency_drift",
+        lambda _deployment: _FakeDependencyReport(True),
+    )
 
-    deploy._check_dependency_drift(deployment)
-
+    assert deploy.check(deployment) == 0
     assert "OK  dependency drift: clean" in capsys.readouterr().out
 
 
-def test_dependency_drift_check_rejects_version_drift(monkeypatch, tmp_path):
+def test_deploy_check_preserves_project_error_for_dependency_drift(monkeypatch, tmp_path):
     deployment = _current_deployment(tmp_path)
+    _write_source_markers(deployment)
+    (deployment.venv / "bin").mkdir(parents=True)
+    deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        deploy,
+        "_envsbot",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
     monkeypatch.setattr(
         deploy,
         "_dependency_drift",
@@ -1087,7 +1112,7 @@ def test_dependency_drift_check_rejects_version_drift(monkeypatch, tmp_path):
     )
 
     with pytest.raises(deploy.DeployError, match=r"slixmpp: installed 1\.14\.1, expected 1\.17\.0"):
-        deploy._check_dependency_drift(deployment)
+        deploy.check(deployment)
 
 
 @pytest.mark.parametrize("minor", [12, 13, 14])
@@ -1098,7 +1123,7 @@ def test_constraint_file_matches_supported_virtualenv_python(tmp_path, monkeypat
     constraints = deployment.root / "constraints"
     constraints.mkdir()
     expected = constraints / f"python3{minor}.txt"
-    expected.write_text("envs-xmpp==1.7.0\n", encoding="utf-8")
+    expected.write_text("envs-xmpp==1.7.1\n", encoding="utf-8")
 
     class Result:
         stdout = f"3.{minor}\n"

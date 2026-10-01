@@ -345,14 +345,11 @@ def test_markdown_tables_escape_pipes_inside_inline_code():
     assert broken == []
 
 
-def test_omemo_dependency_is_part_of_default_runtime():
+def test_omemo_dependency_is_part_of_default_runtime_without_redundant_extra():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     runtime_dependencies = pyproject["project"]["dependencies"]
-    assert "envs-xmpp[omemo]>=1.7.0,<2.0" in runtime_dependencies
-    assert pyproject["project"]["optional-dependencies"]["omemo"] == [
-        "envs-xmpp[omemo]>=1.7.0,<2.0"
-    ]
+    assert "envs-xmpp[omemo]>=1.7.1,<2.0" in runtime_dependencies
+    assert "omemo" not in pyproject["project"]["optional-dependencies"]
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    compatibility_requirements = (ROOT / "requirements-omemo.txt").read_text(encoding="utf-8")
-    assert "envs-xmpp[omemo]>=1.7.0,<2.0" in requirements
-    assert "envs-xmpp[omemo]>=1.7.0,<2.0" in compatibility_requirements
+    assert "envs-xmpp[omemo]>=1.7.1,<2.0" in requirements
+    assert not (ROOT / "requirements-omemo.txt").exists()
