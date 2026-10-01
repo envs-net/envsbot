@@ -538,6 +538,22 @@ async def test_status_room_and_direct_contact_helpers(monkeypatch):
     )[1]
 
 
+def test_xmpp_status_places_room_lifecycle_directly_after_rooms(monkeypatch):
+    bot = types.SimpleNamespace(boundjid=types.SimpleNamespace(bare="bot@example.org"))
+    monkeypatch.setattr(_admin.ROOM_LIFECYCLE, "snapshot", lambda: {"room": object()})
+    monkeypatch.setattr(
+        _admin,
+        "room_lifecycle_summary",
+        lambda _snapshot: "Room lifecycle: test",
+    )
+
+    lines = _admin._xmpp_status_lines(bot, tuple(), ())
+
+    assert lines[1].startswith("Rooms: ")
+    assert lines[2] == "Room lifecycle: test"
+    assert lines[3] == "Pending invites: 0"
+
+
 @pytest.mark.asyncio
 async def test_stored_rooms_snapshot_handles_missing_and_failed_manager():
     assert await _admin._stored_rooms_snapshot(types.SimpleNamespace()) == ()

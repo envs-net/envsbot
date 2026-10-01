@@ -305,14 +305,18 @@ def _xmpp_status_lines(
     lines = [
         _xmpp_connection_line(bot),
         f"Rooms: {muc_label} · {direct_label}",
-        f"Pending invites: {pending_invites}",
-        f"Occupants: {occupants} tracked",
-        f"Avatar: {'published' if avatar_hash else 'missing'}",
-        f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
     ]
     tracked_rooms = ROOM_LIFECYCLE.snapshot()
     if tracked_rooms:
         lines.append(room_lifecycle_summary(tracked_rooms))
+    lines.extend(
+        [
+            f"Pending invites: {pending_invites}",
+            f"Occupants: {occupants} tracked",
+            f"Avatar: {'published' if avatar_hash else 'missing'}",
+            f"vCard: {'configured' if vcard_path.exists() else 'missing'}",
+        ]
+    )
     omemo_status = getattr(bot, "omemo_status", None)
     if callable(omemo_status):
         try:
