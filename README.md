@@ -92,9 +92,10 @@ pip install envsbot
 python -m pip show envsbot
 ```
 
-OMEMO transport dependencies are installed with envsbot by default. The historical
-`envsbot[omemo]` extra remains a compatibility alias; runtime encryption is still
-opt-in through `OMEMO_ENABLED`.
+OMEMO transport dependencies are installed with envsbot by default through the
+shared `envs-xmpp[omemo]` runtime dependency; runtime encryption remains opt-in
+through `OMEMO_ENABLED`. A separate `envsbot[omemo]` package extra is no longer
+needed.
 
 The PyPI package contains the application code, `config_sample.py`,
 `vcard_sample.py`, and bundled read-only runtime assets. It does not create
@@ -110,7 +111,7 @@ Verify the installed application and shared core without starting XMPP:
 
 ```bash
 envsbot --version
-# envsbot 2.4.1 (envs-xmpp 1.6.1)
+# envsbot 2.5.0 (envs-xmpp 1.7.2)
 ```
 
 For a structured 72-hour post-release observation checklist, see
@@ -261,12 +262,10 @@ CONNECT_PORT = 5223
 
 ### Optional OMEMO
 
-OMEMO runtime dependencies are installed by default; enabling encrypted transport remains opt-in in `config.py`. For an older/manual checkout, `requirements-omemo.txt` remains available as a compatibility installer:
+OMEMO runtime dependencies are installed by default; enabling encrypted transport remains opt-in in `config.py`. On Debian/Ubuntu, install the native build prerequisites when your platform cannot use prebuilt wheels:
 
 ```bash
-# Debian/Ubuntu build prerequisites when not already installed:
 sudo apt install libsodium-dev libxeddsa-dev
-python -m pip install -r requirements-omemo.txt
 ```
 
 ```python
@@ -278,11 +277,12 @@ OMEMO_RESET_ON_IDENTITY_CHANGE = True
 
 EnvsBot mirrors the transport mode of the incoming message: plaintext input
 gets a plaintext reply and an OMEMO-encrypted input gets an OMEMO-encrypted
-reply. Proactive/background messages remain plaintext because they have no
-incoming encryption context. There is deliberately no admin-room auto-encrypt
-setting in EnvsBot. If an encrypted reply cannot be produced and
+reply. When OMEMO is enabled, proactive 1:1 messages such as RSS delivery,
+upgrade notifications and daily health reports also use the encrypted delivery
+policy. There is deliberately no admin-room auto-encrypt setting in EnvsBot.
+If encryption is required and cannot be produced while
 `OMEMO_PLAINTEXT_FALLBACK` is `False` (the recommended default), EnvsBot does
-not silently disclose that reply as plaintext.
+not silently disclose that message as plaintext.
 
 Trust model: the shared XEP-0384 adapter uses Blind Trust Before Verification (BTBV), matching the existing bot behavior. New devices are accepted automatically; there is currently no interactive fingerprint verification workflow.
 The shared core recognizes both legacy and OMEMO 2 encrypted payload namespaces, while actual wire-format support is provided by the installed `slixmpp-omemo` backend. Unsupported encrypted payloads are rejected fail-closed and are never reinterpreted as plaintext.
