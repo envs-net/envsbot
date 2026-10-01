@@ -18,10 +18,6 @@ from envs_xmpp_core.config.python_file import (
     PythonConfigEdit,
     apply_config_edit_transaction,
     prepare_assignment_edit,
-    replace_or_append_assignment_text,
-)
-from envs_xmpp_core.config.python_file import (
-    assignment_ranges as _core_assignment_ranges,
 )
 from envs_xmpp_core.security import is_secret_key as _central_is_secret_key
 from envs_xmpp_core.security import redact_named as _central_redact_named
@@ -133,20 +129,6 @@ def _format_config_assignment(display_key: str, value: object) -> str:
     else:
         rendered = pprint.pformat(value, width=88, sort_dicts=False)
     return f"{display_key} = {rendered}"
-
-
-def _config_assignment_ranges(source: str) -> dict[str, tuple[int, int, str]]:
-    return _core_assignment_ranges(source, uppercase_only=True)
-
-
-def _replace_config_assignment(source: str, display_key: str, value: object) -> str:
-    assignment = _format_config_assignment(display_key, value)
-    return replace_or_append_assignment_text(
-        source,
-        display_key,
-        assignment,
-        section_comment=_CONFIG_EDIT_SECTION,
-    )
 
 
 def _candidate_config_edit(display_key: str, value: object) -> PythonConfigEdit:

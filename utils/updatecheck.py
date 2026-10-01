@@ -29,7 +29,6 @@ from utils.task_supervisor import sleep_with_heartbeat
 from utils.version import __version__, display_version, normalized_version
 from utils.xmpp_notify import (
     ensure_notification_target_joined,
-    notification_message_type,
     prepare_notification_target,
 )
 
@@ -104,11 +103,6 @@ def update_notification_target() -> str | None:
         return None
     target = str(target).strip()
     return target or None
-
-
-def _notification_type(bot, target: str) -> str:
-    """Return the message type for an already prepared notification target."""
-    return notification_message_type(bot, target)
 
 
 async def send_update_notification(bot, remote_version: str) -> bool:

@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from envs_xmpp_core.config.operator import format_config_change_lines
-from envs_xmpp_core.security import redact_named
 
 from utils.config.spec import (
     DUCK_FIELDS,
@@ -43,10 +42,6 @@ def _display_key(key: str) -> str:
     from .defaults import _LOWER_TO_PYTHON_CONFIG_KEY
 
     return _LOWER_TO_PYTHON_CONFIG_KEY.get(key, key.upper())
-
-
-def _display_value(key: str, value: object) -> str:
-    return repr(redact_named(key, value))
 
 
 def config_change_lines(before: Mapping[str, object], after: Mapping[str, object]) -> list[str]:

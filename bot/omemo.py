@@ -68,10 +68,6 @@ def _current_identity(config: Mapping[str, Any]) -> dict[str, str]:
     return current_identity(config)
 
 
-def _read_identity_metadata(path: Path) -> dict[str, str] | None:
-    return read_identity_metadata(path)
-
-
 def _ensure_identity_metadata(
     storage_path: Path,
     identity: dict[str, str],

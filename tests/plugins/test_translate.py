@@ -53,8 +53,15 @@ def clear_translate_caches(monkeypatch):
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_INITIAL_SECONDS", 60.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_MAX_SECONDS", 900.0)
     monkeypatch.setattr(translate, "TRANSLATE_RATE_LIMIT_BACKOFF_MULTIPLIER", 2.0)
-    translate._reset_rate_limit_state()
-    translate._reset_capability_state()
+    translate._RATE_LIMIT_STATES.clear()
+    translate._RATE_LIMIT_STATES["google-api"] = translate._RATE_LIMIT_STATE
+    state = translate._RATE_LIMIT_STATE
+    state.backoff_seconds = 0.0
+    state.until_monotonic = 0.0
+    state.total_429_count = 0
+    state.streak_429_count = 0
+    state.last_429_monotonic = None
+    translate._CAPABILITY_STATES.clear()
     translate._CAPABILITY_REFRESH_TASK = None
     translate._PROVIDER_LOCKS.clear()
     message_cache._PROCESSED_STANZAS.clear()
@@ -69,27 +76,6 @@ def _bot_with_cache(*, room: str = "room@conference.example.org"):
         message_cache=message_cache.MessageCache(max_messages=20),
         handle_command=AsyncMock(),
     )
-
-
-def test_reset_rate_limit_state_without_provider_clears_all_states():
-    google_state = translate._rate_limit_state("google-api")
-    libre_state = translate._rate_limit_state("libretranslate-public")
-    google_state.backoff_seconds = 60.0
-    google_state.until_monotonic = 120.0
-    google_state.total_429_count = 3
-    google_state.streak_429_count = 2
-    google_state.last_429_monotonic = 90.0
-    libre_state.backoff_seconds = 30.0
-
-    translate._reset_rate_limit_state()
-
-    assert translate._RATE_LIMIT_STATES == {"google-api": translate._RATE_LIMIT_STATE}
-    assert translate._RATE_LIMIT_STATES["google-api"] is translate._RATE_LIMIT_STATE
-    assert google_state.backoff_seconds == 0.0
-    assert google_state.until_monotonic == 0.0
-    assert google_state.total_429_count == 0
-    assert google_state.streak_429_count == 0
-    assert google_state.last_429_monotonic is None
 
 
 def test_rate_limit_time_helpers_honor_explicit_now_and_subsecond_age():

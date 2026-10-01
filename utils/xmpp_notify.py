@@ -6,10 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from envs_xmpp_core.xmpp.messaging import (
-    MUC_FEATURE,
-    disco_muc_status,
-)
+from envs_xmpp_core.xmpp.messaging import MUC_FEATURE
 from envs_xmpp_core.xmpp.messaging import (
     looks_like_bare_room_jid as _looks_like_bare_room_jid,
 )
@@ -81,23 +78,6 @@ def joined_room_nick(bot: Any, room_jid: str) -> str | None:
 def notification_message_type(bot: Any, target: str) -> str:
     """Return ``groupchat`` when *target* is a known joined room, else ``chat``."""
     return "groupchat" if joined_room_nick(bot, target) else "chat"
-
-
-async def _disco_muc_status(bot: Any, target: str) -> bool | None:
-    """Return True/False from shared disco parsing, or None when unavailable."""
-    disco = None
-    plugin = getattr(bot, "plugin", None)
-    if isinstance(plugin, dict):
-        disco = plugin.get("xep_0030")
-    if disco is None:
-        try:
-            disco = bot["xep_0030"]
-        except Exception:
-            disco = None
-    status = await disco_muc_status(disco, target)
-    if status is None and disco is not None:
-        log.debug("Could not discover whether notification target is a MUC: %s", target)
-    return status
 
 
 async def target_is_muc_room(bot: Any, target: str) -> bool:

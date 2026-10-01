@@ -8,13 +8,14 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from envs_xmpp_core.xmpp.omemo import read_identity_metadata
+
 from bot.omemo import (
     OMEMO_AVAILABLE,
     OmemoMixin,
     _ensure_identity_metadata,
     _identity_metadata_path,
     _prepare_storage_file,
-    _read_identity_metadata,
     _resolve_storage_path,
 )
 
@@ -63,7 +64,7 @@ def test_omemo_storage_and_identity_metadata_are_owner_only(tmp_path):
     metadata = _identity_metadata_path(storage)
 
     assert storage.read_text(encoding="utf-8").strip() == "{}"
-    assert _read_identity_metadata(metadata) == identity
+    assert read_identity_metadata(metadata) == identity
     assert stat.S_IMODE(storage.stat().st_mode) == 0o600
     assert stat.S_IMODE(metadata.stat().st_mode) == 0o600
     assert stat.S_IMODE(storage.parent.stat().st_mode) == 0o700
@@ -81,7 +82,7 @@ def test_identity_change_rotates_existing_storage(tmp_path):
     assert backup is not None
     assert backup.read_text(encoding="utf-8").strip() == '{"session": "old"}'
     assert not storage.exists()
-    assert _read_identity_metadata(_identity_metadata_path(storage)) == new
+    assert read_identity_metadata(_identity_metadata_path(storage)) == new
 
 
 def test_configure_omemo_disabled_is_noop(tmp_path):
@@ -243,7 +244,10 @@ def test_omemo_status_reports_runtime_state(tmp_path):
     bot = DummyOmemoBot()
     bot.omemo_enabled = True
     bot.omemo_plaintext_fallback = False
-    bot.omemo_storage_file = str(tmp_path / "omemo.json")
+    storage = _prepare_storage_file(tmp_path / "omemo.json")
+    identity = {"jid": "bot@example.org", "resource": "service", "nick": "Bot"}
+    _ensure_identity_metadata(storage, identity, reset_on_change=True)
+    bot.omemo_storage_file = str(storage)
     bot.omemo_ready = asyncio.Event()
     bot.omemo_ready.set()
 
@@ -252,3 +256,4 @@ def test_omemo_status_reports_runtime_state(tmp_path):
     assert status["enabled"] is True
     assert status["ready"] is True
     assert status["plaintext_fallback"] is False
+    assert status["stored_identity"] == identity

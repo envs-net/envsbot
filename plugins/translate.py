@@ -370,36 +370,12 @@ def _reset_rate_limit_backoff(provider_key: str = "google-api") -> None:
     state.streak_429_count = 0
 
 
-def _reset_rate_limit_state(provider_key: str | None = None) -> None:
-    """Reset provider cooldown diagnostics (primarily for tests)."""
-    if provider_key is None:
-        _RATE_LIMIT_STATES.clear()
-        _RATE_LIMIT_STATES["google-api"] = _RATE_LIMIT_STATE
-        states = tuple(_RATE_LIMIT_STATES.values())
-    else:
-        states = (_rate_limit_state(provider_key),)
-    for state in states:
-        state.backoff_seconds = 0.0
-        state.until_monotonic = 0.0
-        state.total_429_count = 0
-        state.streak_429_count = 0
-        state.last_429_monotonic = None
-
-
 def _capability_state(provider_key: str) -> _CapabilityState:
     state = _CAPABILITY_STATES.get(provider_key)
     if state is None:
         state = _CapabilityState()
         _CAPABILITY_STATES[provider_key] = state
     return state
-
-
-def _reset_capability_state(provider_key: str | None = None) -> None:
-    """Reset capability cache diagnostics (primarily for tests/reloads)."""
-    if provider_key is None:
-        _CAPABILITY_STATES.clear()
-    else:
-        _CAPABILITY_STATES.pop(provider_key, None)
 
 
 def _capability_age(

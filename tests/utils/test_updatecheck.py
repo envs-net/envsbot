@@ -156,7 +156,7 @@ def test_fetch_latest_release_version_sync_falls_back_to_redirect(monkeypatch):
     ]
 
 
-def test_updatecheck_settings_targets_and_notification_type(monkeypatch):
+def test_updatecheck_settings_and_targets(monkeypatch):
     monkeypatch.setitem(updatecheck.config, "version_check_enabled", True)
     monkeypatch.setitem(updatecheck.config, "version_check_interval", 1)
     monkeypatch.setitem(updatecheck.config, "version_check_url", "https://example.test/releases/latest")
@@ -174,17 +174,6 @@ def test_updatecheck_settings_targets_and_notification_type(monkeypatch):
     assert updatecheck.update_notification_target() is None
     monkeypatch.setitem(updatecheck.config, "version_check_notify_jid", None)
     assert updatecheck.update_notification_target() == "owner@example.org"
-
-    bot = SimpleNamespace(presence=SimpleNamespace(joined_rooms={"room@conf.test": "Bot"}))
-    assert updatecheck._notification_type(bot, "room@conf.test") == "groupchat"
-    assert updatecheck._notification_type(bot, "user@example.org") == "chat"
-
-    class BadPresence:
-        @property
-        def joined_rooms(self):
-            raise RuntimeError("broken")
-
-    assert updatecheck._notification_type(SimpleNamespace(presence=BadPresence()), "room@conf.test") == "chat"
 
 
 @pytest.mark.asyncio

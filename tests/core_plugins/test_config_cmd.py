@@ -308,22 +308,11 @@ def test_config_key_mapping_and_runtime_writable_guards():
     assert config_cmd._is_runtime_writable_config_key("youtube_api_key") is False
 
 
-def test_parse_config_value_and_replace_multiline_assignment():
+def test_parse_config_value():
     assert config_cmd._parse_config_value("true") is True
     assert config_cmd._parse_config_value("None") is None
     assert config_cmd._parse_config_value("42") == 42
     assert config_cmd._parse_config_value("DEBUG") == "DEBUG"
-
-    source = "A = 1\nROOM_PLUGIN_DEFAULTS = {\n    'dice': True,\n}\nB = 2\n"
-    updated = config_cmd._replace_config_assignment(
-        source,
-        "ROOM_PLUGIN_DEFAULTS",
-        {"dice": False, "rss": True},
-    )
-    assert "'dice': True" not in updated
-    assert "'dice': False" in updated
-    assert "'rss': True" in updated
-    compile(updated, "config.py", "exec")
 
 
 @pytest.mark.asyncio
