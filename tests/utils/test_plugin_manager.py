@@ -804,20 +804,25 @@ async def test_shutdown_quiesce_cancels_active_lifecycle_operation(monkeypatch):
     reload_task = asyncio.create_task(pm.reload("A"), name="test-plugin-reload")
     await entered.wait()
 
-    result = await pm.quiesce_for_shutdown(
-        grace_timeout=0.0,
-        cancel_timeout=1.0,
-    )
+    try:
+        result = await pm.quiesce_for_shutdown(
+            grace_timeout=0.0,
+            cancel_timeout=1.0,
+        )
 
-    assert result["status"] == "cancelled"
-    assert result["operation"] == "reload"
-    assert reload_task.cancelled()
-    assert pm._lifecycle_lock.locked() is False
+        assert result["status"] == "cancelled"
+        assert result["operation"] == "reload"
+        assert reload_task.cancelled()
+        assert pm._lifecycle_lock.locked() is False
 
-    with pytest.raises(RuntimeError, match="shutting down"):
-        await pm.reload("A")
+        with pytest.raises(RuntimeError, match="shutting down"):
+            await asyncio.wait_for(pm.reload("A"), timeout=0.25)
+    finally:
+        block.set()
+        if not reload_task.done():
+            reload_task.cancel()
+        await asyncio.gather(reload_task, return_exceptions=True)
 
-    block.set()
     success, _message = await pm.unload_all()
     assert success is True
     assert pm.plugins == {}
@@ -859,16 +864,23 @@ async def test_shutdown_quiesce_rejects_lifecycle_waiter_queued_before_shutdown(
     queued = asyncio.create_task(pm.reload("B"))
     await asyncio.sleep(0)
 
-    result = await pm.quiesce_for_shutdown(
-        grace_timeout=0.0,
-        cancel_timeout=1.0,
-    )
+    try:
+        result = await pm.quiesce_for_shutdown(
+            grace_timeout=0.0,
+            cancel_timeout=1.0,
+        )
 
-    assert result["status"] == "cancelled"
-    assert first.cancelled()
-    with pytest.raises(RuntimeError, match="shutting down"):
-        await asyncio.gather(queued)
-    assert "B" in pm.plugins
+        assert result["status"] == "cancelled"
+        assert first.cancelled()
+        with pytest.raises(RuntimeError, match="shutting down"):
+            await asyncio.wait_for(queued, timeout=0.25)
+        assert "B" in pm.plugins
+    finally:
+        block.set()
+        for task in (first, queued):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(first, queued, return_exceptions=True)
 
 
 @pytest.mark.asyncio
