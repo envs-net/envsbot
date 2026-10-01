@@ -138,7 +138,7 @@ def test_copy_if_missing_never_overwrites_existing_operator_file(tmp_path):
 def test_install_dry_run_requires_no_confirmation_and_changes_nothing(tmp_path, monkeypatch, capsys):
     deployment = _current_deployment(tmp_path, dry_run=True)
     _write_source_markers(deployment)
-    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: pytest.fail("dry-run must not prompt"))
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, _prompt: pytest.fail("dry-run must not prompt"))
 
     result = deploy.install(deployment)
 
@@ -161,11 +161,11 @@ def test_install_preserves_existing_config_database_vcard_avatar_and_unit(tmp_pa
     avatar.write_bytes(b"existing avatar")
     deployment.unit.write_text("existing unit\n", encoding="utf-8")
 
-    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: True)
-    monkeypatch.setattr(deploy, "_stop_active_service", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(deploy, "_account_exists", lambda _user: True)
-    monkeypatch.setattr(deploy, "_create_venv_if_missing", lambda _deployment: None)
-    monkeypatch.setattr(deploy, "_install_dependencies", lambda _deployment: None)
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, _prompt: True)
+    monkeypatch.setattr(type(deploy._frontend()), "stop_active_service", lambda _self, *_args, **_kwargs: False)
+    monkeypatch.setattr(type(deploy._frontend()), "account_exists", lambda _self, _user: True)
+    monkeypatch.setattr(type(deploy._frontend()), "create_venv_if_missing", lambda _self, _deployment: None)
+    monkeypatch.setattr(type(deploy._frontend()), "install_dependencies", lambda _self, _deployment: None)
     monkeypatch.setattr(
         deploy,
         "_envsbot",
@@ -181,8 +181,8 @@ def test_install_preserves_existing_config_database_vcard_avatar_and_unit(tmp_pa
             "avatar": avatar,
         },
     )
-    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
-    monkeypatch.setattr(deploy, "_ask_start", lambda _deployment: None)
+    monkeypatch.setattr(type(deploy._frontend()), "systemctl_exists", lambda _self, _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "ask_start", lambda _self, _deployment: None)
 
     result = deploy.install(deployment)
     config_contents = deployment.config.read_text(encoding="utf-8")
@@ -208,10 +208,10 @@ def test_update_dry_run_does_not_fetch_stop_or_change_files(tmp_path, monkeypatc
     deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
     deployment.config.write_text("config\n", encoding="utf-8")
 
-    monkeypatch.setattr(deploy, "_require_clean_tracked_tree", lambda _deployment: None)
+    monkeypatch.setattr(type(deploy._frontend()), "require_clean_tracked_tree", lambda _self, _deployment: None)
     monkeypatch.setattr(deploy, "_update_plan", lambda _deployment, _tag: print("PLAN"))
-    monkeypatch.setattr(deploy, "_git", lambda *_args, **_kwargs: pytest.fail("dry-run must not fetch"))
-    monkeypatch.setattr(deploy, "_stop_active_service", lambda _deployment: pytest.fail("dry-run must not stop"))
+    monkeypatch.setattr(type(deploy._frontend()), "git", lambda _self, *_args, **_kwargs: pytest.fail("dry-run must not fetch"))
+    monkeypatch.setattr(type(deploy._frontend()), "stop_active_service", lambda _self, _deployment: pytest.fail("dry-run must not stop"))
 
     result = deploy.update(deployment, "v1.8.0")
     config_contents = deployment.config.read_text(encoding="utf-8")
@@ -346,11 +346,11 @@ def test_deployment_discovers_existing_systemd_paths(tmp_path, monkeypatch):
 def test_install_confirmation_decline_changes_nothing(tmp_path, monkeypatch):
     deployment = _current_deployment(tmp_path)
     _write_source_markers(deployment)
-    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: False)
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, _prompt: False)
     monkeypatch.setattr(
-        deploy,
-        "_account_exists",
-        lambda _user: pytest.fail("account check must happen only after install confirmation"),
+        type(deploy._frontend()),
+        "account_exists",
+        lambda _self, _user: pytest.fail("account check must happen only after install confirmation"),
     )
 
     with pytest.raises(deploy.UserCancelled):
@@ -364,18 +364,18 @@ def test_stop_and_start_are_separately_confirmed(tmp_path, monkeypatch):
     deployment = _current_deployment(tmp_path)
     commands = []
     answers = iter((False, False))
-    monkeypatch.setattr(deploy, "_service_active", lambda _deployment: True)
-    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: next(answers))
-    monkeypatch.setattr(deploy, "_run", lambda args, **_kwargs: commands.append(tuple(args)))
+    monkeypatch.setattr(type(deploy._frontend()), "service_active", lambda _self, _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, _prompt: next(answers))
+    monkeypatch.setattr(type(deploy._frontend()), "run", lambda _self, args, **_kwargs: commands.append(tuple(args)))
 
     with pytest.raises(deploy.UserCancelled):
-        deploy._stop_active_service(deployment, reason="before update")
+        deploy._frontend().stop_active_service(deployment, reason="before update")
 
     assert commands == []
 
-    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
-    monkeypatch.setattr(deploy, "_service_active", lambda _deployment: False)
-    deploy._ask_start(deployment)
+    monkeypatch.setattr(type(deploy._frontend()), "systemctl_exists", lambda _self, _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "service_active", lambda _self, _deployment: False)
+    deploy._frontend().ask_start(deployment)
 
     assert commands == []
 
@@ -398,9 +398,9 @@ def test_status_is_quiet_and_formats_labels_unambiguously(tmp_path, monkeypatch,
             "avatar": deployment.root / "utils" / "bundled" / "avatar.jpg",
         },
     )
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.7.3-58-gabcdef")
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "v1.7.3-58-gabcdef")
     monkeypatch.setattr(deploy, "_latest_tag", lambda _deployment: "v1.7.3")
-    monkeypatch.setattr(deploy, "_service_active", lambda _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "service_active", lambda _self, _deployment: True)
     monkeypatch.setattr(deploy.shutil, "which", lambda name: "/bin/systemctl" if name == "systemctl" else None)
 
     result = deploy.status(deployment)
@@ -563,7 +563,7 @@ def test_installed_systemd_check_reports_effective_mismatch(tmp_path, monkeypatc
     actual["ProtectSystem"] = "full"
 
     monkeypatch.setattr(deploy.shutil, "which", lambda _name: "/bin/systemctl")
-    monkeypatch.setattr(deploy, "_systemctl_exists", lambda _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "systemctl_exists", lambda _self, _deployment: True)
     monkeypatch.setattr(deploy, "_desired_systemd_values", lambda _deployment: desired)
     monkeypatch.setattr(deploy, "_actual_systemd_values", lambda _deployment: actual)
 
@@ -620,9 +620,9 @@ def test_deploy_check_succeeds_when_effective_service_matches(
     )
     monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
     monkeypatch.setattr(
-        deploy,
-        "_dependency_drift",
-        lambda _deployment: _FakeDependencyReport(True),
+        type(deploy._frontend()),
+        "dependency_drift",
+        lambda _self, _deployment: _FakeDependencyReport(True),
     )
 
     result = deploy.check(deployment)
@@ -669,9 +669,9 @@ def test_target_relation_uses_git_ancestry(
             return subprocess.CompletedProcess([], 0 if target_before_head else 1, "", "")
         raise AssertionError(f"unexpected Git call: {args}")
 
-    monkeypatch.setattr(deploy, "_git", fake_git)
+    monkeypatch.setattr(type(deploy._frontend()), "git", lambda _self, *args, **kwargs: fake_git(*args, **kwargs))
 
-    relation = deploy._target_relation(deployment, "v1.8.0")
+    relation = deploy._frontend().target_relation(deployment, "v1.8.0")
 
     assert relation == expected
 
@@ -687,25 +687,25 @@ def test_automatic_update_refuses_latest_release_behind_current_head(
     (deployment.venv / "bin").mkdir(parents=True)
     deployment.envsbot.write_text("#!/bin/sh\n", encoding="utf-8")
     deployment.config.write_text("# config\n", encoding="utf-8")
-    monkeypatch.setattr(deploy, "_require_clean_tracked_tree", lambda _deployment: None)
+    monkeypatch.setattr(type(deploy._frontend()), "require_clean_tracked_tree", lambda _self, _deployment: None)
     monkeypatch.setattr(deploy, "_update_plan", lambda _deployment, _tag: None)
-    monkeypatch.setattr(deploy, "_confirm", lambda _prompt: True)
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, _prompt: True)
     monkeypatch.setattr(
-        deploy,
-        "_prepare_release_target",
-        lambda _deployment, _tag: ("origin", "v1.7.3"),
+        type(deploy._frontend()),
+        "prepare_release_target",
+        lambda _self, _deployment, _tag: ("origin", "v1.7.3"),
     )
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.7.3-60-gabcdef")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "v1.7.3-60-gabcdef")
+    monkeypatch.setattr(type(deploy._frontend()), "target_relation", lambda _self, _deployment, _tag: "downgrade")
     monkeypatch.setattr(
         deploy,
         "_protected_paths",
         lambda _deployment: pytest.fail("no operator files should be prepared without an upgrade"),
     )
     monkeypatch.setattr(
-        deploy,
-        "_stop_active_service",
-        lambda *_args, **_kwargs: pytest.fail("service must not stop without an upgrade"),
+        type(deploy._frontend()),
+        "stop_active_service",
+        lambda _self, *_args, **_kwargs: pytest.fail("service must not stop without an upgrade"),
     )
 
     result = deploy.update(deployment, None)
@@ -726,13 +726,13 @@ def test_latest_local_release_tag_ignores_prerelease_and_nonrelease_tags(tmp_pat
         stdout="v2.0.0-rc1\nbackup-20260810\nv1.9.0\nv1.8.1\n",
         stderr="",
     )
-    monkeypatch.setattr(deploy, "_git", lambda *_args, **_kwargs: result)
+    monkeypatch.setattr(type(deploy._frontend()), "git", lambda _self, *_args, **_kwargs: result)
 
     assert deploy._latest_tag(deployment) == "v1.9.0"
 
 
 def test_prepare_release_target_uses_shared_release_planner(tmp_path, monkeypatch):
-    import envs_xmpp_ops.git as shared_git
+    import envs_xmpp_ops.frontend as shared_frontend
 
     deployment = _current_deployment(tmp_path)
     observed = {}
@@ -745,9 +745,9 @@ def test_prepare_release_target_uses_shared_release_planner(tmp_path, monkeypatc
         observed["error_factory"] = error_factory
         return "upstream", "v1.8.0"
 
-    monkeypatch.setattr(shared_git, "prepare_release_target", fake_prepare)
+    monkeypatch.setattr(shared_frontend, "prepare_release_target", fake_prepare)
 
-    remote, target = deploy._prepare_release_target(deployment, None)
+    remote, target = deploy._frontend().prepare_release_target(deployment, None)
 
     assert (remote, target) == ("upstream", "v1.8.0")
     assert observed["requested"] is None
@@ -845,7 +845,7 @@ def test_release_discovery_ignores_unrelated_conflicting_local_tag(tmp_path, mon
     assert conflicting_before != first
     monkeypatch.setenv("ENVSBOT_DEPLOY_REMOTE", "origin")
 
-    remote, target = deploy._prepare_release_target(deployment, None)
+    remote, target = deploy._frontend().prepare_release_target(deployment, None)
 
     assert (remote, target) == ("origin", "v1.8.0")
     assert _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.0.0") == conflicting_before
@@ -863,19 +863,19 @@ def test_selected_release_tag_conflict_is_refused_without_overwrite(tmp_path, mo
     monkeypatch.setenv("ENVSBOT_DEPLOY_REMOTE", "origin")
 
     with pytest.raises(deploy.DeployError, match="conflicts with remote"):
-        deploy._prepare_release_target(deployment, "v1.8.0")
+        deploy._frontend().prepare_release_target(deployment, "v1.8.0")
 
     assert _git_cmd(deployment.root, "rev-parse", "refs/tags/v1.8.0") == local_before
 
 
 def test_explicit_older_release_requires_allow_downgrade(tmp_path, monkeypatch):
     deployment = _current_deployment(tmp_path)
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "v1.8.0")
+    monkeypatch.setattr(type(deploy._frontend()), "target_relation", lambda _self, _deployment, _tag: "downgrade")
     monkeypatch.setattr(
-        deploy,
-        "_confirm",
-        lambda _prompt: pytest.fail("refused downgrade must not prompt for approval"),
+        type(deploy._frontend()),
+        "confirm",
+        lambda _self, _prompt: pytest.fail("refused downgrade must not prompt for approval"),
     )
 
     with pytest.raises(deploy.DeployError, match="refusing downgrade"):
@@ -894,9 +894,9 @@ def test_explicit_downgrade_requires_additional_warning_confirmation(
 ):
     deployment = _current_deployment(tmp_path)
     prompts = []
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "downgrade")
-    monkeypatch.setattr(deploy, "_confirm", lambda prompt: prompts.append(prompt) or True)
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "v1.8.0")
+    monkeypatch.setattr(type(deploy._frontend()), "target_relation", lambda _self, _deployment, _tag: "downgrade")
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, prompt: prompts.append(prompt) or True)
 
     approved = deploy._approve_update_target(
         deployment,
@@ -916,10 +916,10 @@ def test_explicit_downgrade_requires_additional_warning_confirmation(
 def test_same_release_commit_on_branch_is_pinned_to_tag(tmp_path, monkeypatch):
     deployment = _current_deployment(tmp_path)
     prompts = []
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "same")
-    monkeypatch.setattr(deploy, "_head_is_detached", lambda _deployment: False)
-    monkeypatch.setattr(deploy, "_confirm", lambda prompt: prompts.append(prompt) or True)
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "v1.8.0")
+    monkeypatch.setattr(type(deploy._frontend()), "target_relation", lambda _self, _deployment, _tag: "same")
+    monkeypatch.setattr(type(deploy._frontend()), "head_is_detached", lambda _self, _deployment: False)
+    monkeypatch.setattr(type(deploy._frontend()), "confirm", lambda _self, prompt: prompts.append(prompt) or True)
 
     approved = deploy._approve_update_target(
         deployment,
@@ -934,13 +934,13 @@ def test_same_release_commit_on_branch_is_pinned_to_tag(tmp_path, monkeypatch):
 
 def test_same_release_commit_already_detached_is_noop(tmp_path, monkeypatch, capsys):
     deployment = _current_deployment(tmp_path)
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "v1.8.0")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "same")
-    monkeypatch.setattr(deploy, "_head_is_detached", lambda _deployment: True)
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "v1.8.0")
+    monkeypatch.setattr(type(deploy._frontend()), "target_relation", lambda _self, _deployment, _tag: "same")
+    monkeypatch.setattr(type(deploy._frontend()), "head_is_detached", lambda _self, _deployment: True)
     monkeypatch.setattr(
-        deploy,
-        "_confirm",
-        lambda _prompt: pytest.fail("already pinned release must not prompt"),
+        type(deploy._frontend()),
+        "confirm",
+        lambda _self, _prompt: pytest.fail("already pinned release must not prompt"),
     )
 
     approved = deploy._approve_update_target(
@@ -957,8 +957,8 @@ def test_same_release_commit_already_detached_is_noop(tmp_path, monkeypatch, cap
 
 def test_diverged_release_history_is_refused(tmp_path, monkeypatch):
     deployment = _current_deployment(tmp_path)
-    monkeypatch.setattr(deploy, "_current_revision", lambda _deployment: "feature-abcdef")
-    monkeypatch.setattr(deploy, "_target_relation", lambda _deployment, _tag: "diverged")
+    monkeypatch.setattr(type(deploy._frontend()), "current_revision", lambda _self, _deployment: "feature-abcdef")
+    monkeypatch.setattr(type(deploy._frontend()), "target_relation", lambda _self, _deployment, _tag: "diverged")
 
     with pytest.raises(deploy.DeployError, match="non-fast-forward deployment"):
         deploy._approve_update_target(
@@ -986,9 +986,9 @@ def test_git_helper_forwards_nonchecking_mode(tmp_path, monkeypatch):
         observed["check"] = kwargs["check"]
         return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
 
-    monkeypatch.setattr(deploy, "_run", fake_run)
+    monkeypatch.setattr(type(deploy._frontend()), "run", lambda _self, *args, **kwargs: fake_run(*args, **kwargs))
 
-    result = deploy._git(
+    result = deploy._frontend().git(
         deployment,
         "rev-parse",
         "--verify",
@@ -1033,9 +1033,9 @@ def test_deploy_check_uses_shared_dependency_drift_gate(monkeypatch, tmp_path, c
     )
     monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
     monkeypatch.setattr(
-        deploy,
-        "_dependency_drift",
-        lambda _deployment: _FakeDependencyReport(True),
+        type(deploy._frontend()),
+        "dependency_drift",
+        lambda _self, _deployment: _FakeDependencyReport(True),
     )
 
     assert deploy.check(deployment) == 0
@@ -1054,9 +1054,9 @@ def test_deploy_check_preserves_project_error_for_dependency_drift(monkeypatch, 
     )
     monkeypatch.setattr(deploy, "_check_installed_systemd", lambda _deployment: True)
     monkeypatch.setattr(
-        deploy,
-        "_dependency_drift",
-        lambda _deployment: _FakeDependencyReport(
+        type(deploy._frontend()),
+        "dependency_drift",
+        lambda _self, _deployment: _FakeDependencyReport(
             False,
             ("slixmpp: installed 1.14.1, expected 1.17.0",),
         ),
@@ -1074,11 +1074,11 @@ def test_constraint_file_matches_supported_virtualenv_python(tmp_path, monkeypat
     constraints = deployment.root / "constraints"
     constraints.mkdir()
     expected = constraints / f"python3{minor}.txt"
-    expected.write_text("envs-xmpp==1.7.1\n", encoding="utf-8")
+    expected.write_text("envs-xmpp==1.7.2\n", encoding="utf-8")
 
     class Result:
         stdout = f"3.{minor}\n"
 
-    monkeypatch.setattr(deploy, "_run", lambda *_args, **_kwargs: Result())
+    monkeypatch.setattr(type(deploy._frontend()), "run", lambda _self, *_args, **_kwargs: Result())
 
-    assert deploy._constraint_file(deployment) == expected
+    assert deploy._frontend().constraint_file(deployment) == expected

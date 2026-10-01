@@ -151,18 +151,6 @@ def test_omemo_muc_pm_recipient_resolves_real_jid(monkeypatch):
     assert str(bot._omemo_recipient_for_chat("carol@example.org/desktop")) == "carol@example.org"
 
 
-def test_omemo_payload_detection_requires_real_encrypted_element():
-    legacy = ET.fromstring(
-        "<message><encrypted xmlns='eu.siacs.conversations.axolotl'/></message>"
-    )
-    omemo2 = ET.fromstring("<message><encrypted xmlns='urn:xmpp:omemo:2'/></message>")
-    fallback_only = ET.fromstring("<message><body>This message is OMEMO encrypted.</body></message>")
-
-    assert OmemoMixin._message_has_omemo_payload(FakeMessage(xml=legacy)) is True
-    assert OmemoMixin._message_has_omemo_payload(FakeMessage(xml=omemo2)) is True
-    assert OmemoMixin._message_has_omemo_payload(FakeMessage(xml=fallback_only)) is False
-
-
 @pytest.mark.asyncio
 async def test_decrypt_incoming_omemo_success_and_plaintext_passthrough():
     bot = DummyOmemoBot()
@@ -251,7 +239,7 @@ async def test_send_omemo_message_object_encrypts_direct_message():
     assert str(args[1]) == "alice@example.org"
 
 
-def test_unusable_recipient_extraction_and_status(tmp_path):
+def test_omemo_status_reports_runtime_state(tmp_path):
     bot = DummyOmemoBot()
     bot.omemo_enabled = True
     bot.omemo_plaintext_fallback = False
@@ -259,12 +247,8 @@ def test_unusable_recipient_extraction_and_status(tmp_path):
     bot.omemo_ready = asyncio.Event()
     bot.omemo_ready.set()
 
-    missing = bot._extract_unusable_omemo_recipients(
-        RuntimeError("devices unavailable for 'Alice@Example.org/phone' and 'bob@example.org'")
-    )
     status = bot.omemo_status()
 
-    assert missing == {"alice@example.org", "bob@example.org"}
     assert status["enabled"] is True
     assert status["ready"] is True
     assert status["plaintext_fallback"] is False

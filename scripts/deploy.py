@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,6 +81,27 @@ class Deployment(_DeploymentTarget):
         return self.environment_for("ENVSBOT_CONFIG")
 
 
+_FRONTEND = None
+
+
+def _frontend():
+    """Return the shared deployment frontend after bootstrap has installed it."""
+    global _FRONTEND
+    if _FRONTEND is None:
+        from envs_xmpp_ops import DeploymentFrontend
+
+        _FRONTEND = DeploymentFrontend(
+            project_name="envsbot",
+            release_remote_environment="ENVSBOT_DEPLOY_REMOTE",
+            error_factory=DeployError,
+            cancelled_error_factory=UserCancelled,
+            announce_prefix="+",
+            default_cwd_to_deployment_root=False,
+            service_active_capture=False,
+        )
+    return _FRONTEND
+
+
 def _project_root() -> Path:
     return _CHECKOUT_ROOT
 
@@ -103,9 +123,7 @@ def _default_config(root: Path, service: str) -> Path:
 
 
 def _systemd_property(service: str, prop: str) -> str:
-    from envs_xmpp_ops.systemd import systemd_property
-
-    return systemd_property(service, prop, run_process=subprocess.run)
+    return _frontend().systemd_property(service, prop)
 
 
 def _systemd_config_path(service: str) -> Path | None:
@@ -230,47 +248,6 @@ def _deployment(options: argparse.Namespace) -> Deployment:
     )
 
 
-def _run(
-    args: Sequence[object],
-    *,
-    deployment: Deployment | None = None,
-    as_service_user: bool = False,
-    capture: bool = False,
-    check: bool = True,
-    cwd: Path | None = None,
-    announce: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    from envs_xmpp_ops.process import run_deploy_command
-
-    return run_deploy_command(
-        args,
-        cwd=cwd,
-        env=deployment.environment if deployment else None,
-        service_user=(deployment.service_user if as_service_user and deployment is not None else None),
-        capture=capture,
-        check=check,
-        announce=announce,
-        announce_prefix="+",
-        error_factory=DeployError,
-    )
-
-
-def _confirm(prompt: str) -> bool:
-    from envs_xmpp_ops.interaction import confirm
-
-    return confirm(prompt, input_func=input)
-
-
-def _require_confirmation(prompt: str) -> None:
-    from envs_xmpp_ops.interaction import require_confirmation
-
-    require_confirmation(
-        prompt,
-        confirm_func=_confirm,
-        error_factory=UserCancelled,
-    )
-
-
 def _require_source_tree(deployment: Deployment) -> None:
     from envs_xmpp_ops.paths import require_source_tree
 
@@ -282,17 +259,11 @@ def _require_source_tree(deployment: Deployment) -> None:
     )
 
 
-def _account_exists(user: str) -> bool:
-    from envs_xmpp_ops.accounts import account_exists
-
-    return account_exists(user, getpwnam=pwd.getpwnam)
-
-
 def _ensure_parent(path: Path, deployment: Deployment, *, mode: int = 0o750) -> None:
     if path.parent.exists():
         return
     path.parent.mkdir(parents=True, mode=mode)
-    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+    if os.geteuid() == 0 and _frontend().account_exists(deployment.service_user):
         details = pwd.getpwnam(deployment.service_user)
         try:
             gid = grp.getgrnam(deployment.service_group).gr_gid
@@ -313,7 +284,7 @@ def _copy_if_missing(source: Path, destination: Path, deployment: Deployment, *,
         print(f"KEEP existing {destination}")
         return False
     destination.chmod(mode)
-    if os.geteuid() == 0 and _account_exists(deployment.service_user):
+    if os.geteuid() == 0 and _frontend().account_exists(deployment.service_user):
         details = pwd.getpwnam(deployment.service_user)
         try:
             gid = grp.getgrnam(deployment.service_group).gr_gid
@@ -322,73 +293,6 @@ def _copy_if_missing(source: Path, destination: Path, deployment: Deployment, *,
         os.chown(destination, details.pw_uid, gid)
     print(f"CREATE {destination}")
     return True
-
-
-def _venv_version(deployment: Deployment) -> tuple[int, int]:
-    if not deployment.venv_python.is_file():
-        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
-    result = _run(
-        [deployment.venv_python, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
-        deployment=deployment,
-        capture=True,
-        announce=False,
-    )
-    try:
-        major, minor = result.stdout.strip().split(".", 1)
-        return int(major), int(minor)
-    except (TypeError, ValueError) as exc:
-        raise DeployError("could not determine virtualenv Python version") from exc
-
-
-def _constraint_file(deployment: Deployment) -> Path:
-    major, minor = _venv_version(deployment)
-    if major != 3 or minor not in {12, 13, 14}:
-        raise DeployError(f"unsupported Python version {major}.{minor}; envsbot supports Python 3.12/3.13/3.14")
-    path = deployment.root / f"constraints/python3{minor}.txt"
-    if not path.is_file():
-        raise DeployError(f"constraint snapshot missing: {path}")
-    return path
-
-
-
-def _dependency_drift(deployment: Deployment):
-    """Compare installed runtime dependencies with the reviewed constraints."""
-    from envs_xmpp_ops import inspect_dependency_drift
-
-    if not deployment.venv_python.is_file():
-        raise DeployError(f"virtualenv Python not found: {deployment.venv_python}")
-    try:
-        return inspect_dependency_drift(
-            deployment.root,
-            deployment.venv_python,
-            _constraint_file(deployment),
-        )
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise DeployError(f"could not inspect runtime dependency drift: {exc}") from exc
-
-
-def _install_dependencies(deployment: Deployment) -> None:
-    from envs_xmpp_ops.venv import install_editable_checkout
-
-    install_editable_checkout(
-        pip=deployment.pip,
-        root=deployment.root,
-        constraints=_constraint_file(deployment),
-        run_command=_run,
-        deployment=deployment,
-    )
-
-
-def _create_venv_if_missing(deployment: Deployment) -> None:
-    from envs_xmpp_ops.venv import create_venv_if_missing
-
-    create_venv_if_missing(
-        venv=deployment.venv,
-        venv_python=deployment.venv_python,
-        python=deployment.python,
-        run_command=_run,
-        deployment=deployment,
-    )
 
 
 def _runtime_paths(deployment: Deployment) -> dict[str, Path | None]:
@@ -411,7 +315,7 @@ print(json.dumps({
     "avatar": str(avatar.resolve()) if avatar else None,
 }))
 """
-    result = _run(
+    result = _frontend().run(
         [deployment.venv_python, "-c", code],
         deployment=deployment,
         capture=True,
@@ -433,34 +337,13 @@ def _envsbot(
 ) -> subprocess.CompletedProcess[str]:
     if not deployment.envsbot.is_file():
         raise DeployError(f"envsbot executable not found: {deployment.envsbot}")
-    return _run(
+    return _frontend().run(
         [deployment.envsbot, *args],
         deployment=deployment,
         as_service_user=True,
         capture=capture,
         cwd=deployment.root,
         announce=announce,
-    )
-
-
-def _systemctl_exists(deployment: Deployment) -> bool:
-    from envs_xmpp_ops.systemd import systemctl_exists
-
-    return systemctl_exists(
-        deployment.service,
-        run_command=_run,
-        which=shutil.which,
-    )
-
-
-def _service_active(deployment: Deployment) -> bool:
-    from envs_xmpp_ops.systemd import service_active
-
-    return service_active(
-        deployment.service,
-        run_command=_run,
-        which=shutil.which,
-        capture=False,
     )
 
 
@@ -577,7 +460,7 @@ def _check_installed_systemd(deployment: Deployment) -> bool:
     """Compare the desired unit with systemd's effective loaded properties."""
     if not shutil.which("systemctl"):
         raise DeployError("systemctl is required for installed service checks")
-    if not _systemctl_exists(deployment):
+    if not _frontend().systemctl_exists(deployment):
         raise DeployError(f"installed systemd service not found: {deployment.service}")
 
     desired = _desired_systemd_values(deployment)
@@ -598,95 +481,14 @@ def _check_installed_systemd(deployment: Deployment) -> bool:
     return all_ok
 
 
-def _stop_active_service(deployment: Deployment, *, reason: str) -> bool:
-    from envs_xmpp_ops.service import stop_active_service
-
-    return stop_active_service(
-        deployment.service,
-        reason=reason,
-        is_active=partial(_service_active, deployment),
-        require_confirmation=_require_confirmation,
-        run_systemctl=lambda action, service: _run(["systemctl", action, service]),
-    )
-
-
-def _ask_start(deployment: Deployment) -> None:
-    from envs_xmpp_ops.service import ask_start
-
-    ask_start(
-        deployment.service,
-        exists=partial(_systemctl_exists, deployment),
-        is_active=partial(_service_active, deployment),
-        confirm=_confirm,
-        run_systemctl=lambda action, service: _run(["systemctl", action, service]),
-    )
-
-
-def _git(
-    deployment: Deployment,
-    *args: str,
-    capture: bool = False,
-    check: bool = True,
-    announce: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    return _run(
-        ["git", *args],
-        deployment=deployment,
-        as_service_user=True,
-        capture=capture,
-        check=check,
-        cwd=deployment.root,
-        announce=announce,
-    )
-
-
-def _require_clean_tracked_tree(deployment: Deployment) -> None:
-    from envs_xmpp_ops.git import require_clean_tracked_tree
-
-    require_clean_tracked_tree(partial(_git, deployment), error_factory=DeployError)
-
-
-def _current_revision(deployment: Deployment) -> str:
-    from envs_xmpp_ops.git import describe_revision
-
-    return describe_revision(partial(_git, deployment))
-
-
 def _latest_tag(deployment: Deployment) -> str:
     from envs_xmpp_ops.git import stable_release_tags
 
-    result = _git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
+    result = _frontend().git(deployment, "tag", "--sort=-v:refname", capture=True, announce=False)
     tags = stable_release_tags([line.strip() for line in result.stdout.splitlines()])
     if not tags:
         raise DeployError("no stable Git release tags (vX.Y.Z) found")
     return tags[0]
-
-
-def _prepare_release_target(deployment: Deployment, requested_tag: str | None) -> tuple[str, str]:
-    from envs_xmpp_ops.git import prepare_release_target
-
-    return prepare_release_target(
-        partial(_git, deployment),
-        requested_tag,
-        configured_remote=os.environ.get("ENVSBOT_DEPLOY_REMOTE"),
-        error_factory=DeployError,
-    )
-
-
-def _target_relation(deployment: Deployment, target: str) -> str:
-    from envs_xmpp_ops.git import release_target_relation
-
-    return release_target_relation(
-        partial(_git, deployment),
-        target,
-        error_factory=DeployError,
-    )
-
-
-def _head_is_detached(deployment: Deployment) -> bool:
-    from envs_xmpp_ops.git import head_is_detached
-
-    return head_is_detached(partial(_git, deployment), error_factory=DeployError)
 
 
 def _approve_update_target(
@@ -698,16 +500,16 @@ def _approve_update_target(
 ) -> bool:
     from envs_xmpp_ops.git import approve_release_target
 
-    current = _current_revision(deployment)
-    relation = _target_relation(deployment, target)
+    current = _frontend().current_revision(deployment)
+    relation = _frontend().target_relation(deployment, target)
     return approve_release_target(
         current=current,
         target=target,
         relation=relation,
         requested_tag=requested_tag,
         allow_downgrade=allow_downgrade,
-        head_is_detached=_head_is_detached(deployment) if relation == "same" else False,
-        require_confirmation=_require_confirmation,
+        head_is_detached=_frontend().head_is_detached(deployment) if relation == "same" else False,
+        require_confirmation=_frontend().require_confirmation,
         error_factory=DeployError,
     )
 
@@ -786,17 +588,17 @@ def _install_unit_if_missing(deployment: Deployment) -> None:
                 capture=True,
             ).stdout
         ),
-        service_exists=lambda: _systemctl_exists(deployment),
-        confirm=_confirm,
-        run_command=_run,
+        service_exists=lambda: _frontend().systemctl_exists(deployment),
+        confirm=_frontend().confirm,
+        run_command=_frontend().run,
     )
 
 
 def _finish_install(deployment: Deployment, *, stopped: bool) -> InstallApplyResult:
     from envs_xmpp_ops.deploy import InstallApplyResult
 
-    _create_venv_if_missing(deployment)
-    _install_dependencies(deployment)
+    _frontend().create_venv_if_missing(deployment)
+    _frontend().install_dependencies(deployment)
     created_config = _copy_if_missing(deployment.root / "config_sample.py", deployment.config, deployment, mode=0o600)
     if created_config:
         print(
@@ -843,19 +645,19 @@ def install(deployment: Deployment) -> int:
         return 0
 
     def validate_preconditions() -> None:
-        if not _account_exists(deployment.service_user):
+        if not _frontend().account_exists(deployment.service_user):
             raise DeployError(
                 f"service user {deployment.service_user!r} does not exist; create it manually or use --user"
             )
 
     run_install_transaction(
-        confirm_install=lambda: _require_confirmation("Proceed with the envsbot installation shown above?"),
+        confirm_install=lambda: _frontend().require_confirmation("Proceed with the envsbot installation shown above?"),
         validate_preconditions=validate_preconditions,
-        stop_service=lambda: _stop_active_service(
+        stop_service=lambda: _frontend().stop_active_service(
             deployment, reason="before installing dependencies and deployment files"
         ),
         apply_install=lambda stopped: _finish_install(deployment, stopped=stopped),
-        ask_start=lambda: _ask_start(deployment),
+        ask_start=lambda: _frontend().ask_start(deployment),
         failure_message=(f"INSTALL FAILED: {deployment.service} was stopped and will remain stopped."),
     )
     return 0
@@ -865,7 +667,7 @@ def _update_plan(deployment: Deployment, requested_tag: str | None) -> None:
     runtime = _runtime_paths(deployment) if deployment.venv_python.is_file() and deployment.config.exists() else None
     _print_paths(deployment, runtime=runtime)
     print("\nUpdate plan:")
-    print(f"  current: {_current_revision(deployment)}")
+    print(f"  current: {_frontend().current_revision(deployment)}")
     print(f"  target:  {requested_tag or 'newest stable vX.Y.Z release (resolved after Git query)'}")
     print("  - require a clean tracked Git worktree")
     print("  - preserve config/database/vCard/operator-avatar/systemd unit files")
@@ -894,15 +696,15 @@ def update(
         raise DeployError(f"update requires a Git checkout: {deployment.root}")
     if not deployment.envsbot.is_file() or not deployment.config.is_file():
         raise DeployError("existing virtualenv/envsbot executable and runtime config are required for update")
-    _require_clean_tracked_tree(deployment)
+    _frontend().require_clean_tracked_tree(deployment)
     _update_plan(deployment, requested_tag)
     if deployment.dry_run:
         print("\nDRY RUN: no Git refs, files, packages, database or services were changed.")
         return 0
-    _require_confirmation("Proceed with the envsbot update plan shown above?")
+    _frontend().require_confirmation("Proceed with the envsbot update plan shown above?")
 
     def apply_target(_target: str) -> None:
-        _install_dependencies(deployment)
+        _frontend().install_dependencies(deployment)
         _envsbot(deployment, "db", "status")
         _envsbot(deployment, "db", "migrate", "--dry-run")
         _envsbot(deployment, "db", "backup")
@@ -921,7 +723,7 @@ def update(
 
     run_release_update_transaction(
         root=deployment.root,
-        prepare_target=lambda: _prepare_release_target(deployment, requested_tag),
+        prepare_target=lambda: _frontend().prepare_release_target(deployment, requested_tag),
         approve_target=lambda target: _approve_update_target(
             deployment,
             target,
@@ -929,12 +731,12 @@ def update(
             allow_downgrade=allow_downgrade,
         ),
         protected_paths=lambda: _protected_paths(deployment),
-        stop_service=lambda: _stop_active_service(
+        stop_service=lambda: _frontend().stop_active_service(
             deployment, reason="before changing code, dependencies and database schema"
         ),
-        checkout_target=lambda target: _git(deployment, "checkout", target),
+        checkout_target=lambda target: _frontend().git(deployment, "checkout", target),
         apply_target=apply_target,
-        ask_start=lambda: _ask_start(deployment),
+        ask_start=lambda: _frontend().ask_start(deployment),
         temp_prefix="envsbot-deploy-protect.",
         announce_protected=True,
         failure_message=(
@@ -959,16 +761,16 @@ def status(deployment: Deployment) -> int:
     status_rows: list[tuple[str, str]] = []
     if (deployment.root / ".git").exists():
         try:
-            status_rows.append(("revision", _current_revision(deployment)))
+            status_rows.append(("revision", _frontend().current_revision(deployment)))
             status_rows.append(("latest stable tag", _latest_tag(deployment)))
         except DeployError as exc:
             status_rows.append(("Git status", f"unavailable ({exc})"))
     if shutil.which("systemctl"):
-        service_state = "active" if _service_active(deployment) else "inactive/not found"
+        service_state = "active" if _frontend().service_active(deployment) else "inactive/not found"
         status_rows.append(("service state", service_state))
     if deployment.venv_python.is_file():
         try:
-            status_rows.append(("dependency drift", _dependency_drift(deployment).summary()))
+            status_rows.append(("dependency drift", _frontend().dependency_drift(deployment).summary()))
         except DeployError as exc:
             status_rows.append(("dependency drift", f"unavailable ({exc})"))
 
@@ -1005,12 +807,7 @@ def check(deployment: Deployment) -> int:
             "installed systemd service differs from the rendered envsbot service; review the FAIL entries above"
         )
     print("OK  installed systemd service matches the rendered deployment")
-    from envs_xmpp_ops import require_clean_dependency_drift
-
-    require_clean_dependency_drift(
-        _dependency_drift(deployment),
-        error_factory=DeployError,
-    )
+    _frontend().require_clean_dependency_drift(deployment)
     return 0
 
 

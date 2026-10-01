@@ -18,15 +18,12 @@ from envs_xmpp_core.xmpp.omemo import (
     decrypt_incoming_message,
     encrypt_and_send,
     ensure_identity_metadata,
-    extract_unusable_recipients,
     format_device_ids,
     identity_metadata_path,
-    message_has_omemo_payload,
     normalize_bare_jid,
     prepare_storage_file,
     read_identity_metadata,
     recipient_bare_jids,
-    require_omemo_bare_jid,
     rotate_storage_identity,
     wait_for_omemo_ready,
 )
@@ -101,10 +98,6 @@ class OmemoMixin:
     def _omemo_host(self) -> _OmemoHost:
         return cast(_OmemoHost, self)
 
-    def _configure_omemo_dependency_logging(self) -> None:
-        """Compatibility wrapper for shared dependency logger setup."""
-        configure_omemo_dependency_logging()
-
     def configure_omemo(self) -> None:
         host = self._omemo_host()
         config = host.config
@@ -120,7 +113,7 @@ class OmemoMixin:
         if not self.omemo_enabled:
             log.info("[OMEMO] Disabled")
             return
-        self._configure_omemo_dependency_logging()
+        configure_omemo_dependency_logging()
         if not OMEMO_AVAILABLE or XEP_0384Impl is None or XEP_0384_module is None:
             log.warning(
                 "[OMEMO] Enabled but required OMEMO runtime dependencies are unavailable; "
@@ -162,21 +155,6 @@ class OmemoMixin:
         if not ready and getattr(self, "omemo_enabled", False):
             log.warning("[OMEMO] Initialization is not ready")
         return ready
-
-    @staticmethod
-    def _normalize_bare_jid(value: object) -> str | None:
-        return normalize_bare_jid(value)
-
-    def _bare_jid(self, value: object) -> str:
-        """Compatibility wrapper for strict shared OMEMO JID validation."""
-        return require_omemo_bare_jid(value)
-
-    @staticmethod
-    def _message_has_omemo_payload(msg: Any) -> bool:
-        return message_has_omemo_payload(msg)
-
-    def _extract_unusable_omemo_recipients(self, exc: Exception) -> set[str]:
-        return extract_unusable_recipients(exc)
 
     def _visible_room_jids(self, room_jid: str) -> set[object]:
         room = normalize_bare_jid(room_jid)

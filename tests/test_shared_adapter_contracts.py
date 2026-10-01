@@ -10,7 +10,6 @@ from envs_xmpp_ops.contract_cases import CONFIG_CASES, ENCRYPTION_CASES, INCOMIN
 
 from bot import messages as messages_module
 from bot.messages import MessageMixin
-from bot.omemo import OmemoMixin
 from bot.routing import MessageRoutingMixin
 from core_plugins.rooms import commands as rooms_commands
 from utils.config.runtime import config_change_lines
@@ -129,12 +128,6 @@ async def test_reply_encryption_adapter_preserves_explicit_choice(
     assert bot.encrypted_sends == int(case.effective is True)
     assert message.plain_sends == int(case.effective is not True)
 
-
-def test_strict_omemo_jid_uses_core_validation() -> None:
-    adapter = OmemoMixin()
-    assert adapter._bare_jid("Alice@Example.test/Phone") == "alice@example.test"
-    with pytest.raises(ValueError, match="valid bare JID"):
-        adapter._bare_jid(" ")
 
 @pytest.mark.asyncio
 async def test_rejected_omemo_transport_is_not_reported_as_delivered(
