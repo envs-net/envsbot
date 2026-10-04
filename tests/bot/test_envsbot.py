@@ -1830,9 +1830,12 @@ async def test_main_normal_path_closes_database(monkeypatch):
         calls.append(("connect", xmpp))
 
     monkeypatch.setattr(envsbot, "connect_xmpp", fake_connect)
+    info_log = MagicMock()
+    monkeypatch.setattr(envsbot.log, "info", info_log)
 
     await envsbot.main()
 
+    info_log.assert_any_call("[XMPP] Connection initiated. Starting event loop...")
     assert calls == [
         ("validate", envsbot.config),
         ("connect", fake_xmpp),

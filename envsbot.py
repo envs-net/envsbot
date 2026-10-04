@@ -270,7 +270,7 @@ async def main():
     await connect_xmpp(xmpp)
     loop = asyncio.get_running_loop()
     installed_signals = _install_shutdown_signal_handlers(xmpp, loop)
-    log.info("[XMPP] ✅ Connected successfully. Starting event loop...")
+    log.info("[XMPP] Connection initiated. Starting event loop...")
 
     try:
         while True:
