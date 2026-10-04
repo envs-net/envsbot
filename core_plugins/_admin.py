@@ -1155,7 +1155,6 @@ async def bot_status(bot, sender, nick, args, msg, is_room):
 async def on_load(bot):
     """Initialize admin plugin."""
     set_bot_start_time(bot)
-    log.info("[ADMIN] Admin plugin loaded")
 
 
 async def on_ready(bot):

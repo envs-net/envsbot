@@ -870,7 +870,5 @@ async def on_unload(bot):
         _BIRTHDAY_CHECK_TASK = None
         ANNOUNCED_TODAY.clear()
 
-        log.info("[BIRTHDAY] ✅ Birthday notification plugin unloaded")
-
     except Exception as exc:
         log.exception("[BIRTHDAY] Error during plugin unload: %s", exc)

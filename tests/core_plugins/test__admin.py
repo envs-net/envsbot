@@ -406,14 +406,13 @@ async def test_bot_restart_saves_notification_to_persistent_paths(monkeypatch, f
 @pytest.mark.asyncio
 async def test_on_load_sets_start_time(monkeypatch):
     called = []
-    monkeypatch.setattr(_admin, "set_bot_start_time",
-                        lambda b: called.append("set"))
+    monkeypatch.setattr(
+        _admin, "set_bot_start_time", lambda bot: called.append(bot)
+    )
 
-    class FakeLogger:
-        def info(self, *a, **k): called.append("info")
-    monkeypatch.setattr(_admin, "log", FakeLogger())
     await _admin.on_load("bot")
-    assert "set" in called and "info" in called
+
+    assert called == ["bot"]
 
 
 def test_status_formatting_helpers_cover_edges(monkeypatch):

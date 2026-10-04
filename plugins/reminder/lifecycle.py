@@ -91,11 +91,8 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
 async def on_unload(bot):
     """Cancel all active reminder tasks."""
     try:
-        log.info("[REMINDER] Unloading reminder plugin...")
-
         cancelled = await _cancel_all_active_tasks()
-        log.info("[REMINDER] ✅ Plugin unloaded; cancelled %s task(s)",
-                 cancelled)
+        log.info("[REMINDER] Cancelled %s active task(s) during unload", cancelled)
 
     except Exception as exc:
         log.exception("[REMINDER] Error during plugin unload: %s", exc)
