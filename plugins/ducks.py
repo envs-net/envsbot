@@ -1255,15 +1255,12 @@ async def on_message(bot, msg):
 
 
 async def on_load(bot):
-    log.info("[DUCKS] Plugin loading...")
-
     bot.bot_plugins.register_event(
         "ducks",
         "groupchat_message",
         partial(on_message, bot),
     )
 
-    log.info("[DUCKS] Plugin loaded")
 
 
 async def doctor(bot, room_jid: str | None = None) -> list[str]:
@@ -1299,7 +1296,6 @@ async def on_unload(bot):
     NEXT_DUCK_THRESHOLDS.clear()
     ROOM_CONFIG_CACHE.clear()
 
-    log.info("[DUCKS] Plugin unloaded")
 
 
 async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:

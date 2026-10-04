@@ -396,7 +396,6 @@ async def on_ready(bot):
 
 
 async def on_load(bot):
-    _dep_config.log.info("[IDLERPG] Plugin loading...")
     message_handler = partial(on_message, bot)
     bot.bot_plugins.register_event(
         _dep_constants.PLUGIN_NAME,
@@ -420,7 +419,6 @@ async def on_load(bot):
         "groupchat_presence",
         partial(on_muc_presence, bot),
     )
-    _dep_config.log.info("[IDLERPG] Plugin loaded")
 
 
 async def on_unload(bot):
@@ -430,7 +428,6 @@ async def on_unload(bot):
         await _cancel_room_task(room_jid)
     if active_rooms:
         await _flush_idlerpg_store(bot)
-    _dep_config.log.info("[IDLERPG] Plugin unloaded")
 
 # Explicit module dependencies; module-qualified access keeps cyclic domain
 # relationships visible without copying names into sibling namespaces.

@@ -3,13 +3,16 @@ from utils.time_utils import utc_now
 """Split module for core_plugins/users.py: tracking."""
 
 import asyncio
+import logging
 from datetime import datetime
 from functools import partial
 
 from slixmpp import JID
 
 from .lookup import _parse_user_jid
-from .roles import MAX_ROOM_NICKS, log
+from .roles import MAX_ROOM_NICKS
+
+log = logging.getLogger(__name__)
 
 _DIRECT_USERS_KEY = "_direct_users"
 _ROOM_USERS_KEY = "_room_users"
@@ -248,8 +251,9 @@ async def on_private_message(bot, msg):
 
     users = bot.db.users
     if await users.get(real_jid) is None:
-        log.info("[USERS] ✅ Creating direct-message user: '%s'", real_jid)
-        await users.create(real_jid)
+        created = await users.create(real_jid)
+        if created:
+            log.info("[USERS] ✅ Creating direct-message user: '%s'", real_jid)
 
     await _remember_user_source(bot, real_jid, "direct")
     await update_last_seen(bot, real_jid)
@@ -310,8 +314,9 @@ async def track_room_nick(bot, real_jid: str, room: str, nick: str):
     """
     um = bot.db.users
     if await um.get(real_jid) is None:
-        log.info(f"[USERS] ✅ Creating user: '{real_jid}'")
-        await um.create(real_jid, nick)
+        created = await um.create(real_jid, nick)
+        if created:
+            log.info("[USERS] ✅ Creating user: '%s'", real_jid)
 
     await _remember_user_source(bot, real_jid, "room")
 

@@ -1056,9 +1056,7 @@ async def poll_command(bot, sender_jid, nick, args, msg, is_room):
 
 
 async def on_load(bot):
-    log.info("[POLL] Plugin loading...")
     await _restore_auto_close_tasks(bot)
-    log.info("[POLL] Plugin loaded")
 
 
 async def restart_tasks(bot):
@@ -1071,7 +1069,6 @@ async def on_unload(bot):
     for task in list(AUTO_CLOSE_TASKS.values()):
         task.cancel()
     AUTO_CLOSE_TASKS.clear()
-    log.info("[POLL] Plugin unloaded")
 
 
 async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:

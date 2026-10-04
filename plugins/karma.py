@@ -516,15 +516,12 @@ async def doctor(bot, room_jid: str | None = None) -> list[str]:
 
 
 async def on_load(bot):
-    log.info("[KARMA] Plugin loading...")
     bot.bot_plugins.register_event(
         "karma",
         "groupchat_message",
         partial(on_message, bot),
     )
-    log.info("[KARMA] Plugin loaded")
 
 
 async def on_unload(bot):
     LAST_KARMA_ACTIONS.clear()
-    log.info("[KARMA] Plugin unloaded")

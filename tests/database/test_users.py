@@ -402,7 +402,9 @@ async def test_user_manager_create_get_set_list_update_and_delete_cache_cleanup(
     db_user = await um.get("db@jid")
     assert db_user["nickname"] == "DbNick"
 
-    await um.create("new@jid", "NewNick")
+    assert await um.create("new@jid", "NewNick") is True
+    assert await um.create("new@jid", "IgnoredNick") is False
+    assert um._users_cache["new@jid"]["nickname"] == "NewNick"
     assert await um.set("new@jid", "role", 60) is um._users_cache["new@jid"]
     assert await um.set("absent@jid", "role", 60) is None
     await um.update_last_seen("new@jid")

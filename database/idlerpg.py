@@ -846,7 +846,7 @@ class IdleRPGStateStore:
             if removed:
                 # Event IDs are append-only and the recent cache is retained,
                 # so no in-memory hash rebuild is required after pruning.
-                log.info("[IDLERPG] Pruned %d retained event row(s)", removed)
+                log.info("[IDLERPG] Pruned %d expired event row(s)", removed)
             return removed
 
     async def clear(self) -> None:

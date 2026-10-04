@@ -887,8 +887,6 @@ async def on_load(bot):
     """Load the XKCD plugin and start background tasks safely."""
     global CHECK_TASK, INDEX_TASK
 
-    log.info("[XKCD] Plugin loading...")
-
     # Register XEP-0066 if available.
     try:
         if not bot.plugin.get("xep_0066", None):
@@ -926,7 +924,7 @@ async def on_load(bot):
         fallback_creator=create_plugin_task,
     )
 
-    log.info("[XKCD] Plugin loaded, background tasks started")
+    log.info("[XKCD] Background tasks started")
 
 
 async def restart_tasks(bot):
@@ -938,15 +936,13 @@ async def on_unload(bot):
     """Unload the XKCD plugin and stop background tasks."""
     global CHECK_TASK, INDEX_TASK
 
-    log.info("[XKCD] Plugin unloading...")
-
     await _cancel_task(INDEX_TASK, "index")
     await _cancel_task(CHECK_TASK, "check")
 
     INDEX_TASK = None
     CHECK_TASK = None
 
-    log.info("[XKCD] Plugin unloaded")
+    log.info("[XKCD] Background tasks stopped")
 
 
 async def cleanup_room_state(bot, room_jid: str) -> dict[str, int]:

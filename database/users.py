@@ -455,19 +455,22 @@ class UserManager:
     # Users (DB + cache)
     # ------------------------------------------------------------------
 
-    async def create(self, jid, nickname=None):
+    async def create(self, jid, nickname=None) -> bool:
+        if jid in self._users_cache:
+            return False
+
         now = utc_now().isoformat()
-        if jid not in self._users_cache:
-            self._users_cache[jid] = {
-                "jid": jid,
-                "nickname": nickname,
-                "role": 80,
-                "created_at": now,
-                "last_seen": now,
-                "registered": True,
-            }
-            self._mark_user_dirty(jid)
-            self._touch_user_cache(jid)
+        self._users_cache[jid] = {
+            "jid": jid,
+            "nickname": nickname,
+            "role": 80,
+            "created_at": now,
+            "last_seen": now,
+            "registered": True,
+        }
+        self._mark_user_dirty(jid)
+        self._touch_user_cache(jid)
+        return True
 
     async def get(self, jid):
         if jid in self._users_cache:

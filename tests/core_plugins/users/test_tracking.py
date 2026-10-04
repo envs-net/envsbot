@@ -115,6 +115,40 @@ async def test_on_private_message_creates_and_tracks_direct_user(mock_bot):
 
 
 @pytest.mark.asyncio
+async def test_on_private_message_logs_creation_only_when_create_wins(
+    mock_bot, caplog
+):
+    mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
+    mock_bot._is_muc_private_message = MagicMock(return_value=False)
+    mock_bot.db.users.get = AsyncMock(return_value=None)
+    mock_bot.db.users.create = AsyncMock(side_effect=[True, False])
+    mock_bot.db.users._direct_users = set()
+    store = AsyncMock()
+    store.update_global = AsyncMock(return_value=["member@example.org"])
+    mock_bot.db.users.plugin = MagicMock(return_value=store)
+    msg = {
+        "type": "chat",
+        "from": "member@example.org/phone",
+    }
+
+    with patch(
+        "core_plugins.users.tracking.update_last_seen",
+        new=AsyncMock(),
+    ):
+        with caplog.at_level("INFO", logger="core_plugins.users.tracking"):
+            await users_mod.on_private_message(mock_bot, msg)
+            await users_mod.on_private_message(mock_bot, msg)
+
+    creation_logs = [
+        record
+        for record in caplog.records
+        if "Creating direct-message user" in record.getMessage()
+    ]
+    assert len(creation_logs) == 1
+    assert creation_logs[0].name == "core_plugins.users.tracking"
+
+
+@pytest.mark.asyncio
 async def test_on_private_message_skips_muc_pm_and_own_messages(mock_bot):
     mock_bot.boundjid = types.SimpleNamespace(bare="bot@example.org")
     mock_bot.db.users.get = AsyncMock()
@@ -267,6 +301,32 @@ async def test_track_room_nick(build_mock_bot, monkeypatch):
         "oldnick": ["other@x", "jid@x"],
         "sharednick": ["jid@x"],
     }
+
+
+@pytest.mark.asyncio
+async def test_track_room_nick_logs_creation_only_when_create_wins(
+    build_mock_bot, caplog
+):
+    bot = build_mock_bot()
+    plugin_store = AsyncMock()
+    plugin_store.update_global = AsyncMock(return_value=["jid@x"])
+    plugin_store.get = AsyncMock(return_value={})
+    plugin_store.set = AsyncMock()
+    user_store = FakeUserManager(plugin_store=plugin_store, nick_index={})
+    user_store.create = AsyncMock(side_effect=[True, False])
+    bot.db.users = user_store
+
+    with caplog.at_level("INFO", logger="core_plugins.users.tracking"):
+        await users_mod.track_room_nick(bot, "jid@x", "roomY", "nickname")
+        await users_mod.track_room_nick(bot, "jid@x", "roomY", "nickname")
+
+    creation_logs = [
+        record
+        for record in caplog.records
+        if "Creating user" in record.getMessage()
+    ]
+    assert len(creation_logs) == 1
+    assert creation_logs[0].name == "core_plugins.users.tracking"
 
 
 @pytest.mark.asyncio
