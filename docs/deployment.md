@@ -129,7 +129,7 @@ guess XMPP credentials.
 For updates, use a release tag:
 
 ```bash
-sudo ./scripts/deploy.sh update --to v2.5.0
+sudo ./scripts/deploy.sh update --to v2.5.1
 # or let the helper select the newest stable vX.Y.Z tag from the remote:
 sudo ./scripts/deploy.sh update
 ```
